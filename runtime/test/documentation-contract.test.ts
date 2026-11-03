@@ -84,9 +84,10 @@ test('configuration guides share a concise public subset and env example stays c
     const block = generatedBlock(await readFile(resolve(repositoryRoot, file), 'utf8'))
     const names = [...block.matchAll(/^\| `([A-Z0-9_]+)` \|/gmu)].map(match => match[1]!)
     assert.equal(new Set(names).size, names.length, file)
-    assert.ok(names.length <= 28 && names.length > 0, file)
+    // Keep guides concise while allowing a few additional public settings.
+    assert.ok(names.length <= 40 && names.length > 0, file)
     for (const name of names) assert.ok(publicNames.has(name), `${file}: ${name}`)
-    for (const essential of ['NOVA_SPACE_HOST_CONFIG', 'DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'PIPELINE_MODE', 'MEMORY_CONNECTION']) {
+    for (const essential of ['NOVA_SPACE_HOST_CONFIG', 'DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'PIPELINE_MODE', 'MEMORY_CONNECTION', 'MEMORY_RECALL_ENGINE', 'MEMORY_EXTRACTORS']) {
       assert.ok(names.includes(essential), `${file}: ${essential}`)
     }
     selections.push(names)

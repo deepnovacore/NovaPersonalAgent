@@ -1,4 +1,4 @@
-import {personalMemoryFactory} from '../memory/factory.js'
+import {factoryForMemoryComposition, personalMemoryFactory} from '../memory/factory.js'
 const VOICE_CONTEXT_MESSAGES=12
 import {bindUsageReporter} from '../realtime/usage.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
@@ -68,7 +68,7 @@ export function preparedReferenceParts(material:PreparedContent):string[]{
 }
 
 /** Reuses deployment resources while allocating a separate causal runtime, provider and session. */
-export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'|'additionalAgentControllers'|'executorApproval'> & {
+export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'|'additionalAgentControllers'|'executorApproval'|'memoryComposition'> & {
  onExecutorProgress?:(progress:ExecutorProgress,result?:ExecutorResult)=>void;
  createTextProvider?:typeof buildCascadedTextProvider;
  createVoiceProvider?:typeof buildConversationVoiceProvider;
@@ -134,8 +134,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   if(recovery){if(!options.blackboard)throw Error('task_blackboard_unavailable');try{await access(options.blackboard.path+'.conversation-'+suffix)}catch{throw Error('task_blackboard_unavailable')}}
   const usageContext:UsageContext={feature:processing?'source_processing':execution?'scheduled':mode==='voice'?'voice':'conversation',conversationId:conversation.id,...(execution?{runId:execution.run_id,taskId:execution.fence.task_id,trigger:'scheduled' as const}:{trigger:'manual' as const})}
   const onUsage=bindUsageReporter(options.onUsage,usageContext)
-  const createPersonalMemory=personalMemoryFactory(options.settings)
-  const memoryTools=options.memoryTools??resolveMemoryToolCapabilities(options.memory(),plannedMemoryTools({...options,...(createPersonalMemory?{createPersonalMemory}:{})}))
+  const configuredMemory=options.memoryComposition?undefined:personalMemoryFactory(options.settings)
+  const memoryComposition=options.memoryComposition??configuredMemory!.composition
+  const createPersonalMemory=configuredMemory?.factory??factoryForMemoryComposition(memoryComposition,options.settings)
+  const memoryTools=options.memoryTools??resolveMemoryToolCapabilities(options.memory(),plannedMemoryTools({...options,memoryComposition,...(createPersonalMemory?{createPersonalMemory}:{})}))
   const core=buildAssembly({...options,memoryTools,...(onUsage?{onUsage}:{}),...(options.gateway?{gateway:gatewayWithUsage(options.gateway,usageContext)}:{}),taskHost:!execution,includeSpaceMobile:options.host.spaceHostStatus().mode==='host',includeSchedules:!execution,scheduledContext:!!execution,sourceProcessingContext:!!processing,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
    ...(options.blackboard?{blackboard:{...options.blackboard,path:options.blackboard.path+'.conversation-'+suffix}}:{}),
    ids:{next:namespace=>namespace+'-'+randomUUID()},

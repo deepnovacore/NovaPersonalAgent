@@ -52,10 +52,13 @@ Plan 和 Build 的文字会话可以使用当前后端支持的记忆检索工�
 
 | 选择 | 配置 |
 |---|---|
-| 本地统一账本（默认） | `MEMORY_CONNECTION=local`，不填写 provider 或选择 `voicemem` |
-| 本地 mem0 | `MEMORY_CONNECTION=local` 和 `MEMORY_PROVIDER=mem0` |
+| 本地统一账本（默认，含旧数据迁移） | `MEMORY_CONNECTION=local`，引擎及 provider 变量均留空 |
+| 显式账本组合（无旧数据迁移） | `MEMORY_CONNECTION=local`、`MEMORY_RECALL_ENGINE=ledger`、`MEMORY_EXTRACTORS=ledger` |
+| 独立 mem0（已弃用的选择方式） | `MEMORY_CONNECTION=local` 和 `MEMORY_PROVIDER=mem0` |
 | 关闭个人记忆 | `MEMORY_CONNECTION=disabled`，移除 provider 配置 |
-| 连接远程记忆服务 | `MEMORY_CONNECTION=remote`，配置下述地址和令牌，移除 provider 配置 |
+| 连接远程记忆服务 | `MEMORY_CONNECTION=remote`，配置下述地址和令牌，移除 provider 及两个新组合变量 |
+
+`MEMORY_PROVIDER` 已弃用：旧 `voicemem` 保留默认账本迁移，旧 `mem0` 保留独立模式；不能与新变量共用。新的 voicemem/mem0 召回引擎组合尚不可用。
 
 远程服务需要 `MEMORY_URL` 和 `MEMORY_TOKEN`。服务须兼容 Nova 的记忆接口；不能直接填写任意 mem0 服务地址。远程连接失败时会显示不可用，不会自动改存本地。
 
@@ -68,3 +71,12 @@ mem0 支持回忆、用户原话证据，以及记忆页面的列表、更正和
 更正以 SDK 条目 ID 为键持久保存本地覆盖内容。版本令牌由 SDK 更新时间与规范内容的哈希生成；无更新时间时回退为内容哈希。规范内容不超过 500 字符。更正或遗忘条目后，该来源不再重新提取，避免 SDK 分配新 ID 后恢复旧事实。原文证据始终是用户原话，不是更正内容或提取结果。遗忘来源立即写入墓碑，并在重启后继续清理衍生条目。更正只改变返回内容，不更新 SDK 向量，因此检索排序仍依据原向量。
 
 mem0 列表每页扫描 SDK 存储一次（O(n) 读取、O(n log n) 排序），批量读取本地覆盖内容，仅构建当前页条目，不跨请求缓存扫描结果。不支持 `include_expired: true`，传入时返回输入无效错误；已遗忘条目始终不列出。
+
+### 高级后端组合
+
+`MEMORY_RECALL_ENGINE=ledger` 与 `MEMORY_EXTRACTORS=ledger` 显式选择 Nova 账本。
+目前仅实现 ledger 提取器。`MEMORY_PROVIDER` 已弃用：旧 voicemem 保留账本迁移，
+旧 mem0 保留独立模式。新旧变量不能共用，新变量不能覆盖远程连接的引擎。
+新的 voicemem/mem0 召回引擎在持久化索引管线完成前明确拒绝配置，不会静默回退，
+也不会默认启用。设置界面没有引擎选择器。
+详见[分阶段组合契约](../design-notes/2026-11-03-memory-backend-composition.md)。

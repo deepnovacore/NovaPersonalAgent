@@ -1,3 +1,5 @@
+import {factoryForMemoryComposition, legacyMemoryComposition} from '../memory/factory.js'
+import {ConfigurationError, type MemoryComposition} from '../config/config.js'
 import {configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
 export {configuredMemoryConsumer, configuredMemoryRecipient, configuredTaskVerifierConsumer} from '../memory/consumer.js'
 import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
@@ -259,6 +261,7 @@ export interface RealtimeAssemblyOptions {
   /** Required only when the resolved runtime has a coding role. */
   readonly codingAgentControllerFactory?: CodingAgentControllerFactory
   /** Personal-memory allocation occurs only after the final tool and executor validation. */
+  readonly memoryComposition?: MemoryComposition
   readonly createPersonalMemory?: () => PersonalMemoryResource
 }
 
@@ -1457,11 +1460,11 @@ export function filterDisabledCoding<T extends AssemblyOptions & Pick<RealtimeAs
 export const createLocalMemoryGateway=(options:OpenAIGatewayOptions)=>new OpenAIModelGateway({...options,...(options.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?{thinkingControl:'qwen' as const}:{})})
 
 /** Resolve the same Space override before tool compilation and resource composition. */
-export function plannedMemoryTools(options: Pick<AssemblyOptions, 'settings' | 'knowledge'> & Pick<RealtimeAssemblyOptions, 'createPersonalMemory' | 'spaceHostConfigPath'>) {
+export function plannedMemoryTools(options: Pick<AssemblyOptions, 'settings' | 'knowledge'> & Pick<RealtimeAssemblyOptions, 'createPersonalMemory' | 'spaceHostConfigPath' | 'memoryComposition'>) {
   const spaceConfigPath = options.spaceHostConfigPath ?? process.env.NOVA_SPACE_HOST_CONFIG
   const spaceConfig = spaceConfigPath ? readHostSpaceConfig(memoryPath(spaceConfigPath)) : undefined
   return planMemoryToolCapabilities({settings: options.settings, knowledge: options.knowledge !== undefined,
-    createPersonalMemory: options.createPersonalMemory, ...(spaceConfig ? {spaceConfig} : {})})
+    createPersonalMemory: options.createPersonalMemory, ...(options.memoryComposition ? {memoryComposition: options.memoryComposition} : {}), ...(spaceConfig ? {spaceConfig} : {})})
 }
 
 /** Shared production wiring; provider policy remains at each pipeline boundary. */
@@ -1473,14 +1476,16 @@ export function composeRealtime(
 ): RealtimeAssembly {
   const spaceConfigPath=options.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(memoryPath(spaceConfigPath)):undefined
-  const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;extraction?:{baseUrl:string;apiKey:string};embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
+  const composition = options.memoryComposition ?? legacyMemoryComposition(options.createPersonalMemory)
+  if (composition?.kind === 'ledger' && composition.engine !== 'ledger') throw new ConfigurationError('MEMORY_RECALL_ENGINE engine feeding is not available yet')
+  const local = composition?.kind === 'ledger' ? composition.local : undefined
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig&&spaceConfig.data_mode!=='existing'?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
   const extraction=local?.extraction??(()=>{const connection=resolveMemoryExtractionConnection(options.settings);return {baseUrl:connection.baseUrl,apiKey:connection.apiKey}})()
   const memoryGateway=local?(extraction.apiKey.trim()?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),...extraction,clock:new RealClock()}):unconfiguredModelGateway):core.gateway
   const isolatedSpace=spaceConfig!==undefined&&spaceConfig.data_mode!=='existing'
-  const localLedger = useLocalLedger({knowledge: core.knowledge !== undefined, createPersonalMemory: options.createPersonalMemory, ...(spaceConfig ? {spaceConfig} : {})})
+  const localLedger = useLocalLedger({knowledge: core.knowledge !== undefined, createPersonalMemory: options.createPersonalMemory, ...(options.memoryComposition ? {memoryComposition: options.memoryComposition} : {}), ...(spaceConfig ? {spaceConfig} : {})})
   const createPersonalMemory = localLedger ? () => {
     const memory = new SubstrateMemoryResource({client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
@@ -1491,7 +1496,7 @@ export function composeRealtime(
       conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
-      ...(local&&!isolatedSpace?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
+      ...(composition?.kind === 'ledger' && composition.migrateLegacy && !isolatedSpace ? {migrate:async()=>{await getClient().memory('migrate_legacy',{path:composition.migrateLegacy!.path,user_id:composition.migrateLegacy!.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
     })
     if(local||isolatedSpace){
       return memory
@@ -1502,7 +1507,7 @@ export function composeRealtime(
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
       processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),feishuProcessingConsent:(...args)=>memory.feishuProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),recordEvidenceBatch:inputs=>memory.recordEvidenceBatch(inputs),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),...(memory.forgetSources?{forgetSources:(refs:readonly string[])=>memory.forgetSources(refs)}:{}),
     } satisfies PersonalMemoryResource
-  } : options.createPersonalMemory
+  } : options.createPersonalMemory ?? (composition ? factoryForMemoryComposition(composition, options.settings) : undefined)
   const memoryConsumerFingerprint = options.memoryConsumerFingerprint ?? configuredMemoryConsumer(options.settings,options.memoryReadMode ?? 'voice')
   return buildRealtimeAssembly({
     ...(memoryConsumerFingerprint ? {memoryConsumerFingerprint} : {}),

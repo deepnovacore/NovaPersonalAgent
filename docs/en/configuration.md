@@ -46,7 +46,9 @@ Set only what you need to change. Keep credentials out of Git.
 | `CODEX_APPROVAL_MODE` | ask | Coding approval mode for Codex and ACP backends; Pi refuses ask. |
 | `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | Capabilities registry path. |
 | `MEMORY_CONNECTION` | local | Memory connection: disabled, local, or remote. |
-| `MEMORY_PROVIDER` | None | Local engine: voicemem (default; unified ledger) or explicit mem0. Remote engines are service-owned. |
+| `MEMORY_PROVIDER` | None | Deprecated local provider: voicemem keeps ledger migration; mem0 keeps standalone mode. Conflicts with new memory variables. |
+| `MEMORY_RECALL_ENGINE` | ledger | Expert local recall engine: ledger, voicemem or mem0. Non-ledger feeding is not available yet and is rejected; no UI picker. |
+| `MEMORY_EXTRACTORS` | ledger | Comma-separated extractors; only ledger is implemented and required. Cannot combine with MEMORY_PROVIDER. |
 | `DASHSCOPE_API_KEY` | None | Qwen realtime credential. |
 | `QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen realtime model. |
 | `QWEN_REALTIME_VOICE` | longanqian | Qwen realtime voice. |

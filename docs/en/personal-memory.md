@@ -46,10 +46,13 @@ For source use, edit `.env` and restart Nova. No changes are needed for the defa
 
 | Choice | Configuration |
 |---|---|
-| Unified local ledger (default) | `MEMORY_CONNECTION=local`; omit provider or select `voicemem` |
-| Local mem0 | `MEMORY_CONNECTION=local` and `MEMORY_PROVIDER=mem0` |
+| Unified local ledger (default, with legacy migration) | `MEMORY_CONNECTION=local`; leave all engine/provider variables unset |
+| Explicit ledger composition (no legacy migration) | `MEMORY_CONNECTION=local`, `MEMORY_RECALL_ENGINE=ledger`, `MEMORY_EXTRACTORS=ledger` |
+| Standalone mem0 (deprecated selection) | `MEMORY_CONNECTION=local` and `MEMORY_PROVIDER=mem0` |
 | Disable memory | `MEMORY_CONNECTION=disabled`; remove provider |
-| Remote service | `MEMORY_CONNECTION=remote`; configure the service URL and token below; remove provider |
+| Remote service | `MEMORY_CONNECTION=remote`; configure the service URL and token below; unset provider and both new composition variables |
+
+`MEMORY_PROVIDER` is deprecated; legacy `voicemem` preserves the default ledger migration and legacy `mem0` preserves standalone mode. Do not combine it with the new variables. New `voicemem`/`mem0` recall-engine composition is not yet available.
 
 Remote connections require `MEMORY_URL` and `MEMORY_TOKEN`. The service must implement Nova's memory interface; an arbitrary mem0 endpoint is not compatible. Connection failure reports unavailable rather than switching to local storage.
 
@@ -62,3 +65,13 @@ mem0 supports recall with original user-turn evidence and local Memory-page list
 Corrections use durable local overrides under the SDK item ID; revision tokens hash the SDK update timestamp and canonical content, falling back to a content hash when no timestamp exists. The canonical text is bounded to 500 characters. Correcting or forgetting an item freezes re-extraction of its source to prevent new SDK IDs from resurrecting old facts. Raw evidence remains the original user turn, not the corrected or extracted text. Source forgetting tombstones that turn immediately and retries derived-item deletion after restart. Corrections change returned text, not the SDK embedding, so ranking still uses the original embedding.
 
 mem0 listing scans the SDK store once per page (O(n) reads and O(n log n) sorting), batches local overrides, and hydrates only the requested page. No scan is cached across requests. `include_expired: true` is unsupported and returns an invalid-input error; forgotten entries are never listed.
+
+### Expert backend composition
+
+`MEMORY_RECALL_ENGINE=ledger` and `MEMORY_EXTRACTORS=ledger` select the Nova ledger
+explicitly. Only the ledger extractor is implemented. `MEMORY_PROVIDER` is deprecated:
+legacy `voicemem` keeps ledger migration and legacy `mem0` keeps standalone mode.
+Do not combine legacy and new variables or use new variables with a remote connection.
+The new `voicemem`/`mem0` recall engines fail closed until durable feeding is implemented;
+they are not silently substituted or enabled by default. There is no engine picker.
+See [the staged composition contract](../design-notes/2026-11-03-memory-backend-composition.md).

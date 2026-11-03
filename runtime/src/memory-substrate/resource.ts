@@ -363,6 +363,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return {source:'personal' as const,state:hits.length?'ok' as const:'empty' as const,scope,hits,degraded:result.degraded}
   }
   #extractionFingerprint():string{return this.options.extractionFingerprint??this.options.model}
+  recallAuthorityRevision():number{return this.options.client.recallAuthorityRevision()}
   async canReadConversationEvidence(id:string,consumer:string):Promise<boolean>{this.#ready();if(!id.startsWith(this.prefix))return false;return await this.options.client.memory('processing_evidence',{id,purpose:'conversation',provider:consumer})!==null}
   async canProcessEvidenceMany(ids:readonly string[],purpose:'extraction'|'embedding'):Promise<string[]>{
     const selected=[...new Set(ids)],allowed:string[]=[]

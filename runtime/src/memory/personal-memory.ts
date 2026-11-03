@@ -19,6 +19,8 @@ export type PersonalMemoryRecallScope = 'recent' | 'any'
 export interface PersonalMemoryPurgeResult {status:'complete'|'incomplete';operation_id:string;removed_entries:number;removed_evidence:number;removed_entry_ids?:string[];removed_evidence_ids?:string[];index_evidence_ids?:string[];backup_cleanup:{status:'complete'|'incomplete';unresolved:string[]}}
 
 export interface PersonalMemoryRecallHit {
+  /** Fixed engine-record expiry; response style only, never renewed by recall. */
+  readonly expiresAt?: string
   readonly revision?: MemoryVersion
   readonly memoryId: string
   readonly text: string
@@ -102,6 +104,8 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** In-memory ledger mutation fence; compare only within this resource instance. */
+  readonly recallAuthorityRevision?: () => number
   /** Only the Nova ledger supplies memory to proactive/product surfaces. */
   readonly productSurfaces?: true
   readonly beginExplicitTurn?: (turn:ExplicitMemoryTurn)=>Promise<ExplicitMemoryTurn>

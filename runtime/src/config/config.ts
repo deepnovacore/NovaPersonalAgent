@@ -1,3 +1,5 @@
+import {homedir} from 'node:os'
+import {resolve} from 'node:path'
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import {CODING_BACKEND_IDS} from './coding-backends.js'
 import {isIP} from 'node:net'
@@ -246,6 +248,8 @@ export const settingsSchema = z.object({
   memory_consolidation_timezone: z.string().refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true}catch{return false}},'invalid timezone').default('UTC'),
   memory_connection: memoryConnectionSchema.default('local'),
   memory_provider: z.enum(['voicemem', 'mem0']).nullable().default(null),
+  memory_recall_engine: z.enum(['ledger', 'voicemem', 'mem0']).nullable().default(null),
+  memory_extractors: z.array(z.literal('ledger')).min(1).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
@@ -307,7 +311,7 @@ export interface CascadedCredentials {
 
 export type PersonalMemoryConfig = {readonly connection: 'remote'; readonly url: string; readonly token: string} | LocalPersonalMemoryConfig
 
-interface LocalPersonalMemoryConfig {
+export interface LocalPersonalMemoryConfig {
   readonly connection: 'local'
   readonly provider: 'voicemem' | 'mem0'
   readonly extractionModel: string
@@ -614,6 +618,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ...((optionalString(environment.MEMORY_CONNECTION) ?? 'local') === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
     memory_provider: optionalString(environment.MEMORY_PROVIDER),
+    memory_recall_engine: optionalNonEmptyString(environment.MEMORY_RECALL_ENGINE),
+    memory_extractors: optionalNonEmptyString(environment.MEMORY_EXTRACTORS)?.split(',').map(value => value.trim()),
     memory_url: optionalString(environment.MEMORY_URL),
     memory_token: optionalSecret(environment.MEMORY_TOKEN),
     memory_path: optionalString(environment.MEMORY_PATH),
@@ -849,6 +855,25 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   })
 }
 
+export type MemoryComposition =
+  | {readonly kind: 'disabled'}
+  | {readonly kind: 'remote'; readonly config: Extract<PersonalMemoryConfig, {connection: 'remote'}>}
+  | {readonly kind: 'ledger'; readonly engine: 'ledger' | 'voicemem' | 'mem0'; readonly extractors: readonly 'ledger'[]; readonly migrateLegacy?: {readonly path: string; readonly userId: string}; readonly local: LocalPersonalMemoryConfig}
+  | {readonly kind: 'standalone-mem0'; readonly config: LocalPersonalMemoryConfig}
+
+/** Pure plan: no stores, warnings, migrations or model calls happen during resolution. */
+export function resolveMemoryComposition(settings: Settings): MemoryComposition {
+  const configured = requirePersonalMemory(settings)
+  if (!configured) return {kind: 'disabled'}
+  if (configured.connection === 'remote') return {kind: 'remote', config: configured}
+  const path = resolve(configured.path.startsWith('~/') ? resolve(homedir(), configured.path.slice(2)) : configured.path)
+  const local = {...configured, path}
+  if (settings.memory_provider === 'mem0') return {kind: 'standalone-mem0', config: local}
+  const legacy = settings.memory_recall_engine === null && settings.memory_extractors === null
+  return {kind: 'ledger', engine: settings.memory_recall_engine ?? 'ledger', extractors: ['ledger'], local,
+    ...(legacy ? {migrateLegacy: {path, userId: local.userId}} : {})}
+}
+
 /** Module status in the shape of `modules.search`; local memory is off without both credentials. */
 export function memoryStatus(settings: Settings): {enabled: boolean; reason: string | null; fallback: null} {
   try {
@@ -870,6 +895,11 @@ export function memoryStatus(settings: Settings): {enabled: boolean; reason: str
 
 function resolveMemoryConnection(settings: Settings): z.infer<typeof memoryConnectionSchema> {
   const connection = settings.memory_connection
+  const newSettings = settings.memory_recall_engine !== null || settings.memory_extractors !== null
+  if (newSettings && settings.memory_provider !== null) throw new ConfigurationError('MEMORY_PROVIDER conflicts with MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS')
+  if (newSettings && connection === 'remote') throw new ConfigurationError('MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS are only valid for a local memory connection')
+  if (settings.memory_extractors !== null && (settings.memory_extractors.length === 0 || settings.memory_extractors.some(value => value !== 'ledger'))) throw new ConfigurationError('MEMORY_EXTRACTORS supports only ledger; other extractors are not implemented')
+  if (settings.memory_recall_engine === 'voicemem' || settings.memory_recall_engine === 'mem0') throw new ConfigurationError('MEMORY_RECALL_ENGINE engine feeding is not available yet')
   if (settings.memory_provider !== null && connection !== 'local') {
     throw new ConfigurationError('MEMORY_PROVIDER is only valid for a local memory connection; remote engines are selected by the service')
   }
@@ -1261,6 +1291,11 @@ function parseSelector<T extends string>(
 function optionalString(value: string | undefined): string | undefined {
   if (value === undefined) return undefined
   return stripLikePython(value)
+}
+
+function optionalNonEmptyString(value: string | undefined): string | undefined {
+  const parsed = optionalString(value)
+  return parsed === '' ? undefined : parsed
 }
 
 function optionalJsonStringArray(value: string | undefined): unknown {

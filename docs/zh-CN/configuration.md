@@ -46,7 +46,9 @@ DASHSCOPE_API_KEY=你的百炼密钥
 | `CODEX_APPROVAL_MODE` | ask | 编程审批模式，适用于 Codex 与 ACP 执行器；Pi 不接受询问模式。 |
 | `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | 能力注册表路径。 |
 | `MEMORY_CONNECTION` | local | 记忆连接：disabled、local 或 remote。 |
-| `MEMORY_PROVIDER` | 无 | 本地引擎：voicemem（默认，统一账本）或显式选择 mem0。远程引擎由服务端选择。 |
+| `MEMORY_PROVIDER` | 无 | 已弃用本地提供方：voicemem 保留账本迁移；mem0 保留独立模式。不能与新记忆变量共用。 |
+| `MEMORY_RECALL_ENGINE` | ledger | 高级本地召回引擎：ledger、voicemem 或 mem0。非账本索引尚不可用，选择时明确拒绝；无界面选择器。 |
+| `MEMORY_EXTRACTORS` | ledger | 逗号分隔提取器；目前仅实现且必须包含 ledger。不能与 MEMORY_PROVIDER 共用。 |
 | `DASHSCOPE_API_KEY` | 无 | Qwen 实时凭据。 |
 | `QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen 实时模型。 |
 | `QWEN_REALTIME_VOICE` | longanqian | Qwen 实时音色。 |

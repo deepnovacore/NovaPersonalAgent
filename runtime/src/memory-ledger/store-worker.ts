@@ -43,6 +43,7 @@ port.on('message', message => {
     port.postMessage({kind: 'protocol_error'})
     return
   }
+  const authorityRevision = store.recallAuthorityRevision()
   try {
     const result=store.withMemoryFilesLock(()=>{
       if(request.operation!=='memory'&&request.operation!=='close')store.syncMemoryFiles()
@@ -50,13 +51,15 @@ port.on('message', message => {
       if(request.operation!=='memory'&&request.operation!=='close')store.flushMemoryFiles()
       return response
     })
-    port.postMessage({kind: 'response', request_id: request.request_id, ok: true, result})
+    port.postMessage({kind: 'response', request_id: request.request_id, ok: true, result, authority_changed: store.recallAuthorityRevision() !== authorityRevision, authority_epoch: store.recallAuthorityEpoch()})
   } catch (error) {
     port.postMessage({
       kind: 'response',
       request_id: request.request_id,
       ok: false,
       error_code: safeErrorCode(error),
+      authority_changed: store.recallAuthorityRevision() !== authorityRevision,
+      authority_epoch: store.recallAuthorityEpoch(),
     })
   }
 })

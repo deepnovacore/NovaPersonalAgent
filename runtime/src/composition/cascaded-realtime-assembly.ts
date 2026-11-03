@@ -42,7 +42,7 @@ import {
 import {RealClock, type Clock} from '../core/clock.js'
 import {type CodingExecutorResource} from '../executors/coding-executor.js'
 import {MonotonicIdFactory, type IdFactory} from '../core/ids.js'
-import {personalMemoryFactory} from '../memory/factory.js'
+import {factoryForMemoryComposition, personalMemoryFactory} from '../memory/factory.js'
 import {unconfiguredModelGateway, OpenAIModelGateway, type ModelGateway} from '../model/model-gateway.js'
 import {stripLikePython} from '../text/python-text.js'
 import {
@@ -269,7 +269,10 @@ export function buildTextRealtimeAssembly(
   const selected=requireSelectedCascadedLlmConfig(options.settings)
   const clock=options.clock??new RealClock(),ids=options.ids??new MonotonicIdFactory()
   const capabilities=options.capabilities??capabilitiesFromSettings(options.settings)
-  const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
   const memoryTools=options.memoryTools??plannedMemoryTools({...options,...(createPersonalMemory?{createPersonalMemory}:{})})
   const instructions=frontendInstructions({memoryTools,search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
   const common={clock,ids,instructions,...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
@@ -301,8 +304,10 @@ export function buildCascadedRealtimeAssembly(
   const selected = requireSelectedCascadedRealtimeConfig(options.settings)
   const selection = selected.selection
   validateCodingResource(options)
-  const createPersonalMemory = options.createPersonalMemory
-    ?? personalMemoryFactory(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
@@ -587,8 +592,10 @@ export function buildQwenRealtimeAssembly(
   const integratedProvider = options.settings.integrated_provider
   const nativeProvider = integratedProvider === 'minicpm-o' || integratedProvider === 'personaplex'
   const supportConnection = nativeProvider ? null : resolveProviderModelConnection(options.settings, integratedProvider)
-  const createPersonalMemory = options.createPersonalMemory
-    ?? personalMemoryFactory(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   // The support gateway stays on the selected provider: its own model URL and the credential the
@@ -679,7 +686,10 @@ export function buildIntegratedRealtimeAssembly(
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
-  const createPersonalMemory = options.createPersonalMemory ?? personalMemoryFactory(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
   const memoryTools = options.memoryTools ?? plannedMemoryTools({...options, ...(createPersonalMemory ? {createPersonalMemory} : {})})
   const qwenProvider = factory({
     language: options.settings.language,

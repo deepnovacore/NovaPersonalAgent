@@ -1,4 +1,5 @@
-import type {Settings} from '../config/config.js'
+import {legacyMemoryComposition} from './factory.js'
+import type {MemoryComposition, Settings} from '../config/config.js'
 import type {HostSpaceConfig} from '../space-host/config.js'
 import type {PersonalMemoryResource} from './personal-memory.js'
 import type {PersonalMemoryFactory} from './factory.js'
@@ -20,21 +21,23 @@ export function deriveMemoryToolCapabilities(resource: PersonalMemoryResource | 
     lookup: !!resource?.lookupExplicit && !!resource.get, remember: !!resource?.beginExplicitTurn && !!resource.writeExplicit, engine}
 }
 
-interface MemoryPlanInput {settings: Settings; createPersonalMemory?: unknown; knowledge: boolean; spaceConfig?: HostSpaceConfig}
+interface MemoryPlanInput {memoryComposition?: MemoryComposition; settings: Settings; createPersonalMemory?: unknown; knowledge: boolean; spaceConfig?: HostSpaceConfig}
 
 /** The same branch predicate owns both static tool planning and resource composition. */
-export function useLocalLedger(input: Pick<MemoryPlanInput, 'createPersonalMemory' | 'knowledge' | 'spaceConfig'>): boolean {
+export function useLocalLedger(input: Pick<MemoryPlanInput, 'createPersonalMemory' | 'knowledge' | 'spaceConfig' | 'memoryComposition'>): boolean {
   return (input.spaceConfig !== undefined && input.spaceConfig.data_mode !== 'existing')
-    || (input.createPersonalMemory as {localMemoryConfig?: unknown} | undefined)?.localMemoryConfig !== undefined
-    || (input.knowledge && input.createPersonalMemory === undefined)
+    || (input.memoryComposition ?? legacyMemoryComposition(input.createPersonalMemory))?.kind === 'ledger'
+    || (input.knowledge && input.createPersonalMemory === undefined && (!input.memoryComposition || input.memoryComposition.kind === 'disabled'))
 }
 
 export function planMemoryToolCapabilities(input: MemoryPlanInput): MemoryToolCapabilities {
   if (useLocalLedger(input)) {
     const isolated = input.spaceConfig !== undefined && input.spaceConfig.data_mode !== 'existing'
-    const local = (input.createPersonalMemory as {localMemoryConfig?: unknown} | undefined)?.localMemoryConfig !== undefined
+    const local = (input.memoryComposition ?? legacyMemoryComposition(input.createPersonalMemory))?.kind === 'ledger'
     return isolated || local ? FULL_MEMORY_TOOLS : {...NO_MEMORY_TOOLS, recall: true, evidence: true, engine: 'knowledge'}
   }
+  if (input.memoryComposition?.kind === 'remote') return {...NO_MEMORY_TOOLS, recall: true, engine: 'remote'}
+  if (input.memoryComposition?.kind === 'standalone-mem0') return {...NO_MEMORY_TOOLS, recall: true, evidence: true, engine: 'mem0'}
   if (input.createPersonalMemory === undefined) return {...NO_MEMORY_TOOLS, recall: true}
   const backend = (input.createPersonalMemory as PersonalMemoryFactory).memoryBackend
   if (input.settings.memory_connection === 'remote' || backend === 'remote') return {...NO_MEMORY_TOOLS, recall: true, engine: 'remote'}

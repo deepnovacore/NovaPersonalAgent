@@ -12,9 +12,13 @@ export function retrievalPrerecall(retrieval: () => UnifiedRetrieval | undefined
     const result = await current.recall(query, {scope: 'any', limit: 3, signal, consumer: consumer()})
     signal.throwIfAborted()
     return async consumeSignal => {
+      const authorityUnchanged = current.recallAuthorityUnchanged(result)
+      const style = await current.prepareResponseStyle(result, consumeSignal)
+      consumeSignal.throwIfAborted()
       const validated = await current.revalidate(result, consumeSignal)
       consumeSignal.throwIfAborted()
-      return prerecallContext(query, validated)
+      if (!authorityUnchanged()) return null
+      return [prerecallContext(query, validated), style()].filter(Boolean).join('\n') || null
     }
   }
 }

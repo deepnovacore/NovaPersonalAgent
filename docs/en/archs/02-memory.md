@@ -10,7 +10,7 @@ of prompt text.
   FSMs are separate host state, never model-writable planning state. Entries carry time, trust,
   priority, outcome, and evidence references. Applying an event precedes any response derived from
   it. Only the causal runtime owns current task/executor state.
-- **Personal memory.** The unified local ledger is enabled by default through the VoiceMem-compatible selection; mem0, a host-managed remote
+- **Personal memory.** The unified local ledger is enabled by default; mem0, a host-managed remote
   connection, or disabled memory can be selected explicitly. Durable source admission and
   asynchronous extraction retain facts across conversations. Recall, host deletion and optional
   inspection are independent of live task state. See [personal memory](../personal-memory.md)
@@ -29,9 +29,12 @@ long-term memory, and unrestricted long-term memory search remains deferred
 
 ## Personal memory engines
 
-Three engines sit behind one port (`runtime/src/memory/personal-memory.ts`), selected by
-`MEMORY_CONNECTION` and `MEMORY_PROVIDER`; `factory.ts` returns
-`undefined` when memory is disabled, so no store is allocated.
+Personal memory uses one port (`runtime/src/memory/personal-memory.ts`). `MEMORY_CONNECTION`
+selects local, remote or disabled. For explicit local composition use `MEMORY_RECALL_ENGINE=ledger`
+and `MEMORY_EXTRACTORS=ledger`. Leaving both unset preserves the default ledger and legacy migration.
+`MEMORY_PROVIDER` is deprecated: `voicemem` retains that migration and `mem0` retains standalone mode;
+do not combine it with the new variables. New voicemem/mem0 engine composition fails closed until
+durable feeding is implemented. Disabled memory allocates no personal store.
 
 **mem0 (explicit alternative)** admits sources to its own ledger before any model sees them. Each source moves
 through `pending → learned`, or `forgotten` when deleted, and `recall()` returns only `learned`
@@ -42,7 +45,7 @@ duplicating work. Admission is idempotent by source identity. Storage is per use
 `memory.sqlite.mem0/<sha256(userId)>/`, holding `ledger.db` alongside the mem0 SDK's own vector
 databases.
 
-**Unified local ledger (default)** is wired by production composition through `runtime/src/memory-substrate/`. It preserves source evidence, revision history, processing consent and unified retrieval. Legacy VoiceMem data can be imported read-only while retaining the original database. The `voicemem` provider name remains for configuration compatibility; `factory.ts` also retains the legacy adapter. **Remote personal memory** (`remote-personal-memory.ts`) is a host-managed HTTP client
+**Unified local ledger (default)** is wired by production composition through `runtime/src/memory-substrate/`. It preserves source evidence, revision history, processing consent and unified retrieval. Legacy VoiceMem data can be imported read-only while retaining the original database. The `voicemem` provider name remains for configuration compatibility; the compatibility shim retains injected legacy local factories. **Remote personal memory** (`remote-personal-memory.ts`) is a host-managed HTTP client
 over `/v1/remember`, `/v1/forget`, `/v1/recall` and `/v1/preferences`; the URL must be HTTPS or
 loopback, and responses are size-capped.
 

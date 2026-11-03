@@ -1,3 +1,5 @@
+import {responseStyleContext, validateResponseStyleHits} from './ledger-recall-engine.js'
+import type {PersonalMemoryRecallHit} from './personal-memory.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {withUsageContext,type UsageContext} from '../usage/context.js'
 import {abortable} from '../core/camera-session.js'
@@ -34,6 +36,7 @@ const deadline = (signal?: AbortSignal): AbortSignal => AbortSignal.any([...(sig
 
 /** C projection: entries and raw-index candidates resolve against the same A/B authority. */
 export class UnifiedRetrieval {
+  private readonly styleHits = new WeakMap<UnifiedRetrievalResult, readonly PersonalMemoryRecallHit[]>();
   private readonly owners = new WeakMap<UnifiedRetrievalResult, PersonalMemoryResource>();
   private readonly consumers = new WeakMap<UnifiedRetrievalResult,string>();
   constructor(private readonly options: {
@@ -47,6 +50,12 @@ export class UnifiedRetrieval {
   async purgeEvidence(ids: readonly string[]): Promise<void> {
     if (!this.options.rawPurgeEvidence) throw Error('knowledge_purge_unavailable');
     await this.options.rawPurgeEvidence(ids);
+  }
+
+  /** A synchronous fence for all async work consuming this projection. */
+  recallAuthorityUnchanged(result: UnifiedRetrievalResult): () => boolean {
+    const resource = this.owners.get(result), revision = resource?.recallAuthorityRevision?.();
+    return () => this.options.memory() === resource && revision === resource?.recallAuthorityRevision?.();
   }
 
   /** Consume a prefetched projection using current A/B rows, without another embedding request. */
@@ -68,8 +77,17 @@ export class UnifiedRetrieval {
     const current = {...result, entries: entries.filter((item): item is RetrievedEntry => item !== null), snippets: snippets.filter((item): item is RetrievedSnippet => item !== null)};
     current.state = current.entries.length || current.snippets.length ? 'ok' : 'empty';
     this.owners.set(current, resource);
+    this.styleHits.set(current, this.styleHits.get(result) ?? []);
     const consumer=this.consumers.get(result);if(consumer!==undefined)this.consumers.set(current,consumer);
     return this.authorize(current,resource,consumer,signal);
+  }
+
+  /** Response adaptation only: never include style records in factual entries or tool results. */
+  async prepareResponseStyle(result: UnifiedRetrievalResult, signal: AbortSignal): Promise<() => string | null> {
+    const resource = this.owners.get(result), consumer = this.consumers.get(result);
+    if (resource?.recallEngine !== 'voicemem' || this.options.memory() !== resource || !consumer) return () => null;
+    const hits = await validateResponseStyleHits(resource, this.styleHits.get(result) ?? [], consumer, signal);
+    return () => this.options.memory() === resource ? responseStyleContext(hits) : null;
   }
 
   private async authorize(result:UnifiedRetrievalResult,resource:PersonalMemoryResource,consumer:string|undefined,signal:AbortSignal):Promise<UnifiedRetrievalResult>{
@@ -222,6 +240,7 @@ export class UnifiedRetrieval {
     const resultSnippets = checked.flatMap(candidate => candidate?.evidenceId ? [snippets.get(candidate.evidenceId)!] : []);
     const result: UnifiedRetrievalResult = {state: resultEntries.length || resultSnippets.length ? 'ok' : degraded ? 'unavailable' : 'empty', scope, entries: resultEntries, snippets: resultSnippets, degraded};
     this.owners.set(result, resource);
+    if (resource.recallEngine === 'voicemem' && recalled.status === 'fulfilled' && 'contextHits' in recalled.value) this.styleHits.set(result, recalled.value.contextHits ?? []);
     if(options.consumer!==undefined)this.consumers.set(result,options.consumer);
     return this.authorize(result,resource,options.consumer,signal);
   }

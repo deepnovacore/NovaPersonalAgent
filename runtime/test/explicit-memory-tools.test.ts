@@ -8,12 +8,13 @@ import {Memory,makeMemoryRef} from '../src/core/memory.js'
 import {VirtualClock} from '../src/core/clock.js'
 import {compileToolSchema} from '../src/core/tool-schema.js'
 import {RealtimeRuntimeBridge,type ToolCallReady} from '../src/realtime/bridge.js'
+import {RemotePersonalMemoryResource} from '../src/memory/remote-personal-memory.js'
 import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import type {ExplicitMemoryReceipt,ExplicitMemoryPage} from '../src/memory/explicit-memory.js'
 import {buildAssembly} from '../src/composition/assembly.js'
 import {buildRealtimeAssembly} from '../src/composition/realtime-assembly.js'
-import {loadSettings,settingsSchema} from '../src/config/config.js'
+import {loadSettings,resolveMemoryComposition,settingsSchema} from '../src/config/config.js'
 import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import {hostContextItemSchema,type HostContextItem,type RealtimeProvider} from '../src/realtime/protocol.js'
 import {setTimeout as delay} from 'node:timers/promises'
@@ -106,7 +107,10 @@ test('planMemoryToolCapabilities agrees with resource members for each compositi
   const mem0 = createMem0PersonalMemory({path: join(tmpdir(), 'capability-mem0'), userId: 'fixture', embedding: {baseUrl: 'https://embedding.example', apiKey: 'fixture', model: 'fixture'}})
   assert.deepEqual(deriveMemoryToolCapabilities(mem0, 'mem0'), {recall: true, evidence: true, sourceFilter: false, lookup: false, remember: false, engine: 'mem0'})
   const knowledge = {...recallOnly, readEvidence: () => Promise.resolve(null)}
-  const local = Object.assign(() => ledger, {localMemoryConfig: {}})
+  const localComposition = resolveMemoryComposition(loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen'}))
+  assert.equal(localComposition.kind, 'ledger')
+  if (localComposition.kind !== 'ledger') return
+  const local = Object.assign(() => ledger, {localMemoryConfig: localComposition.local})
   const isolated = {data_mode: 'isolated'} as HostSpaceConfig
   for (const entry of [
     {name: 'legacy local ledger', settings: settingsSchema.parse({executors: []}), createPersonalMemory: local, knowledge: false, resource: ledger, engine: 'ledger'},
@@ -132,31 +136,37 @@ test('live resource removes unsupported tools from an untagged factory FULL plan
 })
 
 for (const build of [buildTextRealtimeAssembly, buildCascadedRealtimeAssembly, buildQwenRealtimeAssembly]) {
-  for (const branch of ['explicit FULL untagged', 'untagged', 'mem0 tagged', 'remote', 'default ledger', 'explicit FULL mem0', 'explicit NONE untagged'] as const) {
+  for (const branch of ['explicit FULL untagged', 'untagged', 'mem0 tagged', 'remote', 'default ledger', 'explicit FULL mem0', 'explicit NONE untagged', 'actual mem0 factory', 'actual remote factory', 'composition mem0', 'composition remote'] as const) {
     test(`${build.name} compiles memory capabilities for ${branch}`, async () => {
       const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-builder-capabilities-'))
       const settings = loadSettings({PIPELINE_MODE: 'cascaded', CASCADE_LLM_PROVIDER: 'qwen', INTEGRATED_PROVIDER: 'qwen',
         DASHSCOPE_API_KEY: 'fixture', DOUBAO_BIGMODEL_API_KEY: 'fixture', EXECUTORS: '', CAMERA_MODULE_ENABLED: 'false',
         MEMORY_PATH: join(root, 'legacy.sqlite'), MEMORY_LEDGER_PATH: join(root, 'ledger.sqlite'), WORKSPACE_GRAPH_PATH: join(root, 'workspace.sqlite'),
-        ...(branch === 'remote' ? {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'} : {}),
+        ...(branch === 'remote' ? {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'} : branch === 'actual mem0 factory' ? {MEMORY_PROVIDER: 'mem0'} : {}),
       })
       const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}})
-      const createPersonalMemory = branch.includes('mem0') ? Object.assign(() => recallOnly, {memoryBackend: 'mem0' as const}) : () => recallOnly
+      const createPersonalMemory = branch.startsWith('actual ') ? personalMemoryFactory(branch === 'actual remote factory'
+        ? loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'}) : settings).factory! : branch.includes('mem0') ? Object.assign(() => recallOnly, {memoryBackend: 'mem0' as const}) : () => recallOnly
+      const compositionOnly = branch.startsWith('composition ')
+      const memoryComposition = compositionOnly ? personalMemoryFactory(loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen',
+        ...(branch === 'composition mem0' ? {MEMORY_PROVIDER: 'mem0'} : {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'})})).composition : undefined
       const graph = build({settings, capabilities,
-        ...(branch === 'default ledger' ? {} : {createPersonalMemory}),
+        ...(memoryComposition ? {memoryComposition} : branch === 'default ledger' ? {} : {createPersonalMemory}),
         ...(branch.startsWith('explicit FULL') ? {memoryTools: FULL_MEMORY_TOOLS} : branch === 'explicit NONE untagged' ? {memoryTools: NO_MEMORY_TOOLS} : {}),
       })
       try {
         assert.deepEqual([...graph.tools.bindings.keys()].filter(name => name.startsWith('memory__')).sort(),
-          branch === 'explicit NONE untagged' ? [] : branch === 'mem0 tagged' ? ['memory__evidence', 'memory__recall'] : branch === 'remote' ? ['memory__recall']
+          branch === 'explicit NONE untagged' ? [] : branch === 'mem0 tagged' || branch === 'actual mem0 factory' || branch === 'composition mem0' ? ['memory__evidence', 'memory__recall'] : branch === 'remote' || branch === 'actual remote factory' || branch === 'composition remote' ? ['memory__recall']
             : ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'])
+        if (branch === 'composition mem0') assert.equal(graph.personalMemory?.recallEngine, 'mem0')
+        if (branch === 'composition remote') assert.ok(graph.personalMemory instanceof RemotePersonalMemoryResource)
         if (branch === 'default ledger') assert.deepEqual(graph.core.memoryTools, FULL_MEMORY_TOOLS)
       } finally {await graph.stop(); await rm(root, {recursive: true, force: true})}
     })
   }
 }
 
-for (const branch of ['explicit NONE ledger', 'derived ledger', 'explicit FULL recall-only', 'derived recall-only'] as const) {
+for (const branch of ['explicit NONE ledger', 'derived ledger', 'explicit FULL recall-only', 'derived recall-only', 'composition remote', 'composition mem0'] as const) {
   test(`conversationRuntimeFactory exposes ${branch} memory tools at provider connect`, async () => {
     const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-conversation-capabilities-'))
     const ledger: PersonalMemoryResource = {...recallOnly,
@@ -164,7 +174,7 @@ for (const branch of ['explicit NONE ledger', 'derived ledger', 'explicit FULL r
       lookupExplicit: () => Promise.resolve({entries: [], next_cursor: null}), get: () => Promise.resolve(null),
       beginExplicitTurn: () => {throw Error('unused')}, writeExplicit: () => Promise.reject(Error('unused')),
     }
-    const memory = branch.endsWith('ledger') ? ledger : recallOnly
+    const memory = branch.startsWith('composition ') ? undefined : branch.endsWith('ledger') ? ledger : recallOnly
     const host = new PersonalAgentHost({path: join(root, 'personal.json'), userScope: 'test', memory: () => memory, pool: new SuggestionPool(), evidence: () => null})
     let offered: string[] | undefined
     const provider: RealtimeProvider = {
@@ -184,10 +194,12 @@ for (const branch of ['explicit NONE ledger', 'derived ledger', 'explicit FULL r
         settings: settingsSchema.parse({executors: [], camera_module_enabled: false, cascade_llm_provider: 'qwen', dashscope_api_key: 'fixture', memory_connection: branch.endsWith('ledger') ? 'disabled' : 'local'}),
         capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}}),
         ...(branch === 'explicit NONE ledger' ? {memoryTools: NO_MEMORY_TOOLS} : branch === 'explicit FULL recall-only' ? {memoryTools: FULL_MEMORY_TOOLS} : {}),
+        ...(branch.startsWith('composition ') ? {memoryComposition: personalMemoryFactory(loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen',
+          ...(branch === 'composition mem0' ? {MEMORY_PROVIDER: 'mem0'} : {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'})})).composition} : {}),
         createTextProvider: () => provider,
       })
       runtime = await factory(createConversation('chat', 'Capabilities', null, 'chat:main'), () => undefined)
-      assert.deepEqual(offered, branch === 'explicit NONE ledger' ? [] : branch === 'derived recall-only' ? ['memory__recall']
+      assert.deepEqual(offered, branch === 'explicit NONE ledger' ? [] : branch === 'derived recall-only' || branch === 'composition remote' ? ['memory__recall'] : branch === 'composition mem0' ? ['memory__evidence', 'memory__recall']
         : ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'])
     } finally {await runtime?.close(); await host.close(); await rm(root, {recursive: true, force: true})}
   })
@@ -231,8 +243,8 @@ import {prepareKnowledge} from '../src/knowledge/assembly.js'
 for (const backend of ['ledger', 'mem0', 'remote', 'none'] as const) test(`shared conversation tools before resource creation use the configured ${backend} plan`, async () => {
   const settings = loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen', EXECUTORS: '',
     ...(backend === 'mem0' ? {MEMORY_PROVIDER: 'mem0'} : backend === 'remote' ? {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'} : backend === 'none' ? {MEMORY_CONNECTION: 'disabled'} : {})})
-  const createPersonalMemory = personalMemoryFactory(settings)
-  const planned = plannedMemoryTools({settings, ...(createPersonalMemory ? {createPersonalMemory} : {})})
+  const {factory: createPersonalMemory, composition: memoryComposition} = personalMemoryFactory(settings)
+  const planned = plannedMemoryTools({settings, memoryComposition, ...(createPersonalMemory ? {createPersonalMemory} : {})})
   const caps = resolveMemoryToolCapabilities(undefined, planned)
   const core = buildAssembly({settings, gateway: fixtureGateway, memoryTools: caps, capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}})})
   try {
@@ -244,20 +256,20 @@ for (const backend of ['ledger', 'mem0', 'remote', 'none'] as const) test(`share
   } finally {await core.stop()}
 })
 
-for (const branch of ['ledger', 'isolated', 'knowledge', 'mem0', 'remote', 'none'] as const) test(`plan agrees with composeRealtime resource for ${branch}`, async () => {
+for (const branch of ['ledger', 'explicit-ledger', 'isolated', 'knowledge', 'mem0', 'remote', 'none'] as const) test(`plan agrees with composeRealtime resource for ${branch}`, async () => {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-capability-composition-'))
   const knowledgeEnabled = branch === 'knowledge' || branch === 'mem0'
   const settings = loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen', EXECUTORS: '',
     MEMORY_PATH: join(root, 'legacy.sqlite'), MEMORY_LEDGER_PATH: join(root, 'ledger.sqlite'), KNOWLEDGE_PATH: join(root, 'knowledge.sqlite'),
-    ...(branch === 'mem0' ? {MEMORY_PROVIDER: 'mem0'} : branch === 'remote' ? {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'} : branch === 'ledger' ? {} : {MEMORY_CONNECTION: 'disabled'})})
+    ...(branch === 'mem0' ? {MEMORY_PROVIDER: 'mem0'} : branch === 'remote' ? {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'} : branch === 'explicit-ledger' ? {MEMORY_RECALL_ENGINE: 'ledger'} : branch === 'ledger' ? {} : {MEMORY_CONNECTION: 'disabled'})})
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: knowledgeEnabled}}})
   const knowledge = await prepareKnowledge(settings, capabilities)
   let graph: ReturnType<typeof composeRealtime> | undefined
   try {
     const spaceConfigPath = branch === 'isolated' ? join(root, 'space.json') : undefined
     if (spaceConfigPath) await writeFile(spaceConfigPath, JSON.stringify({v: 1, mode: 'host', data_mode: 'isolated', space: 'fixture', personal_path: join(root, 'personal.json'), relay_url: 'https://relay.example', epoch: 1, identity: {device: 'fixture', signingPublicKey: {}, signingPrivateKey: {}, encryptionPublicKey: {}, encryptionPrivateKey: {}}, content_key: 'a'.repeat(43), members: []}), {mode: 0o600})
-    const createPersonalMemory = personalMemoryFactory(settings)
-    const options = {settings, ...(knowledge ? {knowledge} : {}), ...(createPersonalMemory ? {createPersonalMemory} : {}), ...(spaceConfigPath ? {spaceHostConfigPath: spaceConfigPath} : {})}
+    const {factory: createPersonalMemory, composition: memoryComposition} = personalMemoryFactory(settings)
+    const options = {settings, memoryComposition, ...(knowledge ? {knowledge} : {}), ...(createPersonalMemory ? {createPersonalMemory} : {}), ...(spaceConfigPath ? {spaceHostConfigPath: spaceConfigPath} : {})}
     const planned = plannedMemoryTools(options)
     const core = buildAssembly({...options, capabilities, gateway: fixtureGateway, memoryTools: planned})
     const provider: RealtimeProvider = {
@@ -268,6 +280,16 @@ for (const branch of ['ledger', 'isolated', 'knowledge', 'mem0', 'remote', 'none
     graph = composeRealtime(core, provider, {...options, idFactory: () => 'capability'}, {controlledPreemptiveAlertReconnect: false, preemptiveAlertHistoryRecovery: 'none', preemptiveAlertHistoryPairs: 4})
     // Composition creates the real facade synchronously; opening SDKs or relay transports is unnecessary.
     assert.deepEqual(deriveMemoryToolCapabilities(graph.personalMemory, planned.engine), planned)
-    assert.equal(planned.engine, branch === 'isolated' ? 'ledger' : branch)
+    assert.equal(planned.engine, branch === 'isolated' || branch === 'explicit-ledger' ? 'ledger' : branch)
+    if (branch === 'ledger' || branch === 'explicit-ledger') {
+      const memory = graph.personalMemory as SubstrateMemoryResource
+      if (branch === 'explicit-ledger') assert.equal(memory.options.migrate, undefined)
+      else {
+        const calls: unknown[] = []
+        memory.options.client.memory = (operation, input) => {calls.push({operation, input}); return Promise.resolve(null)}
+        await memory.options.migrate!()
+        assert.deepEqual(calls, [{operation: 'migrate_legacy', input: {path: join(root, 'legacy.sqlite'), user_id: settings.memory_user_id, entry_prefix: memory.prefix, source_prefix: memory.prefix}}])
+      }
+    }
   } finally {await graph?.stop(); await knowledge?.close(); await rm(root, {recursive: true, force: true})}
 })

@@ -1027,3 +1027,24 @@ test('memory status reports an invalid endpoint instead of throwing during compo
     DASHSCOPE_MODEL_BASE_URL: 'http://127.0.0.1:11434/v1'})
   assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'invalid_configuration', fallback: null})
 })
+
+test('memory engine and extractor settings default to legacy resolution and reject unsupported extractors', () => {
+  const defaults = loadSettings({})
+  assert.equal(defaults.memory_recall_engine, null)
+  assert.equal(defaults.memory_extractors, null)
+  assert.deepEqual(loadSettings({MEMORY_EXTRACTORS: ' ledger '}).memory_extractors, ['ledger'])
+  for (const value of ['voicemem', 'ledger,voicemem', 'ledger,', ',ledger']) {
+    assert.throws(() => loadSettings({MEMORY_EXTRACTORS: value}), /MEMORY_EXTRACTORS/)
+  }
+})
+
+
+test('empty memory composition environment variables preserve unset defaults', () => {
+  const defaults = loadSettings({})
+  for (const empty of ['', '   ']) {
+    const settings = loadSettings({MEMORY_RECALL_ENGINE: empty, MEMORY_EXTRACTORS: empty})
+    assert.equal(settings.memory_recall_engine, defaults.memory_recall_engine)
+    assert.equal(settings.memory_extractors, defaults.memory_extractors)
+    assert.equal(loadSettings({MEMORY_PROVIDER: 'voicemem', MEMORY_RECALL_ENGINE: empty, MEMORY_EXTRACTORS: empty}).memory_provider, 'voicemem')
+  }
+})
