@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:path_provider/path_provider.dart';
@@ -137,6 +138,15 @@ class SpaceStorage {
       scope == null ? key : '$key.space.${scope!.id}';
   static Future<Directory> directory({SpaceRecord? space}) async {
     final selected = space ?? scope;
+    if (selected != null && defaultTargetPlatform == TargetPlatform.iOS) {
+      // Native excludes/protects the containing directory before any Dart file
+      // or atomic temporary snapshot can be created. Fail closed if unavailable.
+      final path = await const MethodChannel(
+        'nova/space_scope',
+      ).invokeMethod<String>('prepareSpaceDirectory', {'spaceId': selected.id});
+      if (path == null) throw StateError('space_privacy_unavailable');
+      return Directory(path);
+    }
     final root = await getApplicationSupportDirectory();
     if (selected == null) return root; // Injected legacy unit fixtures only.
     final directory = Directory('${root.path}/spaces/${selected.id}');

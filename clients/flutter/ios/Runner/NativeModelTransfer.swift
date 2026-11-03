@@ -9,6 +9,11 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
   private final class Pending {
     let id: String
     let spaceId: String?
+    let token: String?
+    let authorityGeneration: String?
+    var fileID: String { token.map { id + "." + $0 } ?? id }
+    var terminal = false
+    var cancelled = false
     var data = Data()
     var failure: String?
     var parser: ModelStreamParser?
@@ -16,28 +21,67 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     var deltas = [[String: Any]]()
     var flushScheduled = false
     var completion: ((Result<[String: Any], Error>) -> Void)?
-    init(id: String, spaceId: String?, completion: ((Result<[String: Any], Error>) -> Void)? = nil) { self.id = id; self.spaceId = spaceId; self.completion = completion }
+    init(id: String, spaceId: String?, token: String? = nil, authorityGeneration: String? = nil, completion: ((Result<[String: Any], Error>) -> Void)? = nil) { self.id = id; self.spaceId = spaceId; self.token = token; self.authorityGeneration = authorityGeneration; self.completion = completion }
   }
   private var pending: [Int: Pending] = [:]
   private var tasks: [String: URLSessionTask] = [:]
+  private struct Reservation {
+    let token: String, storageKey: String, authorityGeneration: String, generation: UUID
+    let expires: TimeInterval
+  }
+  private enum Revocation: Hashable {
+    case file(spaceId: String, fileID: String)
+    case space(String)
+  }
+  static let reservationLimit = 128
+  static let reservationLifetime: TimeInterval = 60
+  private var reservations: [String: Reservation] = [:]
+  private var generation = UUID()
+  // Only failed disk revocations remain here. They block new admissions until
+  // cleanup succeeds; they are never evicted to make room for fresh requests.
+  private var revocations = Set<Revocation>()
+  private let clock: () -> TimeInterval
+  private let sessionIdentifier: String
+  private var authorityStore: ModelTransferAuthority?
   private var channel: FlutterMethodChannel?
   private var wakeCompletion: (() -> Void)?
   private var scopeObserver: NSObjectProtocol?
-  override init() {
+  init(clock: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }, sessionIdentifier: String = NativeModelTransfer.sessionID) {
+    self.clock = clock; self.sessionIdentifier = sessionIdentifier
     super.init()
     scopeObserver = NotificationCenter.default.addObserver(forName: NovaSpaceScope.changed, object: nil, queue: .main) { [weak self] _ in
-      self?.tasks.values.forEach { $0.cancel() }
+      guard let self else { return }
+      self.reservations.removeAll(); self.generation = UUID()
+      for value in self.pending.values where !self.sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()) { self.cancel(value.id) }
+      self.session.getAllTasks { tasks in
+        DispatchQueue.main.async {
+          for task in tasks where task.state != .completed {
+            let value = self.entry(task)
+            if !self.sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()) { self.cancelTask(task, value) }
+          }
+        }
+      }
     }
   }
   deinit { if let observer = scopeObserver { NotificationCenter.default.removeObserver(observer) } }
   private lazy var session: URLSession = {
-    let config = URLSessionConfiguration.background(withIdentifier: Self.sessionID)
+    let config = URLSessionConfiguration.background(withIdentifier: sessionIdentifier)
     config.isDiscretionary = false; config.sessionSendsLaunchEvents = true
     config.waitsForConnectivity = true
     config.timeoutIntervalForRequest = 180; config.timeoutIntervalForResource = 600
     config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCredentialStorage = nil; config.urlCache = nil
     return URLSession(configuration: config, delegate: self, delegateQueue: .main)
   }()
+  private func authority() throws -> ModelTransferAuthority {
+    if let authorityStore { return authorityStore }
+    let store = ModelTransferAuthority(controlDirectory: try NovaSpaceScope.modelTransferControlDirectory())
+    authorityStore = store; return store
+  }
+  private func storageKey(_ spaceId: String) throws -> String { try authority().storageKey(NovaSpaceScope.supportPath(spaceId)) }
+  private func sameSpace(_ left: String?, _ right: String?) -> Bool {
+    guard let left, let right, let a = try? storageKey(left), let b = try? storageKey(right) else { return false }
+    return a == b
+  }
   private func folder(spaceId: String) throws -> URL {
     let root = try NovaSpaceScope.supportDirectory(spaceId)
     var folder = root.appendingPathComponent("ModelTransfers", isDirectory: true)
@@ -48,12 +92,23 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
   func install(messenger: FlutterBinaryMessenger) {
     channel = FlutterMethodChannel(name: "nova/model_transfer/v1", binaryMessenger: messenger)
     channel?.setMethodCallHandler { [weak self] call, reply in
-      guard let self, let input = call.arguments as? [String: Any], let id = input["id"] as? String, UUID(uuidString: id) != nil else { reply(FlutterError(code: "invalid_model_request", message: nil, details: nil)); return }
-      if call.method == "cancel" { self.cancel(id); reply(nil); return }
+      guard let self else { reply(FlutterError(code: "model_request_failed", message: nil, details: nil)); return }
+      guard let input = call.arguments as? [String: Any], let id = input["id"] as? String, UUID(uuidString: id) != nil else { reply(FlutterError(code: "invalid_model_request", message: nil, details: nil)); return }
+      if call.method == "reserve" {
+        do { reply(try self.reserve(id: id)) }
+        catch { reply(FlutterError(code: (error as? LocalAgentError)?.code ?? "model_request_failed", message: nil, details: nil)) }
+        return
+      }
+      guard let token = input["reservation"] as? String, UUID(uuidString: token) != nil else { reply(FlutterError(code: "invalid_model_request", message: nil, details: nil)); return }
+      if call.method == "cancel" {
+        if self.cancel(id, reservation: token) { reply(nil) }
+        else { reply(FlutterError(code: "model_cleanup_pending", message: nil, details: nil)) }
+        return
+      }
       guard call.method == "request", let raw = input["configuration"] as? [String: Any], let body = input["body"] as? [String: Any],
         let endpoint = raw["endpoint"] as? String, let model = raw["model"] as? String, let key = raw["key"] as? String else { reply(FlutterMethodNotImplemented); return }
       let configuration = NativeModelConfiguration(endpoint: endpoint, model: model, key: key, apiProtocol:raw["protocol"] as? String)
-      self.request(id: id, configuration: configuration, body: body) { result in
+      self.request(id: id, reservation: token, configuration: configuration, body: body) { result in
         switch result {
         case .success(let value): reply(value)
         case .failure(let error): reply(FlutterError(code: (error as? LocalAgentError)?.code ?? "model_request_failed", message: nil, details: nil))
@@ -61,32 +116,188 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
       }
     }
     _ = session
+    if let id = try? NovaSpaceScope.standaloneID() { reconcile(spaceId: id) }
   }
   func handleEvents(identifier: String, completion: @escaping () -> Void) {
     guard identifier == Self.sessionID else { completion(); return }
     wakeCompletion = completion; _ = session
   }
-  func request(id: String, configuration: NativeModelConfiguration, body: [String: Any], completion: @escaping (Result<[String: Any], Error>) -> Void) {
+  /// Admission contains no body and starts no transfer. Unknown, expired or
+  /// revoked nonces can never become fresh requests, even after ID reuse.
+  func reserve(id: String) throws -> String {
+    dispatchPrecondition(condition: .onQueue(.main))
+    let spaceId = try NovaSpaceScope.standaloneID()
+    try retryCleanup()
+    let directory = try NovaSpaceScope.supportDirectory(spaceId)
+    let epoch = try authority().snapshot(directory).generation
+    let key = try storageKey(spaceId)
+    let now = clock()
+    reservations = reservations.filter { $0.value.expires > now }
+    guard UUID(uuidString: id) != nil, tasks[id] == nil, reservations[id] == nil else { throw LocalAgentError("invalid_model_request") }
+    guard reservations.count < Self.reservationLimit else { throw LocalAgentError("model_admission_full") }
+    let token = UUID().uuidString
+    reservations[id] = Reservation(token: token, storageKey: key, authorityGeneration: epoch, generation: generation, expires: now + Self.reservationLifetime)
+    return token
+  }
+  func request(id: String, reservation token: String, configuration: NativeModelConfiguration, body: [String: Any], completion: @escaping (Result<[String: Any], Error>) -> Void) {
+    guard Thread.isMainThread else {
+      DispatchQueue.main.async { self.request(id: id, reservation: token, configuration: configuration, body: body, completion: completion) }; return
+    }
+    var admittedSpace: String?
     do {
       let spaceId = try NovaSpaceScope.standaloneID()
+      guard let admission = reservations[id], admission.token == token else { throw LocalAgentError("cancelled") }
+      reservations.removeValue(forKey: id)
+      guard admission.expires > clock(), admission.storageKey == (try storageKey(spaceId)), admission.generation == generation else { throw LocalAgentError("cancelled") }
+      try retryCleanup()
       try configuration.validate()
       guard UUID(uuidString: id) != nil, tasks[id] == nil else { throw LocalAgentError("invalid_model_request") }
       let payload = try JSONSerialization.data(withJSONObject: body)
       guard payload.count <= 2 * 1024 * 1024 else { throw LocalAgentError("model_context_too_large") }
-      let file = try folder(spaceId: spaceId).appendingPathComponent(id + ".request")
+      let files = ModelTransferFiles(directory: try folder(spaceId: spaceId))
+      try files.purgeResults()
+      let epoch = try authority().authorize(NovaSpaceScope.supportPath(spaceId), id: id, token: token, expectedGeneration: admission.authorityGeneration)
+      admittedSpace = spaceId
+      let file = files.request(id + "." + token)
       try payload.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
       var request = URLRequest(url: configuration.requestURL)
       request.httpMethod = "POST"; request.setValue("Bearer \(configuration.key)", forHTTPHeaderField: "Authorization")
       request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.setValue(body["stream"] as? Bool == true ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
-      let task = session.uploadTask(with: request, fromFile: file); task.taskDescription = "scope=" + spaceId + "/" + id + (configuration.isResponses ? "/responses" : "") + (body["stream"] as? Bool == true ? "/stream" : "")
-      let value = Pending(id: id, spaceId: spaceId, completion: completion)
+      let task = session.uploadTask(with: request, fromFile: file); task.taskDescription = "scope=" + spaceId + "/" + id + "/token=" + token + "/authority=" + epoch + (configuration.isResponses ? "/responses" : "") + (body["stream"] as? Bool == true ? "/stream" : "")
+      let value = Pending(id: id, spaceId: spaceId, token: token, authorityGeneration: epoch, completion: completion)
       value.responses = configuration.isResponses
       if body["stream"] as? Bool == true { value.parser = parser(for: value) }
       pending[task.taskIdentifier] = value; tasks[id] = task
-      NovaBackgroundExecution.modelTransferStarted(id); task.resume()
-    } catch { completion(.failure(error)) }
+      NovaBackgroundExecution.modelTransferStarted(value.fileID); task.resume()
+    } catch {
+      if let spaceId = admittedSpace { try? revoke(.file(spaceId: spaceId, fileID: id + "." + token)) }
+      completion(.failure(error))
+    }
   }
-  func cancel(_ id: String) { tasks[id]?.cancel() }
+  private func files(_ spaceId: String) throws -> ModelTransferFiles {
+    // Cleanup must never create a removed Space or transfer directory.
+    ModelTransferFiles(directory: try NovaSpaceScope.supportPath(spaceId).appendingPathComponent("ModelTransfers", isDirectory: true))
+  }
+  private func revoke(_ revocation: Revocation) throws {
+    revocations.insert(revocation)
+    switch revocation {
+    case .file(let spaceId, let fileID):
+      let parts = fileID.components(separatedBy: ".")
+      try authority().revoke(NovaSpaceScope.supportPath(spaceId), id: parts[0], token: parts.count == 2 ? parts[1] : nil)
+      try files(spaceId).remove(fileID)
+    case .space(let spaceId):
+      try authority().invalidate(NovaSpaceScope.supportPath(spaceId))
+      try files(spaceId).invalidate()
+    }
+    revocations.remove(revocation)
+  }
+  private func retire(_ taskID: Int, _ value: Pending) throws {
+    guard value.terminal else { return }
+    if let spaceId = value.spaceId { try revoke(.file(spaceId: spaceId, fileID: value.fileID)) }
+    pending.removeValue(forKey: taskID)
+    if tasks[value.id]?.taskIdentifier == taskID { tasks.removeValue(forKey: value.id) }
+  }
+  private func retryCleanup() throws {
+    for revocation in revocations { try? revoke(revocation) }
+    for (taskID, value) in pending where value.terminal { try? retire(taskID, value) }
+    guard revocations.isEmpty, !pending.values.contains(where: { $0.terminal }) else { throw LocalAgentError("model_cleanup_pending") }
+  }
+  @discardableResult func cancel(_ id: String, reservation token: String? = nil) -> Bool {
+    guard Thread.isMainThread else { DispatchQueue.main.async { self.cancel(id, reservation: token) }; return false }
+    let reserved = reservations[id] != nil && (token == nil || reservations[id]?.token == token)
+    if reserved { reservations.removeValue(forKey: id) }
+    if reserved && tasks[id] == nil { return true }
+    if let task = tasks[id], let value = pending[task.taskIdentifier], token == nil || value.token == token {
+      return cancelTask(task, value)
+    }
+    // Revoke the exact restored incarnation before its delegate is recovered.
+    // No tombstone is needed: a delayed request requires a live reservation,
+    // and a restored callback requires this incarnation's request file.
+    var revoked = false
+    if let spaceId = try? NovaSpaceScope.standaloneID() {
+      let file = Revocation.file(spaceId: spaceId, fileID: token.map { id + "." + $0 } ?? id)
+      do { try revoke(file); revoked = true }
+      catch {
+        // An inaccessible directory cannot prove that an unknown incarnation
+        // is absent. Coalesce such failures into a stronger Space-wide gate,
+        // rather than retaining arbitrary cancel-before-restoration UUIDs.
+        revocations.insert(.space(spaceId)); revocations.remove(file)
+      }
+    }
+    session.getAllTasks { all in
+      DispatchQueue.main.async {
+        for task in all where task.state != .completed && task.taskDescription?.components(separatedBy: "/").dropFirst().first == id {
+          let value = self.entry(task)
+          if token == nil || value.token == token { self.cancelTask(task, value) }
+        }
+      }
+    }
+    return revoked
+  }
+  @discardableResult private func cancelTask(_ task: URLSessionTask, _ value: Pending) -> Bool {
+    value.cancelled = true; value.data.removeAll(); value.deltas.removeAll(); value.parser = nil
+    var revoked = true
+    if let spaceId = value.spaceId {
+      do { try revoke(.file(spaceId: spaceId, fileID: value.fileID)) }
+      catch { revoked = false }
+    }
+    task.cancel()
+    let completion = value.completion; value.completion = nil
+    completion?(.failure(LocalAgentError("cancelled")))
+    return revoked
+  }
+  /// The synchronous file revocation precedes acknowledgement to Dart. Any
+  /// restored callback checks ownership before parsing, flushing or delivering.
+  func invalidate(spaceId: String) throws {
+    dispatchPrecondition(condition: .onQueue(.main))
+    let key = try storageKey(spaceId)
+    reservations = reservations.filter { $0.value.storageKey != key }
+    revocations.insert(.space(spaceId))
+    // Explicit lifecycle revocation is the only path allowed to repair a
+    // corrupt/dirty control record. Ordinary admission retries never repair it.
+    try authority().invalidate(NovaSpaceScope.supportPath(spaceId), recovery: true)
+    try NovaSpaceScope.invalidateProtection(spaceId)
+    for value in pending.values where sameSpace(value.spaceId, spaceId) {
+      if let task = tasks[value.id] { cancelTask(task, value) }
+      else { value.cancelled = true }
+    }
+    try revoke(.space(spaceId))
+    reconcile(spaceId: spaceId)
+  }
+  func reconcile(spaceId: String) {
+    let snapshot = try? authority().snapshot(NovaSpaceScope.supportPath(spaceId))
+    let candidates = (try? files(spaceId).requestIDs()) ?? []
+    session.getAllTasks { all in
+      DispatchQueue.main.async {
+        var active = Set<String>()
+        for task in all where task.state != .completed {
+          let value = self.entry(task)
+          if self.sameSpace(value.spaceId, spaceId) {
+            if self.owns(value) { active.insert(value.fileID) }
+            else { self.cancelTask(task, value) }
+          }
+        }
+        // Include requests submitted since getAllTasks took its snapshot.
+        for value in self.pending.values where self.sameSpace(value.spaceId, spaceId) && self.owns(value) { active.insert(value.fileID) }
+        do {
+          if let snapshot { try self.authority().reconcile(NovaSpaceScope.supportPath(spaceId), snapshot: snapshot, active: active) }
+          try self.files(spaceId).purgeResults()
+          for fileID in candidates.subtracting(active) { try self.files(spaceId).remove(fileID) }
+        } catch { self.revocations.insert(.space(spaceId)) }
+      }
+    }
+  }
+  private func owns(_ value: Pending) -> Bool {
+    guard !value.cancelled, let spaceId = value.spaceId else { return false }
+    for revocation in revocations {
+      switch revocation {
+      case .space(let other): if sameSpace(spaceId, other) { return false }
+      case .file(let other, let fileID): if value.fileID == fileID && sameSpace(spaceId, other) { return false }
+      }
+    }
+    guard (try? authority().owns(NovaSpaceScope.supportPath(spaceId), id: value.id, token: value.token, generation: value.authorityGeneration)) == true else { return false }
+    return (try? files(spaceId).owns(value.fileID)) == true
+  }
   private func entry(_ task: URLSessionTask) -> Pending {
     if let value = pending[task.taskIdentifier] { return value }
     let parts = task.taskDescription?.components(separatedBy:"/") ?? []
@@ -94,8 +305,18 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     let spaceId = scoped ? String(parts[0].dropFirst(6)) : nil
     let raw = scoped && parts.count > 1 ? parts[1] : nil
     let id = raw.flatMap { UUID(uuidString: $0) == nil ? nil : $0 } ?? UUID().uuidString
-    let value = Pending(id: id, spaceId: spaceId)
-    if spaceId == nil || spaceId != (try? NovaSpaceScope.standaloneID()) { task.cancel() }
+    let rawToken = parts.first { $0.hasPrefix("token=") }.map { String($0.dropFirst(6)) }
+    let token = rawToken.flatMap { UUID(uuidString: $0) != nil ? $0 : nil }
+    let epoch = parts.first { $0.hasPrefix("authority=") }.map { String($0.dropFirst(10)) }
+    let value = Pending(id: id, spaceId: spaceId, token: token, authorityGeneration: epoch)
+    if let current = tasks[id], current.taskIdentifier != task.taskIdentifier { value.cancelled = true }
+    if token == nil || epoch == nil {
+      value.cancelled = true; value.failure = "model_transfer_interrupted"
+    }
+    // A background relaunch can precede Flutter selecting a Space. Keep a
+    // legitimate upload bounded by URLSession's timeout, but never save its reply.
+    if !owns(value) || (NovaSpaceScope.selected != nil && !sameSpace(spaceId, try? NovaSpaceScope.standaloneID())) { value.cancelled = true; task.cancel() }
+    if tasks[id] == nil { tasks[id] = task }
     value.responses = task.taskDescription?.contains("/responses") == true
     if task.taskDescription?.hasSuffix("/stream") == true { value.parser = parser(for: value) }; pending[task.taskIdentifier] = value; return value
   }
@@ -111,12 +332,13 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
   }
   private func flush(_ value: Pending) {
     value.flushScheduled = false
-    guard value.spaceId == (try? NovaSpaceScope.standaloneID()), !value.deltas.isEmpty else { value.deltas.removeAll(); return }
+    guard let token = value.token, owns(value), sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()), !value.deltas.isEmpty else { value.deltas.removeAll(); return }
     let deltas = value.deltas; value.deltas.removeAll(keepingCapacity:true)
-    channel?.invokeMethod("deltas", arguments:["id":value.id,"deltas":deltas])
+    channel?.invokeMethod("deltas", arguments:["id":value.id,"reservation":token,"deltas":deltas])
   }
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
     let value = entry(dataTask)
+    guard owns(value) else { cancelTask(dataTask, value); return }
     if let parser = value.parser, dataTask.response?.mimeType == "text/event-stream" {
       do { try parser.append(data) }
       catch { value.failure = (error as? LocalAgentError)?.code ?? "invalid_model_response"; dataTask.cancel() }
@@ -127,17 +349,13 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
   }
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
     let value = entry(task)
-    pending.removeValue(forKey: task.taskIdentifier); tasks.removeValue(forKey: value.id)
-    defer {
-      if let id = value.spaceId, let file = try? folder(spaceId: id).appendingPathComponent(value.id + ".request") { try? FileManager.default.removeItem(at: file) }
-    }
     // Deliver already-parsed thinking even when the same batch ends in an error.
     flush(value)
-    NovaBackgroundExecution.modelTransferFinished(value.id)
+    if tasks[value.id]?.taskIdentifier == task.taskIdentifier { NovaBackgroundExecution.modelTransferFinished(value.fileID) }
     let result: Result<[String: Any], Error>
     do {
-      guard value.spaceId != nil, value.spaceId == (try? NovaSpaceScope.standaloneID()) else { throw LocalAgentError("space_changed") }
       if let failure = value.failure { throw LocalAgentError(failure) }
+      guard owns(value), value.spaceId != nil, sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()) else { throw LocalAgentError("space_changed") }
       if let error = error as NSError? {
         switch error.code {
         case NSURLErrorTimedOut: throw LocalAgentError("model_timeout")
@@ -156,17 +374,17 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
       result = .success(object)
       }
     } catch { result = .failure((error as? LocalAgentError) ?? LocalAgentError("invalid_model_response")) }
-    if let completion = value.completion { completion(result) }
-    else {
-      // A terminated Flutter turn is never auto-replayed. Retain the completed
-      // response privately for recovery/inspection, without credentials.
-      let object: [String: Any]
-      switch result { case .success(let output): object = ["response":output]; case .failure(let error): object = ["error":(error as? LocalAgentError)?.code ?? "model_request_failed"] }
-      if let id = value.spaceId, let file = try? folder(spaceId: id).appendingPathComponent(value.id + ".result"), let bytes = try? JSONSerialization.data(withJSONObject: object) {
-        try? bytes.write(to: file, options: [.atomic, .completeFileProtectionUntilFirstUserAuthentication])
-      }
-    }
+    let completion = value.completion; value.completion = nil
+    value.terminal = true; value.cancelled = true
+    value.data.removeAll(); value.deltas.removeAll(); value.parser = nil
+    // Failed cleanup retains the cancelled terminal entry and blocks new
+    // admissions. Successful cleanup retires all per-request cancellation state.
+    try? retire(task.taskIdentifier, value)
+    completion?(result)
+    // No orphan result is persisted: there is no reader/replay consumer. A
+    // suspended live turn still receives its completion; a terminated one does not.
   }
+
   func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
   func urlSessionDidFinishEvents(forBackgroundURLSession session: URLSession) {
     let completion = wakeCompletion; wakeCompletion = nil; completion?()

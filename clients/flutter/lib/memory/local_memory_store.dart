@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import '../personal/local_life.dart';
 import '../protocol/request_id.dart';
 
@@ -84,9 +86,17 @@ final class LocalMemoryStore {
   String? _forgetListenerError;
   String? get forgetListenerError => _forgetListenerError;
 
-  Future<void> _purgeRecoveryFiles() async {
+  Future<void> _purgeRecoveryFiles({bool invalidateTransfers = false}) async {
     // Called only inside our serial queue, never alongside our own write.
     if (!_ownsLedger) return;
+    _recoveryCleanupError = null;
+    if (invalidateTransfers) {
+      try {
+        await _invalidateNativeTransfers();
+      } catch (_) {
+        _recoveryCleanupError = 'memory_recovery_cleanup_failed';
+      }
+    }
     await _purgeOrphanedModelResults();
     if (persistence is! FileLifePersistence) return;
     try {
@@ -100,7 +110,6 @@ final class LocalMemoryStore {
   // the same Space parent as local_memory.json. Orphan results are never replayed.
   Future<void> _purgeOrphanedModelResults() async {
     if (persistence is! FileLifePersistence) return;
-    _recoveryCleanupError = null;
     final parent = (persistence as FileLifePersistence).file.parent;
     final directory = Directory('${parent.path}/ModelTransfers');
     try {
@@ -126,6 +135,18 @@ final class LocalMemoryStore {
     }
   }
 
+  Future<void> _invalidateNativeTransfers() async {
+    if (defaultTargetPlatform != TargetPlatform.iOS ||
+        persistence is! FileLifePersistence) {
+      return;
+    }
+    final parent = (persistence as FileLifePersistence).file.parent;
+    final spaceId = parent.uri.pathSegments.where((s) => s.isNotEmpty).last;
+    await const MethodChannel('nova/space_scope')
+        .invokeMethod<void>('invalidateModelTransfers', {'spaceId': spaceId})
+        .timeout(forgetListenerDeadline);
+  }
+
   bool get available => _available && !_closed;
 
   /// Stops new operations immediately and drains already queued writes.
@@ -145,6 +166,10 @@ final class LocalMemoryStore {
         persistence is! FileLifePersistence) {
       throw const LocalMemoryFailure('memory_reset_unavailable');
     }
+    // Explicit recovery must revoke native requests before preserving/resetting
+    // the ledger. Unlike forget, no commit has occurred: failure aborts reset.
+    await _invalidateNativeTransfers();
+    await _purgeRecoveryFiles();
     final file = (persistence as FileLifePersistence).file;
     if (await file.exists()) {
       await file.copy(
@@ -295,7 +320,7 @@ final class LocalMemoryStore {
       );
       await _commit(next);
     }
-    await _purgeRecoveryFiles();
+    await _purgeRecoveryFiles(invalidateTransfers: true);
     // A committed tombstone must not leave the ledger/retirement queue blocked
     // by a consumer. Report only fixed diagnostic codes, never exception text.
     _forgetListenerError = null;

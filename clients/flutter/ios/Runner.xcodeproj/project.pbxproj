@@ -8,6 +8,9 @@
 
 /* Begin PBXBuildFile section */
 		A11234567890ABCDEF000007 /* ModelStreamParser.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000007 /* ModelStreamParser.swift */; };
+		A11234567890ABCDEF000018 /* ModelTransferAuthority.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000018 /* ModelTransferAuthority.swift */; };
+		A11234567890ABCDEF000017 /* PrivateSpaceDirectory.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000017 /* PrivateSpaceDirectory.swift */; };
+		A11234567890ABCDEF000016 /* ModelTransferFiles.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000016 /* ModelTransferFiles.swift */; };
 		A11234567890ABCDEF000006 /* NativeModelTransfer.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000006 /* NativeModelTransfer.swift */; };
 		A11234567890ABCDEF000005 /* NovaBackgroundExecution.m in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000005 /* NovaBackgroundExecution.m */; };
 		A11234567890ABCDEF000004 /* ArtifactWebHost.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01234567890ABCDEF000004 /* ArtifactWebHost.swift */; };
@@ -69,6 +72,9 @@
 
 /* Begin PBXFileReference section */
 		A01234567890ABCDEF000007 /* ModelStreamParser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelStreamParser.swift; sourceTree = "<group>"; };
+		A01234567890ABCDEF000018 /* ModelTransferAuthority.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelTransferAuthority.swift; sourceTree = "<group>"; };
+		A01234567890ABCDEF000017 /* PrivateSpaceDirectory.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PrivateSpaceDirectory.swift; sourceTree = "<group>"; };
+		A01234567890ABCDEF000016 /* ModelTransferFiles.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelTransferFiles.swift; sourceTree = "<group>"; };
 		A01234567890ABCDEF000006 /* NativeModelTransfer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NativeModelTransfer.swift; sourceTree = "<group>"; };
 		A01234567890ABCDEF000005 /* NovaBackgroundExecution.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = NovaBackgroundExecution.m; sourceTree = "<group>"; };
 		A01234567890ABCDEF000004 /* ArtifactWebHost.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ArtifactWebHost.swift; sourceTree = "<group>"; };
@@ -186,6 +192,9 @@
 				74858FAE1ED2DC5600515810 /* AppDelegate.swift */,
 				A01234567890ABCDEF000005 /* NovaBackgroundExecution.m */,
 				A01234567890ABCDEF000006 /* NativeModelTransfer.swift */,
+				A01234567890ABCDEF000016 /* ModelTransferFiles.swift */,
+				A01234567890ABCDEF000017 /* PrivateSpaceDirectory.swift */,
+				A01234567890ABCDEF000018 /* ModelTransferAuthority.swift */,
 				A01234567890ABCDEF000007 /* ModelStreamParser.swift */,
 				A01234567890ABCDEF000004 /* ArtifactWebHost.swift */,
 				A01234567890ABCDEF000008 /* NovaScheduleBridge.swift */,
@@ -384,6 +393,9 @@
 				74858FAF1ED2DC5600515810 /* AppDelegate.swift in Sources */,
 				A11234567890ABCDEF000005 /* NovaBackgroundExecution.m in Sources */,
 				A11234567890ABCDEF000006 /* NativeModelTransfer.swift in Sources */,
+				A11234567890ABCDEF000016 /* ModelTransferFiles.swift in Sources */,
+				A11234567890ABCDEF000017 /* PrivateSpaceDirectory.swift in Sources */,
+				A11234567890ABCDEF000018 /* ModelTransferAuthority.swift in Sources */,
 				A11234567890ABCDEF000007 /* ModelStreamParser.swift in Sources */,
 				A11234567890ABCDEF000004 /* ArtifactWebHost.swift in Sources */,
 				A11234567890ABCDEF000008 /* NovaScheduleBridge.swift in Sources */,
