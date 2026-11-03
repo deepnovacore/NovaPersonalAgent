@@ -1,3 +1,4 @@
+import {configuredDiscoveryConsumer} from '../memory/consumer.js'
 import {FULL_MEMORY_TOOLS, memoryToolsFor, type MemoryToolCapabilities} from '../memory/tool-capabilities.js'
 import {createWorkbenchGenerator} from '../model/workbench-writer.js'
 import {observeOperation} from '../usage/context.js'
@@ -124,7 +125,7 @@ export interface Assembly {
     profileParticipantMessages?: boolean
     models: Required<Pick<HostOptions,
       'generateProfile' | 'generateDigests' | 'generateContext' | 'generateWorkbench' | 'generateTimeline' | 'rankNews' | 'understand'
-      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover' | 'proposeGoals' | 'prepareGoalCheckin' | 'updateGoalProgress'>> & Pick<HostOptions, 'rankNewsFallback'>
+      | 'prepareBrief' | 'prepareProposal' | 'summarizeMemory' | 'discover' | 'proposeGoals' | 'prepareGoalCheckin' | 'updateGoalProgress'>> & Pick<HostOptions, 'rankNewsFallback' | 'discoveryMemoryConsumer'>
     taskVerifier: Pick<GatewayTaskVerifier, 'evaluateTask'>
   }
 
@@ -504,6 +505,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       prepareBrief: observeOperation('digest',writer.prepareBrief.bind(writer)),
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
+      discoveryMemoryConsumer:()=>configuredDiscoveryConsumer(settings),
       discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
       proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(supportGateway,routedSettings.support_model,input,signal)),
       prepareGoalCheckin: observeOperation('proactivity',(input:GoalCheckinInput,signal:AbortSignal)=>writeGoalCheckins(supportGateway,routedSettings.support_model,input,signal)),

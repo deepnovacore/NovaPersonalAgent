@@ -1,3 +1,4 @@
+import type {RealtimeTelemetry} from '../realtime/telemetry.js'
 import {withUsageContext,type UsageContext} from '../usage/context.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceFilterSchema,type SourceFilter} from './source-retrieval.js'
@@ -38,6 +39,7 @@ export class UnifiedRetrieval {
   constructor(private readonly options: {
     memory: () => PersonalMemoryResource | undefined;
     usageContext?: UsageContext;
+    telemetry?: Pick<RealtimeTelemetry, 'record'>;
     rawPurgeEvidence?: (ids: readonly string[]) => Promise<void>;
     rawRecall?: (query: string, limit: number, signal: AbortSignal) => Promise<readonly {evidence_id: string; score?: number}[]>;
   }) {}
@@ -71,8 +73,8 @@ export class UnifiedRetrieval {
   }
 
   private async authorize(result:UnifiedRetrievalResult,resource:PersonalMemoryResource,consumer:string|undefined,signal:AbortSignal):Promise<UnifiedRetrievalResult>{
-    if(consumer===undefined||!resource.canReadConversationEvidence)return result;
-    const allowed=async(ids:readonly string[])=>ids.length>0&&(await Promise.all(ids.map(id=>abortable(resource.canReadConversationEvidence!(id,consumer),signal)))).every(Boolean);
+    if((consumer===undefined&&!resource.requiresConversationConsumer)||!resource.canReadConversationEvidence)return result;
+    const allowed=async(ids:readonly string[])=>ids.length>0&&(await Promise.all(ids.map(id=>abortable(resource.canReadConversationEvidence!(id,consumer??''),signal)))).every(Boolean);
     const entries=await Promise.all(result.entries.map(async entry=>await allowed(entry.evidence_refs)?entry:null));
     const snippets=await Promise.all(result.snippets.map(async snippet=>await allowed([snippet.evidence_id])?snippet:null));
     signal.throwIfAborted();
@@ -97,7 +99,7 @@ export class UnifiedRetrieval {
       const row = await abortable(resource.readEvidence(id), signal);
       options.signal?.throwIfAborted();
       if (this.options.memory() !== resource) return {state: 'unavailable', evidence: null};
-      const allowed=options.consumer===undefined||!resource.canReadConversationEvidence||await abortable(resource.canReadConversationEvidence(id,options.consumer),signal);
+      const allowed=(options.consumer===undefined&&!resource.requiresConversationConsumer)||!resource.canReadConversationEvidence||await abortable(resource.canReadConversationEvidence(id,options.consumer??''),signal);
       options.signal?.throwIfAborted();
       if(this.options.memory()!==resource)return {state:'unavailable',evidence:null};
       const evidence = allowed&&row?.evidence_id === id ? this.snippet(row, 2000) : null;
@@ -122,13 +124,20 @@ export class UnifiedRetrieval {
       return withUsageContext({...this.options.usageContext,feature:'recall',operation:'retrieve'},()=>abortable(Promise.resolve().then(() => work(abort)), abort));
     };
     const [recalled, raw, sources] = await Promise.allSettled([
-      filter?Promise.resolve({hits:[],degraded:false}):call(abort => resource.recall(query.trim(), {scope, limit: 8, signal: abort})),
+      filter?Promise.resolve({hits:[],degraded:false}):call(abort => resource.recall(query.trim(), {scope, limit: Math.min(8, resource.maxRecallLimit ?? 8), signal: abort})),
       // Recent is the memory provider's bounded candidate window and those entries' originals.
       // The current raw index has no recent-window ranking contract, so search it only for any.
       !filter && this.options.rawRecall && scope === 'any' ? call(abort => this.options.rawRecall!(query.trim(), 8, abort)) : Promise.resolve([]),
       resource.recallSources && options.consumer ? call(abort=>resource.recallSources!(query.trim(),{scope,limit:8,consumer:options.consumer!,signal:abort,...(filter?{filter}:{})})) : Promise.resolve({hits:[],truncated:filter!==undefined}),
     ]);
     options.signal?.throwIfAborted();
+    if (recalled.status === 'rejected') {
+      // Never forward provider messages, arbitrary error codes, queries or endpoint identities.
+      const error: unknown = recalled.reason;
+      const code = error instanceof Error && error.name === 'TimeoutError' ? 'timeout'
+        : error instanceof Error && error.name === 'AbortError' ? 'aborted' : 'error';
+      this.options.telemetry?.record('memory.recall.engine_failed', {engine: resource.recallEngine ?? 'unknown', code});
+    }
     let degraded = recalled.status === 'rejected' || raw.status === 'rejected' || sources.status === 'rejected';
     if(sources.status==='fulfilled')degraded ||= sources.value.truncated;
     if (recalled.status === 'fulfilled') degraded ||= recalled.value.degraded;

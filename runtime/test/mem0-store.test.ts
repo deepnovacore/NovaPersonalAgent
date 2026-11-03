@@ -1,53 +1,20 @@
+import {settingsSchema} from '../src/config/config.js'
+import {configuredDiscoveryConsumer,configuredMemoryConsumers,configuredTaskVerifierConsumer} from '../src/memory/consumer.js'
+import {PersonalMemoryStoreClient} from '../src/voicemem/store-client.js'
+import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
+import {provider, eventually, turn, userDirectory} from './helpers/mem0-fixture.js'
+import {UnifiedRetrieval} from '../src/memory/retrieval.js'
 import {memoryInspectionSchema} from '../src/memory/personal-memory-inspection.js'
 import {MAX_BOARD_MESSAGE_BYTES} from '../src/realtime/memory-board.js'
 import assert from 'node:assert/strict'
-import {createHash} from 'node:crypto'
 import {mkdtemp, readFile, realpath, rm, stat, symlink} from 'node:fs/promises'
-import {createServer} from 'node:http'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import test from 'node:test'
 import {createMem0PersonalMemory} from '../src/mem0/resource.js'
 
-async function provider(failDerived = false) {
-  let release!: () => void
-  const gate = new Promise<void>(resolve => { release = resolve })
-  let fail = true
-  const calls: string[] = []
-  let embeddingFailures = 0
-  const server = createServer((request, response) => {
-    void (async () => {
-      let body = ''
-      for await (const chunk of request) body += String(chunk)
-      const input = JSON.parse(body) as {input?: string | string[]; messages?: {content: string}[]}
-      response.setHeader('content-type', 'application/json')
-      if (request.url === '/v1/embeddings') {
-        const entries = Array.isArray(input.input) ? input.input : [input.input]
-        if (failDerived && fail && entries.includes('likes apples')) { embeddingFailures++; response.statusCode = 400; response.end('{}'); return }
-        response.end(JSON.stringify({data: entries.map((_, index) => ({index, embedding: [1, 0]}))}))
-        return
-      }
-      const prompt = input.messages?.[1]?.content ?? ''
-      calls.push(prompt)
-      if (prompt.includes('slow kiwi')) await gate
-      if (prompt.includes('retry mango') && fail) { response.statusCode = 400; response.end('{}'); return }
-      const text = prompt.includes('retry mango') ? 'retry mango' : prompt.includes('slow kiwi') ? 'slow kiwi' : 'likes apples'
-      response.end(JSON.stringify({choices: [{message: {content: JSON.stringify({memory: [{id: '0', text, attributed_to: 'user'}]})}}]}))
-    })().catch(() => {response.statusCode = 500; response.end('{}')})
-  })
-  await new Promise<void>((resolve, reject) => {server.once('error', reject); server.listen(0, '127.0.0.1', resolve)})
-  const address = server.address(); assert.ok(address && typeof address !== 'string')
-  return {baseUrl: `http://127.0.0.1:${address.port}/v1`, calls, release, get embeddingFailures() {return embeddingFailures}, recover() {fail = false}, async close() {
-    release(); server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve()))
-  }}
-}
-async function eventually(check: () => boolean | Promise<boolean>) {
-  for (let i = 0; i < 150; i++) {if (await check()) return; await new Promise(resolve => setTimeout(resolve, 20))}
-  assert.fail('condition did not become true')
-}
-const turn = (sourceId: string, text = sourceId) => ({sourceId, sessionId: 'session', sequence: 1, text, occurredAt: null})
-const userDirectory = (path: string, user = 'host-user') => `${path}.mem0/${createHash('sha256').update(user).digest('hex')}`
 
 test('real mem0 persists admissions before inference, preserves provenance and isolation, tombstones in-flight learning', {timeout: 20000}, async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-mem0-'))
@@ -295,7 +262,7 @@ test('forget physically erases learned facts and source text from every sqlite f
   assert.equal(await contains('likes apples'), false)
 })
 
-test('a forget interrupted before derived cleanup is finished after restart', {timeout: 25000}, async t => {
+test('forgetSource pending deletion survives restart', {timeout: 25000}, async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-mem0-interrupted-'))
   const endpoint = await provider()
   const path = join(directory, 'personal.sqlite')
@@ -306,9 +273,15 @@ test('a forget interrupted before derived cleanup is finished after restart', {t
   await store.open()
   await store.remember!(turn('apples', 'likes apples'))
   await eventually(async () => (await store.recall('apples', {scope: 'any'})).hits.length > 0)
-  await store.forget!('apples')
-  // Terminate before the drain can confirm derived-vector cleanup; the durable intent must survive.
+  const lock=new DatabaseSync(join(userDirectory(path),'learning-lock.db'))
+  lock.exec('PRAGMA busy_timeout=5000; BEGIN IMMEDIATE')
+  await store.forgetSource!('apples')
+  const db=new DatabaseSync(join(userDirectory(path),'ledger.db'))
+  assert.equal(db.prepare('SELECT cleaned FROM sources WHERE id=?').get('apples')?.cleaned,0)
+  db.close()
+  // Hold the learning lock until termination so cleanup is deterministically still pending.
   await store.close()
+  lock.exec('ROLLBACK');lock.close()
   store = createMem0PersonalMemory(options)
   await store.open()
   const base = userDirectory(path)
@@ -323,5 +296,243 @@ test('a forget interrupted before derived cleanup is finished after restart', {t
   for (let attempt = 0; attempt < 150 && await contains('likes apples'); attempt += 1) {
     await new Promise(resolve => setTimeout(resolve, 100))
   }
-  assert.equal(await contains('likes apples'), false, 'restart completes the interrupted physical deletion')
+  const remainingFiles=[]
+  for(const file of files) if((await readFile(file).catch(()=>Buffer.alloc(0))).includes(Buffer.from('likes apples'))) remainingFiles.push(file.split('/').pop())
+  const state=new DatabaseSync(join(base,'ledger.db'))
+  const cleanup={sources:state.prepare('SELECT id,state,cleaned FROM sources').all(),meta:state.prepare('SELECT * FROM meta').all()}
+  state.close()
+  assert.equal(await contains('likes apples'), false, JSON.stringify({remainingFiles,cleanup}))
+})
+
+test('mem0 get/getMany/list, raw evidence, revision-safe edits and forget survive restart and re-extraction', {timeout:25000}, async t => {
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-entries-'))
+  const endpoint=await provider()
+  const path=join(directory,'memory.sqlite')
+  const options={path,userId:'host-user',conversationProviders:['model-a'],embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'}
+  let store=createMem0PersonalMemory(options)
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open()
+  assert.deepEqual(store.capabilities!(),{list:true,get:true,correct:true,forgetEntry:true,forgetSource:true})
+  for(const id of ['one','two','three']) {
+    await store.remember!(turn(id,`User RAW turn ${id}: I enjoy apples`))
+    await eventually(async()=> (await store.inspect!({})).entries.some(row=>row.sourceId===id&&row.state==='learned'))
+  }
+  const first=await store.list!({limit:2})
+  assert.equal(first.entries.length,2);assert.ok(first.cursor)
+  const second=await store.list!({limit:2,cursor:first.cursor})
+  assert.equal(second.entries.length,1);assert.equal(second.cursor,null)
+  assert.equal(new Set([...first.entries,...second.entries].map(row=>row.id)).size,3)
+  await assert.rejects(store.list!({limit:101}))
+  const original=first.entries[0]!,removed=second.entries[0]!,sourceId=original.evidence_refs![0]!
+  assert.equal(original.content,'likes apples');assert.ok(original.version)
+  assert.deepEqual(await store.getMany!([original.id,'missing',original.id]),[original,null,original])
+  assert.equal((await store.readEvidence!(sourceId))?.text,`User RAW turn ${sourceId}: I enjoy apples`)
+  assert.equal(await store.canReadConversationEvidence!(sourceId,'model-a'),true)
+  assert.equal(await store.canReadConversationEvidence!(sourceId,'model-b'),false)
+  assert.equal(await store.canReadConversationEvidence!(sourceId,''),false)
+  assert.equal((await new UnifiedRetrieval({memory:()=>store}).recall('apples')).entries.length,0,'missing consumer fails closed')
+  const changed=await store.correct!(original.id,original.version,'prefers pears',{type:'conversation',ref:'user-correction',observed_at:'2026-11-02T00:00:00Z'})
+  assert.equal(changed.entry.id,original.id);assert.notEqual(changed.entry.version,original.version)
+  await assert.rejects(store.correct!(original.id,original.version,'stale',{type:'conversation',ref:'stale',observed_at:'2026-11-02T00:00:00Z'}),{code:'STORE_STALE_REVISION'})
+  await assert.rejects(store.forgetEntry!(original.id,original.version),{code:'STORE_STALE_REVISION'})
+  assert.equal((await store.forgetEntry!(removed.id,removed.version)).status,'forgotten')
+  assert.equal(await store.get!(removed.id),null)
+  assert.equal((await store.inspect!({})).entries.find(row=>row.sourceId===sourceId)?.memories[0],'prefers pears')
+  await store.close()
+  // Force a pending extraction as after an interrupted retry. Edited sources must never re-add old facts under new SDK ids.
+  const db=new DatabaseSync(join(userDirectory(path),'ledger.db'))
+  db.prepare("UPDATE sources SET state='pending' WHERE id IN (?,?)").run(sourceId,removed.evidence_refs![0]!)
+  db.close()
+  store=createMem0PersonalMemory(options);await store.open()
+  await eventually(async()=> (await store.get!(original.id))?.content==='prefers pears')
+  assert.equal((await store.get!(original.id))?.version,changed.entry.version)
+  assert.equal(await store.get!(removed.id),null)
+  const recalled=await store.recall('apples',{scope:'any'})
+  assert.equal(recalled.hits.find(hit=>hit.memoryId===original.id)?.text,'prefers pears')
+  assert.equal(recalled.hits.some(hit=>hit.evidenceIds.includes(removed.evidence_refs![0]!)),false)
+  await store.forgetSources!([sourceId,removed.evidence_refs![0]!])
+  assert.equal(await store.readEvidence!(sourceId),null)
+  assert.equal(await store.canReadConversationEvidence!(sourceId,'model-a'),false)
+  assert.equal(await store.get!(original.id),null)
+})
+
+test('mem0 legacy and changed consumer grants fail closed while host-local entries stay visible', {timeout:20000}, async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-consent-'))
+  const endpoint=await provider(),path=join(directory,'memory.sqlite')
+  const options={path,userId:'host-user',embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'}
+  let store=createMem0PersonalMemory(options)
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('legacy','raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===1)
+  await store.close()
+  // Simulate the actual pre-migration sources table, rather than just an empty grant.
+  const db=new DatabaseSync(join(userDirectory(path),'ledger.db'));db.exec('ALTER TABLE sources DROP COLUMN conversation_providers');db.close()
+  store=createMem0PersonalMemory({...options,conversationProviders:['model-a']});await store.open()
+  assert.equal((await store.list!()).entries.length,1)
+  const retrieval=new UnifiedRetrieval({memory:()=>store})
+  assert.equal((await retrieval.recall('apples',{consumer:'model-a'})).state,'empty')
+  assert.equal((await retrieval.evidence('legacy',{consumer:'model-a'})).state,'gone')
+  await store.remember!(turn('new','new raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===2)
+  assert.equal(await store.canReadConversationEvidence!('new','model-a'),true)
+  await store.close();store=createMem0PersonalMemory({...options,conversationProviders:['model-b']});await store.open()
+  assert.equal(await store.canReadConversationEvidence!('new','model-a'),false,'current config also required')
+  assert.equal(await store.canReadConversationEvidence!('new','model-b'),false,'new config cannot grant old sources')
+  let consumer:string|undefined='model-b'
+  const host=new PersonalAgentHost({path:join(directory,'host.json'),userScope:'test',memory:()=>store,pool:new SuggestionPool(),evidence:()=>null,discoveryMemoryConsumer:()=>consumer})
+  t.after(()=>host.close())
+  await host.open()
+  assert.deepEqual((await host.discoverySnapshot()).memory,[],'legacy and changed-destination entries never enter discovery')
+  assert.equal(host.snapshot().memory.entries.length,2,'host-local listing is unrestricted')
+  await store.remember!(turn('allowed','allowed raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===3)
+  assert.deepEqual((await host.discoverySnapshot()).memory,[],'even granted mem0 text is not a product substrate')
+  assert.ok((await retrieval.recall('apples',{consumer:'model-b'})).entries.some(row=>row.evidence_refs.includes('allowed')),'granted recall remains available')
+  consumer=undefined
+  assert.deepEqual((await host.discoverySnapshot()).memory,[],'missing destination fails closed')
+  consumer='model-b'
+  const check=t.mock.method(store as typeof store & {canReadConversationEvidence:NonNullable<typeof store.canReadConversationEvidence>},'canReadConversationEvidence',()=>Promise.reject(Error('private diagnostic')))
+  assert.deepEqual((await host.discoverySnapshot()).memory,[],'failed authorization fails closed')
+  check.mock.restore()
+  await store.remember!(turn('legacy','raw apples'))
+  assert.equal(await store.canReadConversationEvidence!('legacy','model-b'),true,'identical admission refreshes an empty grant')
+  await store.remember!(turn('new','new raw apples'))
+  assert.equal(await store.canReadConversationEvidence!('new','model-b'),false,'nonempty grants never widen')
+  await store.forgetSource!('legacy')
+  await store.remember!(turn('legacy','raw apples'))
+  assert.equal(await store.canReadConversationEvidence!('legacy','model-b'),false,'tombstones never acquire grants')
+})
+
+test('host Memory-page capabilities and mobile list/correct/forget commands reach mem0', {timeout:20000},async t=>{
+  const {PersonalAgentHost}=await import('../src/personal-agent/host.js')
+  const {SuggestionPool}=await import('../src/core/suggestions.js')
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-host-')),endpoint=await provider()
+  const store=createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'host-user',embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'})
+  const host=new PersonalAgentHost({path:join(directory,'host.json'),userScope:'test',memory:()=>store,pool:new SuggestionPool(),evidence:()=>null})
+  t.after(async()=>{await host.close();await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('host-source','raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===1)
+  await host.open()
+  const capabilities=host.snapshot().capabilities.memory
+  assert.equal(capabilities.purgeEntry,false)
+  assert.equal(capabilities.includeExpired,false)
+  for(const key of ['list','get','correct','forgetEntry','forgetSource'] as const) assert.equal(capabilities[key],true)
+  const entry=(await store.list!()).entries[0]!
+  const command=(request_id:string,method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id,method,params})
+  assert.equal((await command('expired','memory.list',{include_expired:true}) as {ok:boolean}).ok,false)
+  assert.equal(host.snapshot().memory.include_expired,false)
+  await host.refreshMemory()
+  assert.equal((await host.discoverySnapshot()).memory.length,0)
+  assert.equal((await command('list','memory.list',{}) as {ok:boolean}).ok,true)
+  assert.equal((await command('correct','memory.correct',{id:entry.id,expected_version:entry.version,content:'host corrected pears'}) as {ok:boolean}).ok,true)
+  const changed=(await store.get!(entry.id))!
+  assert.equal(changed.content,'host corrected pears')
+  assert.equal((await command('forget','memory.forget',{id:entry.id,expected_version:changed.version}) as {ok:boolean}).ok,true)
+  assert.equal(await store.get!(entry.id),null)
+})
+
+
+test('mem0 canonical content is bounded identically for recall and get, including astral characters', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-canonical-')),endpoint=await provider(false,'x'.repeat(499)+'😀tail')
+  const store=createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'host-user',conversationProviders:['model-a'],embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'})
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('long','raw original turn'))
+  await eventually(async()=> (await store.list!()).entries.length===1)
+  const hit=(await store.recall('x',{scope:'any'})).hits[0]!,entry=(await store.get!(hit.memoryId))!
+  assert.equal(entry.content.length,499);assert.equal(entry.content,hit.text.slice(0,500));assert.ok(entry.version)
+  const result=await new UnifiedRetrieval({memory:()=>store}).recall('x',{consumer:'model-a'})
+  assert.equal(result.entries.length,1);assert.equal(result.degraded,false)
+})
+
+
+test('mem0 forgotten item cleanup finishes after restart when SDK deletion already completed', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-item-retry-')),endpoint=await provider()
+  const path=join(directory,'memory.sqlite'),options={path,userId:'host-user',embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'}
+  let store=createMem0PersonalMemory(options)
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('item','raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===1)
+  const entry=(await store.list!()).entries[0]!
+  await store.forgetEntry!(entry.id,entry.version)
+  const db=new DatabaseSync(join(userDirectory(path),'ledger.db'));t.after(()=>db.close())
+  await eventually(()=>db.prepare('SELECT cleaned FROM item_edits WHERE id=?').get(entry.id)?.cleaned===1)
+  await store.close()
+  db.prepare('UPDATE item_edits SET cleaned=0 WHERE id=?').run(entry.id)
+  db.exec("INSERT OR REPLACE INTO meta(key,value) VALUES ('compaction_pending','1')")
+  store=createMem0PersonalMemory(options);await store.open()
+  await eventually(()=>db.prepare('SELECT cleaned FROM item_edits WHERE id=?').get(entry.id)?.cleaned===1 && !db.prepare("SELECT 1 FROM meta WHERE key='compaction_pending'").get())
+  assert.equal(await store.get!(entry.id),null)
+})
+
+test('mem0 serializes simultaneous opens migrating a legacy sources table', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-migration-')),endpoint=await provider()
+  const path=join(directory,'memory.sqlite'),options={path,userId:'host-user',embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2}}
+  const seed=createMem0PersonalMemory(options),first=createMem0PersonalMemory(options),second=createMem0PersonalMemory(options)
+  t.after(async()=>{await seed.close();await first.close();await second.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await seed.open();await seed.close()
+  const db=new DatabaseSync(join(userDirectory(path),'ledger.db'))
+  db.exec('ALTER TABLE sources DROP COLUMN conversation_providers');db.close()
+  await Promise.all([first.open(),second.open()])
+  assert.deepEqual(await first.list!(),{entries:[],cursor:null})
+  assert.deepEqual(await second.list!(),{entries:[],cursor:null})
+})
+
+test('mem0 limit-one pages cover five items and reject expired-history requests', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-list-pages-')),endpoint=await provider()
+  const store=createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'host-user',embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'})
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open()
+  for(let i=0;i<5;i++){await store.remember!(turn('page-'+i,'raw apples'));await eventually(async()=> (await store.list!()).entries.length===i+1)}
+  const ids:string[]=[];let cursor:string|null=null
+  do {const page=await store.list!({limit:1,...(cursor?{cursor}:{})});assert.equal(page.entries.length,1);ids.push(page.entries[0]!.id);cursor=page.cursor}while(cursor)
+  assert.equal(ids.length,5);assert.equal(new Set(ids).size,5)
+  assert.deepEqual(ids,(await store.list!()).entries.map(row=>row.id))
+  await assert.rejects(store.list!({include_expired:true}),{code:'STORE_INVALID_INPUT'})
+  assert.equal((await store.list!({include_expired:false})).entries.length,5)
+})
+
+test('mem0 read failures use content-free read error codes', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-read-errors-')),endpoint=await provider(),path=join(directory,'memory.sqlite')
+  const store=createMem0PersonalMemory({path,userId:'host-user',conversationProviders:['model-a'],embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'})
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('broken','raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===1)
+  const id=(await store.list!()).entries[0]!.id,db=new DatabaseSync(join(userDirectory(path),'ledger.db'))
+  db.exec("UPDATE sources SET payload='invalid private payload',conversation_providers='invalid private grant'; DROP TABLE item_edits");db.close()
+  for(const read of [()=>store.get!(id),()=>store.getMany!([id]),()=>store.list!(),()=>store.readEvidence!('broken'),()=>store.canReadConversationEvidence!('broken','model-a'),()=>store.inspect!({query:'apples'})]){
+    await assert.rejects(read(),error=>{assert.equal((error as {code:string}).code,'STORE_READ_FAILED');assert.equal((error as Error).message,'personal_memory_error');return true})
+  }
+})
+
+test('mem0 forgetSources attempts every source before a content-free aggregate failure and permits retry',async t=>{
+  const attempts:string[]=[];let reject=true
+  t.mock.method(PersonalMemoryStoreClient.prototype,'forgetSource',(ref:string)=>{attempts.push(ref);return ref==='second'&&reject?Promise.reject(Error('private source detail')):Promise.resolve()})
+  const store=createMem0PersonalMemory({path:'/private/tmp/nova-mem0-forget-many',userId:'host-user',embedding:{baseUrl:'https://example.invalid',apiKey:'test',model:'embedding'}})
+  await assert.rejects(store.forgetSources!(['first','second','third']),{message:'personal_memory_error'})
+  assert.deepEqual(attempts,['first','second','third'])
+  reject=false
+  await store.forgetSources!(['first','second','third'])
+  assert.deepEqual(attempts,['first','second','third','first','second','third'])
+  await store.close()
+})
+
+
+test('mem0 scheduled recall verification follows only the granted support route', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-routed-host-')),endpoint=await provider()
+  const routeA=settingsSchema.parse({executors:[],dashscope_api_key:'test',support_model:'legacy-support',model_routes:{support:{provider:'qwen',model:'support-a'}}})
+  const routeB=settingsSchema.parse({...routeA,model_routes:{support:{provider:'qwen',model:'support-b'}}})
+  const store=createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'host-user',conversationProviders:configuredMemoryConsumers(routeA),embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'})
+  const host=new PersonalAgentHost({path:join(directory,'host.json'),userScope:'test',memory:()=>store,pool:new SuggestionPool(),evidence:()=>null})
+  t.after(async()=>{await host.close();await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('routed-source','raw apples'))
+  await eventually(async()=> (await store.list!()).entries.length===1)
+  await host.open()
+  const consumer=configuredDiscoveryConsumer(routeA)!,retrieval=new UnifiedRetrieval({memory:()=>store})
+  const projection=await retrieval.recall('apples',{consumer})
+  assert.ok(projection.snippets.some(row=>row.evidence_id==='routed-source'))
+  const task=await host.tasks.delegate('routed-task',{conversation_id:'chat:main',goal:'Read memory',acceptance:['Summary'],origin_ref:'conversation:1'})
+  const fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await host.tasks.recordContextEvidence(fence,'read',JSON.stringify({consumer,projection}),['routed-source'])
+  assert.equal(await host.appContext.validateTask(task.id,consumer,configuredTaskVerifierConsumer(routeA)),true)
+  assert.equal(await host.appContext.validateTask(task.id,consumer,configuredTaskVerifierConsumer(routeB)),false,'changing only support route cannot authorize verification')
 })

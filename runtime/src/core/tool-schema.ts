@@ -92,7 +92,7 @@ export function compileToolSchema(
     const wireName = 'memory__recall'
     schemas.push(functionSchema(
       wireName,
-      '查找与你相关的事实、事项和资料' + (memory.sourceFilter ? '，包括已同步的飞书 IM 原文，无需先生成 profile。query 用简短主题、发送人姓名或渠道名；按来源或日期查原文用 source_filter（飞书为 kind=im, provider=feishu），此时只返回匹配原文，不以项目文件或推断记忆替代。最近 N 天用 last_days=N（由运行时计算当前时间）；明确日期用 since/before 的 ISO 时间，scope=any。' : '。query 用简短主题。') + '只回想当前对话用 source=session。空结果不证明没有平台权限；依据工具状态说明。' + (memory.engine === 'mem0' || memory.engine === 'remote' ? '仅返回简短记忆片段，无原文引用。' : ''),
+      '查找与你相关的事实、事项和资料' + (memory.sourceFilter ? '，包括已同步的飞书 IM 原文，无需先生成 profile。query 用简短主题、发送人姓名或渠道名；按来源或日期查原文用 source_filter（飞书为 kind=im, provider=feishu），此时只返回匹配原文，不以项目文件或推断记忆替代。最近 N 天用 last_days=N（由运行时计算当前时间）；明确日期用 since/before 的 ISO 时间，scope=any。' : '。query 用简短主题。') + '只回想当前对话用 source=session。空结果不证明没有平台权限；依据工具状态说明。' + (!memory.evidence && (memory.engine === 'mem0' || memory.engine === 'remote') ? '仅返回简短记忆片段，无原文引用。' : ''),
       {
         type: 'object',
         properties: {

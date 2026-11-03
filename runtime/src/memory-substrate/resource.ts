@@ -42,6 +42,7 @@ const digest=(value:string)=>createHash('sha256').update(value).digest('hex')
 
 /** Personal projections over the same worker-owned database as Workspace Graph. */
 export class SubstrateMemoryResource implements PersonalMemoryResource {
+  readonly productSurfaces = true
   readonly prefix:string
   #onChange:(()=>void)|undefined
   setOnChange(listener:()=>void):void{this.#onChange=listener}
@@ -180,7 +181,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     this.#ready();if(this.options.personalMemoryEnabled===false)throw Error('personal_memory_disabled')
     return await this.options.client.memory('explicit_lookup',{prefix:this.prefix,query,consumer},{priority:'interactive'}) as ExplicitMemoryPage
   }
-  capabilities(){return {list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
+  capabilities(){return {includeExpired:true,list:true,get:true,correct:true,forgetEntry:true,forgetSource:true,observeSource:true}}
   async profileSources(ids?:readonly string[]):Promise<ProfileInput[]>{
     this.#ready()
     const records=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('profile_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),...(ids?{ids:ids.filter(id=>id.startsWith(this.prefix))}: {}),...(this.options.profileParticipantMessages?{participants:true}:{})}))

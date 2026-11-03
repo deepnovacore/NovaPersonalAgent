@@ -104,7 +104,7 @@ const recallOnly: PersonalMemoryResource = {open: () => Promise.resolve(), close
 test('planMemoryToolCapabilities agrees with resource members for each composition branch', () => {
   const ledger = Object.create(SubstrateMemoryResource.prototype) as PersonalMemoryResource
   const mem0 = createMem0PersonalMemory({path: join(tmpdir(), 'capability-mem0'), userId: 'fixture', embedding: {baseUrl: 'https://embedding.example', apiKey: 'fixture', model: 'fixture'}})
-  assert.deepEqual(deriveMemoryToolCapabilities(mem0, 'mem0'), {recall: true, evidence: false, sourceFilter: false, lookup: false, remember: false, engine: 'mem0'})
+  assert.deepEqual(deriveMemoryToolCapabilities(mem0, 'mem0'), {recall: true, evidence: true, sourceFilter: false, lookup: false, remember: false, engine: 'mem0'})
   const knowledge = {...recallOnly, readEvidence: () => Promise.resolve(null)}
   const local = Object.assign(() => ledger, {localMemoryConfig: {}})
   const isolated = {data_mode: 'isolated'} as HostSpaceConfig
@@ -148,7 +148,7 @@ for (const build of [buildTextRealtimeAssembly, buildCascadedRealtimeAssembly, b
       })
       try {
         assert.deepEqual([...graph.tools.bindings.keys()].filter(name => name.startsWith('memory__')).sort(),
-          branch === 'explicit NONE untagged' ? [] : branch === 'mem0 tagged' || branch === 'remote' ? ['memory__recall']
+          branch === 'explicit NONE untagged' ? [] : branch === 'mem0 tagged' ? ['memory__evidence', 'memory__recall'] : branch === 'remote' ? ['memory__recall']
             : ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'])
         if (branch === 'default ledger') assert.deepEqual(graph.core.memoryTools, FULL_MEMORY_TOOLS)
       } finally {await graph.stop(); await rm(root, {recursive: true, force: true})}
@@ -237,7 +237,7 @@ for (const backend of ['ledger', 'mem0', 'remote', 'none'] as const) test(`share
   const core = buildAssembly({settings, gateway: fixtureGateway, memoryTools: caps, capabilities: parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, camera: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: false}}})})
   try {
     assert.deepEqual([...core.tools.bindings.keys()].filter(name => name.startsWith('memory__')).sort(), backend === 'ledger'
-      ? ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'] : ['memory__recall'])
+      ? ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'] : backend === 'mem0' ? ['memory__evidence', 'memory__recall'] : ['memory__recall'])
     assert.equal(caps.engine, backend)
     const ledger = Object.create(SubstrateMemoryResource.prototype) as PersonalMemoryResource
     assert.deepEqual(resolveMemoryToolCapabilities(ledger, planned), FULL_MEMORY_TOOLS, 'live shared ledger overrides a reduced static plan')

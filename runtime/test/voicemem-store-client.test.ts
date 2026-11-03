@@ -617,3 +617,13 @@ test('VoiceMem uses separate extraction and embedding transports', {timeout: 100
   assert.equal(extraction.calls.get('separate'), 1)
   assert.equal(embedding.calls.size, 0)
 })
+
+
+test('client preserves STORE_READ_FAILED as a content-free read error',async()=>{
+  const {client:store,worker}=client(),opening=store.open()
+  worker.respond(requestId(worker,0),opened());await opening
+  const read=store.list()
+  worker.refuse(requestId(worker,1),'STORE_READ_FAILED')
+  await assert.rejects(read,error=>error instanceof PersonalMemoryStoreClientError&&error.code==='STORE_READ_FAILED'&&error.state==='error'&&error.message==='personal_memory_error')
+  await store.close()
+})

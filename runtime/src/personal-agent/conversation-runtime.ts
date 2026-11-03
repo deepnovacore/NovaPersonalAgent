@@ -106,7 +106,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const settings=processingLlm?{...options.settings,cascade_llm_provider:processingLlm.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?'qwen' as const:'self-hosted' as const,dashscope_api_key:processingLlm.apiKey,cascade_llm_model:processingLlm.model,self_hosted_llm_base_url:processingLlm.baseUrl,self_hosted_llm_api_key:processingLlm.apiKey}:options.settings
   const selectedProcessing=processing?requireSelectedCascadedLlmConfig(settings):undefined
   const memoryConsumerFingerprint=selectedProcessing?createHash('sha256').update(selectedProcessing.config.baseUrl+'|'+selectedProcessing.config.model).digest('hex'):configuredMemoryConsumer(settings,mode)
-  const verifierConsumerFingerprint=configuredTaskVerifierConsumer(options.settings)
+  const verifierConsumerFingerprint=configuredTaskVerifierConsumer(options.settings)??null
   if(execution){options.host.scheduledAuthority.validate(execution);execution=options.host.scheduledRunGrant(execution.run_id,lifetime,memoryConsumerFingerprint??null)}
   const targetPort=options.codexResource?.mode==='project'?(options.codexResource.adapter as ProjectExecutorAdapter).targetPort:undefined
   const codingTarget=targetPort?new CodingTargetController(targetPort,(target,stillCurrent)=>options.host.rememberCodingTarget(conversation.id,conversation.generation,target,()=>!lifetime.aborted&&stillCurrent())):undefined

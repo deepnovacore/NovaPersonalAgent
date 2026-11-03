@@ -89,6 +89,8 @@ export interface PersonalMemoryAdmissionReceipt {
 }
 
 export interface PersonalMemoryRecallPort {
+  readonly maxRecallLimit?: number
+  readonly recallEngine?: 'ledger' | 'mem0' | 'voicemem' | 'remote' | 'knowledge'
   recall(query: string, options?: {
     /** Recent is a bounded candidate window; any searches the full authorized namespace. */
     readonly scope?: PersonalMemoryRecallScope
@@ -100,6 +102,8 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** Only the Nova ledger supplies memory to proactive/product surfaces. */
+  readonly productSurfaces?: true
   readonly beginExplicitTurn?: (turn:ExplicitMemoryTurn)=>Promise<ExplicitMemoryTurn>
   readonly writeExplicit?: (turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string)=>Promise<ExplicitMemoryReceipt>
   readonly lookupExplicit?: (query:ExplicitMemoryLookup,consumer:string)=>Promise<ExplicitMemoryPage>
@@ -122,6 +126,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
   readonly canProcessEvidence?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
   readonly canProcessEvidenceMany?: (ids:readonly string[],purpose:'extraction'|'embedding')=>Promise<string[]>
+  readonly requiresConversationConsumer?: boolean
   readonly canReadConversationEvidence?: (id:string,consumer:string)=>Promise<boolean>
   readonly processingStamp?: (ids:string[])=>Promise<string|null>
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant

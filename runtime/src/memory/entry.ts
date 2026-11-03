@@ -37,7 +37,7 @@ export function memoryEligibleForDiscovery(entry:MemoryEntry|null|undefined):ent
     &&(entry.life===undefined||['open','doing','waiting','active'].includes(entry.life.status))
 }
 export type MemoryVersion = z.infer<typeof MemoryVersionSchema>
-export interface MemoryCapabilities {readonly list:boolean;readonly get:boolean;readonly correct:boolean;readonly forgetEntry:boolean;readonly forgetSource:boolean;readonly observeSource?:boolean}
+export interface MemoryCapabilities {readonly includeExpired?:boolean;readonly list:boolean;readonly get:boolean;readonly correct:boolean;readonly forgetEntry:boolean;readonly forgetSource:boolean;readonly observeSource?:boolean}
 export const MemoryListOptionsSchema = z.object({cursor:text(256).optional(),limit:z.number().int().min(1).max(100).optional(),include_expired:z.boolean().optional()}).strict()
 export type MemoryListOptions = z.infer<typeof MemoryListOptionsSchema>
 export const MemoryPageSchema = z.object({entries:z.array(MemoryEntrySchema).max(100),cursor:z.string().nullable()}).strict()

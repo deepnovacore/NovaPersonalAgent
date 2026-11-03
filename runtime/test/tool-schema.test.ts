@@ -283,13 +283,14 @@ test('ledger default compiled schemas are byte-identical to explicit FULL capabi
   assert.equal(compileToolSchema([]).bindings.has('memory__recall'), false)
 })
 
-test('mem0 and remote caps offer recall only without source_filter or IM clauses', () => {
+test('mem0 offers recall and evidence, remote recall only, without source_filter or IM clauses', () => {
   for (const engine of ['mem0', 'remote'] as const) {
-    const tools = compileToolSchema([], {memory: {...NO_MEMORY_TOOLS, recall: true, engine}})
-    assert.deepEqual([...tools.bindings.keys()].filter(name => name.startsWith('memory__')), ['memory__recall'])
+    const tools = compileToolSchema([], {memory: {...NO_MEMORY_TOOLS, recall: true, evidence: engine==='mem0', engine}})
+    assert.deepEqual([...tools.bindings.keys()].filter(name => name.startsWith('memory__')), engine==='mem0'?['memory__recall','memory__evidence']:['memory__recall'])
     const schema = JSON.stringify(tools.schemas.find(schema => (schema.function as {name: string}).name === 'memory__recall'))
     assert.doesNotMatch(schema, /source_filter|飞书|feishu|IM/u)
-    assert.match(schema, /仅返回简短记忆片段，无原文引用。/u)
+    if (engine==='remote') assert.match(schema, /仅返回简短记忆片段，无原文引用。/u)
+    else assert.doesNotMatch(schema, /无原文引用/u)
   }
 })
 

@@ -1,17 +1,17 @@
+import {configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
+export {configuredMemoryConsumer, configuredMemoryRecipient, configuredTaskVerifierConsumer} from '../memory/consumer.js'
 import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
 import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.js'
 import type {UsageContext} from '../usage/context.js'
 import {soulRoleContext} from './soul-context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
-import {resolveMemoryExtractionConnection, resolveSelectedModelConnection, resolveEmbeddingConnection} from '../config/config.js'
+import {resolveMemoryExtractionConnection, resolveEmbeddingConnection} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import {admitIntakeTask} from '../personal-agent/intake-task.js'
 import type {RuntimeDispatchResult} from '../core/runtime.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import type {CodingTargetController} from '../personal-agent/coding-targets.js'
-import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
-import {requireIntegratedRealtime} from '../config/config.js'
 import type {RealtimeProviderEvent} from '../realtime/protocol.js'
 import type {KnowledgeEvidenceLedger} from '../knowledge/service.js'
 import {UnifiedRetrieval} from '../memory/retrieval.js'
@@ -168,21 +168,6 @@ function turnKey(sessionEpoch: number, userInputRevision: number): string {
   return `${sessionEpoch}:${userInputRevision}`
 }
 
-export function configuredMemoryConsumer(settings: AssemblyOptions['settings'], mode: 'text'|'voice'): string|undefined {
-  return configuredMemoryRecipient(settings,mode)?.consumer
-}
-export function configuredMemoryRecipient(settings: AssemblyOptions['settings'], mode:'text'|'voice'):{consumer:string;provider:string}|undefined {
-  try {
-    const selected = mode === 'text' || settings.pipeline_mode === 'cascaded' ? requireSelectedCascadedLlmConfig(settings) : undefined
-    const voice = selected === undefined ? requireIntegratedRealtime(settings) : undefined
-    const endpoint=selected?.config.baseUrl ?? voice!.url,model=selected?.config.model ?? voice!.model
-    return {consumer:embeddingHash('sha256').update(JSON.stringify({provider:selected?.provider ?? settings.integrated_provider,endpoint,model})).digest('hex'),provider:endpoint+'|'+model}
-  } catch { return undefined }
-}
-export function configuredTaskVerifierConsumer(settings:AssemblyOptions['settings']):string {
-  const connection=resolveSelectedModelConnection(settings)
-  return embeddingHash('sha256').update(JSON.stringify({provider:connection?.provider??'unconfigured',endpoint:connection?.baseUrl??'',model:settings.support_model})).digest('hex')
-}
 
 async function responseAdaptationFor(
   resource: PersonalMemoryResource | undefined,
@@ -999,7 +984,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     throw new AssemblyError('coding agent controller factory requires a coding executor')
   }
   const personalMemorySessionId = randomUUID()
-  const retrieval=new UnifiedRetrieval({...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
+  const retrieval=new UnifiedRetrieval({...(options.telemetry?{telemetry:options.telemetry}:{}),...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
     if(!personalMemoryHolder.current?.readEvidence)return []
     const result=await core.knowledge!.service.recall(query,Math.min(5,limit),signal)
     return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
@@ -1502,7 +1487,7 @@ export function composeRealtime(
       sourceProcessingLlm:extraction,
       extractionFingerprint:embeddingHash('sha256').update(extraction.baseUrl+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,profileParticipantMessages:options.settings.profile_participant_messages,
-      conversationProviders: [...new Set([...(['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined),configuredTaskVerifierConsumer(options.settings)])],
+      conversationProviders: configuredMemoryConsumers(options.settings),
       conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},

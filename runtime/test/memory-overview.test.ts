@@ -23,7 +23,7 @@ test('late summaries cannot survive corrections, forgetting, page changes or clo
   const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-overview-'))
   let entries=[entry]
   const calls:{resolve:(value:MemoryOverview)=>void;signal:AbortSignal}[]=[]
-  const memory={list:()=>Promise.resolve({entries,cursor:null}),get:(id:string)=>Promise.resolve(entries.find(e=>e.id===id)??null),correct:()=>{entries=[{...entry,version:2}];return Promise.resolve({previous:entry,entry:entries[0]})},forgetEntry:()=>{entries=[];return Promise.resolve({...entry,status:'forgotten'})}} as unknown as PersonalMemoryResource
+  const memory={productSurfaces:true,list:()=>Promise.resolve({entries,cursor:null}),get:(id:string)=>Promise.resolve(entries.find(e=>e.id===id)??null),correct:()=>{entries=[{...entry,version:2}];return Promise.resolve({previous:entry,entry:entries[0]})},forgetEntry:()=>{entries=[];return Promise.resolve({...entry,status:'forgotten'})}} as unknown as PersonalMemoryResource
   const host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,summarizeMemory:(_entries,signal)=>new Promise(resolve=>calls.push({resolve,signal}))})
   try {
     await host.open();assert.equal(calls.length,1);assert.equal(host.snapshot().memory.overview,null)
@@ -66,7 +66,7 @@ test('two-stage synthesis uses the existing model and preserves facts before gro
 })
 test('failed overview retries on explicit refresh without looping or caching failure',async()=>{
   const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-overview-retry-'));let calls=0
-  const memory={list:()=>Promise.resolve({entries:[entry],cursor:null})} as unknown as PersonalMemoryResource
+  const memory={productSurfaces:true,list:()=>Promise.resolve({entries:[entry],cursor:null})} as unknown as PersonalMemoryResource
   const host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,summarizeMemory:()=>++calls===1?Promise.reject(Error('temporary')):Promise.resolve(overview())})
   try {
     await host.open();await tick();assert.equal(calls,1);assert.equal(host.snapshot().memory.overview,null)
@@ -77,7 +77,7 @@ test('failed overview retries on explicit refresh without looping or caching fai
 })
 test('source observation refreshes memory while discovery is disabled and evidence signature unchanged',async()=>{
   const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-overview-source-'));let entries:MemoryEntry[]=[];let discovered=0
-  const memory={list:()=>Promise.resolve({entries,cursor:null})} as unknown as PersonalMemoryResource
+  const memory={productSurfaces:true,list:()=>Promise.resolve({entries,cursor:null})} as unknown as PersonalMemoryResource
   const host=new PersonalAgentHost({path:join(dir,'host.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,discover:()=>{discovered++;return Promise.resolve(null)}})
   try {
     await host.open();await host.command({type:'personal.command',request_id:'off',method:'discovery.configure',params:{enabled:false}})

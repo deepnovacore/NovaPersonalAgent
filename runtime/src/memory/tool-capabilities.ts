@@ -38,7 +38,7 @@ export function planMemoryToolCapabilities(input: MemoryPlanInput): MemoryToolCa
   if (input.createPersonalMemory === undefined) return {...NO_MEMORY_TOOLS, recall: true}
   const backend = (input.createPersonalMemory as PersonalMemoryFactory).memoryBackend
   if (input.settings.memory_connection === 'remote' || backend === 'remote') return {...NO_MEMORY_TOOLS, recall: true, engine: 'remote'}
-  if (backend === 'mem0') return {...NO_MEMORY_TOOLS, recall: true, engine: 'mem0'}
+  if (backend === 'mem0') return {...NO_MEMORY_TOOLS, recall: true, evidence: true, engine: 'mem0'}
   // Untagged injected factories retain legacy tools; live resources refine this plan.
   return FULL_MEMORY_TOOLS
 }
@@ -50,6 +50,6 @@ export function memoryToolsFor(caps: MemoryToolCapabilities, mode: {scheduled: b
 /** Shared conversations may compile before the owning graph has created its resource. */
 export function resolveMemoryToolCapabilities(resource: PersonalMemoryResource | undefined, planned: MemoryToolCapabilities): MemoryToolCapabilities {
   if (!resource) return planned
-  const engine = resource.writeExplicit ? 'ledger' : resource.readEvidence ? 'knowledge' : planned.engine
+  const engine = resource.writeExplicit ? 'ledger' : planned.engine === 'mem0' ? 'mem0' : resource.readEvidence ? 'knowledge' : planned.engine
   return deriveMemoryToolCapabilities(resource, engine)
 }

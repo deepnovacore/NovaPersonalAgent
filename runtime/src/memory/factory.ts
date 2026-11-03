@@ -1,3 +1,4 @@
+import {configuredMemoryConsumers} from './consumer.js'
 import {createMem0PersonalMemory} from '../mem0/resource.js'
 import {homedir} from 'node:os'
 import {resolve} from 'node:path'
@@ -19,6 +20,6 @@ export function personalMemoryFactory(
   const path = resolve(configured.path.startsWith('~/')
     ? resolve(homedir(), configured.path.slice(2))
     : configured.path)
-  if (configured.provider === 'mem0') return Object.assign(() => createMem0PersonalMemory({...configured, path}), {memoryBackend: 'mem0' as const})
+  if (configured.provider === 'mem0') return Object.assign(() => createMem0PersonalMemory({...configured, path, conversationProviders:configuredMemoryConsumers(settings)}), {memoryBackend: 'mem0' as const})
   return Object.assign(() => new PersonalMemoryStoreClient({...configured, path}), {localMemoryConfig: {...configured, path}})
 }
