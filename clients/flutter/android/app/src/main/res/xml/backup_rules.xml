@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<full-backup-content>
+    <!-- path_provider Application Support is filesDir. Exclude only app-owned
+         Space data (memory, conversations, derived snapshots, and workspace). -->
+    <exclude domain="file" path="spaces/" />
+</full-backup-content>
