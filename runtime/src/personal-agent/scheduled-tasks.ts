@@ -161,7 +161,7 @@ export class ScheduleService{
   const parsed=summarySchema.parse(summary)
   return this.#changeRun(runId,(run,next)=>{if(run.terminal_summary){if(scheduleHash({...run.terminal_summary,published:false})!==scheduleHash({...parsed,published:false}))throw Error('run_result_conflict');return}run.stage='terminal';run.terminal_summary=parsed;const current=next.items.find(item=>item.id===run.schedule_id);if(current?.processing){current.processing.failures=parsed.outcome==='completed'?0:current.processing.failures+1;current.processing.next_attempt=new Date(this.now().getTime()+(parsed.outcome==='completed'?0:Math.min(3600000,60000*2**Math.min(current.processing.failures-1,6)))).toISOString()}})
  }
- markWithheld(runId:string){return this.#changeRun(runId,run=>{if(run.terminal_summary?.published)return;run.stage='terminal';run.terminal_summary={outcome:'failed',text:'相关资料已变化，本次结果未发送。请重新运行以读取最新资料。',evidence_refs:[],published:true}})}
+ markWithheld(runId:string){return this.#changeRun(runId,run=>{if(run.terminal_summary?.published)return;run.stage='terminal';run.terminal_summary={...(run.terminal_summary?.memory_origin?{memory_origin:run.terminal_summary.memory_origin}:{}),outcome:'failed',text:'相关资料已变化，本次结果未发送。请重新运行以读取最新资料。',evidence_refs:[],published:true}})}
  markPublished(runId:string){return this.#changeRun(runId,run=>{if(!run.terminal_summary)throw Error('run_not_terminal');run.terminal_summary.published=true})}
  #run(item:Schedule,slot:ScheduleSlot|null,trigger:ScheduleRun['trigger'],run_id:string):ScheduleRun{
   const frozen=definition(item),definition_hash=scheduleHash(frozen)

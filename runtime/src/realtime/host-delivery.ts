@@ -1,3 +1,4 @@
+import {abortable} from '../core/camera-session.js'
 import type {ApprovalHost} from '../core/approval.js'
 import type {Clock} from '../core/clock.js'
 import type {JsonValue} from '../core/events.js'
@@ -42,6 +43,7 @@ interface HostDeliveryPorts {
   readonly approvalHost: ApprovalHost
   readonly controlledPreemptiveAlertReconnect: boolean
   readonly clearingConversation: () => boolean
+  readonly stopSignal:()=>AbortSignal
   readonly stopped: () => boolean
   readonly providerFailed: () => boolean
   readonly wake: () => void
@@ -489,6 +491,7 @@ export class HostDelivery {
     this.#ports.telemetry?.record('hostitem.queued', {event_id: intent.item.event_id})
     this.#hostItemSeq += 1
     const queued: QueuedHostResponse = {
+      ...(options.authorizeBeforeInject?{authorizeBeforeInject:options.authorizeBeforeInject}:{}),
       ...(options.stillWanted?{stillWanted:options.stillWanted}:{}),
       ...(options.onNotDelivered?{onNotDelivered:options.onNotDelivered}:{}),
       sortKey: [-effectivePriority, preemptive ? -1 : 0, this.#hostItemSeq],
@@ -635,6 +638,11 @@ export class HostDelivery {
         if (!eligible) eligibilityRevoked = true
         return eligible
       }
+      const authorization=queued.authorizeBeforeInject?{authorizeBeforeInject:async()=>{
+        const valid=await this.#authorizeQueued(queued)
+        if(!valid)eligibilityRevoked=true
+        return valid&&responseAllowed()
+      }}:{}
       let delivery
       try {
         if (userActivation) {
@@ -642,7 +650,7 @@ export class HostDelivery {
           // crossing a reconnect has to carry that activation or it lands in a session that never
           // responds.
           delivery = await this.session.deliverHostResponse(queued.intent, {
-            responseAllowed,
+            responseAllowed,...authorization,
             asUserActivation: true,
           })
         } else if (preemptiveOverlap) {
@@ -655,13 +663,13 @@ export class HostDelivery {
             ? 0.5
             : null
           delivery = confirmationTimeout === null
-            ? await this.session.deliverPreemptiveHostResponse(queued.intent, {responseAllowed})
+            ? await this.session.deliverPreemptiveHostResponse(queued.intent, {responseAllowed,...authorization})
             : await this.session.deliverPreemptiveHostResponse(queued.intent, {
               confirmationTimeout,
-              responseAllowed,
+              responseAllowed,...authorization,
             })
         } else {
-          delivery = await this.session.deliverHostResponse(queued.intent, {responseAllowed})
+          delivery = await this.session.deliverHostResponse(queued.intent, {responseAllowed,...authorization})
         }
       } catch (cause) {
         // Preserve the item after transport failure; a response may already have been requested.
@@ -672,6 +680,10 @@ export class HostDelivery {
         throw cause
       }
       const delivered = delivery.accepted
+      if(!delivered&&!eligibilityRevoked&&queued.authorizeBeforeInject&&!this.#ports.stopped()){
+        this.requeueHostItem(queued);break
+      }
+      if(!delivered&&eligibilityRevoked&&delivery.injectionEpoch===null)await this.#notDelivered(queued)
       if (
         !delivered
         && eligibilityRevoked
@@ -714,6 +726,13 @@ export class HostDelivery {
         break
       }
     }
+  }
+
+  async #authorizeQueued(queued:QueuedHostResponse):Promise<boolean>{
+    if(!queued.authorizeBeforeInject)return true
+    const signal=AbortSignal.any([this.#ports.stopSignal(),AbortSignal.timeout(5000)])
+    try{return await abortable(queued.authorizeBeforeInject(signal),signal)&&!signal.aborted&&!this.#ports.stopped()}
+    catch{return false}
   }
 
   /** Revalidate lifecycle eligibility at the final provider boundary. */
@@ -1432,6 +1451,7 @@ export class HostDelivery {
     try {
       delivery = await this.session.deliverPreemptiveHostResponse(queued.intent, {
         confirmationTimeout: 0.5,
+        ...(queued.authorizeBeforeInject?{authorizeBeforeInject:async()=>{const valid=await this.#authorizeQueued(queued);if(!valid)lifecycleRevoked=true;return valid&&this.#queuedHostItemEligible(queued)}}:{}),
         responseAllowed: () => {
           const eligible = this.#queuedHostItemEligible(queued)
           if (!eligible) lifecycleRevoked = true
@@ -1448,6 +1468,7 @@ export class HostDelivery {
         if (delivery.injectionEpoch === this.session.sessionEpoch) {
           await this.retireProviderHostEventNow(queued.intent.item.event_id)
         }
+        await this.#notDelivered(queued)
       } else {
         this.requeueHostItem(queued)
       }

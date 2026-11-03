@@ -2,11 +2,11 @@
 
 Proactive discovery, feeds, timeline, brief and profile are available only with the default Nova ledger; mem0 provides recall, evidence and Memory-page management.
 
-Task-result feeds created while a non-product memory resource (mem0, remote or VoiceMem) is present carry a persisted `memory_origin: 'non_product'` marker. They remain visible locally, but cannot enter model-bound discovery, briefs, timeline, suggestion selection or voice delivery, even after restarting or switching to the ledger. With no memory resource, new task results remain unmarked and eligible, as do legacy unmarked task results regardless of the current backend. Memory-dependent feeds require that substrate; evidence-only dependencies must resolve independently through a non-memory source when no product substrate is active. App-record references (such as todos, goals and tasks) do not require a memory backend; scheduled-result access independently checks their versions and authorization. Disabling memory never makes unresolved memory evidence eligible.
+Task-result feeds created while a non-product memory resource (mem0, remote or VoiceMem) is present carry a persisted `memory_origin: 'non_product'` marker. They remain visible locally, but cannot enter model-bound discovery, briefs, timeline, suggestion selection or voice delivery, even after restarting or switching to the ledger. With no memory resource, new task results remain unmarked and eligible, as do legacy unmarked task results regardless of the current backend. Memory-dependent feeds require that substrate; evidence-only dependencies must resolve independently through a non-memory source when no product substrate is active. App-record references (such as todos, goals and tasks) do not require a memory backend; all model-bound uses revalidate their current versions and destination authorization. Disabling memory never makes unresolved memory evidence eligible.
 
 Scheduled summaries persist the optional, bounded `memory_origin: 'non_product'` field before feed delivery and copy it to the feed and chat bubble. Publication retries preserve that production-time provenance across backend changes. This is an additive schema change: old summaries need no rewrite and remain unmarked.
 
-Known limitation: app-only legacy reports are not re-validated against current app state on non-scheduled discovery, brief and conversation surfaces. No memory-derived text is involved. Scheduled-result access still validates app references.
+App-informed assistant answers, versioned plans and Plan/Build checkpoints retain optional, bounded `context_dependencies`, including inherited dependencies from prior answers. Reusing history or voice context requires current source authorization; overflow is unavailable rather than partially tracked. Legacy rows remain readable locally. Unverifiable app-informed legacy checkpoints refuse model reuse without deleting plans or tool receipts. Confirmed plan handoffs retain the published version’s dependencies and check the receiving model again before use. Queued personal voice items reauthorize immediately before provider injection, including after floor waits or reconnects. Unrelated standalone chat remains usable.
 
 The default local ledger supports explicit saves such as “Remember to call me kant.” Nova uses `memory__remember` and confirms only after a durable receipt. A new conversation can read the saved preference immediately, without waiting for extraction or vector indexing; it survives restart. A preferred form of address is not a legal name. Explicit changes and forgetting use the same versioned ledger.
 
@@ -58,7 +58,7 @@ For source use, edit `.env` and restart Nova. No changes are needed for the defa
 | Disable memory | `MEMORY_CONNECTION=disabled`; remove provider |
 | Remote service | `MEMORY_CONNECTION=remote`; configure the service URL and token below; unset provider and both new composition variables |
 
-`MEMORY_PROVIDER` is deprecated; legacy `voicemem` preserves the default ledger migration and legacy `mem0` preserves standalone mode. Do not combine it with the new variables. New `voicemem`/`mem0` recall-engine composition is not yet available.
+`MEMORY_PROVIDER` is deprecated; legacy `voicemem` preserves the default ledger migration and legacy `mem0` preserves standalone mode. Do not combine it with the new variables.
 
 Remote connections require `MEMORY_URL` and `MEMORY_TOKEN`. The service must implement Nova's memory interface; an arbitrary mem0 endpoint is not compatible. Connection failure reports unavailable rather than switching to local storage.
 
@@ -78,6 +78,6 @@ mem0 listing scans the SDK store once per page (O(n) reads and O(n log n) sortin
 explicitly. Only the ledger extractor is implemented. `MEMORY_PROVIDER` is deprecated:
 legacy `voicemem` keeps ledger migration and legacy `mem0` keeps standalone mode.
 Do not combine legacy and new variables or use new variables with a remote connection.
-The new `voicemem`/`mem0` recall engines fail closed until durable feeding is implemented;
-they are not silently substituted or enabled by default. There is no engine picker.
+Explicit recall-engine selections are not silently substituted or enabled by default.
+There is no engine picker. See [configuration](configuration.md) for supported selections.
 See [the staged composition contract](../design-notes/2026-11-03-memory-backend-composition.md).

@@ -2,8 +2,10 @@ import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {join,dirname} from 'node:path'
+import {emptyLifeState} from '../src/personal-agent/life.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {createConversation,type ConversationRuntime} from '../src/personal-agent/conversations.js'
 import {PersonalStore} from '../src/personal-agent/store.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
@@ -145,7 +147,7 @@ for(const backend of ['none','mem0','ledger'] as const)test(`generated task prov
 })
 
 for(const [backend,count] of [['none',1],['mem0',1],['mem0',2]] as const)test(`foreground declare/tool continuation retains all task fences (${backend}, ${count})`,{timeout:30000},async()=>{
- const f=await fixture(backend),eligible=backend==='none',histories:string[]=[],injected:HostContextItem[]=[]
+ const f=await fixture(backend),eligible=backend==='none',histories:string[]=[],requests:string[]=[],injected:HostContextItem[]=[]
  let host=f.host,responses=0
  try{
   // This test owns the foreground declaration chain, not the background worker loop.
@@ -174,8 +176,13 @@ for(const [backend,count] of [['none',1],['mem0',1],['mem0',2]] as const)test(`f
   assert.equal(saved.feed.length,1)
   delete persisted.memory_origin;await new PersonalStore(f.path).write(saved)
   host=f.make();await host.open()
-  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createVoiceProvider:captureProvider(async function*(){await Promise.resolve();yield {kind:'response_started',response_id:'unused'};yield {kind:'response_completed',response_id:'unused'}},[],injected),createTextProvider:captureProvider(async function*(){await Promise.resolve();yield {kind:'response_started',response_id:'later'};yield {kind:'text_delta',text:'Later'};yield {kind:'response_completed',response_id:'later'}},histories)}),()=>{/* local renderer */})
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createVoiceProvider:captureProvider(async function*(){await Promise.resolve();yield {kind:'response_started',response_id:'unused'};yield {kind:'response_completed',response_id:'unused'}},[],injected),createTextProvider:captureProvider(async function*(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'later'};yield {kind:'text_delta',text:'Later'};yield {kind:'response_completed',response_id:'later'}},histories)}),()=>{/* local renderer */})
   await host.submitConversationText('chat:main','Later question','later');await host.waitConversation('chat:main')
+  assert.equal(host.conversationSnapshot().messages.find(message=>message.request_id==='later')?.generation_status,'completed','filtered task history must not abort the ordinary new question')
+  const later=host.conversationSnapshot().messages.find(message=>message.role==='assistant'&&message.text==='Later')
+  assert.ok(later,'ordinary reply is generated and persisted after restart')
+  assert.equal(requests.length,1,'capture the actual new model request, not just a history callback')
+  if(!eligible){assert.ok(requests.every(input=>!input.includes(taskText)));assert.deepEqual(later.context_dependencies,{state:'tracked',items:[]},'already-excluded reports do not taint the unrelated answer')}
   assert.ok(histories.length>0)
   assert.equal(histories.some(input=>input.includes(taskText)),eligible,'real paired history honors task identity while no-memory history stays eligible')
   const ack=await host.command({type:'personal.command',request_id:'voice',method:'conversations.voice',params:{id:'chat:main',enabled:true}}) as {ok:boolean}
@@ -194,4 +201,219 @@ test('scheduled feed mixing app and memory dependencies fails closed without a p
   const host=f.make();await host.open()
   try{assert.equal((await host.discoverySnapshot()).recent_delivery.some(feed=>feed.title===report),false)}finally{await host.close()}
  }finally{await f.host.close();await f.close()}
+})
+
+for(const [backend,section] of [['none','todos'],['none','goals'],['none','tasks'],['ledger','todos'],['mem0','todos']] as const)test(`live app references fence actual destination-B inputs and retained voice context (${backend}, ${section})`,{timeout:30000},async()=>{
+ const f=await fixture(backend),requests:string[]=[],histories:string[]=[],injected:HostContextItem[]=[]
+ let host=f.host
+ const appTitle='Synthetic orchid app report title'
+ const scope={...context,todos:section==='todos',goals:section==='goals',tasks:section==='tasks'}
+ const createProvider=captureProvider(async function*(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'current'};yield {kind:'text_delta',text:'Current answer'};yield {kind:'response_completed',response_id:'current'}},histories,injected)
+ try{
+  if(section!=='tasks')await host.life.mutate({op:'create',kind:section==='todos'?'todo':'goal',title:'App record'},'record')
+  const schedule=await host.schedules.create('create',{title:appTitle,goal:'Review app records',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context:scope},{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:scope})
+  const run=await host.schedules.runNow('run',schedule.id,1),task=await host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  const page=await host.readAppContext(section,null,host.scheduledRunGrant(run.run_id,new AbortController().signal,null))
+  await host.tasks.recordDelivery(fence,'app-report',report)
+  await host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:app-report'],criteria:[{index:0,evidence_refs:['task-delivery:app-report']}]})
+  if(backend==='mem0')await host.schedules.markFinished(run.run_id,{outcome:'completed',text:report,evidence_refs:page.evidence_refs,consumer:null,published:false}) // Legacy unmarked app-only report.
+  await host.publishScheduledResult(run.run_id)
+  assert.equal(await host.scheduledResultAuthorized(run.run_id),true)
+  if(section==='tasks')assert.equal(await host.appContext.validateRefs(page.evidence_refs,null,'receiving-conversation'),false,'app task hashes must exclude the producing task, not the receiving conversation')
+  await host.close()
+  const store=new PersonalStore(f.path),saved=await store.read(),feed=saved.feed.find(item=>item.schedule_ref?.run_id===run.run_id)!,at='2026-11-02T12:00:00Z'
+  feed.delivery.presented_at=at
+  const topic=createConversation('topic','Review',feed.subject_key,'topic:report')
+  topic.feed_ids=[feed.id];topic.prepared=feed.prepared!
+  topic.messages=[{id:'prior-user',conversation_id:topic.id,role:'user',text:'Earlier question',created_at:at},{id:'task-caption',conversation_id:topic.id,role:'assistant',task_ids:[task.id],text:report,reply_to:'prior-user',delivery:'completed',created_at:at}]
+  saved.conversations.items.push(topic);await store.write(saved)
+  host=f.make();await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createTextProvider:createProvider,createVoiceProvider:createProvider}),()=>{/* local renderer */})
+  assert.ok((await host.discoverySnapshot()).recent_delivery.some(item=>item.id===feed.id),'valid app-only discovery is backend-independent')
+  assert.ok((await host.dailyBriefSnapshot()).recent_delivery.some(item=>item.id===feed.id),'valid app-only brief remains eligible')
+  await host.submitConversationText(topic.id,'Before change','before');await host.waitConversation(topic.id)
+  assert.ok(histories.some(input=>input.includes(report)),'real restored task-caption history is a positive control')
+  await host.command({type:'personal.command',request_id:'voice-before',method:'conversations.voice',params:{id:topic.id,enabled:true}})
+  assert.ok(injected.some(item=>item.content.includes('conversation_handoff')&&item.content.includes(report)))
+  if(section==='tasks')await host.tasks.delegate('changed-app-task',{conversation_id:'chat:main',goal:'New task',acceptance:[],origin_ref:'conversation:new'})
+  else{
+   const row=host.life.snapshot()[section][0]!
+   await host.life.mutate(section==='goals'?{op:'delete',kind:'goal',id:row.id,expected_version:row.version}:{op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Revised app record'},'revoke')
+  }
+  assert.equal(await host.scheduledResultAuthorized(run.run_id),false)
+  assert.ok(!(await host.discoverySnapshot()).recent_delivery.some(item=>item.id===feed.id))
+  assert.ok(!(await host.dailyBriefSnapshot()).recent_delivery.some(item=>item.id===feed.id))
+  await assert.rejects(host.sendConversationAudio(topic.id,new Uint8Array(320)),/context_authorization_changed/,'already-created voice runtime cannot reuse revoked handoff')
+  await host.command({type:'personal.command',request_id:'voice-off',method:'conversations.voice',params:{id:topic.id,enabled:false}})
+  requests.length=0;histories.length=0;injected.length=0
+  await host.submitConversationText(topic.id,'After change','after');await host.waitConversation(topic.id)
+  await host.submitConversationText('chat:main','Explain previous report','follow-up-after');await host.waitConversation('chat:main')
+  assert.equal(requests.length,2,'actual destination-B requests still run after revocation')
+  assert.ok([...requests,...histories].every(input=>!input.includes(report)&&!input.includes(appTitle)),'prepared, restored/task bubbles and follow-up requests exclude stale app text')
+  await host.command({type:'personal.command',request_id:'voice-after',method:'conversations.voice',params:{id:topic.id,enabled:true}})
+  assert.ok(injected.some(item=>item.content.includes('conversation_handoff')))
+  assert.ok(injected.every(item=>!item.content.includes(report)&&!item.content.includes(appTitle)))
+  assert.ok(host.snapshot().feed.some(item=>item.prepared?.text===report),'local report remains visible')
+ }finally{await host.close();await f.close()}
+})
+
+for(const backend of ['none','ledger'] as const)test(`derived app answer chains survive restart but never revocation (${backend})`,{timeout:30000},async()=>{
+ const f=await fixture(backend),secret='Synthetic app fact: orchid project code L-917',histories:string[]=[],requests:string[]=[],injected:HostContextItem[]=[]
+ let host=f.host,revoked=false,reply=0
+ const create=captureProvider(async function*(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'chain-'+(++reply)};yield {kind:'text_delta',text:revoked?'Safe current answer':secret};yield {kind:'response_completed',response_id:'chain-'+reply}},histories,injected)
+ const bind=()=>host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createTextProvider:create,createVoiceProvider:create}),()=>{/* local */})
+ try{
+  await host.life.mutate({op:'create',kind:'todo',title:'Orchid',note:secret},'app-record')
+  const row=host.life.snapshot().todos[0]!
+  assert.equal(await host.contextDependenciesAuthorized({state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},'destination-b'),true)
+  assert.equal(await host.contextAuthorizationRevision(),await host.contextAuthorizationRevision(),'unchanged source authority token is stable')
+  bind()
+  const selected=await host.discussionContext([{kind:'todo',id:row.id,version:row.version}])
+  await host.submitConversationText('chat:main','Explain selected Todo','first',undefined,selected);await host.waitConversation('chat:main')
+  await host.submitConversationText('chat:main','Explain your previous answer','second');await host.waitConversation('chat:main')
+  const before=await new PersonalStore(f.path).read(),answers=before.conversations.items[0]!.messages.filter(message=>message.role==='assistant')
+  assert.equal(answers.length,2,JSON.stringify(before.conversations.items[0]!.messages))
+  for(const answer of answers){assert.equal(answer.text,secret);assert.deepEqual(answer.context_dependencies,{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})}
+  assert.equal(before.conversations.items[0]!.messages.find(message=>message.request_id==='second')?.references,undefined,'transitive dependency is not a latest-user-reference shortcut')
+  await host.close();host=f.make();await host.open();bind()
+  await host.submitConversationText('chat:main','Continue the answer chain','third');await host.waitConversation('chat:main')
+  assert.ok(histories.some(history=>history.includes(secret)),'authorized chain is restored after restart')
+  await host.command({type:'personal.command',request_id:'standalone',method:'conversations.create',params:{title:'Unrelated standalone'}})
+  const standalone=host.conversationSnapshot().selected_id
+  revoked=true
+  await host.submitConversationText(standalone,'Independent question','unrelated');await host.waitConversation(standalone)
+  const unrelated=host.conversationSnapshot().messages.find(message=>message.role==='assistant')!
+  assert.deepEqual(unrelated.context_dependencies,{state:'tracked',items:[]})
+  await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,note:'Revoked old app fact'},'revocation')
+  await host.close();host=f.make();await host.open();bind();histories.length=0;requests.length=0;injected.length=0
+  await host.submitConversationText('chat:main','What can you say now?','after');await host.waitConversation('chat:main')
+  assert.ok([...histories,...requests].every(value=>!value.includes(secret)),'all three derived assistant generations are excluded from actual restored/provider inputs')
+  await host.command({type:'personal.command',request_id:'voice-chain',method:'conversations.voice',params:{id:'chat:main',enabled:true}})
+  assert.ok(injected.some(item=>item.content.includes('conversation_handoff')))
+  assert.ok(injected.every(item=>!item.content.includes(secret)))
+  const saved=await new PersonalStore(f.path).read(),standaloneConversation=saved.conversations.items.find(item=>item.id===standalone)!
+  assert.ok((await host.productConversation(standaloneConversation,'destination-b')).messages.some(message=>message.id===unrelated.id),'truly unrelated standalone chat remains usable')
+ }finally{await host.close();await f.close()}
+})
+
+for(const mode of ['text','voice'] as const)for(const action of ['revoke','cancel'] as const)test(`startup identity await cannot publish revoked app history or prepared context (${mode}, ${action})`,{timeout:30000},async()=>{
+ const f=await fixture('none'),host=f.host,histories:string[]=[],injected:HostContextItem[]=[]
+ let release=()=>{/* assigned below */},entered=()=>{/* assigned below */}
+ const gate=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ const create=captureProvider(async function*(){await Promise.resolve();throw Error('startup must not request a response')},histories,injected)
+ const original=host.synchronizePreferredName.bind(host)
+ try{
+  await host.life.mutate({op:'create',kind:'todo',title:'Startup secret',note:report},'record')
+  const row=host.life.snapshot().todos[0]!,conversation=createConversation('chat','Startup secret',null,'startup')
+  conversation.messages=[{id:'u',conversation_id:conversation.id,role:'user',text:'Earlier question',created_at:new Date().toISOString()},{id:'a',conversation_id:conversation.id,role:'assistant',text:report,reply_to:'u',context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:new Date().toISOString()}]
+  host.synchronizePreferredName=async()=>{entered();await gate;return original()}
+  const factory=conversationRuntimeFactory({host,memory:()=>undefined,gateway,settings:settings('b'),createTextProvider:create,createVoiceProvider:create})
+  const lifetime=new AbortController()
+  const starting=factory(conversation,()=>{/* local */},mode,lifetime.signal),rejected=assert.rejects(starting,action==='revoke'?/context_authorization_changed/:/cancelled_startup/)
+  await started
+  if(action==='revoke')await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed startup source'},'change')
+  else lifetime.abort(Error('cancelled_startup'))
+  release();await rejected
+  assert.ok(histories.every(history=>!history.includes(report)),'provider never receives initial history during connect')
+  assert.ok(injected.every(item=>!item.content.includes(report)&&!item.content.includes('Startup secret')),'post-start identity gap cannot leak handoff/context')
+ }finally{release();host.synchronizePreferredName=original;await host.close();await f.close()}
+})
+
+for(const backend of ['none','ledger'] as const)test(`unchanged PCM chunks reuse compact authorization and app mutation fences the next frame (${backend})`,{timeout:30000},async t=>{
+ const f=await fixture(backend),host=f.host
+ let frames=0
+ let other:SubstrateMemoryResource|undefined
+ const create=captureProvider(async function*(){await Promise.resolve();throw Error('no response expected')})
+ try{
+  await host.life.mutate({op:'create',kind:'todo',title:'PCM source'},'source')
+  const row=host.life.snapshot().todos[0]!
+  await host.close()
+  const store=new PersonalStore(f.path),state=await store.read()
+  state.conversations.items[0]!.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Earlier question',created_at:new Date().toISOString()},{id:'answer',conversation_id:'chat:main',role:'assistant',text:report,reply_to:'user',context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:new Date().toISOString()}]
+  await store.write(state);await host.open()
+  const originalAuthorize=host.contextDependenciesAuthorized.bind(host)
+  const historyPass=t.mock.method(host,'productConversation',host.productConversation.bind(host)),dependencyPass=t.mock.method(host,'contextDependenciesAuthorized',originalAuthorize)
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createVoiceProvider:options=>{const value=create(options);value.sendAudio=()=>{frames++;return Promise.resolve()};return value}}),()=>{/* local */})
+  const ack=await host.command({type:'personal.command',request_id:'voice',method:'conversations.voice',params:{id:'chat:main',enabled:true}}) as {ok:boolean}
+  assert.equal(ack.ok,true)
+  await host.sendConversationAudio('chat:main',new Uint8Array(320))
+  const historyCount=historyPass.mock.callCount(),dependencyCount=dependencyPass.mock.callCount(),before=frames
+  await host.life.refresh();await host.sourceProcessingAgent.reload()
+  host.recordConfirmation('unrelated-ui',{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null})
+  for(let i=0;i<20;i++)await host.sendConversationAudio('chat:main',new Uint8Array(320))
+  assert.equal(frames,before+20)
+  assert.equal(historyPass.mock.callCount(),historyCount,'PCM never reconstructs/serializes conversation history or unrelated feeds')
+  assert.equal(dependencyPass.mock.callCount(),dependencyCount,'unchanged local authority does not re-read app collections per chunk')
+  if(backend==='ledger'){
+   other=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(dirname(f.path),'ledger.sqlite')),userId:'test',model:'extract',inputConsent:true,consolidation:{enabled:false},gateway})
+   await other.open();const remote=other.lifeBackend(),current=await remote.load(emptyLifeState())
+   await remote.mutate({input:{op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Source changed from another client'},requestId:'remote-change',expectedRevision:current.revision})
+  }else{
+   let changed=false
+   dependencyPass.mock.mockImplementation(async(dependencies,consumer)=>{
+    const allowed=await originalAuthorize(dependencies,consumer)
+    if(!changed){changed=true;await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Source changed during authorization'},'change')}
+    return allowed
+   })
+   host.connectionChanged()
+  }
+  await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array(320)),/context_authorization_changed/)
+  assert.equal(frames,before+20,'not one frame is forwarded after cross-client or mid-check source revocation')
+ }finally{await other?.close();await host.close();await f.close()}
+})
+
+for(const revoked of [false,true])test(`scoped queued personal suggestion reauthorizes at actual provider injection (${revoked?'revoked':'valid'})`,{timeout:10000},async()=>{
+ const f=await fixture('none'),host=f.host,injected:HostContextItem[]=[],requests:string[]=[]
+ let runtime:ConversationRuntime|undefined
+ try{
+  const schedule=await host.schedules.create('queued-rule',{title:'Queued private app title',goal:'Review',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context},{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context})
+  const run=await host.schedules.runNow('queued-run',schedule.id,1),task=await host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  await host.readAppContext('todos',null,host.scheduledRunGrant(run.run_id,new AbortController().signal,null))
+  await host.tasks.recordDelivery(fence,'queued-report',report);await host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:queued-report'],criteria:[{index:0,evidence_refs:['task-delivery:queued-report']}]});await host.publishScheduledResult(run.run_id)
+  const feed=host.snapshot().feed.find(item=>item.schedule_ref?.run_id===run.run_id)!
+  const factory=conversationRuntimeFactory({host,memory:()=>undefined,gateway,settings:settings('b'),createVoiceProvider:captureProvider(async function*(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'queued'};yield {kind:'text_delta',text:'Queued announcement'};yield {kind:'response_completed',response_id:'queued'}},[],injected)})
+  runtime=await factory(createConversation('chat','Voice',null,'chat:main'),()=>{/* local */},'voice')
+  const {RealtimeService}=await import('../src/realtime/service.js'),service=runtime.bridgeService
+  assert.ok(service instanceof RealtimeService)
+  await service.session.accept({kind:'user_speech_started',session_epoch:1,speech_id:'busy',provider_item_id:'held'})
+  const suggestion=host.options.pool.add({origin:'surrogate',kind:'notify',content:{summary:feed.title,personal_feed_id:feed.id}})
+  runtime.deliverSuggestion!(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+  await eventually(()=>service.pendingHostItemCount===1)
+  assert.ok(injected.every(item=>!item.content.includes(feed.title)))
+  if(revoked)await host.life.mutate({op:'create',kind:'todo',title:'Changed after scoped queue admission'},'change')
+  await service.session.accept({kind:'user_speech_ended',session_epoch:1,speech_id:'busy',provider_item_id:'held'})
+  await service.session.accept({kind:'user_transcript_failed',session_epoch:1,item_id:'held'})
+  await service.flushHostItems()
+  if(!revoked)await eventually(()=>requests.length===1)
+  else for(let i=0;i<10;i++)await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(injected.some(item=>item.content.includes(feed.title)),!revoked)
+  assert.equal(requests.some(item=>item.includes(feed.title)),!revoked)
+ }finally{await runtime?.close();await host.close();await f.close()}
+})
+
+test('revoked retained Plan association does not block an independent Chat model turn',async()=>{
+ const f=await fixture('none'),host=f.host,secret='Synthetic revoked plan source L-917',title='Private retained plan title',body='Private retained plan body',requests:string[]=[],histories:string[]=[],injected:HostContextItem[]=[]
+ try{
+  const row=await host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const dependencies={state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]}
+  await host.close()
+  const store=new PersonalStore(f.path),state=await store.read(),at=new Date().toISOString()
+  state.conversations.items[0]!.messages=[{id:'source-answer',conversation_id:'chat:main',role:'assistant',text:secret,context_dependencies:dependencies,created_at:at}]
+  await store.write(state);await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,gateway,settings:settings('b'),createTextProvider:captureProvider(async function*(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'independent'};yield {kind:'text_delta',text:'Independent Chat reply'};yield {kind:'response_completed',response_id:'independent'}},histories,injected)}),()=>{/* local */})
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){const ack=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(ack.ok,true)}
+  const plan=await host.publishPlan('chat:main',0,title,body,undefined,dependencies)
+  await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed source'},'revoke')
+  const ack=await host.command({type:'personal.command',request_id:'chat',method:'conversations.mode',params:{id:'chat:main',mode:'chat'}},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(ack.ok,true)
+  assert.equal(host.conversationSnapshot().items[0]!.plan!.id,plan.id,'local Plan association is retained')
+  await host.submitConversationText('chat:main','Answer an independent arithmetic question','independent');await host.waitConversation('chat:main')
+  assert.equal(requests.length,1,'actual Chat model request executes despite the unused revoked plan')
+  const reply=host.conversationSnapshot().messages.at(-1)!
+  assert.equal(reply.text,'Independent Chat reply');assert.equal(host.conversationSnapshot().messages.find(message=>message.request_id==='independent')?.generation_status,'completed');assert.deepEqual(reply.context_dependencies,{state:'tracked',items:[]})
+  for(const input of [...requests,...histories,...injected.map(item=>item.content)])for(const excluded of [secret,title,body])assert.ok(!input.includes(excluded),'unused Plan content and revoked history never reach the model/provider')
+  assert.ok(host.conversationSnapshot().messages.some(message=>message.text===secret),'source report remains locally visible')
+  assert.equal((await host.workbench.plan(plan.id,plan.version)).content,body)
+ }finally{await host.close();await f.close()}
 })

@@ -1,3 +1,4 @@
+import {abortable} from '../core/camera-session.js'
 import {parseMemoryRef} from '../core/memory.js'
 import type {ProactiveNotice} from './service-ports.js'
 import {TaskExecutionRejected} from '../personal-agent/task-loop.js'
@@ -176,7 +177,7 @@ export class RealtimeService {
     const notice:ProactiveNotice={event_id:event,kind:((event.startsWith('progress:')||intent.item.kind==='progress')?'task_progress':event.startsWith('observation:')?'alert':event.startsWith('suggestion:')?'suggestion':'task_result'),body,...(work?{work_id:work}:{}),priority:options.preemptiveAlert?100:options.priority??40,expires_in_ms:options.expiresAt==null?null:Math.max(0,(options.expiresAt-this.#clock.now())*1000)};
     const signal=this.#stop.signal;notice.evidence_refs=evidenceRefs;notice.valid=()=>{if(signal.aborted)return false;for(const ref of evidenceRefs){try{const [channel,seq]=parseMemoryRef(ref);if(!this.#runtime.memory?.channels.get(channel)?.items.some(item=>item.seq===seq))return false}catch{/* Durable evidence is validated by the host. */}}if(options.stillWanted&&!options.stillWanted())return false;if(work&&notice.kind==='alert'&&!this.#runtime.inFlightDelegate(work))return false;if(options.owner){const state=this.session.delegateState(options.owner.delegate_id);if(state!=='running')return false;}return options.expiresAt==null||options.expiresAt>this.#clock.now()};
     if(!admittedFeed)void route.publish(notice).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_admission_failed'));
-    if(!route.local()){void this.session.injectHostContext(intent.item).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_context_unavailable'));return}
+    if(!route.local()){void this.session.injectHostContext(intent.item,options.authorizeBeforeInject?{authorizeBeforeInject:async()=>{const guard=AbortSignal.any([this.#stop.signal,AbortSignal.timeout(5000)]);try{return await abortable(options.authorizeBeforeInject!(guard),guard)&&!guard.aborted}catch{return false}}}:{}).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_context_unavailable'));return}
     const prior=options.stillWanted;this.queueHostItem(intent,{...options,stillWanted:()=>route.local()&&(!prior||prior())})
   }
 
@@ -188,9 +189,9 @@ export class RealtimeService {
     this.#projection.projectRuntimeEvent(event, currentConversation)
   }
 
-  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
+  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason,authorization:Pick<HostItemOptions,'authorizeBeforeInject'>={}): void {
     if (this.#provider.capabilities?.protocol.conversationItems === false || this.#provider.capabilities?.protocol.clientResponses === false) return
-    this.#projection.onSuggestionSelected(suggestion, reason)
+    this.#projection.onSuggestionSelected(suggestion, reason,authorization)
   }
 
   readonly session: RealtimeSession
@@ -357,6 +358,7 @@ export class RealtimeService {
       controlledPreemptiveAlertReconnect: this.#controlledPreemptiveAlertReconnect,
       clearingConversation: () => this.#clearingConversation,
       stopped: () => this.#stop.signal.aborted,
+      stopSignal:()=>this.#stop.signal,
       providerFailed: () => this.#providerFailed,
       wake: () => this.#deliveryReady.set(),
       intakeFactEligible: (id, epoch) => this.#intake?.factEligible(id, epoch),

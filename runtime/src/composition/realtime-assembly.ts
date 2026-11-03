@@ -1,6 +1,6 @@
 import {factoryForMemoryComposition, legacyMemoryComposition} from '../memory/factory.js'
 import {ConfigurationError, type MemoryComposition} from '../config/config.js'
-import {configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
+import {configuredDiscoveryConsumer, configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
 export {configuredMemoryConsumer, configuredMemoryRecipient, configuredTaskVerifierConsumer} from '../memory/consumer.js'
 import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
 import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.js'
@@ -302,6 +302,7 @@ export class RealtimeAssembly {
   readonly #spaceHostConfigPath:string|undefined
   readonly #spaceHostEnvironment:NodeJS.ProcessEnv|undefined
   readonly #unsubscribePersonalEvents: () => void
+  readonly #unbindPersonalModelContext: () => void
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
   readonly #codexResource: CodingExecutorResource | undefined
@@ -409,6 +410,7 @@ export class RealtimeAssembly {
       ...input.core.personalAgentConfig?.models,
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
+    this.#unbindPersonalModelContext=input.core.runtime.bindModelContextAuthorizer((view,slot,signal)=>this.personalAgent.authorizeModelContext(view,slot==='fast'?input.memoryConsumerFingerprint??null:configuredDiscoveryConsumer(input.core.settings)??null,signal))
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
       if(current===false)return
@@ -621,6 +623,7 @@ export class RealtimeAssembly {
     }
 
     this.#unsubscribePersonalEvents()
+    this.#unbindPersonalModelContext()
     if (!this.#sharedPersonal) await this.personalAgent.close()
     this.#unbindSuggestionSelected?.()
 
@@ -1206,8 +1209,23 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const unbindSuggestionSelected = core.runtime.bindSuggestionSelected(
     (suggestion: Suggestion, reason: WakeReason) => {
       try { options.onExecutorSuggestion?.(suggestion) } catch { /* observability cannot own speech */ }
-      if (typeof suggestion.content.personal_feed_id === 'string') {
-        void assemblyHolder.current?.personalAgent.canDeliver(suggestion.content.personal_feed_id).then(valid=>{if(valid&&!assemblyHolder.current?.personalAgent.routePersonalSuggestion(suggestion,reason))service.onSuggestionSelected(suggestion,reason)}).catch(()=>{ /* optional host projection failure */ })
+      const personalFeedId=suggestion.content.personal_feed_id
+      if (typeof personalFeedId === 'string') {
+        const host=assemblyHolder.current?.personalAgent
+        if(!host)return
+        const dependencies=host.feedContextDependencies(personalFeedId)
+        void host.canDeliver(personalFeedId).then(async valid=>{
+          if(!valid||assemblyHolder.current?.personalAgent!==host||host.routePersonalSuggestion(suggestion,reason))return
+          const receiver=assemblyHolder.current.memoryConsumerFingerprint??null
+          if(!await host.productFeedAuthorized(personalFeedId,receiver)||!await host.contextDependenciesAuthorized(dependencies,receiver))return
+          service.onSuggestionSelected(suggestion,reason,{authorizeBeforeInject:async signal=>{
+            signal.throwIfAborted()
+            if(assemblyHolder.current?.personalAgent!==host)return false
+            const currentReceiver=assemblyHolder.current.memoryConsumerFingerprint??null
+            const allowed=await host.productFeedAuthorized(personalFeedId,currentReceiver)&&await host.contextDependenciesAuthorized(dependencies,currentReceiver)
+            signal.throwIfAborted();return allowed&&assemblyHolder.current?.personalAgent===host&&currentReceiver===(assemblyHolder.current.memoryConsumerFingerprint??null)
+          }})
+        }).catch(()=>{ /* source/destination changed or delivery was cancelled */ })
       } else service.onSuggestionSelected(suggestion, reason)
     },
   )

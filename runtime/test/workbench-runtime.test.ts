@@ -1585,6 +1585,7 @@ test('restored Plan checkpoints receive the persistent memory policy on every mo
    assert.equal(result.ok,true)
   }
   const checkpoint=await host.workbench.checkpoint('chat:main',0)
+  checkpoint.context_dependencies={state:'tracked',items:[]}
   checkpoint.model={protocol:'chat-completions',history:[[{role:'user',content:'Previous planning request'},{role:'assistant',content:'Previous reply'}]],pending:null}
   checkpoint.inputs=[{kind:'user_text',text:'Pending request'}]
   await host.workbench.saveCheckpoint(checkpoint)
@@ -1612,5 +1613,194 @@ for(const failure of ['timeout','output_limit'] as const)test(`Plan drops pendin
   assert.match(JSON.stringify(f.script.requests[0]!.inputs),/one-shot recalled secret/)
   assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|one-shot recalled secret/)
   assert.equal(recalls,failure==='timeout'?2:1)
+ }finally{await f.close()}
+})
+
+for(const legacy of [false,true])test(`app-informed Workbench checkpoint persists dependencies and rejects revoked model reuse (${legacy?'legacy':'tracked'})`,async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-workbench-deps-')),path=join(directory,'personal.json'),secret='Synthetic checkpoint app fact L-917'
+ const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let host=make(),runtime:ConversationRuntime|undefined
+ const first=scripted(()=>({text:secret})),next=scripted(()=>({text:'Current valid answer'})),rejected=scripted(()=>({text:'Must not run'}))
+ const bridge:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:''}),close:()=>Promise.resolve(),toolBridge:{tools:[],readonlyNames:[],origin:()=>Promise.resolve('conversation:1'),invoke:()=>Promise.reject(Error('must not replay tools'))}}
+ try{
+  await host.open();await host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const row=host.life.snapshot().todos[0]!,at=new Date().toISOString(),conversation={id:'chat:main',kind:'chat' as const,mode:'plan' as const,title:'Plan',subject_key:null,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[{id:'user',conversation_id:'chat:main',role:'user' as const,text:'Previous question',created_at:at},{id:'answer',conversation_id:'chat:main',role:'assistant' as const,text:secret,context_dependencies:{state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]},created_at:at}],feed_ids:[],prepared:null,read_through_id:null}
+  const open=(factory:CascadedLlmFactory)=>createWorkbenchRuntime({conversation,host,factory,contextConsumer:null,createBridge:()=>Promise.resolve(bridge),emit:()=>{/* local */},lifetime:new AbortController().signal,language:'en',approval:'never'})
+  runtime=await open(first.factory);const result=await runtime.runTurn('Plan from report',new AbortController().signal)
+  assert.equal(result.assistant,secret);assert.ok(JSON.stringify(first.requests).includes(secret))
+  const checkpoint=await host.workbench.checkpoint(conversation.id,0)
+  assert.deepEqual(checkpoint.context_dependencies,result.context_dependencies)
+  await runtime.close();runtime=undefined;await host.close();host=make();await host.open()
+  runtime=await open(next.factory);await runtime.runTurn('Continue authorized plan',new AbortController().signal)
+  assert.equal(next.restores.length,1,'valid model state survives restart')
+  assert.equal(next.requests.length,1)
+  await runtime.close();runtime=undefined
+  const saved=await host.workbench.checkpoint(conversation.id,0)
+  saved.calls.push({id:'already-executed',name:'file_write',arguments:{path:'evidence.txt'},state:'completed',result:{status:'ok'}})
+  saved.pending_calls=[saved.calls.at(-1)!]
+  if(legacy)delete saved.context_dependencies
+  await host.workbench.saveCheckpoint(saved)
+  await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed app authority'},'revoke')
+  await host.close();host=make();await host.open();runtime=await open(rejected.factory)
+  await assert.rejects(runtime.runTurn('Resume old plan',new AbortController().signal),/context_authorization_changed/)
+  assert.equal(rejected.restores.length,0);assert.equal(rejected.requests.length,0,'no revoked model/inputs reach the actual model port')
+  const withheld=await host.workbench.checkpoint(conversation.id,0)
+  assert.equal(withheld.reason,'context_authorization_changed')
+  assert.deepEqual(withheld.calls,saved.calls);assert.deepEqual(withheld.pending_calls,saved.pending_calls,'tool receipts survive invalidation without replay/reset')
+  assert.deepEqual(withheld.model,saved.model,'private model checkpoint remains locally preserved')
+ }finally{await runtime?.close();await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('owned legacy no-app Workbench checkpoint remains resumable without dependency fields',async()=>{
+ const f=await fixture(()=>({text:'Independent plan reply'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Independent planning request','legacy-user');await f.host.waitConversation('chat:main')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  delete checkpoint.context_dependencies;await f.host.workbench.saveCheckpoint(checkpoint)
+  await f.host.close();await f.host.open();f.runtime()
+  await f.host.submitConversationText('chat:main','Continue unrelated plan','legacy-resume');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests.length,2)
+  assert.equal(f.script.restores.length,1)
+  assert.deepEqual((await f.host.workbench.checkpoint('chat:main',0)).context_dependencies,{state:'tracked',items:[]})
+ }finally{await f.close()}
+})
+
+test('unverifiable legacy Workbench model text is not treated as an empty dependency set',async()=>{
+ const f=await fixture(()=>({text:'Independent planning reply'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Owned planning request','first');await f.host.waitConversation('chat:main')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  delete checkpoint.context_dependencies;checkpoint.model={unknown_history:'Unattributed synthetic app fact'}
+  await f.host.workbench.saveCheckpoint(checkpoint);await f.host.close();await f.host.open();f.runtime()
+  await f.host.submitConversationText('chat:main','Do not reconstruct unknown text','next');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests.length,1);assert.equal(f.script.restores.length,0)
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).reason,'context_authorization_changed')
+ }finally{await f.close()}
+})
+
+for(const scenario of ['revoked','valid','no-app','legacy'] as const)test(`confirmed Plan provenance follows a fresh empty-history Build (${scenario})`,{skip:!supported},async()=>{
+ const secret='Synthetic confirmed app plan L-917'
+ const f=await fixture((request,step)=>request.tools.some(tool=>tool.name==='finish_build')?{text:'Build checked current context'}:step===0?{call:{name:'publish_plan',arguments:{title:'Versioned plan',content:secret}}}:{text:'Plan ready'},'never')
+ try{
+  await f.host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const row=f.host.life.snapshot().todos[0]!
+  if(scenario!=='no-app'){
+   await f.host.close()
+   const {PersonalStore}=await import('../src/personal-agent/store.js'),store=new PersonalStore(join(f.root,'personal.json')),state=await store.read(),at=new Date().toISOString()
+   state.conversations.items[0]!.messages=[{id:'report-user',conversation_id:'chat:main',role:'user',text:'Review app source',created_at:at},{id:'report-answer',conversation_id:'chat:main',role:'assistant',text:secret,context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:at}]
+   await store.write(state);await f.host.open();f.runtime()
+  }
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main',scenario==='no-app'?'Publish the complete plan: '+secret:'Publish the complete plan','plan');await f.host.waitConversation('chat:main')
+  const reference=f.host.conversationSnapshot().items.find(item=>item.id==='chat:main')!.plan!
+  let plan=await f.host.workbench.plan(reference.id,reference.version)
+  assert.deepEqual(plan.context_dependencies,scenario==='no-app'?{state:'tracked',items:[]}:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  assert.ok(JSON.stringify(f.script.requests).includes(secret),'actual Plan request/publication chain carries synthetic plan text')
+  if(scenario==='valid'){const firstVersion=plan.version;const edited=await f.host.publishPlan('chat:main',0,plan.title,plan.content+'\nUser clarification');assert.equal(edited.id,plan.id);assert.equal(edited.version,firstVersion+1);assert.deepEqual(edited.context_dependencies,plan.context_dependencies);assert.deepEqual((await f.host.workbench.plan(plan.id,firstVersion)).context_dependencies,plan.context_dependencies);plan=edited}
+  if(scenario==='legacy'){
+   delete plan.context_dependencies;await f.host.workbench.savePlan(plan)
+   const checkpoint=await f.host.workbench.checkpoint('chat:main',0);delete checkpoint.context_dependencies;await f.host.workbench.saveCheckpoint(checkpoint)
+  }
+  if(scenario==='revoked'||scenario==='legacy')await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed source'},'revoke')
+  const count=f.script.requests.length
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id;assert.notEqual(id,'chat:main');await f.host.waitConversation(id)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.ok(!f.host.conversationSnapshot().messages.some(message=>message.id==='report-answer'),'fresh Build contains no source transcript')
+  if(scenario==='valid'||scenario==='no-app'){
+   assert.equal(f.script.requests.length,count+1)
+   assert.ok(f.script.requests.at(-1)!.workspaceContext?.includes(secret),'actual Build model input receives the authorized confirmed plan')
+   assert.deepEqual(checkpoint.context_dependencies,plan.context_dependencies)
+  }else{
+   assert.equal(f.script.requests.length,count,'no revoked plan reaches any fresh Build model request')
+   assert.equal(checkpoint.reason,'context_authorization_changed')
+  }
+  const retained=await f.host.workbench.plan(plan.id,plan.version)
+  assert.equal(retained.content,plan.content);assert.equal(retained.id,plan.id);assert.equal(retained.version,plan.version)
+ }finally{await f.close()}
+})
+
+for(const scenario of ['manual','no-app','source-backed','revoked-during-preparation','revoked-after-reservation'] as const)test(`external confirmed plan revalidates canonical dependencies before bridge invocation (${scenario})`,async()=>{
+ const f=await fixture(()=>({text:'unused'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const row=scenario==='source-backed'?await f.host.life.mutate({op:'from_suggestion',kind:'todo',suggestion_id:'source',title:'Private source record',note:'Private plan fact',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'source'):await f.host.life.mutate({op:'create',kind:'todo',title:'Manual plan record'},'manual')
+  const dependencies=scenario==='no-app'?{state:'tracked' as const,items:[]}:{state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]}
+  const plan=await f.host.publishPlan('chat:main',0,'Delegation plan','Complete local plan text',undefined,dependencies)
+  if(scenario==='revoked-during-preparation')f.bridge.origin=async()=>{await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed while preparing'},'change');return 'memory:test-user'}
+  if(scenario==='revoked-after-reservation'){const mark=f.host.tasks.markEffectDispatching.bind(f.host.tasks);f.host.tasks.markEffectDispatching=async id=>{await mark(id);await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed after reservation'},'change-reservation')}}
+  const result=await f.raw('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  if(scenario==='source-backed'||scenario==='revoked-during-preparation'||scenario==='revoked-after-reservation'){
+   assert.equal(result.ok,false);assert.equal(result.error,'context_authorization_changed');assert.equal(f.invocations.length,0)
+   assert.equal(f.host.conversationSnapshot().items[0]!.mode,'plan')
+   assert.ok(f.host.tasks.list().every(task=>!task.work_ids.length),'authorization denial cannot claim external delivery')
+   if(scenario==='revoked-after-reservation')for(const task of f.host.tasks.list()){assert.equal(task.waiting_reason,'plan_delegation_refused');assert.equal(f.host.tasks.pendingEffect(task.id),null)}
+  }else{
+   assert.equal(result.ok,true);assert.equal(f.invocations.length,1)
+   assert.ok(f.host.tasks.list().some(task=>task.work_ids.length===1))
+   assert.ok(!JSON.stringify(f.invocations).includes('context_dependencies'),'executor tool arguments contain no provenance/guard callback')
+  }
+  assert.equal((await f.host.workbench.plan(plan.id,plan.version)).content,plan.content)
+ }finally{await f.close()}
+})
+
+for(const receiver of ['build-a','build-b'])test(`confirmed source-backed plan uses the actual Build recipient (${receiver})`,{skip:!supported},async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-build-recipient-')),script=scripted(()=>({text:'Current Build result'}))
+ const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),canReadConversationEvidence:(_ref:string,consumer:string)=>Promise.resolve(consumer==='build-a')} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:''}),close:()=>Promise.resolve(),toolBridge:{tools:[],readonlyNames:[],origin:()=>Promise.resolve('conversation:1'),invoke:()=>Promise.reject(Error('unused'))}}
+ try{
+  await host.open()
+  host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,contextConsumer:receiver,factory:script.factory,createBridge:()=>Promise.resolve(bridge),emit,lifetime:lifetime??new AbortController().signal,language:'en',approval:'never'}),()=>{/* local */})
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){const ack=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(ack.ok,true)}
+  const row=await host.life.mutate({op:'from_suggestion',kind:'todo',suggestion_id:'source',title:'Receiver-scoped app plan fact',note:'Private source',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'source')
+  const plan=await host.publishPlan('chat:main',0,'Scoped plan','Receiver-scoped app plan fact',undefined,{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  const ack=await host.command({type:'personal.command',request_id:'confirm',method:'build.start',params:{id:'chat:main',plan_id:plan.id,version:plan.version,project:directory}},{client_id:'desktop:local'}) as {ok:boolean}
+  assert.equal(ack.ok,true);const id=host.conversationSnapshot().selected_id;await host.waitConversation(id)
+  assert.equal(script.requests.length,receiver==='build-a'?1:0)
+  if(receiver==='build-a')assert.ok(script.requests[0]!.workspaceContext?.includes(plan.content))
+  else assert.equal((await host.workbench.checkpoint(id,0)).reason,'context_authorization_changed')
+ }finally{await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('excluded non-product report does not taint an independent Plan publication, fresh Build or delegation',{skip:!supported},async()=>{
+ const excluded='Synthetic retained non-product scheduled report L-917',content='Independent no-app plan: inspect the local project'
+ const f=await fixture((request,step)=>request.tools.some(tool=>tool.name==='finish_build')?{text:'Independent Build reply'}:step===0?{call:{name:'publish_plan',arguments:{title:'Independent plan',content}}}:{text:'Independent plan ready'},'never')
+ try{
+  const context={todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}
+  const schedule=await f.host.schedules.create('create',{title:'Retained report',goal:'Review todos',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context},{user_scope:'local-test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context})
+  const run=await f.host.schedules.runNow('run',schedule.id,1),task=await f.host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await f.host.schedules.bindTask(run.run_id,task.id);await f.host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  const page=await f.host.readAppContext('todos',null,f.host.scheduledRunGrant(run.run_id,new AbortController().signal,null))
+  await f.host.tasks.recordDelivery(fence,'report',excluded);await f.host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:report'],criteria:[{index:0,evidence_refs:['task-delivery:report']}]})
+  await f.host.schedules.markFinished(run.run_id,{memory_origin:'non_product',outcome:'completed',text:excluded,evidence_refs:page.evidence_refs,consumer:null,published:false})
+  await f.host.publishScheduledResult(run.run_id)
+  assert.equal(await f.host.scheduledResultAuthorized(run.run_id),false)
+  const report=f.host.conversationSnapshot().messages.find(message=>message.schedule_ref?.run_id===run.run_id)!
+  assert.equal(report.memory_origin,'non_product');assert.ok(report.text.includes(excluded))
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Publish an independent no-app plan','independent');await f.host.waitConversation('chat:main')
+  const reference=f.host.conversationSnapshot().items.find(item=>item.id==='chat:main')!.plan!
+  const published=await f.host.workbench.plan(reference.id,reference.version)
+  assert.deepEqual(published.context_dependencies,{state:'tracked',items:[]},'host publication preserves actual filtered-input provenance')
+  const plan=await f.host.publishPlan('chat:main',0,published.title,published.content+'\nUser clarification')
+  assert.equal(plan.version,published.version+1);assert.deepEqual(plan.context_dependencies,published.context_dependencies,'host-only edit fallback also excludes non-product history')
+  const count=f.script.requests.length
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const build=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(build)
+  assert.equal(f.script.requests.length,count+1);assert.equal((JSON.parse(f.script.requests.at(-1)!.workspaceContext!) as {confirmed_plan:{content:string}}).confirmed_plan.content,plan.content,'actual fresh Build receives the independent confirmed plan')
+  assert.deepEqual((await f.host.workbench.checkpoint(build,0)).context_dependencies,{state:'tracked',items:[]})
+  await f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  assert.equal(f.invocations.length,1)
+  const delegated=f.host.tasks.list().find(task=>task.approved_plan?.id===plan.id)!
+  assert.equal(delegated.approved_plan!.content,plan.content);assert.equal(delegated.work_ids.length,1);assert.equal(f.host.tasks.pendingEffect(delegated.id),null)
+  const executorInput=approvedPlanWorkOrder({workOrder:'Execute confirmed plan',approvedPlan:delegated.approved_plan!})
+  assert.ok(executorInput.includes(plan.content))
+  assert.ok(!JSON.stringify(f.script.requests).includes(excluded),'neither actual Plan nor Build model inputs contain the excluded report')
+  assert.ok(!JSON.stringify(f.invocations).includes(excluded)&&!executorInput.includes(excluded),'executor inputs contain no excluded report')
+  await f.command('conversations.select',{id:'chat:main'})
+  assert.ok(f.host.conversationSnapshot().messages.some(message=>message.id===report.id&&message.text.includes(excluded)),'original report remains locally visible')
  }finally{await f.close()}
 })
