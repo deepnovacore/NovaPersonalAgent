@@ -4,7 +4,10 @@ import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
 import {parentPort, workerData} from 'node:worker_threads'
 import {Memory} from 'mem0ai/oss'
-import {VoiceMem, OpenAITextModel, OpenAIEmbeddingModel, type MemoryRecord} from 'voicemem'
+import type {MemoryRecord} from 'voicemem'
+import {loadGroundedVoiceMem} from './grounded-voicemem.js'
+
+const {VoiceMem, OpenAITextModel, OpenAIEmbeddingModel} = await loadGroundedVoiceMem()
 import {engineSnapshotSchema, type EngineSnapshot} from '../memory-substrate/engine-outbox.js'
 import {preparePrivateDatabasePath} from '../storage/private-database.js'
 import type {PersonalMemoryRecallHit} from './personal-memory.js'

@@ -46,6 +46,9 @@ files:
   - node_modules/@nova-personal-agent/runtime/package.json
   - node_modules/@nova-personal-agent/runtime/scripts/autoglm-bridge.py
   - node_modules/@nova-personal-agent/runtime/dist/src/**/*.js
+  - node_modules/@nova-personal-agent/runtime/dist/src/memory/voicemem-sdk/LICENSE
+  - node_modules/@nova-personal-agent/runtime/dist/src/memory/voicemem-sdk/NOTICE.md
+  - node_modules/@nova-personal-agent/runtime/dist/src/memory/voicemem-sdk/PATCH-NOTICE.md
 
 # The tray reads these with nativeImage.createFromPath, so they stay outside
 # the asar and top-level (every platform's tray needs them), while the

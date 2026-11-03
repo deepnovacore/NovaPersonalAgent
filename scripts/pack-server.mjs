@@ -75,6 +75,7 @@ export async function packServer({root = resolve(import.meta.dirname, '..'), des
     const [{filename, files}] = JSON.parse(result.stdout)
     const allowed = new Set(['package.json', 'README.md', 'LICENSE', 'bin/novapersonal-server.mjs', 'bin/nova-space-host.mjs', 'src/command.mjs',
       'runtime/scripts/pair-device.mjs', 'resources/native-resources-v1.json',
+      ...['LICENSE', 'NOTICE.md', 'PATCH-NOTICE.md'].map(name => `runtime/dist/src/memory/voicemem-sdk/${name}`),
       'node_modules/@nova-personal-agent/relay/package.json',
       'resources/native/project-native/nova_project_native.node', 'resources/native/codex-sandbox-probe',
       ...['MANIFEST.json', 'LICENSE.silero-vad.txt', 'speech-16k-s16le.pcm', 'silence-16k-s16le.pcm'].map(name => `resources/endpointing/volcengine-v1/${name}`)])

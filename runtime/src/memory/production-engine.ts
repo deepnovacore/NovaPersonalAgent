@@ -4,6 +4,7 @@ import {Worker} from 'node:worker_threads'
 import {z} from 'zod'
 import type {MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {engineSnapshotSchema} from '../memory-substrate/engine-outbox.js'
+import {VOICEMEM_SEMANTIC_PROTOCOL} from './grounded-voicemem.js'
 import type {PersonalMemoryEmbeddingConfig} from '../voicemem/store-client.js'
 import type {MemoryRecallEngine} from './ledger-recall-engine.js'
 import type {PersonalMemoryRecallResult} from './personal-memory.js'
@@ -32,7 +33,7 @@ export class ProductionMemoryEngine implements MemoryRecallEngine {
   lastIndexError:string|null=null
   constructor(readonly config:EngineConfig,private readonly client:MemoryLedgerClient,readonly prefix:string,private readonly embeddingFingerprint:string,private readonly extractionFingerprint:string,private readonly retiredKey?:string) {
     this.recallEngine=config.engine
-    this.key=retiredKey??createHash('sha256').update(JSON.stringify([config.path,config.engine,config.styles,config.embedding.baseUrl,config.embedding.model,config.embedding.dimensions,config.extraction.baseUrl,config.extractionModel])).digest('hex')
+    this.key=retiredKey??createHash('sha256').update(JSON.stringify([config.path,config.engine,config.styles,config.embedding.baseUrl,config.embedding.model,config.embedding.dimensions,config.extraction.baseUrl,config.extractionModel,VOICEMEM_SEMANTIC_PROTOCOL])).digest('hex')
   }
   async open():Promise<void> {
     this.#closed=false
@@ -99,7 +100,8 @@ export class ProductionMemoryEngine implements MemoryRecallEngine {
     const result=await this.#call('recall',{query,limit:Math.min(options.limit??8,20)},signal) as PersonalMemoryRecallResult
     const current=await this.client.memory('engine_outbox',{action:'status',scope:this.prefix,engine:this.key})
     signal.throwIfAborted()
-    return {...result,scope:options.scope??'any',degraded:result.degraded||this.lastIndexError!==null||current!==true}
+    // Pending source reconciliation may contain an unindexed contradiction. Never expose an older style until it completes.
+    return {...result,scope:options.scope??'any',contextHits:current===true&&this.lastIndexError===null?(result.contextHits??[]):[],degraded:result.degraded||this.lastIndexError!==null||current!==true}
   }
   async close():Promise<void> {
     this.#closed=true;clearInterval(this.#timer)

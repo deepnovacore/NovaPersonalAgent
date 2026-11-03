@@ -39,7 +39,8 @@ export class UnifiedRetrieval {
   // Serialized snippet labels are not proof of host knowledge-index provenance.
   private readonly knowledgeReferences = new WeakMap<UnifiedRetrievalResult, ReadonlySet<string>>();
   private readonly userOnly = new WeakSet<UnifiedRetrievalResult>();
-  private readonly styleHits = new WeakMap<UnifiedRetrievalResult, readonly PersonalMemoryRecallHit[]>();
+  // Styles depend on the entire source inventory, not just their supporting sources.
+  private readonly styleProjections = new WeakMap<UnifiedRetrievalResult, {hits: readonly PersonalMemoryRecallHit[]; authorityRevision: number}>();
   private readonly owners = new WeakMap<UnifiedRetrievalResult, PersonalMemoryResource>();
   private readonly consumers = new WeakMap<UnifiedRetrievalResult,string>();
   constructor(private readonly options: {
@@ -89,17 +90,23 @@ export class UnifiedRetrieval {
     this.owners.set(current, resource);
     if(userOnly)this.userOnly.add(current);
     this.knowledgeReferences.set(current,knowledge);
-    this.styleHits.set(current, this.styleHits.get(result) ?? []);
+    const styleProjection=this.styleProjections.get(result);
+    if(styleProjection)this.styleProjections.set(current,styleProjection);
     const consumer=this.consumers.get(result);if(consumer!==undefined)this.consumers.set(current,consumer);
     return this.authorize(current,resource,consumer,signal);
   }
 
   /** Response adaptation only: never include style records in factual entries or tool results. */
   async prepareResponseStyle(result: UnifiedRetrievalResult, signal: AbortSignal): Promise<() => string | null> {
-    const resource = this.owners.get(result), consumer = this.consumers.get(result);
-    if (resource?.supportsResponseStyle !== true || this.options.memory() !== resource || !consumer) return () => null;
-    const hits = await validateResponseStyleHits(resource, this.styleHits.get(result) ?? [], consumer, signal);
-    return () => this.options.memory() === resource ? responseStyleContext(hits) : null;
+    signal.throwIfAborted();
+    const resource = this.owners.get(result), consumer = this.consumers.get(result), projection=this.styleProjections.get(result);
+    const unchanged=()=>this.options.memory()===resource&&projection!==undefined&&resource?.recallAuthorityRevision?.()===projection.authorityRevision;
+    if (resource?.supportsResponseStyle !== true || !consumer || !projection || !unchanged()) return () => null;
+    // Authorization reads also discover committed changes made by other ledger clients.
+    const hits = await validateResponseStyleHits(resource, projection.hits, consumer, signal);
+    signal.throwIfAborted();
+    if(!unchanged())return () => null;
+    return () => !signal.aborted&&unchanged() ? responseStyleContext(hits) : null;
   }
 
   private async authorize(result:UnifiedRetrievalResult,resource:PersonalMemoryResource,consumer:string|undefined,signal:AbortSignal):Promise<UnifiedRetrievalResult>{
@@ -158,6 +165,7 @@ export class UnifiedRetrieval {
     signal.throwIfAborted();
     const resource = this.options.memory();
     if (!resource) return {state: 'unavailable', scope, entries: [], snippets: [], degraded: true};
+    const styleAuthorityRevision=resource.recallAuthorityRevision?.();
     const call = <T>(work: (abort: AbortSignal) => Promise<T>): Promise<T> => {
       const abort = AbortSignal.any([signal, AbortSignal.timeout(5000)]);
       return withUsageContext({...this.options.usageContext,feature:'recall',operation:'retrieve'},()=>abortable(Promise.resolve().then(() => work(abort)), abort));
@@ -271,7 +279,7 @@ export class UnifiedRetrieval {
     this.owners.set(result, resource);
     if(userOnly)this.userOnly.add(result);
     this.knowledgeReferences.set(result,new Set(resultSnippets.filter(snippet=>snippet.context_kind==='knowledge_reference').map(snippet=>snippet.evidence_id)));
-    if (resource.supportsResponseStyle === true && recalled.status === 'fulfilled' && 'contextHits' in recalled.value) this.styleHits.set(result, recalled.value.contextHits ?? []);
+    if (resource.supportsResponseStyle === true && styleAuthorityRevision!==undefined && recalled.status === 'fulfilled' && 'contextHits' in recalled.value) this.styleProjections.set(result, {hits:recalled.value.contextHits ?? [],authorityRevision:styleAuthorityRevision});
     if(options.consumer!==undefined)this.consumers.set(result,options.consumer);
     return this.authorize(result,resource,options.consumer,signal);
   }
