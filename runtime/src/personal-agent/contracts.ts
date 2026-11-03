@@ -29,6 +29,10 @@ export const goalCheckinSchema=z.object({local_date:z.string().date(),items:z.ar
 export type GoalCheckin=z.infer<typeof goalCheckinSchema>;
 export interface PreparedMaterial {prepared:PreparedContent;action_label:string;memory_refs:Proposal['memory_refs']}
 export interface FeedItem {
+    /** Non-product task prose cannot become product context, even after a backend change. */
+    memory_origin?:'non_product'|undefined;
+    /** Durable producer identity; task_ref may instead identify a work result or revision. */
+    task_id?:string|undefined;
     schedule_ref?:ScheduleReference|undefined;
     goal_proposal?:GoalProposal|undefined;
     goal_checkin?:GoalCheckin|undefined;
@@ -83,6 +87,7 @@ export interface PersonalSettings {
     diary_enabled?:boolean|undefined;
 }
 export const feedItemSchema: z.ZodType<FeedItem> = z.object({
+    memory_origin:z.literal('non_product').optional(),task_id:z.string().min(1).max(128).optional(),
     schedule_ref:scheduleReferenceSchema.optional(),goal_proposal:goalProposalSchema.optional(),goal_checkin:goalCheckinSchema.optional(),prepared:preparedContentSchema.optional(),action_label:z.string().trim().min(1).max(80).optional(),
     id: z.string().min(1).max(128), kind: z.enum(['notify', 'question', 'task_result', 'schedule', 'change']), title: z.string().max(120), why_now: z.string().max(200), evidence_refs: z.array(z.string().max(512)).max(16), memory_refs: z.array(z.object({ entry_id: z.string().max(256), version: versionSchema }).strict()).max(16), source: z.object({ type: z.enum(['conversation', 'task', 'memory', 'file', 'mail', 'calendar', 'im', 'news']), ref: z.string().max(512) }).strict(), suggestion_id: z.string().nullable(), task_ref: z.object({ work_id: z.string() }).strict().nullable(), subject_key: z.string(), priority: z.number().finite(), created_at: z.string().datetime(), updated_at: z.string().datetime(), expires_at: z.string().datetime().nullable(), user_state: z.enum(['new', 'seen', 'snoozed', 'dismissed']), snooze_until: z.string().datetime().nullable(), lifecycle: z.enum(['active', 'resolved', 'invalidated']), delivery: z.object({ presented_at: z.string().datetime().nullable(), notified_at: z.string().datetime().nullable(), spoken_at: z.string().datetime().nullable(), im_sent_at: z.string().datetime().nullable().optional() }).strict(),
 }).strict();

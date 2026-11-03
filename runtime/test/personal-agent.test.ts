@@ -423,7 +423,7 @@ test('local evidence survives a full runtime evidence budget and host selects na
  const f=await fixture()
  const host=new PersonalAgentHost({path:join(f.dir,'balanced.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),newsLanguage:'zh-CN',evidence:()=>null,evidenceRefs:()=>Array.from({length:32},(_,i)=>'task:'+i)})
  try{
-  host.setSources({list:()=>[],command:()=>Promise.resolve({}),evidenceSnapshot:()=>[{ref:'file:local',summary:'Independent collection'}]})
+  host.setSources({list:()=>[],command:()=>Promise.resolve({}),evidence:ref=>ref==='file:local'?{subject_key:'file:local',source:{type:'file',ref}}:null,evidenceSnapshot:()=>[{ref:'file:local',summary:'Independent collection'}]})
   await host.open();assert.ok((await host.discoverySnapshot()).evidence_refs.includes('file:local'))
   const sources=host.snapshot().news.sources;assert.ok(sources.length>0);assert.ok(sources.every(s=>s.language==='zh-CN'))
  }finally{await host.close();await f.close()}
