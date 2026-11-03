@@ -232,6 +232,7 @@ class ScheduledAgentRunner extends ChangeNotifier with WidgetsBindingObserver {
       await agent.send(
         taskId,
         'Scheduled task authorized by the user. Goal: ${definition['goal']}\nAcceptance: ${definition['acceptance']}\nReport what was actually observed or done. A denied action or unknown outcome is not success. Do not broaden the selected context or execution scope.',
+        userAuthored: false,
         approve: (offer) async {
           await repository.checkpoint(id, revision, 'waiting_approval');
           pendingApproval = offer;

@@ -79,9 +79,22 @@ class VoiceHistoryItem {
 
 /// Host facts describe execution, never authorize another tool invocation.
 class VoiceHostItem {
-  const VoiceHostItem({required this.id, required this.text, this.callId});
+  const VoiceHostItem({
+    required this.id,
+    required this.text,
+    this.callId,
+    this.memoryTool,
+  });
   final String id, text;
   final String? callId;
+
+  /// Memory receipts are transient, not durable execution facts.
+  final String? memoryTool;
+}
+
+/// Providers that can fence all derived history and refresh local instructions.
+abstract interface class VoiceMemoryContext {
+  Future<void> resetMemoryContext(String instructions);
 }
 
 /// The selected fact is valid but the provider cannot activate it yet.

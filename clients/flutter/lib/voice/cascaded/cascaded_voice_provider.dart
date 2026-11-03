@@ -2,12 +2,13 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 import '../voice_provider.dart';
+import '../../memory/memory_context_budget.dart';
 import 'ports.dart';
 import 'silence_endpointing.dart';
 export 'ports.dart';
 export 'silence_endpointing.dart';
 
-class CascadedVoiceProvider implements VoiceProvider {
+class CascadedVoiceProvider implements VoiceProvider, VoiceMemoryContext {
   CascadedVoiceProvider({
     required this.asr,
     required this.llm,
@@ -345,6 +346,10 @@ class CascadedVoiceProvider implements VoiceProvider {
         }
       }
     } finally {
+      if (hostFact?.memoryTool != null) {
+        _facts.remove(hostItemId);
+        _activatedHosts.remove(hostItemId);
+      }
       cancel.cancel();
       if (generation == _generation) {
         _cancel = null;
@@ -374,6 +379,20 @@ class CascadedVoiceProvider implements VoiceProvider {
   }
 
   void _interrupt() {
+    // Cancellation may outlive the network stream. Retire consumed receipts
+    // now, not only when that stream eventually reaches its finally block.
+    final consumedMemory = _facts.keys
+        .where(
+          (id) =>
+              id != _pendingHost &&
+              _activatedHosts.contains(id) &&
+              _facts[id]!.memoryTool != null,
+        )
+        .toList();
+    for (final id in consumedMemory) {
+      _facts.remove(id);
+      _activatedHosts.remove(id);
+    }
     final response = _responseId;
     ++_generation;
     _cancel?.cancel();
@@ -397,7 +416,9 @@ class CascadedVoiceProvider implements VoiceProvider {
   @override
   Future<void> injectHostItem(VoiceHostItem item) async {
     _ready();
-    if (item.id.isEmpty || item.id.length > 256 || item.text.length > 4000) {
+    if (item.id.isEmpty ||
+        item.id.length > 256 ||
+        item.text.length > voiceHostItemCharLimit) {
       throw const CascadeFailure('invalid_host_item');
     }
     final existing = _facts[item.id];
@@ -444,6 +465,21 @@ class CascadedVoiceProvider implements VoiceProvider {
     required bool interrupted,
   }) async {
     throw const CascadeFailure('playback_report_unsupported');
+  }
+
+  @override
+  Future<void> resetMemoryContext(String instructions) async {
+    _ready();
+    _pendingHost = null;
+    _interrupt();
+    _instructions = instructions;
+    // Assistant history can paraphrase a memory: clear it as well as receipts.
+    _history.clear();
+    _facts.clear();
+    _activatedHosts.clear();
+    endpointing.reset();
+    _utterance.clear();
+    _speechId = null;
   }
 
   @override

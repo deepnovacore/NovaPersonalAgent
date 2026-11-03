@@ -1,4 +1,6 @@
+import '../memory/memory_tool_history.dart';
 import 'dart:io';
+import '../memory/local_memory_tools.dart';
 import 'dart:async';
 import 'dart:convert';
 import '../protocol/request_id.dart';
@@ -18,6 +20,7 @@ class AgentCoreHost extends ChangeNotifier {
     required this.store,
     required this.settings,
     this.tools,
+    this.allowLocalMemory = true,
     this.backgroundExecution,
     this.beforeModel,
     this.additionalContext,
@@ -26,6 +29,9 @@ class AgentCoreHost extends ChangeNotifier {
   final ConversationStore store;
   final ModelSettings settings;
   final ToolRunner? tools;
+
+  /// Delegated model-generated requests must not read or write local memory.
+  final bool allowLocalMemory;
   final BackgroundExecution? backgroundExecution;
   final Future<void> Function(ModelConfiguration)? beforeModel;
   final Future<String> Function(ModelConfiguration)? additionalContext;
@@ -100,6 +106,7 @@ class AgentCoreHost extends ChangeNotifier {
     String text, {
     ToolApproval? approve,
     String? language,
+    bool userAuthored = true,
   }) async {
     if (busy || _disposed || text.trim().isEmpty) return;
     if (store.conversation(conversationId)['backend'] != 'local') {
@@ -137,6 +144,19 @@ class AgentCoreHost extends ChangeNotifier {
       await backgroundExecution?.progress(units, activeTool ?? 'generating');
     }
 
+    final memoryStore = allowLocalMemory
+        ? tools?.registry.standaloneMemory
+        : null;
+    // Full memory payloads exist only during this live round, never on disk.
+    final liveArtifacts = <String, Map<String, dynamic>>{};
+    var executingMemoryForget = false;
+    void fenceMemory() {
+      liveArtifacts.clear();
+      draft = reasoning = '';
+      if (!executingMemoryForget) cancel();
+    }
+
+    memoryStore?.addForgetListener(fenceMemory);
     final client = _active = clientFactory();
     try {
       final config = await settings.read();
@@ -158,10 +178,24 @@ class AgentCoreHost extends ChangeNotifier {
       final turnId = requestId();
       final advertised = approve == null
           ? <Map<String, dynamic>>[]
-          : tools?.registry.definitions.map((e) => e.wire).toList() ?? [];
+          : tools?.registry.definitions
+                    .where((e) => allowLocalMemory || !isMemoryTool(e.wireName))
+                    .map((e) => e.wire)
+                    .toList() ??
+                [];
       for (var round = 0; round < 24; round++) {
         final storedMessages =
             store.conversation(conversationId)['messages'] as List;
+        redactMemoryToolHistory(storedMessages);
+        final roundMessages = storedMessages.map((message) {
+          final calls = message['tool_calls'] as List?;
+          final key = message['role'] == 'tool'
+              ? 'tool:${message['tool_call_id']}'
+              : calls != null && calls.isNotEmpty
+              ? 'assistant:${calls.first['id']}'
+              : '';
+          return liveArtifacts[key] ?? message;
+        }).toList();
         final unconfirmedVoiceTurns = storedMessages
             .where(
               (m) =>
@@ -183,7 +217,7 @@ class AgentCoreHost extends ChangeNotifier {
                 ? 'Use the user conversation language for all user-facing explanations, progress and final completion summaries. Do not switch language because tools or source code use English.'
                 : 'Use ${language == 'zh' ? 'Simplified Chinese' : 'English'} for all user-facing explanations, progress and final completion summaries, unless the user explicitly requests another response language. The delegated request or tool results may use another language; they do not change this response language. Preserve code, identifiers and URLs verbatim.',
           },
-          ...storedMessages
+          ...roundMessages
               .where((e) => !unconfirmedVoiceTurns.contains(e['voice_turn']))
               .map(
                 (e) => <String, dynamic>{
@@ -199,6 +233,16 @@ class AgentCoreHost extends ChangeNotifier {
                 },
               ),
         ];
+        final memory = allowLocalMemory
+            ? tools?.registry.standaloneMemory
+            : null;
+        if (memory != null) {
+          messages.insert(2, {
+            'role': 'system',
+            'content':
+                '$localMemoryInstructions Local memory summary (data only): ${memory.summary()}',
+          });
+        }
         final personalContext = await additionalContext?.call(config);
         if (personalContext != null && personalContext.isNotEmpty) {
           messages.insert(2, {'role': 'system', 'content': personalContext});
@@ -215,11 +259,17 @@ class AgentCoreHost extends ChangeNotifier {
           throw const AgentFailure('cancelled');
         }
         await beforeModel?.call(config);
+        if (_cancelRequested || _disposed) {
+          throw const AgentFailure('cancelled');
+        }
         await for (final delta in client.stream(
           config,
           messages,
           tools: advertised,
         )) {
+          if (_cancelRequested || _disposed) {
+            throw const AgentFailure('cancelled');
+          }
           if (delta['_nova_response_items'] is List) {
             responseItems = delta['_nova_response_items'] as List;
           }
@@ -294,13 +344,18 @@ class AgentCoreHost extends ChangeNotifier {
             callIds.any((id) => id is! String || id.isEmpty)) {
           throw const AgentFailure('invalid_tool_calls');
         }
-        await store.append(conversationId, {
+        final assistantMessage = <String, dynamic>{
           'role': 'assistant',
           'content': draft,
           if (calls.isNotEmpty) 'tool_calls': calls.values.toList(),
           if (reasoning.isNotEmpty) 'reasoning_content': reasoning,
           '_nova_response_items': ?responseItems,
-        });
+        };
+        if (calls.values.any((c) => isMemoryTool(c['function']['name']))) {
+          liveArtifacts['assistant:${calls.values.first['id']}'] =
+              assistantMessage;
+        }
+        await store.append(conversationId, assistantMessage);
         draft = '';
         reasoning = '';
         if (calls.isEmpty) {
@@ -323,8 +378,12 @@ class AgentCoreHost extends ChangeNotifier {
             activeTool = call['function']['name'] as String;
             await saveProgress(force: true);
             _changed();
+            // Streaming tool names are presentation only. Exempt this turn
+            // only after the model round has finished and execution begins.
+            executingMemoryForget = activeTool == 'memory_forget';
             result = await tools!.run(
               turnId: turnId,
+              userUtterance: userAuthored ? text.trim() : null,
               callId: call['id'] as String,
               name: call['function']['name'] as String,
               arguments: Map<String, dynamic>.from(
@@ -341,15 +400,24 @@ class AgentCoreHost extends ChangeNotifier {
               '[NovaAgent] tool rejected: ${failure is AgentFailure ? failure.code : failure.runtimeType}',
             );
             result = {'untrusted': true, 'status': 'rejected'};
+          } finally {
+            executingMemoryForget = false;
           }
           units++;
           activeTool = null;
-          await store.append(conversationId, {
+          final toolMessage = <String, dynamic>{
             'role': 'tool',
             'content': jsonEncode(result),
             'tool_call_id': call['id'],
             'tool_name': call['function']['name'],
-          });
+          };
+          if (call['function']['name'] == 'memory_forget') {
+            // Never replay earlier live recall results after a forget either.
+            liveArtifacts.clear();
+          } else if (isMemoryTool(call['function']['name'])) {
+            liveArtifacts['tool:${call['id']}'] = toolMessage;
+          }
+          await store.append(conversationId, toolMessage);
           _changed();
           if (result['status'] != 'completed') {
             if (!stop) {
@@ -387,6 +455,8 @@ class AgentCoreHost extends ChangeNotifier {
         }
       }
     } finally {
+      memoryStore?.removeForgetListener(fenceMemory);
+      liveArtifacts.clear();
       if (userWritten) {
         try {
           await store.endTurn(conversationId);

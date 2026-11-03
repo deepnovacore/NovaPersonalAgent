@@ -82,6 +82,9 @@ class ToolStep extends StatelessWidget {
   String get label {
     String t(String zh, String en) => language == 'zh' ? zh : en;
     return switch (name) {
+      'memory_remember' => t('保存记忆', 'Save memory'),
+      'memory_recall' => t('召回记忆', 'Recall memory'),
+      'memory_forget' => t('忘记记忆', 'Forget memory'),
       'file_read' => t('读取文件', 'Read file'),
       'file_write' => t('写入文件', 'Write file'),
       'file_edit' => t('修改文件', 'Edit file'),

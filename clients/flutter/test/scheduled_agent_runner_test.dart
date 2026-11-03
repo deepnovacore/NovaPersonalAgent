@@ -110,6 +110,7 @@ void main() {
           expect(model.advertised.contains(name), grantWorkspace, reason: name);
         }
         expect(model.advertised, isNot(contains('web_fetch')));
+        expect(model.advertised.where((n) => n.startsWith('memory_')), isEmpty);
         expect(repo.runs.single['status'], 'completed');
       },
     );
