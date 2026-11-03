@@ -1,8 +1,9 @@
+import {createHash,randomUUID} from 'node:crypto'
 import type {MemoryOperation} from '../memory-substrate/store.js'
 import {AsyncLocalStorage} from 'node:async_hooks'
 import { Worker, type WorkerOptions } from 'node:worker_threads'
 
-import type {MemoryLedgerStoreErrorCode} from './store.js'
+import type {MemoryLedgerStoreErrorCode,LifeAuthorizationRevision} from './store.js'
 import {hasOnlyKeys, isRecord} from '../core/guards.js'
 
 export interface MemoryLedgerWorker {
@@ -141,6 +142,7 @@ export class MemoryLedgerClient {
     readonly memoryLockWaitMs?: number
   }
   #worker: MemoryLedgerWorker
+  #authorizationFence = randomUUID()
   readonly #pending = new Map<number, PendingRequest>()
   readonly #queue: QueuedRequest[] = []
   #inService: number | null = null
@@ -169,6 +171,18 @@ export class MemoryLedgerClient {
   }
 
   recallAuthorityRevision(): number { return this.#recallAuthorityRevision }
+
+  async lifeAuthorizationRevision(namespace: string, signal?: AbortSignal): Promise<string> {
+    const fence = this.#authorizationFence
+    const revision = await this.#request('life_authorization_revision', {namespace}, value => {
+      const counter=(item:unknown)=>typeof item==='number'&&Number.isSafeInteger(item)&&item>=0
+      if (!Array.isArray(value)||value.length!==4||(value[0]!==null&&!counter(value[0]))||!counter(value[1])||!counter(value[2])
+        ||!Array.isArray(value[3])||value[3].length>256||!value[3].every((item:unknown)=>Array.isArray(item)&&item.length===2&&typeof item[0]==='string'&&item[0].length>0&&item[0].length<=512&&!item[0].includes('\0')&&counter(item[1]))) throw new TypeError('invalid life authorization revision')
+      return value as unknown as LifeAuthorizationRevision
+    }, priorityRank.interactive, signal)
+    if (fence !== this.#authorizationFence) throw new MemoryLedgerClientError('WORKER_RECYCLED')
+    return createHash('sha256').update(JSON.stringify([fence,revision])).digest('hex')
+  }
 
   memory(operation: MemoryOperation, input: unknown, options: {readonly priority?: MemoryRequestPriority; readonly signal?: AbortSignal} = {}): Promise<unknown> {
     const priority = options.priority ?? (backgroundContext.getStore() ? 'background' : 'normal')
@@ -419,6 +433,7 @@ export class MemoryLedgerClient {
   }
 
   #spawnWorker(): MemoryLedgerWorker {
+    this.#authorizationFence = randomUUID()
     const worker = this.#workerFactory(this.#workerUrl, {workerData: this.#workerData})
     worker.on('message', message => this.#handleMessage(worker, message))
     worker.on('error', () => this.#handleWorkerFailure(worker, 'WORKER_ERROR'))

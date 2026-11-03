@@ -249,7 +249,7 @@ export const settingsSchema = z.object({
   memory_connection: memoryConnectionSchema.default('local'),
   memory_provider: z.enum(['voicemem', 'mem0']).nullable().default(null),
   memory_recall_engine: z.enum(['ledger', 'voicemem', 'mem0']).nullable().default(null),
-  memory_extractors: z.array(z.literal('ledger')).min(1).nullable().default(null),
+  memory_extractors: z.array(z.enum(['ledger','voicemem'])).min(1).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
@@ -338,8 +338,11 @@ const proactivityPresets: Readonly<Record<Settings['proactivity_preset'], Proact
   eager: {cooldown: 30, fresh_window: 45},
 }
 
+export type MemoryConfigurationVariable = 'MEMORY_PROVIDER'|'MEMORY_RECALL_ENGINE'|'MEMORY_EXTRACTORS'|'MEMORY_CONNECTION'|'MEMORY_URL'|'MEMORY_TOKEN'
+export interface MemoryStartupConfiguration {readonly code:'memory_provider_conflict'|'memory_configuration_invalid';readonly variables:readonly MemoryConfigurationVariable[]}
+const memoryConfigurationVariables:readonly string[]=['MEMORY_PROVIDER','MEMORY_RECALL_ENGINE','MEMORY_EXTRACTORS','MEMORY_CONNECTION','MEMORY_URL','MEMORY_TOKEN']
 export class ConfigurationError extends Error {
-  constructor(message: string, readonly code: 'invalid_configuration' = 'invalid_configuration') {
+  constructor(message: string, readonly code: 'invalid_configuration' = 'invalid_configuration', readonly startupConfiguration?: MemoryStartupConfiguration) {
     super(message)
     this.name = 'ConfigurationError'
   }
@@ -634,7 +637,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     const fields = [...new Set(result.error.issues.map(issue => String(issue.path[0] ?? 'settings')))]
       .sort(compareStrings)
       .map(configurationFieldName)
-    throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`)
+    throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`, 'invalid_configuration', fields.some(field=>memoryConfigurationVariables.includes(field)) ? {code:'memory_configuration_invalid',variables:fields.filter(field=>memoryConfigurationVariables.includes(field)) as MemoryConfigurationVariable[]} : undefined)
   }
   resolveMemoryConnection(result.data)
   return result.data
@@ -831,11 +834,7 @@ export function resolveMemoryExtractionConnection(settings: Settings): MemoryExt
 export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig | null {
   const connection = resolveMemoryConnection(settings)
   if (connection === 'disabled') return null
-  if (connection === 'remote') return Object.freeze({
-    connection: 'remote',
-    url: requiredSetting(settings.memory_url, 'MEMORY_URL'),
-    token: requiredCredential(settings.memory_token, 'MEMORY_TOKEN'),
-  })
+  if (connection === 'remote') return remoteMemoryConfig(settings)
   // Local memory is optional: without its embedding and extraction credentials it stays off
   // instead of blocking the voice pipeline or silently failing every extraction request.
   if (!resolveEmbeddingConnection(settings).apiKey) return null
@@ -858,7 +857,7 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
 export type MemoryComposition =
   | {readonly kind: 'disabled'}
   | {readonly kind: 'remote'; readonly config: Extract<PersonalMemoryConfig, {connection: 'remote'}>}
-  | {readonly kind: 'ledger'; readonly engine: 'ledger' | 'voicemem' | 'mem0'; readonly extractors: readonly 'ledger'[]; readonly migrateLegacy?: {readonly path: string; readonly userId: string}; readonly local: LocalPersonalMemoryConfig}
+  | {readonly kind: 'ledger'; readonly engine: 'ledger' | 'voicemem' | 'mem0'; readonly extractors: readonly ('ledger'|'voicemem')[]; readonly migrateLegacy?: {readonly path: string; readonly userId: string}; readonly local: LocalPersonalMemoryConfig}
   | {readonly kind: 'standalone-mem0'; readonly config: LocalPersonalMemoryConfig}
 
 /** Pure plan: no stores, warnings, migrations or model calls happen during resolution. */
@@ -870,7 +869,7 @@ export function resolveMemoryComposition(settings: Settings): MemoryComposition 
   const local = {...configured, path}
   if (settings.memory_provider === 'mem0') return {kind: 'standalone-mem0', config: local}
   const legacy = settings.memory_recall_engine === null && settings.memory_extractors === null
-  return {kind: 'ledger', engine: settings.memory_recall_engine ?? 'ledger', extractors: ['ledger'], local,
+  return {kind: 'ledger', engine: settings.memory_recall_engine ?? 'ledger', extractors: settings.memory_extractors ?? ['ledger'], local,
     ...(legacy ? {migrateLegacy: {path, userId: local.userId}} : {})}
 }
 
@@ -893,16 +892,28 @@ export function memoryStatus(settings: Settings): {enabled: boolean; reason: str
   }
 }
 
+function remoteMemoryConfig(settings:Settings):Extract<PersonalMemoryConfig,{connection:'remote'}> {
+  const invalid=(variables:readonly MemoryConfigurationVariable[])=>new ConfigurationError('invalid remote memory configuration','invalid_configuration',{code:'memory_configuration_invalid',variables})
+  const url=settings.memory_url.trim()
+  try {
+    const parsed=new URL(url)
+    if((parsed.protocol!=='https:'&&!(parsed.protocol==='http:'&&['127.0.0.1','[::1]'].includes(parsed.hostname)))||parsed.username||parsed.password||parsed.search||parsed.hash||(parsed.pathname!=='/'&&parsed.pathname!==''))throw Error()
+  }catch{throw invalid(['MEMORY_CONNECTION','MEMORY_URL'])}
+  const token=(settings.memory_token??'').trim()
+  if(!token||token.length>8192||/\s/u.test(token))throw invalid(['MEMORY_CONNECTION','MEMORY_TOKEN'])
+  return Object.freeze({connection:'remote',url,token})
+}
+
 function resolveMemoryConnection(settings: Settings): z.infer<typeof memoryConnectionSchema> {
   const connection = settings.memory_connection
   const newSettings = settings.memory_recall_engine !== null || settings.memory_extractors !== null
-  if (newSettings && settings.memory_provider !== null) throw new ConfigurationError('MEMORY_PROVIDER conflicts with MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS')
-  if (newSettings && connection === 'remote') throw new ConfigurationError('MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS are only valid for a local memory connection')
-  if (settings.memory_extractors !== null && (settings.memory_extractors.length === 0 || settings.memory_extractors.some(value => value !== 'ledger'))) throw new ConfigurationError('MEMORY_EXTRACTORS supports only ledger; other extractors are not implemented')
-  if (settings.memory_recall_engine === 'voicemem' || settings.memory_recall_engine === 'mem0') throw new ConfigurationError('MEMORY_RECALL_ENGINE engine feeding is not available yet')
+  if (newSettings && settings.memory_provider !== null) throw new ConfigurationError('MEMORY_PROVIDER conflicts with MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS','invalid_configuration',{code:'memory_provider_conflict',variables:['MEMORY_PROVIDER',...(settings.memory_recall_engine!==null?['MEMORY_RECALL_ENGINE' as const]:[]),...(settings.memory_extractors!==null?['MEMORY_EXTRACTORS' as const]:[])]})
+  if (newSettings && connection === 'remote') throw new ConfigurationError('MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS are only valid for a local memory connection','invalid_configuration',{code:'memory_configuration_invalid',variables:['MEMORY_CONNECTION',...(settings.memory_recall_engine!==null?['MEMORY_RECALL_ENGINE' as const]:[]),...(settings.memory_extractors!==null?['MEMORY_EXTRACTORS' as const]:[])]})
+  if (settings.memory_extractors !== null && (!settings.memory_extractors.includes('ledger') || new Set(settings.memory_extractors).size !== settings.memory_extractors.length)) throw new ConfigurationError('MEMORY_EXTRACTORS requires ledger and at most one voicemem','invalid_configuration',{code:'memory_configuration_invalid',variables:['MEMORY_EXTRACTORS']})
   if (settings.memory_provider !== null && connection !== 'local') {
-    throw new ConfigurationError('MEMORY_PROVIDER is only valid for a local memory connection; remote engines are selected by the service')
+    throw new ConfigurationError('MEMORY_PROVIDER is only valid for a local memory connection; remote engines are selected by the service','invalid_configuration',{code:'memory_configuration_invalid',variables:['MEMORY_PROVIDER','MEMORY_CONNECTION']})
   }
+  if(connection==='remote')remoteMemoryConfig(settings)
   return connection
 }
 

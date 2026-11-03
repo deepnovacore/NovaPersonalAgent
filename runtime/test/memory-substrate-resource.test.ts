@@ -281,14 +281,14 @@ test('semantic memory retrieval finds paraphrases and hydrates only current evid
   assert.equal((await resource.list()).entries.length,2,'both unrelated memories survive valid resolver add decisions')
   const answer=await resource.recall('假期安排',{limit:1});assert.equal(answer.degraded,false);assert.equal(answer.hits[0]?.text,'喜欢去海边旅行')
   const hit=answer.hits[0]
-  assert.equal((await resource.evidenceFor(hit.memoryId,hit.revision))[0]?.text,'喜欢去海边旅行')
+  assert.equal((await resource.evidenceFor(hit.memoryId,hit.revision!))[0]?.text,'喜欢去海边旅行')
   assert.deepEqual(await resource.evidenceFor(hit.memoryId,999),[])
   const mismatched=await client.memory('search',{entry_prefix:resource.prefix,provider:'endpoint-b:fixture:2',query:'假期安排',vector:[1,0],scope:'any',limit:1}) as {hits:unknown[];degraded:boolean}
   assert.equal(mismatched.hits.length,0);assert.equal(mismatched.degraded,true,'different provider fingerprints never mix vectors')
   const pending=resource.recall('延迟查询');await started
   await resource.forgetSource('trip');release([new Float32Array([1,0])])
   assert.ok(!(await pending).hits.some(row=>row.memoryId===hit.memoryId),'deletion during provider work cannot return a stale hit')
-  assert.deepEqual(await resource.evidenceFor(hit.memoryId,hit.revision),[])
+  assert.deepEqual(await resource.evidenceFor(hit.memoryId,hit.revision!),[])
  }finally{release?.([new Float32Array([1,0])]);await resource.close();await rm(root,{recursive:true,force:true})}
 })
 

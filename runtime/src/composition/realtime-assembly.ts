@@ -1,5 +1,5 @@
 import {factoryForMemoryComposition, legacyMemoryComposition} from '../memory/factory.js'
-import {ConfigurationError, type MemoryComposition} from '../config/config.js'
+import {type MemoryComposition} from '../config/config.js'
 import {configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
 export {configuredMemoryConsumer, configuredMemoryRecipient, configuredTaskVerifierConsumer} from '../memory/consumer.js'
 import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
@@ -1477,7 +1477,6 @@ export function composeRealtime(
   const spaceConfigPath=options.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(memoryPath(spaceConfigPath)):undefined
   const composition = options.memoryComposition ?? legacyMemoryComposition(options.createPersonalMemory)
-  if (composition?.kind === 'ledger' && composition.engine !== 'ledger') throw new ConfigurationError('MEMORY_RECALL_ENGINE engine feeding is not available yet')
   const local = composition?.kind === 'ledger' ? composition.local : undefined
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig&&spaceConfig.data_mode!=='existing'?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
@@ -1487,7 +1486,9 @@ export function composeRealtime(
   const isolatedSpace=spaceConfig!==undefined&&spaceConfig.data_mode!=='existing'
   const localLedger = useLocalLedger({knowledge: core.knowledge !== undefined, createPersonalMemory: options.createPersonalMemory, ...(options.memoryComposition ? {memoryComposition: options.memoryComposition} : {}), ...(spaceConfig ? {spaceConfig} : {})})
   const createPersonalMemory = localLedger ? () => {
-    const memory = new SubstrateMemoryResource({client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
+    const memory = new SubstrateMemoryResource({
+      ...(composition?.kind==='ledger'?{engine:{recall:composition.engine,styles:composition.extractors.includes('voicemem'),consumer:options.memoryConsumerFingerprint??configuredMemoryConsumer(options.settings,options.memoryReadMode??'voice')??'',config:{path:composition.local.path+'.engines',embedding:composition.local.embedding,extraction:composition.local.extraction,extractionModel:composition.local.extractionModel}}}:{}),
+      client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:extraction,
       extractionFingerprint:embeddingHash('sha256').update(extraction.baseUrl+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),

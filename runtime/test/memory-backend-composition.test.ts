@@ -48,15 +48,18 @@ test('disabled, credential-disabled and remote preserve their connection modes',
   assert.deepEqual(resolveMemoryComposition(loadSettings({...credentials, MEMORY_CONNECTION: 'disabled', MEMORY_RECALL_ENGINE: 'ledger'})), {kind: 'disabled'})
   assert.equal(resolveMemoryComposition(loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'})).kind, 'remote')
 })
-test('conflicts, remote overrides and unfinished engine feeding fail at configuration time', () => {
+test('conflicts and remote overrides fail at configuration time', () => {
   for (const env of [
     {MEMORY_PROVIDER: 'voicemem', MEMORY_RECALL_ENGINE: 'ledger'},
     {MEMORY_PROVIDER: 'mem0', MEMORY_EXTRACTORS: 'ledger'},
     {MEMORY_CONNECTION: 'remote', MEMORY_RECALL_ENGINE: 'ledger'},
     {MEMORY_CONNECTION: 'remote', MEMORY_EXTRACTORS: 'ledger'},
-    {MEMORY_EXTRACTORS: 'ledger,voicemem'}, {MEMORY_EXTRACTORS: 'mem0'},
+    {MEMORY_EXTRACTORS: 'voicemem'}, {MEMORY_EXTRACTORS: 'mem0'}, {MEMORY_EXTRACTORS:'ledger,ledger'},
   ]) assert.throws(() => loadSettings({...credentials, ...env}), ConfigurationError)
-  for (const engine of ['voicemem', 'mem0']) assert.throws(() => loadSettings({...credentials, MEMORY_RECALL_ENGINE: engine}), /engine feeding is not available yet/)
+  for (const engine of ['voicemem', 'mem0']) {
+    const composition=resolveMemoryComposition(loadSettings({...credentials,MEMORY_RECALL_ENGINE:engine,MEMORY_EXTRACTORS:'ledger,voicemem'}))
+    assert.equal(composition.kind,'ledger');if(composition.kind==='ledger'){assert.equal(composition.engine,engine);assert.deepEqual(composition.extractors,['ledger','voicemem'])}
+  }
 })
 
 
@@ -70,4 +73,11 @@ test('legacyMemoryComposition rejects malformed tags without narrowing injected 
     assert.equal(legacyMemoryComposition(factory), undefined)
     assert.deepEqual(planMemoryToolCapabilities({settings, createPersonalMemory: factory, knowledge: false}), FULL_MEMORY_TOOLS)
   }
+})
+
+test('startup configuration metadata names only allowlisted fields',()=>{
+  for(const env of [{MEMORY_RECALL_ENGINE:'secret-invalid-value'},{MEMORY_EXTRACTORS:'ledger,secret-invalid-value'},{MEMORY_PROVIDER:'mem0',MEMORY_RECALL_ENGINE:'ledger'},{MEMORY_CONNECTION:'remote',MEMORY_RECALL_ENGINE:'ledger'}]){
+    assert.throws(()=>loadSettings({...credentials,...env}),(error:unknown)=>{assert.ok(error instanceof ConfigurationError);assert.ok(error.startupConfiguration);assert.ok(!JSON.stringify(error.startupConfiguration).includes('secret-invalid-value'));return true})
+  }
+  assert.throws(()=>resolveMemoryComposition(loadSettings({MEMORY_CONNECTION:'remote',MEMORY_URL:'https://private.invalid?token=secret-invalid-value',MEMORY_TOKEN:'fixture'})),(error:unknown)=>{assert.ok(error instanceof ConfigurationError);assert.equal(error.startupConfiguration?.code,'memory_configuration_invalid');return true})
 })

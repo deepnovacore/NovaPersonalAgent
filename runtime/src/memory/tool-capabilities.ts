@@ -33,8 +33,9 @@ export function useLocalLedger(input: Pick<MemoryPlanInput, 'createPersonalMemor
 export function planMemoryToolCapabilities(input: MemoryPlanInput): MemoryToolCapabilities {
   if (useLocalLedger(input)) {
     const isolated = input.spaceConfig !== undefined && input.spaceConfig.data_mode !== 'existing'
-    const local = (input.memoryComposition ?? legacyMemoryComposition(input.createPersonalMemory))?.kind === 'ledger'
-    return isolated || local ? FULL_MEMORY_TOOLS : {...NO_MEMORY_TOOLS, recall: true, evidence: true, engine: 'knowledge'}
+    const composition=input.memoryComposition??legacyMemoryComposition(input.createPersonalMemory)
+    const local=composition?.kind==='ledger'
+    return isolated || local ? {...FULL_MEMORY_TOOLS,engine:local?composition.engine:'ledger'} : {...NO_MEMORY_TOOLS, recall: true, evidence: true, engine: 'knowledge'}
   }
   if (input.memoryComposition?.kind === 'remote') return {...NO_MEMORY_TOOLS, recall: true, engine: 'remote'}
   if (input.memoryComposition?.kind === 'standalone-mem0') return {...NO_MEMORY_TOOLS, recall: true, evidence: true, engine: 'mem0'}
@@ -53,6 +54,6 @@ export function memoryToolsFor(caps: MemoryToolCapabilities, mode: {scheduled: b
 /** Shared conversations may compile before the owning graph has created its resource. */
 export function resolveMemoryToolCapabilities(resource: PersonalMemoryResource | undefined, planned: MemoryToolCapabilities): MemoryToolCapabilities {
   if (!resource) return planned
-  const engine = resource.writeExplicit ? 'ledger' : planned.engine === 'mem0' ? 'mem0' : resource.readEvidence ? 'knowledge' : planned.engine
+  const engine = resource.writeExplicit ? resource.recallEngine??'ledger' : planned.engine === 'mem0' ? 'mem0' : resource.readEvidence ? 'knowledge' : planned.engine
   return deriveMemoryToolCapabilities(resource, engine)
 }
