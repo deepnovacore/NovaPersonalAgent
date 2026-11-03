@@ -353,3 +353,33 @@ test('window show fence follows the active Windows shell and observes an early c
   closing.emit('closed')
   await assert.rejects(closed,/startup_window_closed/)
 })
+
+test('startup notice displays fixed actionable memory configuration hints, never raw fields', async () => {
+  const {startupMessage} = await import('../src/renderer/startup-notice.mjs')
+  const privateDetail = 'Bearer short https://private.invalid?token=secret consumer:private'
+  for (const [code, variables, hint] of [
+    ['memory_provider_conflict', ['MEMORY_PROVIDER', 'MEMORY_RECALL_ENGINE'], /请移除旧的 MEMORY_PROVIDER/u],
+    ['memory_configuration_invalid', ['MEMORY_EXTRACTORS', 'MEMORY_CONNECTION'], /格式与连接模式/u],
+  ]) {
+    const message = startupMessage({stage: 'failed', message: privateDetail,
+      startupConfiguration: {code, variables, hint: privateDetail}})
+    assert.ok(message.includes(code))
+    for (const name of variables) assert.ok(message.includes(name))
+    assert.match(message, hint)
+    assert.doesNotMatch(message, /Bearer|private|secret|consumer/u)
+  }
+  for (const configuration of [{code: privateDetail, variables: ['MEMORY_PROVIDER']},
+    {code: 'memory_configuration_invalid', variables: [privateDetail]}]) {
+    assert.equal(startupMessage({stage: 'failed', startupConfiguration: configuration}), '后台启动失败，请打开设置检查配置后重试。')
+  }
+})
+
+test('main publishes structured startup configuration from supervisor without adding raw diagnostics', () => {
+  assert.match(source, /publishStartup\('failed', status\.diagnostic, status\.startupConfiguration\)/u)
+  const body = source.slice(source.indexOf('const STARTUP_DIAGNOSTIC_STAGES'), source.indexOf('async function paintStartup('))
+  const context = vm.createContext({startup: {stage: 'backend'}, backendStatus: {}, sendToOrb: () => {}, sendToSettings: () => {}, settingsView: () => ({}), console: {error: () => {}}})
+  vm.runInContext(body, context)
+  const configuration = {code: 'memory_configuration_invalid', variables: ['MEMORY_RECALL_ENGINE']}
+  context.publishStartup('failed', 'configuration_required', configuration)
+  assert.deepEqual(JSON.parse(JSON.stringify(context.startup.startupConfiguration)), configuration)
+})

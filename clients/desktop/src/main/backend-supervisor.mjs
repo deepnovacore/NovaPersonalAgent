@@ -1,5 +1,6 @@
 import {publicUsageReport} from './frontend-usage.mjs'
 import {randomUUID} from 'node:crypto'
+import {publicStartupConfiguration} from '../startup-configuration.mjs'
 
 const FAILURE_KINDS = new Set([
   'configuration_required', 'authentication_failed', 'unavailable', 'recoverable',
@@ -11,7 +12,8 @@ function failureOf(value) {
     const code = typeof value.code === 'string' && /^[a-z0-9_]{1,64}$/.test(value.code)
       ? value.code
       : value.kind
-    return Object.freeze({kind: value.kind, code})
+    const configuration = publicStartupConfiguration(value.startupConfiguration)
+    return Object.freeze({kind: value.kind, code, ...(configuration ? {startupConfiguration: configuration} : {})})
   }
   return Object.freeze({kind: 'recoverable', code: 'backend_disconnected'})
 }
@@ -50,8 +52,8 @@ export function createBackendSupervisor({
     state: 'stopped', connection: null, retryInMs: null, diagnostic: null,
   })
 
-  const publish = (state, connection = null, retryInMs = null, diagnostic = null) => {
-    current = Object.freeze({state, connection, retryInMs, diagnostic})
+  const publish = (state, connection = null, retryInMs = null, diagnostic = null, startupConfiguration = null) => {
+    current = Object.freeze({state, connection, retryInMs, diagnostic, ...(startupConfiguration ? {startupConfiguration} : {})})
     onStatus(current)
   }
   const cancelRetry = () => {
@@ -80,7 +82,7 @@ export function createBackendSupervisor({
     const failure = failureOf(value)
     if (failure.kind !== 'recoverable') {
       cancelRetry()
-      publish(failure.kind, null, null, failure.code)
+      publish(failure.kind, null, null, failure.code, failure.startupConfiguration)
       return
     }
     if (timer !== null) return
@@ -200,6 +202,8 @@ export function publicRuntimeCapabilityStatus(value) {
   result.servers = (Array.isArray(value.servers) ? value.servers : []).slice(0, 8).filter(server => /^[a-z][a-z0-9_]{0,31}$/u.test(server?.name ?? '')).map(server => ({name: server.name, ...status(server), ...(server.codex ? {codex: status(server.codex)} : {})}))
   if (result.state === 'startup_failed' && value.reason === 'configuration_required') {
     result.reason = 'configuration_required'
+    const configuration = publicStartupConfiguration(value.startupConfiguration)
+    if (configuration) result.startupConfiguration = configuration
     if (['integrated', 'cascaded'].includes(value.pipeline)) result.pipeline = value.pipeline
     result.missing = (Array.isArray(value.missing) ? value.missing : []).slice(0, 4).filter(name => BLOCKING_CREDENTIALS.has(name))
   }
@@ -300,16 +304,23 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
 ])
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
 const CONFIG_WARNING = /\[config-warning\] [\x20-\x7e]{1,160}/g
-const STARTUP_ERROR = /\[runtime-startup-error\] [^\r\n]{1,296}/g
+const STARTUP_ERROR = /\[runtime-startup-error\] ([^\r\n]{1,296})(?=\r?\n|$)/g
 
 /** Runtime configuration warnings name only variables, never values, so the main process can echo them verbatim. */
 export function configWarnings(chunk) {
   return String(chunk).match(CONFIG_WARNING) ?? []
 }
 
-/** The runtime's sanitised startup exception; terminal-only, never a failure code. */
+/** Echo only the runtime's fixed startup contract; arbitrary stderr is not safe exception prose. */
 export function startupErrors(chunk) {
-  return String(chunk).match(STARTUP_ERROR) ?? []
+  const lines = []
+  for (const [, detail] of String(chunk).matchAll(STARTUP_ERROR)) {
+    if (detail === 'startup_failed') { lines.push('[runtime-startup-error] startup_failed'); continue }
+    const [code, variables] = detail.split(': ')
+    const configuration = publicStartupConfiguration({code, variables: variables?.split(', ')})
+    if (configuration && detail === `${configuration.code}: ${configuration.variables.join(', ')}`) lines.push(`[runtime-startup-error] ${detail}`)
+  }
+  return lines
 }
 
 export function classifyBackendFailure(code) {
@@ -338,7 +349,8 @@ export function createBackendDiagnosticCollector() {
       const status = publicRuntimeCapabilityStatus(value)
       if (status?.state === 'startup_failed' && (status.reason === 'configuration_required'
         || (status.toolCount !== null && status.toolCount > status.toolBudget))) {
-        startupFailure = classifyBackendFailure('configuration_required')
+        startupFailure = Object.freeze({...classifyBackendFailure('configuration_required'),
+          ...(status.startupConfiguration ? {startupConfiguration: status.startupConfiguration} : {})})
       }
     },
     push(chunk) {

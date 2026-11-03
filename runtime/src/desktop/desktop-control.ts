@@ -9,6 +9,7 @@ import type {DesktopStopParentSource} from './desktop-session.js'
 import {reportUsage, type UsageReport} from '../realtime/usage.js'
 import {CODING_BACKEND_IDS, type CodingBackendId} from '../config/coding-backends.js'
 import {rotateCredential} from '../config/credential-rotation.js'
+import {startupConfiguration, type StartupConfiguration} from './startup-error.js'
 
 type ParentPort = DesktopStopParentSource & {postMessage(message: unknown): void}
 export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
@@ -19,6 +20,7 @@ export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
   readonly reason?: 'configuration_required'
   readonly pipeline?: 'integrated' | 'cascaded'
   readonly missing?: readonly string[]
+  readonly startupConfiguration?: StartupConfiguration
 }
 /** Utility IPC only: the renderer WebSocket never admits these host operations. */
 export function installDesktopControl(options: {
@@ -102,8 +104,11 @@ export function installDesktopControl(options: {
     reportUsage(port === undefined ? undefined : value => port.postMessage({type: 'nova.usage', report: value}), report)
   }}
 }
-/** Names the missing pipeline keys so the host can ask for exactly those instead of a bare configuration error. */
+/** Names only safe configuration keys so the host can offer an actionable startup failure. */
 export function desktopConfigurationFailure(error: unknown): DesktopCapabilityState | undefined {
+  const configuration = startupConfiguration(error)
+  if (configuration !== undefined) return {state: 'startup_failed', toolCount: null,
+    toolBudget: DEFAULT_FRONTBRAIN_TOOL_BUDGET, reason: 'configuration_required', startupConfiguration: configuration}
   if (!(error instanceof BlockingConfigurationError)) return undefined
   const missing = error.missing.filter(name => /^[A-Z][A-Z0-9_]{0,63}$/u.test(name)).slice(0, 4)
   return {state: 'startup_failed', toolCount: null, toolBudget: DEFAULT_FRONTBRAIN_TOOL_BUDGET,

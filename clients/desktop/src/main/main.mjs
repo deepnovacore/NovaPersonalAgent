@@ -530,9 +530,9 @@ const STARTUP_DIAGNOSTIC_STAGES = Object.freeze(new Set([
   'configuration', 'backend', 'failed', 'ready',
 ]))
 
-function publishStartup(stage, code = null) {
+function publishStartup(stage, code = null, startupConfiguration = null) {
   const changed = startup.stage !== stage
-  startup = Object.freeze({stage, code})
+  startup = Object.freeze({stage, code, ...(startupConfiguration ? {startupConfiguration} : {})})
   if (changed && STARTUP_DIAGNOSTIC_STAGES.has(stage)) {
     console.error(`[desktop-diagnostic] startup_stage=${stage}`)
   }
@@ -578,12 +578,12 @@ async function accessCredentials(operation, {retry = false, startupAttempt = fal
       if (startup.stage === 'credentials') {
         if (startupAttempt && backendStatus.state === 'starting') publishStartup('backend')
         else if (backendStatus.state === 'connected') publishStartup('ready')
-        else publishStartup(previous.stage, previous.code)
+        else publishStartup(previous.stage, previous.code, previous.startupConfiguration)
       }
       return result
     } catch (error) {
       if (['credential_access_failed', 'credential_invalid'].includes(error?.code)) credentialFailure = error
-      if (startup.stage === 'credentials') publishStartup(previous.stage, previous.code)
+      if (startup.stage === 'credentials') publishStartup(previous.stage, previous.code, previous.startupConfiguration)
       throw error
     }
   })
@@ -2555,7 +2555,7 @@ async function startSelectedCamera(camera, smokeChannel) {
       sendToSettings('nova:settings:changed', settingsView())
       if (status.state === 'connected') { backendEverConnected = true; publishStartup('ready') }
       else if (status.state === 'reconnecting') publishStartup(backendEverConnected ? 'reconnecting' : 'backend', status.diagnostic)
-      else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic)
+      else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic, status.startupConfiguration)
       sendToOrb('nova:backend-status', {...status, startup})
       if (smokeChannel === null && status.state === 'connected' && status.connection) {
         sendToOrb('nova:backend-ready', status.connection)
