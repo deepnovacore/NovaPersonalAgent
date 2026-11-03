@@ -4,6 +4,7 @@ import {mkdtemp,readFile,writeFile,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {emptyContextDependencies} from '../src/personal-agent/context-dependencies.js'
 import {emptyLifeState} from '../src/personal-agent/life.js'
 import {PersonalStore,initialState} from '../src/personal-agent/store.js'
 import type {ScheduleRun} from '../src/personal-agent/scheduled-tasks.js'
@@ -154,7 +155,9 @@ for(const backend of ['mem0','ledger'] as const)test(`host product memory: ${bac
  await writeFile(path+'.schedules.json',JSON.stringify(legacySchedules))
  persisted.feed.push({...structuredClone(taskFeed),id:'legacy-task',title:legacyText,prepared:{trust:'untrusted_external',text:legacyText,evidence_refs:[]},delivery:{presented_at:now.toISOString(),notified_at:null,spoken_at:null}})
  delete persisted.feed.at(-1)!.memory_origin
- persisted.conversations.items[0]!.messages.push({id:'feed:'+taskFeed.id,conversation_id:'chat:main',role:'assistant',origin:'proactive',text:taskText,created_at:now.toISOString()})
+ // This verified task read no app/source context; unlike a legacy answer after the scheduled report, its provenance is known.
+ assert.equal(host.tasks.evidence(task.id).some(item=>item.kind==='context'),false)
+ persisted.conversations.items[0]!.messages.push({id:'feed:'+taskFeed.id,conversation_id:'chat:main',role:'assistant',origin:'proactive',text:taskText,context_dependencies:emptyContextDependencies(),created_at:now.toISOString()})
  await new PersonalStore(path).write(persisted)
  const control=ledger?memory:new SubstrateMemoryResource({client:new MemoryLedgerClient(join(directory,'restart-ledger.sqlite')),userId:'test',model:'extract',inputConsent:true,consolidation:{enabled:false},gateway:{async *stream(){await Promise.resolve();throw Error('unexpected extraction')},complete:()=>Promise.reject(Error('unexpected extraction'))}})
  if(!ledger){await control.open();t.after(()=>control.close())}

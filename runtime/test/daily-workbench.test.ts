@@ -107,7 +107,8 @@ test('source notification hides pending cards but a no-change refresh preserves 
 
 test('host waits for the first successful selected-chat sync before shared generation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-sync-'));let lastSync:string|undefined,calls=0
- const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>({productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()])}) as unknown as PersonalMemoryResource,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  host.setFeishu({open:()=>Promise.resolve(),close:()=>Promise.resolve(),snapshot:()=>({state:'ready',chats:[{selected:true}],last_sync:lastSync}),command:()=>Promise.resolve({})})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(calls,0);lastSync=new Date().toISOString();await host.workbenchContext.refresh();assert.equal(calls,3)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

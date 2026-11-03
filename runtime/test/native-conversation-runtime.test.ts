@@ -9,6 +9,7 @@ import {settingsSchema} from '../src/config/config.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
 import {createConversation} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {emptyContextDependencies} from '../src/personal-agent/context-dependencies.js'
 import {realtimeCapabilities} from '../src/realtime/capabilities.js'
 import type {RealtimeProvider,HostContextItem} from '../src/realtime/protocol.js'
 import {RealtimeService} from '../src/realtime/service.js'
@@ -85,7 +86,10 @@ for(const mode of ['chat','plan','build'] as const)test(`${mode} voice factory i
  try{
   await host.open()
   const conversation=createConversation(mode==='build'?'build':'chat','Context');conversation.mode=mode==='plan'?'plan':'chat'
-  if(mode==='plan')conversation.plan={id:'plan',version:3,title:'Current plan'}
+  if(mode==='plan'){
+   conversation.plan={id:'plan',version:3,title:'Current plan'}
+   await host.workbench.savePlan({...conversation.plan,content:'Discuss the current plan',conversation_id:conversation.id,generation:conversation.generation,created_at:new Date().toISOString(),context_dependencies:emptyContextDependencies()})
+  }
   if(mode==='build')conversation.build={project:dir,status:'paused',approval:null,reason:null,log_revision:0,source_conversation_id:'chat:main'}
   conversation.messages=Array.from({length:20},(_,index)=>({id:'m'+index,conversation_id:conversation.id,role:index%2?'assistant' as const:'user' as const,text:'message '+index+'\n'.repeat(1000),created_at:new Date().toISOString()}))
   const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test',deepseek_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})

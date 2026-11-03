@@ -102,8 +102,16 @@ import {composeRealtime, plannedMemoryTools} from '../src/composition/realtime-a
 const fixtureGateway = {async *stream() {await Promise.reject(Error('unused'))}, complete() {throw Error('unused')}}
 const recallOnly: PersonalMemoryResource = {open: () => Promise.resolve(), close: () => Promise.resolve(), recall: () => Promise.resolve({source: 'personal', state: 'empty', scope: 'any', hits: [], degraded: false})}
 
-test('planMemoryToolCapabilities agrees with resource members for each composition branch', () => {
-  const ledger = Object.create(SubstrateMemoryResource.prototype) as PersonalMemoryResource
+function createUnopenedCapabilityLedger(): SubstrateMemoryResource {
+  const client = new MemoryLedgerClient(':memory:')
+  client.open = () => {throw Error('capability planning must not open the ledger')}
+  client.memory = () => {throw Error('capability planning must not access the ledger')}
+  return new SubstrateMemoryResource({client, userId: 'fixture', model: 'fixture', gateway: fixtureGateway, inputConsent: true, conversationProviders: ['chat']})
+}
+
+test('planMemoryToolCapabilities agrees with resource members for each composition branch', t => {
+  const ledger = createUnopenedCapabilityLedger()
+  t.after(() => ledger.close())
   const mem0 = createMem0PersonalMemory({path: join(tmpdir(), 'capability-mem0'), userId: 'fixture', embedding: {baseUrl: 'https://embedding.example', apiKey: 'fixture', model: 'fixture'}})
   assert.deepEqual(deriveMemoryToolCapabilities(mem0, 'mem0'), {recall: true, evidence: true, sourceFilter: false, lookup: false, remember: false, engine: 'mem0'})
   const knowledge = {...recallOnly, readEvidence: () => Promise.resolve(null)}
@@ -240,7 +248,7 @@ import {createMem0PersonalMemory} from '../src/mem0/resource.js'
 import {personalMemoryFactory} from '../src/memory/factory.js'
 import {prepareKnowledge} from '../src/knowledge/assembly.js'
 
-for (const backend of ['ledger', 'mem0', 'remote', 'none'] as const) test(`shared conversation tools before resource creation use the configured ${backend} plan`, async () => {
+for (const backend of ['ledger', 'mem0', 'remote', 'none'] as const) test(`shared conversation tools before resource creation use the configured ${backend} plan`, async t => {
   const settings = loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen', EXECUTORS: '',
     ...(backend === 'mem0' ? {MEMORY_PROVIDER: 'mem0'} : backend === 'remote' ? {MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture'} : backend === 'none' ? {MEMORY_CONNECTION: 'disabled'} : {})})
   const {factory: createPersonalMemory, composition: memoryComposition} = personalMemoryFactory(settings)
@@ -251,8 +259,13 @@ for (const backend of ['ledger', 'mem0', 'remote', 'none'] as const) test(`share
     assert.deepEqual([...core.tools.bindings.keys()].filter(name => name.startsWith('memory__')).sort(), backend === 'ledger'
       ? ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'] : backend === 'mem0' ? ['memory__evidence', 'memory__recall'] : ['memory__recall'])
     assert.equal(caps.engine, backend)
-    const ledger = Object.create(SubstrateMemoryResource.prototype) as PersonalMemoryResource
-    assert.deepEqual(resolveMemoryToolCapabilities(ledger, planned), FULL_MEMORY_TOOLS, 'live shared ledger overrides a reduced static plan')
+    const ledger = createUnopenedCapabilityLedger()
+    t.after(() => ledger.close())
+    assert.equal(ledger.recallEngine, 'ledger')
+    const resolved = resolveMemoryToolCapabilities(ledger, planned)
+    assert.deepEqual(resolved, FULL_MEMORY_TOOLS, 'live shared ledger overrides a reduced static plan')
+    assert.deepEqual([...compileToolSchema([], {memory: resolved}).bindings.keys()].filter(name => name.startsWith('memory__')).sort(),
+      ['memory__evidence', 'memory__lookup', 'memory__recall', 'memory__remember'])
   } finally {await core.stop()}
 })
 
