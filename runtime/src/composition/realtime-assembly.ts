@@ -1,5 +1,5 @@
 import {factoryForMemoryComposition, legacyMemoryComposition} from '../memory/factory.js'
-import {ConfigurationError, type MemoryComposition} from '../config/config.js'
+import {type MemoryComposition} from '../config/config.js'
 import {configuredDiscoveryConsumer, configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
 export {configuredMemoryConsumer, configuredMemoryRecipient, configuredTaskVerifierConsumer} from '../memory/consumer.js'
 import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
@@ -990,7 +990,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     throw new AssemblyError('coding agent controller factory requires a coding executor')
   }
   const personalMemorySessionId = randomUUID()
-  const retrieval=new UnifiedRetrieval({...(options.telemetry?{telemetry:options.telemetry}:{}),...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
+  const retrieval=new UnifiedRetrieval({...(options.telemetry?{telemetry:options.telemetry}:{}),...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawRecallKind:'knowledge' as const,rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
     if(!personalMemoryHolder.current?.readEvidence)return []
     const result=await core.knowledge!.service.recall(query,Math.min(5,limit),signal)
     return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
@@ -1495,7 +1495,6 @@ export function composeRealtime(
   const spaceConfigPath=options.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
   const spaceConfig=spaceConfigPath?readHostSpaceConfig(memoryPath(spaceConfigPath)):undefined
   const composition = options.memoryComposition ?? legacyMemoryComposition(options.createPersonalMemory)
-  if (composition?.kind === 'ledger' && composition.engine !== 'ledger') throw new ConfigurationError('MEMORY_RECALL_ENGINE engine feeding is not available yet')
   const local = composition?.kind === 'ledger' ? composition.local : undefined
   let sharedClient: MemoryLedgerClient | undefined
   const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig&&spaceConfig.data_mode!=='existing'?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
@@ -1505,7 +1504,9 @@ export function composeRealtime(
   const isolatedSpace=spaceConfig!==undefined&&spaceConfig.data_mode!=='existing'
   const localLedger = useLocalLedger({knowledge: core.knowledge !== undefined, createPersonalMemory: options.createPersonalMemory, ...(options.memoryComposition ? {memoryComposition: options.memoryComposition} : {}), ...(spaceConfig ? {spaceConfig} : {})})
   const createPersonalMemory = localLedger ? () => {
-    const memory = new SubstrateMemoryResource({client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
+    const memory = new SubstrateMemoryResource({
+      ...(composition?.kind==='ledger'?{engine:{recall:composition.engine,styles:composition.extractors.includes('voicemem'),consumer:options.memoryConsumerFingerprint??configuredMemoryConsumer(options.settings,options.memoryReadMode??'voice')??'',config:{path:composition.local.path+'.engines',embedding:composition.local.embedding,extraction:composition.local.extraction,extractionModel:composition.local.extractionModel}}}:{}),
+      client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:extraction,
       extractionFingerprint:embeddingHash('sha256').update(extraction.baseUrl+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
@@ -1523,6 +1524,7 @@ export function composeRealtime(
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
+      requiresConversationConsumer:true,canReadConversationEvidence:(id,consumer)=>memory.canReadConversationEvidence(id,consumer),recallAuthorityRevision:()=>memory.recallAuthorityRevision(),
       processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),feishuProcessingConsent:(...args)=>memory.feishuProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),recordEvidenceBatch:inputs=>memory.recordEvidenceBatch(inputs),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),...(memory.forgetSources?{forgetSources:(refs:readonly string[])=>memory.forgetSources(refs)}:{}),
     } satisfies PersonalMemoryResource
   } : options.createPersonalMemory ?? (composition ? factoryForMemoryComposition(composition, options.settings) : undefined)

@@ -45,7 +45,7 @@ port.on('message', message => {
   }
   const authorityRevision = store.recallAuthorityRevision()
   try {
-    const result=store.withMemoryFilesLock(()=>{
+    const result=request.operation==='life_authorization_revision'?execute(request):store.withMemoryFilesLock(()=>{
       if(request.operation!=='memory'&&request.operation!=='close')store.syncMemoryFiles()
       const response=execute(request)
       if(request.operation!=='memory'&&request.operation!=='close')store.flushMemoryFiles()
@@ -66,6 +66,8 @@ port.on('message', message => {
 
 function execute(request: StoreRequest): unknown {
   switch (request.operation) {
+    case 'life_authorization_revision':
+      return store.lifeAuthorizationRevision(stringField(request,'namespace'))
     case 'memory': {
       const operation=stringField(request,'memoryOperation') as MemoryOperation
       return store.memory(operation,request.input,path=>new DatabaseSync(path,{readOnly:true,allowExtension:false}))

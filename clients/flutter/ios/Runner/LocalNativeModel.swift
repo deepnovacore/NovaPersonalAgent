@@ -75,7 +75,7 @@ final class NoModelRedirects: NSObject, URLSessionTaskDelegate {
                   newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
-final class LocalNativeModel {
+@MainActor final class LocalNativeModel {
   let config: NativeModelConfiguration
   private var activeRequest: String?
   init(_ config: NativeModelConfiguration) { self.config = config }
@@ -110,8 +110,10 @@ final class LocalNativeModel {
     let requestID = UUID().uuidString
     activeRequest = requestID
     defer { activeRequest = nil }
+    try Task.checkCancellation()
+    let reservation = try NativeModelTransfer.shared.reserve(id: requestID)
     var root: [String: Any] = try await withCheckedThrowingContinuation { continuation in
-      NativeModelTransfer.shared.request(id: requestID, configuration: config, body: body) { continuation.resume(with: $0) }
+      NativeModelTransfer.shared.request(id: requestID, reservation: reservation, configuration: config, body: body) { continuation.resume(with: $0) }
     }
     try Task.checkCancellation()
     if config.isResponses && root["_nova_streamed"] as? Bool != true {

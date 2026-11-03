@@ -33,8 +33,8 @@ Personal memory uses one port (`runtime/src/memory/personal-memory.ts`). `MEMORY
 selects local, remote or disabled. For explicit local composition use `MEMORY_RECALL_ENGINE=ledger`
 and `MEMORY_EXTRACTORS=ledger`. Leaving both unset preserves the default ledger and legacy migration.
 `MEMORY_PROVIDER` is deprecated: `voicemem` retains that migration and `mem0` retains standalone mode;
-do not combine it with the new variables. New voicemem/mem0 engine composition fails closed until
-durable feeding is implemented. Disabled memory allocates no personal store.
+do not combine it with the new variables. Both `mem0` and `voicemem` are production recall choices
+over the same ledger authority. Disabled memory allocates no personal store.
 
 **mem0 (explicit alternative)** admits sources to its own ledger before any model sees them. Each source moves
 through `pending → learned`, or `forgotten` when deleted, and `recall()` returns only `learned`
@@ -49,7 +49,9 @@ databases.
 over `/v1/remember`, `/v1/forget`, `/v1/recall` and `/v1/preferences`; the URL must be HTTPS or
 loopback, and responses are size-capped.
 
-Explicitly switching to mem0 or remote memory does not migrate unified-ledger data. The legacy VoiceMem read-only import is a separate migration path.
+Legacy standalone mem0 and remote memory do not migrate unified-ledger data. New `MEMORY_RECALL_ENGINE=mem0|voicemem` instead backfills derived SDK indexes from that ledger. The legacy VoiceMem read-only import is a separate migration path.
+
+`MEMORY_EXTRACTORS=ledger,voicemem` adds opt-in VoiceMem emotion/trait extraction. Styles stay in the SDK store, never ledger facts; at least three distinct authorized user-conversation sources are required for a trait. Context expires within ten minutes of its earliest evidence and is revalidated at consumption. Corrections, forget, consent changes and purge enqueue transactional generation jobs; workers reconcile SDK state idempotently, with leased claims, external-write locks and restart retries. Engine candidates are always hydrated to canonical ledger IDs/revisions/evidence. General/project memories remain explicitly readable with canonical scope labels, but are excluded from automatic user-only recall. Engines reuse existing embedding and fast-model routes, not new memory-specific keys. See [production composition](../../design-notes/2026-11-03-memory-backend-composition.md) for provider requirements, failure handling and quality limits.
 
 ## Separate document knowledge (K)
 

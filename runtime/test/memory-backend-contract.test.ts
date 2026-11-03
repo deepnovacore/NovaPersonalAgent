@@ -18,18 +18,18 @@ import type {ModelGateway} from '../src/model/model-gateway.js'
 const gateway: ModelGateway = {async *stream() { /* No streaming extraction in this fixture. */ }, complete: () => Promise.resolve({text: JSON.stringify({entries: [{key: 'tea', text: 'I prefer tea', topic: 'tea', kind: 'preference', due: null, direction: null, status: null, valid_until: null}]})})}
 const signal = () => new AbortController().signal
 
-// One authority suite: candidate transports are deliberately fake until durable feeding is ready.
+// Adversarial candidates over real ledger authority; production SDK feeding has its own behavioral suite.
 for (const backend of ['ledger', 'voicemem', 'mem0'] as const) test(`memory-backend contract: ${backend} candidates over persistent ledger`, async () => {
   const root = await mkdtemp(join(tmpdir(), 'nova-backend-contract-'))
   const path = join(root, 'ledger.sqlite')
-  const create = (userId = 'owner') => new SubstrateMemoryResource({client: new MemoryLedgerClient(path), userId, gateway, model: 'fixture', inputConsent: true, conversationProviders: ['consumer'], consolidation: {enabled: false}})
+  const create = (userId = 'owner') => new SubstrateMemoryResource({client: new MemoryLedgerClient(path), userId, gateway, model: 'fixture', inputConsent: true, embedding:{id:'fixture',dims:2,embed:texts=>Promise.resolve(texts.map(()=>new Float32Array([1,0])))}, conversationProviders: ['consumer'], consolidation: {enabled: false}})
   let ledger = create()
   let candidates: PersonalMemoryRecallHit[] = [], contextHits: PersonalMemoryRecallHit[] = []
   const engine: MemoryRecallEngine = {recallEngine: backend === 'ledger' ? 'voicemem' : backend,
     recall: () => Promise.resolve({source: 'personal', state: 'ok', scope: 'any', hits: candidates, contextHits, degraded: false})}
   const facade = (): PersonalMemoryResource => {
     const recall = backend === 'ledger' ? ledger : new LedgerRecallEngine(ledger, engine, 'consumer')
-    return {open: () => ledger.open(), close: () => ledger.close(), recallEngine: backend,
+    return {open: () => ledger.open(), close: () => ledger.close(), recallEngine: backend, supportsResponseStyle: backend==='voicemem',
       recall: (...args) => recall.recall(...args), get: id => ledger.get(id), getMany: ids => ledger.getMany(ids),
       readEvidence: id => ledger.readEvidence(id), recallAuthorityRevision: () => ledger.recallAuthorityRevision(), requiresConversationConsumer: true,
       canReadConversationEvidence: (id, consumer) => ledger.canReadConversationEvidence(id, consumer)}
@@ -119,7 +119,7 @@ for (const activity of ['read', 'correction', 'other-correction', 'other-read', 
     const entered = deferred(), release = deferred()
     let consuming = false, styleAuthorized = false
     const personal: PersonalMemoryResource = {
-      open: () => ledger.open(), close: () => ledger.close(), recallEngine: 'voicemem', requiresConversationConsumer: true,
+      open: () => ledger.open(), close: () => ledger.close(), recallEngine: 'voicemem', supportsResponseStyle:true, requiresConversationConsumer: true,
       recallAuthorityRevision: () => ledger.recallAuthorityRevision(),
       recall: () => Promise.resolve({source: 'personal', state: 'ok', scope: 'any', hits: [{memoryId: fact.id, revision: fact.version, text: fact.content, evidenceIds: fact.evidence_refs!}], contextHits: [style], degraded: false}),
       readEvidence: id => ledger.readEvidence(id),
@@ -226,10 +226,10 @@ function deferred() {
 
 function recallFixture() {
   const now = Date.now(), evidence = {evidence_id: 'evidence', locator: 'fixture', text: 'tea source', source_kind: 'conversation', observed_at: new Date(now).toISOString(), trust: 'untrusted_external' as const}
-  const entry: MemoryEntry = {id: 'fact-A', version: 1, content: 'I prefer tea', kind: 'preference', origin: 'stated', source_refs: [], evidence_refs: [evidence.evidence_id], observed_at: evidence.observed_at, recorded_at: evidence.observed_at, topic: 'tea', status: 'active', corrected_to: null, confidence_note: null}
+  const entry: MemoryEntry = {memory_scope:'user',id: 'fact-A', version: 1, content: 'I prefer tea', kind: 'preference', origin: 'stated', source_refs: [], evidence_refs: [evidence.evidence_id], observed_at: evidence.observed_at, recorded_at: evidence.observed_at, topic: 'tea', status: 'active', corrected_to: null, confidence_note: null}
   const fact: PersonalMemoryRecallHit = {memoryId: entry.id, revision: 1, text: entry.content, evidenceIds: entry.evidence_refs!}
   const style: PersonalMemoryRecallHit = {memoryId: 'style-B', text: 'Use a gentle tone', kind: 'experience', evidenceIds: [evidence.evidence_id], recordedAt: new Date(now).toISOString(), expiresAt: new Date(now + 1000).toISOString()}
-  const ledger = {open: () => Promise.resolve(), close: () => Promise.resolve(), recallEngine: 'voicemem',
+  const ledger = {open: () => Promise.resolve(), close: () => Promise.resolve(), recallEngine: 'voicemem', supportsResponseStyle:true,
     recall: () => Promise.resolve({source: 'personal', state: 'ok', scope: 'any', hits: [fact], contextHits: [style], degraded: false}),
     get: (id: string): Promise<MemoryEntry | null> => Promise.resolve(id === entry.id ? entry : null), readEvidence: () => Promise.resolve(evidence), canReadConversationEvidence: () => Promise.resolve(true)} satisfies PersonalMemoryResource
   return {now, entry, fact, style, ledger}
