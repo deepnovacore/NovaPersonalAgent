@@ -9,7 +9,7 @@ export function retrievalPrerecall(retrieval: () => UnifiedRetrieval | undefined
   return async (query, signal) => {
     const current = retrieval()
     if (!current) return null
-    const result = await current.recall(query, {scope: 'any', limit: 3, signal, consumer: consumer()})
+    const result = await current.recall(query, {scope: 'any', userOnly:true, limit: 3, signal, consumer: consumer()})
     signal.throwIfAborted()
     return async consumeSignal => {
       const authorityUnchanged = current.recallAuthorityUnchanged(result)

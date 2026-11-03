@@ -1,3 +1,4 @@
+import {ledgerMemoryScope} from '../memory/entry.js'
 import {createHash, randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {LedgerDatabase} from '../memory-ledger/store.js'
@@ -53,7 +54,7 @@ export function engineOutboxOperation(db: LedgerDatabase, input: unknown): unkno
   for(const raw of rows){const entry=EntryRevisionSchema.parse(JSON.parse(String(raw.payload_json)));if(entry.content.memory_scope==='general')for(const id of entry.evidence_refs)generalEvidence.add(id)}
   for (const raw of rows) {
     const entry = EntryRevisionSchema.parse(JSON.parse(String(raw.payload_json)))
-    if (typeof entry.content.text!=='string'||!entry.content.text.trim()||entry.op === 'tombstone' || entry.content.memory_scope === 'general' || ['soul','diary','memory_summary','profile'].includes(entry.kind) || fileDerivedInference(db,entry) || (entry.valid_until !== null && Date.parse(entry.valid_until) <= Date.now())) continue
+    if (typeof entry.content.text!=='string'||!entry.content.text.trim()||entry.op === 'tombstone' || ledgerMemoryScope(entry.content.memory_scope) !== 'user' || ['soul','diary','memory_summary','profile'].includes(entry.kind) || fileDerivedInference(db,entry) || (entry.valid_until !== null && Date.parse(entry.valid_until) <= Date.now())) continue
     const stamp = processingStamp(db,entry.evidence_refs,'embedding',q.embedding)
     if (stamp) {
       const evidence=entry.evidence_refs.map(ref=>effectiveEvidence(db,ref,{purpose:'embedding',provider:q.embedding!}))

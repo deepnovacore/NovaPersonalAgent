@@ -22,8 +22,8 @@ import {createHash, randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {ModelGateway} from '../model/model-gateway.js'
 import {MemoryLedgerClientError,runInMemoryBackground,type MemoryLedgerClient} from '../memory-ledger/store-client.js'
-import {MemoryObservationSchema, MemoryListOptionsSchema, MemorySourceRefSchema, LifeMemorySchema, type MemoryEntry, type MemoryObservation, type MemorySourceRef, type MemoryVersion} from '../memory/entry.js'
-import type {PersonalMemoryResource, PersonalMemoryRememberTurn, PersonalMemoryResponseAdaptation, PersonalMemoryPurgeResult} from '../memory/personal-memory.js'
+import {ledgerMemoryScope, MemoryObservationSchema, MemoryListOptionsSchema, MemorySourceRefSchema, LifeMemorySchema, type MemoryEntry, type MemoryObservation, type MemorySourceRef, type MemoryVersion} from '../memory/entry.js'
+import type {PersonalMemoryResource, PersonalMemoryRememberTurn, PersonalMemoryResponseAdaptation, PersonalMemoryPurgeResult, PersonalMemoryRecallHit} from '../memory/personal-memory.js'
 import {CandidateSchema, EntryRevisionSchema, EvidenceRecordSchema, contentHash, type Candidate,type EntryRevision, type EvidenceRecord} from './store.js'
 import {prepareAutomaticCandidate} from './candidates.js'
 import {SOUL_BODY_MAX} from './memory-documents.js'
@@ -298,7 +298,8 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const data=row.content.life_data as Record<string,unknown>|undefined
     const life=['todo','idea','goal'].includes(row.kind)&&data?LifeMemorySchema.parse({id:data.id,version:data.version,status:data.status,due:data.due??null,goal_id:data.goal_id??null,idea_id:data.idea_id??null,success_criteria:data.success_criteria??null}):undefined
     const commitment=row.kind==='commitment'?z.object({direction:z.enum(['owed_by_me','owed_to_me']),due:z.iso.datetime({offset:true}).nullable(),status:z.enum(['open','done','dropped']),counterparty:z.string().optional()}).safeParse(row.content):null
-    return {id:row.entry_id,version:row.revision,content:text.slice(0,500),editable:!workspace,...(life?{life}:{}),...(commitment?.success?{commitment:commitment.data}:{}),kind:workspace?'entity':['fact','preference','plan','concern','commitment','entity','topic','todo','idea','goal','profile'].includes(row.kind)?row.kind as MemoryEntry['kind']:'fact',origin:row.origin,sources:tags?[...new Set(row.evidence_refs)].slice(0,256).flatMap(id=>{const tag=tags.get(id);return tag?[tag]:[]}):await this.sourceTags(row.evidence_refs),source_refs:refs,evidence_refs:row.evidence_refs,observed_at:refs[0]?.observed_at??row.recorded_at,recorded_at:row.recorded_at,topic:displayText(row.content.topic),status:row.op==='tombstone'?'forgotten':row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now()?'expired':'active',corrected_to:null,confidence_note:null}
+    const memoryScope=workspace?'general':ledgerMemoryScope(row.content.memory_scope)
+    return {...(memoryScope?{memory_scope:memoryScope}:{}),id:row.entry_id,version:row.revision,content:text.slice(0,500),editable:!workspace,...(life?{life}:{}),...(commitment?.success?{commitment:commitment.data}:{}),kind:workspace?'entity':['fact','preference','plan','concern','commitment','entity','topic','todo','idea','goal','profile'].includes(row.kind)?row.kind as MemoryEntry['kind']:'fact',origin:row.origin,sources:tags?[...new Set(row.evidence_refs)].slice(0,256).flatMap(id=>{const tag=tags.get(id);return tag?[tag]:[]}):await this.sourceTags(row.evidence_refs),source_refs:refs,evidence_refs:row.evidence_refs,observed_at:refs[0]?.observed_at??row.recorded_at,recorded_at:row.recorded_at,topic:displayText(row.content.topic),status:row.op==='tombstone'?'forgotten':row.valid_until!==null&&Date.parse(row.valid_until)<=Date.now()?'expired':'active',corrected_to:null,confidence_note:null}
   }
   async #entries(rows:EntryRevision[]):Promise<MemoryEntry[]>{
     const ids=[...new Set(rows.flatMap(row=>row.evidence_refs))],evidence=new Map<string,EvidenceRecord>(),tags=new Map<string,SourceTag>()
@@ -371,38 +372,58 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     return ids.map(id=>entries.get(id)??null)
   }
 
-  async recall(query:string,options:{scope?:'recent'|'any';limit?:number;signal?:AbortSignal}={}){
+  async recall(query:string,options:{scope?:'recent'|'any';limit?:number;signal?:AbortSignal;userOnly?:boolean}={}){
     this.#ready();const parsed=z.string().min(1).max(4000).parse(query);options.signal?.throwIfAborted()
     const scope=z.enum(['recent','any']).parse(options.scope??'recent');const limit=z.number().int().min(1).max(20).parse(options.limit??8)
+    const userOnly=z.boolean().parse(options.userOnly??false)
     const selected=this.#engines.find(engine=>engine.recallEngine===this.recallEngine)
     const consumer=this.options.engine?.consumer??''
     if(selected){
-      const engine=new LedgerRecallEngine(this,selected,consumer,async(id,revision)=>{const row=(await this.#rows(false,false,true)).find(row=>row.entry_id===id&&row.revision===revision);return !!row&&row.content.memory_scope!=='general'})
-      const recalled=await engine.recall(parsed,options)
-      if(selected.recallEngine==='voicemem'||!this.options.engine?.styles)return recalled
+      const engine=new LedgerRecallEngine(this,selected,consumer,async(id,revision)=>{const row=(await this.#rows(false,false,true)).find(row=>row.entry_id===id&&row.revision===revision);return !!row&&ledgerMemoryScope(row.content.memory_scope)==='user'})
       const authority=this.recallAuthorityRevision()
-      const styles=this.#engines.find(engine=>engine.recallEngine==='voicemem')
-      const styleResult=await styles!.recall(parsed,options)
-      const contextHits=await validateResponseStyleHits(this,styleResult.contextHits??[],consumer,options.signal??this.#abort.signal)
+      const recalled=await engine.recall(parsed,{...options,userOnly})
+      // Explicit recall intentionally combines the SDK's user index with local general memories.
+      // An SDK failure above is never replaced with a successful ledger-user fallback.
+      const general=userOnly?undefined:await this.#recallLedger(parsed,{scope,limit,signal:options.signal,memoryScope:'general',lexicalOnly:true,consumer})
+      const hits:PersonalMemoryRecallHit[]=[]
+      for(let index=0;hits.length<limit&&(index<recalled.hits.length||index<(general?.hits.length??0));index++)for(const hit of [recalled.hits[index],general?.hits[index]])if(hit&&hits.length<limit)hits.push(hit)
+      let contextHits=recalled.contextHits??[],degraded=recalled.degraded||!!general?.degraded
+      if(selected.recallEngine!=='voicemem'&&this.options.engine?.styles){
+        const styles=this.#engines.find(engine=>engine.recallEngine==='voicemem')!
+        const styleResult=await styles.recall(parsed,options)
+        contextHits=await validateResponseStyleHits(this,styleResult.contextHits??[],consumer,options.signal??this.#abort.signal)
+        degraded ||= styleResult.degraded
+      }
       if(authority!==this.recallAuthorityRevision())throw Error('memory_engine_stale_authority')
-      return {...recalled,state:recalled.hits.length||contextHits.length?'ok' as const:'empty' as const,contextHits,degraded:recalled.degraded||styleResult.degraded}
+      return {...recalled,state:hits.length||contextHits.length?'ok' as const:'empty' as const,hits,contextHits,degraded}
     }
     let vector:number[]|null=null
-    try{if(this.options.embedding&&this.recallEngine==='ledger'){const result=await this.options.embedding.embed([parsed],AbortSignal.any([this.#abort.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(10000)]));vector=this.#vector(result[0])}}catch{options.signal?.throwIfAborted();this.#abort.signal.throwIfAborted()}
-    const result=z.object({hits:z.array(z.object({entry:EntryRevisionSchema,score:z.number().finite()})),degraded:z.boolean()}).parse(await this.options.client.memory('search',{entry_prefix:this.prefix,provider:this.#fingerprint(),query:parsed,vector,scope,limit,exclude_file_inferences:true}))
-    // Recheck after asynchronous provider work and before exposing any citations.
-    const current=new Map((await this.#rows(false,false,true)).map(row=>[row.entry_id,row]))
-    const hits=[]
-    for(const {entry,score} of result.hits){if(entry.content.memory_scope==='general')continue;if(current.get(entry.entry_id)?.revision!==entry.revision)continue
-      const evidenceIds:string[]=[];for(const id of entry.evidence_refs)if(await this.options.client.memory('retrieval_evidence',{id})!==null)evidenceIds.push(id)
-      if(evidenceIds.length)hits.push({memoryId:entry.entry_id,revision:entry.revision,text:displayText(entry.content.text),evidenceIds,recordedAt:entry.recorded_at,score})
-    }
+    try{if(this.options.embedding){const result=await this.options.embedding.embed([parsed],AbortSignal.any([this.#abort.signal,...(options.signal?[options.signal]:[]),AbortSignal.timeout(10000)]));vector=this.#vector(result[0])}}catch{options.signal?.throwIfAborted();this.#abort.signal.throwIfAborted()}
+    const result=await this.#recallLedger(parsed,{scope,limit,signal:options.signal,vector,...(userOnly?{memoryScope:'user' as const}:{})})
     const authority=this.recallAuthorityRevision()
     const styles=this.#engines.find(engine=>engine.recallEngine==='voicemem')
     const styleResult=styles?await styles.recall(parsed,options):undefined
     const contextHits=styleResult?await validateResponseStyleHits(this,styleResult.contextHits??[],consumer,options.signal??this.#abort.signal):[]
     if(styles&&authority!==this.recallAuthorityRevision())return {source:'personal' as const,state:'empty' as const,scope,hits:[],contextHits:[],degraded:true}
-    return {source:'personal' as const,state:hits.length||contextHits.length?'ok' as const:'empty' as const,scope,hits,contextHits,degraded:result.degraded||!!styleResult?.degraded}
+    return {source:'personal' as const,state:result.hits.length||contextHits.length?'ok' as const:'empty' as const,scope,hits:result.hits,contextHits,degraded:result.degraded||!!styleResult?.degraded}
+  }
+  async #recallLedger(query:string,options:{scope:'recent'|'any';limit:number;signal:AbortSignal|undefined;vector?:number[]|null;memoryScope?:'user'|'general';lexicalOnly?:boolean;consumer?:string}){
+    if(options.consumer!==undefined&&!options.consumer)return {hits:[] as PersonalMemoryRecallHit[],degraded:true}
+    const result=z.object({hits:z.array(z.object({entry:EntryRevisionSchema,score:z.number().finite()})),degraded:z.boolean()}).parse(await this.options.client.memory('search',{entry_prefix:this.prefix,provider:this.#fingerprint(),query,vector:options.vector??null,scope:options.scope,limit:options.limit,exclude_file_inferences:true,...(options.memoryScope?{memory_scope:options.memoryScope}:{}),...(options.lexicalOnly?{lexical_only:true}:{})}))
+    const current=new Map((await this.#rows(false,false,true)).map(row=>[row.entry_id,row]))
+    const hits:PersonalMemoryRecallHit[]=[]
+    for(const {entry,score} of result.hits){
+      options.signal?.throwIfAborted()
+      if(current.get(entry.entry_id)?.revision!==entry.revision)continue
+      const memoryScope=ledgerMemoryScope(entry.content.memory_scope)
+      if(options.memoryScope&&memoryScope!==options.memoryScope)continue
+      const evidenceIds:string[]=[]
+      for(const id of entry.evidence_refs)if(await this.options.client.memory('retrieval_evidence',{id})!==null&&(options.consumer===undefined||await this.canReadConversationEvidence(id,options.consumer)))evidenceIds.push(id)
+      if(options.consumer!==undefined&&evidenceIds.length!==entry.evidence_refs.length)continue
+      if(evidenceIds.length)hits.push({memoryId:entry.entry_id,revision:entry.revision,text:displayText(entry.content.text),evidenceIds,recordedAt:entry.recorded_at,score,...(memoryScope?{memory_scope:memoryScope}:{})})
+    }
+    options.signal?.throwIfAborted()
+    return {hits,degraded:result.degraded}
   }
   #extractionFingerprint():string{return this.options.extractionFingerprint??this.options.model}
   recallAuthorityRevision():number{return this.options.client.recallAuthorityRevision()}

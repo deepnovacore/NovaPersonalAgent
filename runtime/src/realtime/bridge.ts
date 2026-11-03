@@ -624,6 +624,7 @@ export class RealtimeRuntimeBridge {
 type PersonalRecallState = PersonalMemoryRecallResult['state'] | 'disabled' | 'unavailable' | 'error'
 
 interface PersonalRecallOutputHit {
+  readonly memory_scope?: 'user'|'general'
   readonly source: 'personal'
   readonly memory_id: string
   readonly kind: NonNullable<PersonalMemoryRecallHit['kind']> | null
@@ -688,6 +689,7 @@ function personalRecallHit(hit: PersonalMemoryRecallHit): PersonalRecallOutputHi
   if (
     !boundedString(hit.memoryId, 256, 1)
     || (hit.kind !== undefined && !['fact','experience','trait'].includes(hit.kind))
+    || (hit.memory_scope !== undefined && hit.memory_scope!=='user' && hit.memory_scope!=='general')
     || !boundedString(hit.text, 800, 1)
     || (hit.subject !== undefined && !boundedString(hit.subject, 256, 1))
     || (attributedTo !== null && !boundedString(attributedTo, 256, 1))
@@ -702,6 +704,7 @@ function personalRecallHit(hit: PersonalMemoryRecallHit): PersonalRecallOutputHi
   ) return null
   return {
     source: 'personal', memory_id: hit.memoryId, kind: hit.kind ?? null, text: hit.text,
+    ...(hit.memory_scope===undefined?{}:{memory_scope:hit.memory_scope}),
     subject: hit.subject ?? '', attributed_to: attributedTo, attribute: hit.attribute ?? '',
     emotion: hit.emotion ?? '', occurred_at: hit.occurredAt ?? null, recorded_at: hit.recordedAt ?? null,
     score: hit.score ?? null, evidence_ids: [...hit.evidenceIds],
