@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,realpath,rm} from 'node:fs/promises'
+import {mkdtemp,readFile,writeFile,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {emptyLifeState} from '../src/personal-agent/life.js'
 import {PersonalStore,initialState} from '../src/personal-agent/store.js'
+import type {ScheduleRun} from '../src/personal-agent/scheduled-tasks.js'
 import type {FeedItem} from '../src/personal-agent/contracts.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import {createMem0PersonalMemory} from '../src/mem0/resource.js'
@@ -16,6 +17,7 @@ import {SuggestionPool} from '../src/core/suggestions.js'
 import {Memory} from '../src/core/memory.js'
 import {compileContextView} from '../src/core/context-view.js'
 import {runProactiveSelection} from '../src/core/calls.js'
+import {GatewayPersonalWriter} from '../src/model/personal-writer.js'
 import {GatewayProactivity} from '../src/model/proactivity.js'
 import type {ModelGateway} from '../src/model/model-gateway.js'
 import {provider,eventually,turn} from './helpers/mem0-fixture.js'
@@ -37,19 +39,21 @@ for(const backend of ['mem0','ledger'] as const)test(`host product memory: ${bac
  else {await memory.remember!(turn('private-source',privateText));await eventually(async()=>(await memory.list!()).entries.length===1)}
  const entry=(await memory.list!()).entries[0]!,evidence=entry.evidence_refs![0]!
  assert.equal(memory.productSurfaces===true,ledger)
+ let activeMemory:PersonalMemoryResource|undefined=memory
  let support='support-a',voice='voice-a',pool=new SuggestionPool()
  const inputs:{destination:string;kind:string;text:string}[]=[]
  const proposal={kind:'question' as const,summary:privateText,why_now:privateText,evidence_refs:[],memory_refs:[{entry_id:entry.id,version:entry.version!}]}
  const gateway:ModelGateway={async *stream(){await Promise.resolve();throw Error('unexpected stream')},complete:request=>{
-  const discovery=request.system.includes('discovery opportunity')
-  inputs.push({destination:request.model,kind:discovery?'discovery':'selector',text:request.prompt})
+  const discovery=request.system.includes('discovery opportunity'),brief=request.system.includes('Prepare read-only material')
+  inputs.push({destination:request.model,kind:discovery?'discovery':brief?'brief':'selector',text:request.prompt})
+  if(brief)return Promise.resolve({text:'null'})
   return Promise.resolve({text:JSON.stringify(discovery?{proposals:[proposal]}:{speak:false,suggestion_id:null,progress_class:null,reason:'silent'})})
  }}
  const proactive=()=>new GatewayProactivity({gateway,model:support,proactivityPreset:'balanced'})
  const context=()=>compileContextView(new Memory(), 'idle', now.getTime()/1000,{suggestions:pool.all()})
  const make=()=>{
-  const value=new PersonalAgentHost({path,userScope:'test',memory:()=>memory,pool,now:()=>now,context,evidence:ref=>ref==='external'?{subject_key:'external',source:{type:'file',ref}}:null,evidenceRefs:()=>['external'],discoveryMemoryConsumer:()=>support,discover:(snapshot,signal)=>proactive().discover(snapshot,signal)})
-  value.setRetrieval(new UnifiedRetrieval({memory:()=>memory}))
+  const value=new PersonalAgentHost({path,userScope:'test',memory:()=>activeMemory,pool,now:()=>now,context,evidence:ref=>ref==='external'?{subject_key:'external',source:{type:'file',ref}}:null,evidenceRefs:()=>['external'],discoveryMemoryConsumer:()=>support,discover:(snapshot,signal)=>proactive().discover(snapshot,signal)})
+  value.setRetrieval(new UnifiedRetrieval({memory:()=>activeMemory}))
   value.setConversationRuntime(conversation=>{
    const destination=voice
    inputs.push({destination,kind:'voice-history',text:JSON.stringify(conversation)})
@@ -111,4 +115,76 @@ for(const backend of ['mem0','ledger'] as const)test(`host product memory: ${bac
   if(host.voiceConversationId())assert.equal((await command('conversations.voice',{id:'chat:main',enabled:false})).ok,true)
   assert.equal((await command('presentation.set',{mode:'workbench'})).ok,true)
  }
+ // Produce real verified task prose and a scheduled summary at destination A, then reload at B.
+ support='support-a'
+ const taskText=privateText+' verified task',scheduledText=privateText+' scheduled summary',legacyText=privateText+' legacy task'
+ if(!ledger){
+  const recalled=await new UnifiedRetrieval({memory:()=>memory}).recall('orchid',{consumer:support})
+  assert.ok(recalled.entries.some(item=>item.text===privateText),'task can recall mem0 at destination A')
+ }
+ const task=await host.tasks.delegate('product-task',{conversation_id:'chat:main',goal:'Report',acceptance:['Report delivered'],origin_ref:'conversation:product-task'})
+ const fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+ await host.tasks.recordDelivery(fence,'product-task-answer',taskText)
+ const verified=await host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:product-task-answer'],criteria:[{index:0,evidence_refs:['task-delivery:product-task-answer']}]})
+ await host.taskResult(task.id,'Verified task',verified)
+ const scope={todos:false,goals:false,tasks:false,memory:true,knowledge:false,search:false}
+ const schedule=await host.schedules.create('product-schedule',{title:'Scheduled report',goal:'Report',acceptance:['Report delivered'],rule:{kind:'daily',timezone:'UTC',time:'10:00'},context:scope},{user_scope:'test',source:'ui',origin_ref:'ui:product-schedule',source_refs:[],allowed_context:scope})
+ const run=await host.schedules.runNow('product-run',schedule.id,1),scheduled=await host.tasks.delegate('scheduled:'+run.run_id,run.input)
+ const scheduledFence={task_id:scheduled.id,control_revision:scheduled.control_revision,goal_revision:scheduled.goal_revision}
+ await host.schedules.bindTask(run.run_id,scheduled.id)
+ await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+ await host.tasks.recordContextEvidence(scheduledFence,'product-context',JSON.stringify({consumer:support}),[evidence])
+ await host.tasks.recordDelivery(scheduledFence,'product-scheduled-answer',scheduledText)
+ await host.tasks.applyDecision(scheduledFence,{kind:'complete',evidence_refs:['task-delivery:product-scheduled-answer'],criteria:[{index:0,evidence_refs:['task-delivery:product-scheduled-answer']}]})
+ await host.publishScheduledResult(run.run_id)
+ const taskFeed=host.snapshot().feed.find(item=>item.task_ref?.work_id===task.id)!,scheduledFeed=host.snapshot().feed.find(item=>item.id==='scheduled-result:'+run.run_id)!
+ assert.equal(taskFeed.prepared?.text,taskText)
+ assert.equal(taskFeed.memory_origin,ledger?undefined:'non_product')
+ assert.deepEqual(scheduledFeed.evidence_refs,[evidence])
+ assert.equal(scheduledFeed.memory_origin,ledger?undefined:'non_product')
+ for(const feed of [taskFeed,scheduledFeed])await host.action({id:feed.id,action:'presented'})
+ await host.close()
+ const persisted=await new PersonalStore(path).read()
+ // Resolved legacy evidence-only feeds survive revalidation, so their gate is tested directly.
+ for(const feed of persisted.feed.filter(item=>item.id.startsWith('old-')))feed.lifecycle='resolved'
+ // Old scheduled summaries and evidence-only feeds must also fail when memory is removed.
+ delete persisted.feed.find(item=>item.id===scheduledFeed.id)!.memory_origin
+ const legacySchedules=JSON.parse(await readFile(path+'.schedules.json','utf8')) as {runs:ScheduleRun[]}
+ delete legacySchedules.runs.find(item=>item.run_id===run.run_id)!.terminal_summary!.memory_origin
+ await writeFile(path+'.schedules.json',JSON.stringify(legacySchedules))
+ persisted.feed.push({...structuredClone(taskFeed),id:'legacy-task',title:legacyText,prepared:{trust:'untrusted_external',text:legacyText,evidence_refs:[]},delivery:{presented_at:now.toISOString(),notified_at:null,spoken_at:null}})
+ delete persisted.feed.at(-1)!.memory_origin
+ persisted.conversations.items[0]!.messages.push({id:'feed:'+taskFeed.id,conversation_id:'chat:main',role:'assistant',origin:'proactive',text:taskText,created_at:now.toISOString()})
+ await new PersonalStore(path).write(persisted)
+ const control=ledger?memory:new SubstrateMemoryResource({client:new MemoryLedgerClient(join(directory,'restart-ledger.sqlite')),userId:'test',model:'extract',inputConsent:true,consolidation:{enabled:false},gateway:{async *stream(){await Promise.resolve();throw Error('unexpected extraction')},complete:()=>Promise.reject(Error('unexpected extraction'))}})
+ if(!ledger){await control.open();t.after(()=>control.close())}
+ for(const restart of ['same','none','ledger'] as const){
+  activeMemory=restart==='none'?undefined:restart==='ledger'?control:memory
+  const product=activeMemory?.productSurfaces===true
+  support='support-b';voice='voice-b';pool=new SuggestionPool();host=make();await host.open()
+  inputs.length=0
+  await proactive().discover(await host.discoverySnapshot(),new AbortController().signal)
+  const brief=await host.dailyBriefSnapshot()
+  await new GatewayPersonalWriter({gateway,model:support}).prepareBrief(brief,{kind:'outlook',local_date:'2026-11-02',timezone:'UTC',scheduled_at:now.toISOString(),dedupe_key:'test-brief'},new AbortController().signal)
+  for(const kind of ['discovery','brief']){
+   const captured=inputs.filter(input=>input.kind===kind&&input.destination==='support-b')
+   assert.ok(captured.length>0,'actual '+kind+' gateway input after '+restart+' restart')
+   assert.equal(captured.some(input=>input.text.includes(taskText)),ledger,'marked task prose never becomes product context')
+   assert.equal(captured.some(input=>input.text.includes(scheduledText)),product,'legacy scheduled evidence requires a product substrate')
+   assert.equal(captured.some(input=>input.text.includes(legacyText)),true,'unmarked legacy task prose remains eligible')
+   if(!activeMemory)assert.ok(captured.every(input=>!input.text.includes(scheduledText)),'removing memory must not allow retained evidence-only feeds')
+  }
+  assert.ok(host.snapshot().feed.some(item=>item.prepared?.text===taskText),'local task text survives restart')
+  assert.ok(host.snapshot().feed.some(item=>item.prepared?.text===scheduledText),'local scheduled text survives restart')
+  assert.ok(host.conversationSnapshot().messages.some(message=>message.text.includes(scheduledText)),'local scheduled history remains visible')
+  assert.ok(!pool.all().some(item=>JSON.stringify(item.content).includes(taskText))||ledger)
+  assert.equal((await command('conversations.voice',{id:'chat:main',enabled:true})).ok,true)
+  const suggestion=new SuggestionPool().add({origin:'surrogate',kind:'notify',content:{summary:taskText,personal_feed_id:taskFeed.id}})
+  host.routePersonalSuggestion(suggestion,{...reason,selected_suggestion:suggestion.id})
+  if(ledger)await eventually(()=>inputs.some(input=>input.kind==='voice'&&input.text.includes(taskText)))
+  assert.equal(inputs.some(input=>input.kind==='voice'&&input.text.includes(taskText)),ledger)
+  assert.equal(inputs.some(input=>input.kind==='voice-history'&&input.text.includes(taskText)),ledger)
+  await host.close()
+ }
+
 })

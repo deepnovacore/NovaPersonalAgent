@@ -46,3 +46,25 @@ test('persisted model accounting survives schedule startup, updates and restart'
     await rm(dir, {recursive: true, force: true})
   }
 })
+
+for (const origin of [undefined, 'non_product'] as const) test(`scheduled summary provenance is optional and bounded (${origin ?? 'legacy'})`, async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'schedule-origin-')), path = join(dir, 'schedules.json')
+  const service = new ScheduleService(path), recovered = new ScheduleService(path)
+  try {
+    await service.open()
+    const schedule = await service.ensureSourceProcessing('test'), run = await service.claimSourceProcessing(schedule.id, 'batch', 'recipe')
+    await service.markFinished(run.run_id, {...(origin ? {memory_origin: origin} : {}), outcome: 'completed', text: 'done', evidence_refs: [], published: false})
+    await service.close();await recovered.open()
+    assert.equal(recovered.getRun(run.run_id).terminal_summary?.memory_origin, origin)
+    await recovered.markPublished(run.run_id);await recovered.close()
+    const state = JSON.parse(await readFile(path, 'utf8')) as {runs: {terminal_summary: {memory_origin?: unknown}}[]}
+    for (const invalid of ['product', '', {}, ['non_product']]) {
+      state.runs[0]!.terminal_summary.memory_origin = invalid
+      await writeFile(path, JSON.stringify(state))
+      const rejected = new ScheduleService(path)
+      await assert.rejects(rejected.open(), {name: 'ZodError'});await rejected.close()
+    }
+  } finally {
+    await Promise.all([service.close(), recovered.close()]);await rm(dir, {recursive: true, force: true})
+  }
+})

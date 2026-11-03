@@ -42,7 +42,7 @@ import {workbenchInstructions} from './workbench-instructions.js'
 import {RealClock} from '../core/clock.js'
 import type {PersonalAgentHost} from './host.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
-import type {ConversationRuntimeFactory} from './conversations.js'
+import type {ConversationRuntimeFactory,ConversationTurnResult} from './conversations.js'
 import {scopeApprovalController} from './approval-scope.js'
 import {deliveryToEvent,executorApprovalMessage,projectStateMessage} from '../desktop/desktop-wire.js'
 
@@ -153,7 +153,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let graphRef: ReturnType<typeof buildRealtimeAssembly> | undefined = undefined
    const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,memoryTools:workbenchVoice?NO_MEMORY_TOOLS:core.memoryTools,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&options.settings.memory_prerecall_enabled?{prerecall:retrievalPrerecall(()=>graphRef?.retrieval,()=>memoryConsumerFingerprint??''),prerecallMeta:configuredPrerecallMeta(settings)}:{})})
   if(provider.capabilities)emit({type:'conversation.capabilities',conversation_id:conversation.id,conversation_generation:conversation.generation,mode,capabilities:provider.capabilities})
-  let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
+  let pending:{resolve:(result:ConversationTurnResult)=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
   let voiceEnabled=!textOnly
   let audioGeneration=0
@@ -170,6 +170,12 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const deferredTaskWakes=new Set<string>()
   const taskHostItems=new Map<string,TaskFence>()
   const taskResponseItems=new Map<string,string>()
+  const taskProvenance=(responseId:string)=>{
+   const selected=taskResponses.get(responseId),taskIds=[...(selected?.keys()??[])].slice(0,16)
+   if(!taskIds.length&&!graph.service.isTaskContinuationResponse(responseId))return {}
+   const memory=options.memory()
+   return {task_ids:taskIds,...(memory&&memory.productSurfaces!==true?{memory_origin:'non_product' as const}:{})}
+  }
   const taskToolResponses=new Set<string>()
   let taskTurnContinuing=false
   let currentResponse:string|undefined
@@ -234,7 +240,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(defaultIntake(core,core.gateway,options.settings)?{intake:defaultIntake(core,core.gateway,options.settings)!}:{}),
    ...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
     ...(telemetry?{telemetry}:{}),
-   onDelivery:completion=>{if(mode==='voice'&&!taskToolResponses.has(completion.response_id))void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({delivery_class:graph.service.isTaskContinuationResponse(completion.response_id)?'task_output':graph.service.isProactiveResponse(completion.response_id)?'proactive':'reply',type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
+   onDelivery:completion=>{const provenance=taskProvenance(completion.response_id);if(mode==='voice'&&!taskToolResponses.has(completion.response_id))void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({...provenance,delivery_class:graph.service.isTaskContinuationResponse(completion.response_id)?'task_output':graph.service.isProactiveResponse(completion.response_id)?'proactive':'reply',type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
    onCaption:frame=>{
     let outgoing=frame
     if(frame.role==='assistant'){
@@ -302,12 +308,12 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     if(event.kind==='response_terminal'){
      const hasTools=taskToolResponses.delete(event.response_id)
      const externalTask=!options.host.localNotifications&&graph.service.isTaskContinuationResponse(event.response_id)
-     captureTaskResponse();if(currentResponse===event.response_id)currentResponse=undefined
+     captureTaskResponse();const provenance=taskProvenance(event.response_id);if(currentResponse===event.response_id)currentResponse=undefined
      if(!hasTools||event.status!=='completed')taskTurnContinuing=false
-     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending)){emit({delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true,...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});if(mode==='voice')turnToolTrace=[]}
+     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending)){emit({...provenance,delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true,...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});if(mode==='voice')turnToolTrace=[]}
      if(hasTools&&event.status==='completed'){taskResponseItems.delete(event.response_id);taskResponses.delete(event.response_id);taskForegroundResponses.delete(event.response_id)}
      else if(mode==='text'||event.status!=='completed'||externalTask)void settleTaskResponse(event.response_id,assistant,event.status==='completed',externalTask?'generated':'delivered').then(async()=>{if(externalTask)await graph.service.session.quarantineActiveOrAwaitingResponse()}).finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})
-     if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{}),...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});else current.reject(Object.assign(Error('response_'+event.status),{reason:event.reason}))}
+     if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...provenance,...(assistantTurnId?{turn_id:assistantTurnId}:{}),...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});else current.reject(Object.assign(Error('response_'+event.status),{reason:event.reason}))}
     }
    },
   })
