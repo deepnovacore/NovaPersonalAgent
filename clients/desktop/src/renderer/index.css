@@ -888,3 +888,18 @@ body[data-presentation-mode='orb'] #personal-orb-host .personal-orb-extras {
 body[data-presentation-mode='orb'] #personal-orb-host .personal-orb-task {
   box-shadow: 0 4px 12px rgba(0, 0, 0, .22);
 }
+/* Bubble mode is an absolute, orb-relative layout: the bubble stack owns the window's top edge
+   (its bottom is --bubble-orb-y - 55px) and the task banner starts at --bubble-orb-y + 125px. The
+   chip therefore leaves the top edge and takes the free slot under the status label (label ends
+   at +74px; the project label that normally uses +87px is hidden while the chip shows), centred on
+   the orb so left/right/center alignment all follow it. 160px keeps it inside the window because
+   main keeps the orb at least 80 CSS px from either side. */
+body[data-presentation-mode='orb'] #shell[data-bubbles='true'] #personal-orb-host .personal-orb-extras {
+  top: calc(var(--bubble-orb-y) + 87px);
+  bottom: auto;
+  left: var(--bubble-orb-x);
+  right: auto;
+  width: max-content;
+  max-width: 160px;
+  transform: translateX(-50%);
+}
