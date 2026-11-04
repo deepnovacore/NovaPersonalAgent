@@ -37,6 +37,9 @@ const _en = <String, String>{
   'origin:inferred': 'Inferred',
 };
 const _zh = <String, String>{
+  'Interests': '关注方向',
+  'Add interest': '添加关注词',
+  'Remove interest': '移除关注',
   'Add your introduction here. Information from connected sources appears below.':
       '这里可以补充个人介绍，连接器整理的信息会显示在下方。',
   "This schedule changed. Load its latest version before saving.":

@@ -54,3 +54,51 @@ gh run watch <run-id> --exit-status
 
 Only a successful run for the exact revision provides compile evidence. Merely
 adding or statically validating this workflow does not prove an iOS build passed.
+
+## Baked document base set
+
+New installations include Python 3.12.16, py3-pip, openpyxl 3.1.5, pypdf 6.1.1,
+ReportLab 4.4.4, Pillow 13.0.0, charset-normalizer 3.5.2 and et_xmlfile 2.0.0.
+The owner-approved static-400 common-character TrueType font is at
+`/usr/share/fonts/nova/NovaDocumentSansSC-Regular.ttf`; OFL text/copyright remain
+beside it, under `/usr/share/licenses/nova-document-font/`, and in the Flutter
+application licence registry. This is a GB2312-oriented subset, not all CJK.
+Check glyph coverage; if the font is absent, explain the limitation rather than
+produce garbled PDFs. See [locks and reproducible build](../documents/README.md).
+
+The build now requires a running Docker daemon with internal VM storage and the
+two digest-pinned ARM64 Alpine images pulled as described there. All rootfs
+installation/smoke steps use `--network=none`; fetching fixed-hash inputs happens
+on the host beforehand. Use `--docker /opt/homebrew/bin/docker` if needed and
+`--verify-reproducible` to build twice and compare file/archive/package hashes.
+`--without-font` is a size-comparison option, not the production default.
+
+**Upgrade path:** existing installed filesystems are never replaced or merged.
+An upgraded app with an old bare rootfs still uses its existing packages and
+**does not automatically gain this offline base set**. Detect via
+`/usr/share/nova/document-base.json` (outside `/workspace`) and verify imports.
+Those users retain the documented authorized on-demand install/download path,
+which requires network; report missing dependencies honestly. No automatic
+migration, user-data deletion, or reset is introduced. A fresh app installation
+gets the baked image. Do not recommend uninstalling without backing up user data.
+
+The default `workspace_device_acceptance.dart` uses the baked Python/font smoke
+and blocks Python socket connections; it runs no APK/pip/download commands or
+network diagnostics. Legacy network-install measurements require explicit
+`--dart-define=NOVA_ACCEPTANCE_ON_DEMAND=true`. Acceptance reports include import,
+XLSX, PDF and CJK round-trip timings and RSS when implemented by the guest.
+App Review 2.5.2 and Apple's policy on executable code inside the rootfs remain
+**unverified**; preinstallation does not establish approval.
+
+The builder bakes a canonical tar first, then runs `fakefsify` on that tar.
+`resources/NovaAlpine.sha256` ties the fakefs to the exact baked archive. A stale
+existing fakefs fails instead of silently being reused: select a new isolated
+output root. The package phase requires the marker and document manifest.
+`meta.db` and data size are recorded in the runtime manifest. Simulator ARM64
+libraries still require a separate `--sdk iphonesimulator` build.
+
+CI note: the existing macOS GitHub Actions job now also needs a Docker daemon
+and these pinned images. Its previous native-only toolchain setup is not enough: **the CI build will fail
+without that dependency**. The workflow is intentionally unchanged; a follow-up
+task must supply a Docker-capable runner or a lock-driven prebuilt rootfs
+artifact/cache stage. No successful CI run for this change has been claimed.

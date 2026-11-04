@@ -2,6 +2,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../connectors/feishu/browser.dart';
 import '../ui/components.dart';
+import '../ui/news_interests.dart';
 import 'client_state.dart';
 import 'space_dialog.dart';
 
@@ -219,29 +220,16 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                       _patch('discovery.configure', {'enabled': v}),
                 ),
               ),
-              _tile(
-                '关注的资讯主题',
-                (news['interests'] as List? ?? []).join('、'),
-                () async {
-                  final v = await _ask(
-                    '资讯主题（用逗号分隔，最多 8 个）',
-                    (news['interests'] as List? ?? []).join(','),
-                  );
-                  if (v == null) return;
-                  final interests = v
-                      .split(RegExp(r'[,，、]'))
-                      .map((e) => e.trim())
-                      .where((e) => e.isNotEmpty)
-                      .take(8)
-                      .toList();
-                  await _patch('news.configure', {
-                    'enabled': interests.isNotEmpty,
-                    'explore': news['explore'] ?? true,
-                    'interests': interests,
-                    'expected_version': news['profile_version'],
-                  });
-                },
+              NewsInterests(
                 key: const ValueKey('host.news'),
+                news: news,
+                language: 'zh',
+                configure: (interests) => _patch('news.configure', {
+                  'enabled': news['enabled'] ?? true,
+                  'explore': news['explore'] ?? true,
+                  'interests': interests,
+                  'expected_version': news['profile_version'],
+                }),
               ),
             ],
           ),

@@ -2,6 +2,7 @@ import 'space/space_storage.dart';
 import 'space/native_scope.dart';
 import 'package:flutter/material.dart';
 import 'ui/app.dart';
+import 'ui/document_font_license.dart';
 import 'agent_core/scheduled_agent_runner.dart';
 import 'agent_core/model_settings.dart';
 import 'personal/life_host.dart';
@@ -9,6 +10,7 @@ export 'ui/app.dart' show NovaApp;
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
+  registerDocumentFontLicense();
   runApp(const NovaApp());
 }
 

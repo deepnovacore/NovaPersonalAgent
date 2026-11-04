@@ -36,6 +36,63 @@ class RecordingShell extends WorkspaceShell {
 
 void main() {
   test(
+    'host describes baked ReportLab defaults and verifies Chinese readback',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      final model = PromptModel();
+      final host = AgentCoreHost(
+        store: store,
+        settings: FixtureSettings(),
+        clientFactory: () => model,
+      );
+      addTearDown(host.dispose);
+      await host.send(id, '生成中文 PDF');
+      expect(model.instructions, contains('Helvetica fonts automatically use'));
+      expect(model.instructions, contains('do not download or install fonts'));
+      expect(
+        model.instructions,
+        contains('read generated PDFs back with pypdf'),
+      );
+      expect(model.instructions, contains('if the font is absent, report it'));
+      expect(
+        model.instructions,
+        isNot(contains('verified-hash OFL font download')),
+      );
+    },
+  );
+
+  test(
+    'host requires page-grounded paper explanations without invented coverage',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      final model = PromptModel();
+      final host = AgentCoreHost(
+        store: store,
+        settings: FixtureSettings(),
+        clientFactory: () => model,
+      );
+      addTearDown(host.dispose);
+      await host.send(id, '帮我解读一下这篇 paper');
+      for (final instruction in [
+        'extract text page by page in bounded chunks',
+        'paper explanation without page citations is incomplete',
+        'PDF pages actually read',
+        'Do not silently cut each page',
+        'if output is truncated, read the omitted pages/chunks',
+        'page citation such as (p.3)',
+        'actual PDF page citation',
+        'explicitly disclose unread sections',
+        'never invent novelty, results or citations',
+      ]) {
+        expect(model.instructions, contains(instruction));
+      }
+    },
+  );
+  test(
     'host cancels only its active shell tool, not unrelated conversation work',
     () async {
       final workspace = AgentWorkspace(Directory('/unused-test-workspace'));

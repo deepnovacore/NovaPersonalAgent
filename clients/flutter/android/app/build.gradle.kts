@@ -107,7 +107,7 @@ dependencies {
 
 val verifyLinuxRuntime by tasks.registering {
     doLast {
-        require(linuxRuntime != null) { "Run tool/linux/android/build_runtime.py on the external build disk and set NOVA_ANDROID_LINUX_RUNTIME" }
+        require(linuxRuntime != null) { "Run tool/linux/android/build_runtime.py in an isolated internal build directory and set NOVA_ANDROID_LINUX_RUNTIME" }
         listOf("jniLibs/arm64-v8a/libproot.so", "jniLibs/arm64-v8a/libproot-loader.so", "jniLibs/arm64-v8a/libnova-exec.so", "assets/nova-linux/rootfs.tgz", "assets/nova-linux/rootfs.sha256").forEach {
             require(file("$linuxRuntime/$it").isFile) { "Missing Android Linux runtime artifact: $it" }
         }

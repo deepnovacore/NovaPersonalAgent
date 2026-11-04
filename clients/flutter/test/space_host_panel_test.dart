@@ -83,6 +83,41 @@ void main() {
     expect(find.text('OPENAI_API_KEY'), findsNothing);
   });
 
+  testWidgets(
+    'Host news interests edit inline with the existing settings.patch version',
+    (tester) async {
+      final state = stateWith({
+        'owner': true,
+        'host_settings': {
+          'news': {
+            'enabled': true,
+            'explore': true,
+            'interests': [],
+            'profile_version': 2,
+          },
+        },
+      });
+      await pump(tester, state);
+      await tester.enterText(
+        find.byKey(const ValueKey('news.interest.word')),
+        '园艺',
+      );
+      await tester.tap(find.byTooltip('添加关注词'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(state.pending.single['kind'], 'settings.patch');
+      expect(state.pending.single['input'], {
+        'method': 'news.configure',
+        'params': {
+          'enabled': true,
+          'explore': true,
+          'interests': ['园艺'],
+          'expected_version': 2,
+        },
+      });
+    },
+  );
+
   testWidgets('owner edits enqueue settings.patch and credential intents', (
     tester,
   ) async {
@@ -125,7 +160,13 @@ void main() {
       find.byKey(const ValueKey('host.credential.GEMINI_API_KEY')),
     );
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'g-secret');
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'g-secret',
+    );
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(state.pending.last['kind'], 'secret.put');
@@ -142,12 +183,24 @@ void main() {
     // Queued offline name edits carry only their own field so neither reverts the other.
     await tester.tap(find.byKey(const ValueKey('host.assistant_name')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Nova2');
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'Nova2',
+    );
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('host.user_name')));
     await tester.pumpAndSettle();
-    await tester.enterText(find.byType(TextField), 'Bea');
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'Bea',
+    );
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     final identity = state.pending

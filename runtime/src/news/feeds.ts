@@ -1,15 +1,11 @@
+import {z} from 'zod'
+import sources from './sources.json' with {type:'json'}
 import {createHash} from 'node:crypto'
 import {SaxesParser} from 'saxes'
 export interface NewsSource {id:string;name:string;url:string;language?:'zh-CN'|'en'}
 export interface Article {id:string;source_id:string;title:string;summary:string;url:string;published_at:string|null;first_seen:string;content_hash:string}
-export const NEWS_SOURCES:NewsSource[]=[
- {id:'bbc',name:'BBC News',url:'https://feeds.bbci.co.uk/news/rss.xml',language:'en'},
- {id:'guardian',name:'The Guardian · Technology',url:'https://www.theguardian.com/uk/technology/rss',language:'en'},
- {id:'ithome',name:'IT之家',url:'https://www.ithome.com/rss/',language:'zh-CN'},
- {id:'sspai',name:'少数派',url:'https://sspai.com/feed',language:'zh-CN'},
- {id:'solidot',name:'Solidot',url:'https://www.solidot.org/index.rss',language:'zh-CN'},
- {id:'36kr',name:'36氪',url:'https://www.36kr.com/feed',language:'zh-CN'},
-]
+const sourceSchema=z.object({id:z.string(),name:z.string(),url:z.url(),language:z.enum(['zh-CN','en'])})
+export const NEWS_SOURCES:NewsSource[]=sourceSchema.array().parse(sources)
 export const newsLanguage=(locale:string):'zh-CN'|'en'=>/^zh(?:[-_]|$)/iu.test(locale)?'zh-CN':'en'
 export const digest=(text:string)=>createHash('sha256').update(text).digest('hex')
 export function articleUrl(value:string):string|null{
@@ -19,7 +15,7 @@ export function articleUrl(value:string):string|null{
   return u.href
  }catch{return null}
 }
-function plain(text:string){return text.replace(/<[^>]*>/gu,' ').replace(/&(?:nbsp|amp|lt|gt|quot|apos);/gu,v=>({'&nbsp;':' ','&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"}[v]??v)).replace(/&#(x[0-9a-f]+|[0-9]+);/giu,(_all,value:string)=>{const code=Number.parseInt(value.startsWith('x')?value.slice(1):value,value.startsWith('x')?16:10);return code>0&&code<=0x10ffff?String.fromCodePoint(code):''}).replace(/\s+/gu,' ').trim()}
+function plain(text:string){return text.replace(/<[^>]*>/gu,' ').replace(/&(?:nbsp|amp|lt|gt|quot|apos);/gu,v=>({'&nbsp;':' ','&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&apos;':"'"}[v]??v)).replace(/&#(x[0-9a-f]+|[0-9]+);/giu,(_all,value:string)=>{const hex=/^x/iu.test(value),code=Number.parseInt(hex?value.slice(1):value,hex?16:10);return code>0&&code<=0x10ffff?String.fromCodePoint(code):''}).replace(/\s+/gu,' ').trim()}
 export function parseFeed(xml:string,source:NewsSource,now:Date):Article[]{
  if(Buffer.byteLength(xml)>1024*1024)throw Error('feed_too_large')
  const parser=new SaxesParser({xmlns:false});const stack:string[]=[];let root='',fields:Record<string,string>|null=null,itemDepth=0
@@ -36,7 +32,7 @@ export function parseFeed(xml:string,source:NewsSource,now:Date):Article[]{
  parser.on('closetag',()=>{if(fields&&stack.length===itemDepth){
    const title=plain(fields.title??'').slice(0,300),url=articleUrl((fields.link??'').trim())
    const summary=plain(fields.description??fields.summary??fields['content:encoded']??fields.content??'').slice(0,1500)
-   const timestamp=Date.parse(fields.pubdate??fields.published??fields.updated??'')
+   const timestamp=Date.parse(fields.pubdate??fields.published??fields.updated??fields['dc:date']??'')
    const published_at=Number.isFinite(timestamp)&&timestamp<=now.getTime()+300000?new Date(timestamp).toISOString():null
    if(title&&url&&articles.length<200){const id=digest(url);articles.push({id,source_id:source.id,title,summary,url,published_at,first_seen:now.toISOString(),content_hash:digest(title+'\n'+summary)})}
    fields=null

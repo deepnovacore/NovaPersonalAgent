@@ -1,0 +1,116 @@
+[
+  {
+    "id": "bbc",
+    "name": "BBC News",
+    "url": "https://feeds.bbci.co.uk/news/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "bbc-health",
+    "name": "BBC Health",
+    "url": "https://feeds.bbci.co.uk/news/health/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "bbc-world",
+    "name": "BBC World",
+    "url": "https://feeds.bbci.co.uk/news/world/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "bbc-entertainment",
+    "name": "BBC Entertainment",
+    "url": "https://feeds.bbci.co.uk/news/entertainment_and_arts/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "bbc-sport",
+    "name": "BBC Sport",
+    "url": "https://feeds.bbci.co.uk/sport/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "bbc-science",
+    "name": "BBC Science",
+    "url": "https://feeds.bbci.co.uk/news/science_and_environment/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "npr",
+    "name": "NPR",
+    "url": "https://feeds.npr.org/1001/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "npr-health",
+    "name": "NPR Health",
+    "url": "https://feeds.npr.org/1128/rss.xml",
+    "language": "en"
+  },
+  {
+    "id": "chinanews-scroll-news",
+    "name": "中国新闻网 · 滚动",
+    "url": "https://www.chinanews.com.cn/rss/scroll-news.xml",
+    "language": "zh-CN"
+  },
+  {
+    "id": "chinanews-society",
+    "name": "中国新闻网 · 社会",
+    "url": "https://www.chinanews.com.cn/rss/society.xml",
+    "language": "zh-CN"
+  },
+  {
+    "id": "chinanews-life",
+    "name": "中国新闻网 · 生活",
+    "url": "https://www.chinanews.com.cn/rss/life.xml",
+    "language": "zh-CN"
+  },
+  {
+    "id": "chinanews-sports",
+    "name": "中国新闻网 · 体育",
+    "url": "https://www.chinanews.com.cn/rss/sports.xml",
+    "language": "zh-CN"
+  },
+  {
+    "id": "chinanews-culture",
+    "name": "中国新闻网 · 文化",
+    "url": "https://www.chinanews.com.cn/rss/culture.xml",
+    "language": "zh-CN"
+  },
+  {
+    "id": "chinanews-finance",
+    "name": "中国新闻网 · 财经",
+    "url": "https://www.chinanews.com.cn/rss/finance.xml",
+    "language": "zh-CN"
+  },
+  {
+    "id": "dw-zh",
+    "name": "DW 中文",
+    "url": "https://rss.dw.com/rdf/rss-chi-all",
+    "language": "zh-CN"
+  },
+  {
+    "id": "ft-zh",
+    "name": "FT中文",
+    "url": "https://www.ftchinese.com/rss/news",
+    "language": "zh-CN"
+  },
+  {
+    "id": "rfi-zh",
+    "name": "RFI 中文",
+    "url": "https://www.rfi.fr/cn/rss",
+    "language": "zh-CN"
+  },
+  {
+    "id": "ithome",
+    "name": "IT之家",
+    "url": "https://www.ithome.com/rss/",
+    "language": "zh-CN"
+  },
+  {
+    "id": "sspai",
+    "name": "少数派",
+    "url": "https://sspai.com/feed",
+    "language": "zh-CN"
+  }
+]

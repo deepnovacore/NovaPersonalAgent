@@ -1,4 +1,7 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  "关注方向": "Interests",
+  "添加关注词": "Add interest",
+  "移除关注：{0}": "Remove interest: {0}",
   "模型选择由启动配置管理，当前只读。": "Model selection is managed by the launch configuration and is read-only.",
   "请连接后台后再保存模型选择。": "Connect the backend before saving model selection.",
   "模型选择已在其他设备修改，请重新读取后再保存。": "Model selection changed on another device. Reload it before saving.",

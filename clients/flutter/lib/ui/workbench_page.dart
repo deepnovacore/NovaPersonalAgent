@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'scheduled_tasks_page.dart';
+import 'news_interests.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -1325,6 +1326,21 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                   ...feeds.map(_feed),
                 ],
                 if (widget.page == 1) ...[
+                  NewsInterests(
+                    news: news,
+                    language: widget.language,
+                    available: store.available,
+                    configure: (interests) async {
+                      await store.command('news.configure', {
+                        'enabled': news['enabled'] ?? true,
+                        'explore': news['explore'] ?? true,
+                        'interests': interests,
+                        'keep_mined': true,
+                        if (news['profile_version'] != null)
+                          'expected_version': news['profile_version'],
+                      });
+                    },
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
                     child: Row(

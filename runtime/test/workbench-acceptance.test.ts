@@ -4,6 +4,7 @@ import {mkdtempSync,mkdirSync,writeFileSync,rmSync,readFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {spawnSync} from 'node:child_process'
+import {NEWS_SOURCES,FEED_HEADERS} from '../src/news/feeds.js'
 import {assertOriginalProfilePaths,loadAcceptanceManifest} from '../src/desktop/workbench-acceptance.js'
 
 function fixture(){
@@ -188,12 +189,13 @@ test('news feeds pass the gate only when the manifest turns news on, and only as
  await assert.rejects(fetch('https://feeds.bbci.co.uk/other.xml'),/news_get_only/,'only the built-in feed paths');
  await assert.rejects(fetch(new Request(feed)),/news_get_only/,'a Request object would carry its own headers');
  assert.equal((await fetch(feed,{headers:{Authorization:'secret-token','X-Private':'secret-header'}})).status,200);
- assert.equal(seen.length,3);assert.ok(seen.every(line=>line.includes('NovaPersonalAgent-News')&&!line.includes('secret')),seen.join('|'));
+ for(const url of ${JSON.stringify(NEWS_SOURCES.map(s=>s.url))})assert.equal((await fetch(url)).status,200);
+ assert.equal(seen.length,3+${NEWS_SOURCES.length});assert.ok(seen.every(line=>line.includes(JSON.stringify(${JSON.stringify(FEED_HEADERS)}))&&!line.includes('secret')),seen.join('|'));
  await assert.rejects(fetch('https://feeds.bbci.co.uk.invalid/rss.xml'),/unknown_outbound/);
  await assert.rejects(fetch('http://feeds.bbci.co.uk/news/rss.xml'),/unknown_outbound/);
  assert.throws(()=>net.connect({host:'feeds.bbci.co.uk',port:443}),/unknown_socket/);`)
  assert.equal(on.find(row=>row.kind==='disabled_modules')?.counts.news,0)
- assert.equal(on.filter(row=>row.kind==='news_fetch'&&row.counts.ok===1).length,3)
+ assert.equal(on.filter(row=>row.kind==='news_fetch'&&row.counts.ok===1).length,3+NEWS_SOURCES.length)
  assert.ok(!JSON.stringify(on).includes('bbc'),'counts carry no feed identity')
  }finally{f.close()}
 })

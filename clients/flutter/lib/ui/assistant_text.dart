@@ -16,20 +16,27 @@ class AssistantText extends StatelessWidget {
       r'''nova-file:///workspace/[^\s`<>"\[\]，。；：！？、（）]+''',
     ).allMatches(text)) {
       final url = match[0]!.replaceFirst(RegExp(r'[).,;:!]+$'), '');
-      if (!seen.add(url) ||
-          text.contains(']($url)') ||
-          text.contains('](<$url>)') ||
-          text.contains('<$url>')) {
-        continue;
-      }
+      if (!seen.add(url)) continue;
       try {
         final uri = Uri.parse(url);
         if (uri.host.isEmpty &&
             !uri.hasQuery &&
             !uri.hasFragment &&
             uri.path.startsWith('/workspace/') &&
-            !uri.pathSegments.contains('..') &&
-            RegExp(r'\.html?$', caseSensitive: false).hasMatch(uri.path)) {
+            !Uri.decodeComponent(uri.path).contains('\u0000') &&
+            !Uri.decodeComponent(
+              url,
+            ).split('/').any((part) => part == '..' || part == '.')) {
+          final html = RegExp(
+            r'\.html?$',
+            caseSensitive: false,
+          ).hasMatch(uri.path);
+          if (html &&
+              (text.contains(']($url)') ||
+                  text.contains('](<$url>)') ||
+                  text.contains('<$url>'))) {
+            continue;
+          }
           yield uri;
         }
       } on FormatException {
@@ -73,7 +80,12 @@ class AssistantText extends StatelessWidget {
         for (final uri in _previewLinks)
           TextButton.icon(
             onPressed: () => onArtifactLink!(uri.toString()),
-            icon: const Icon(Icons.open_in_new, size: 18),
+            icon: Icon(
+              RegExp(r'\.html?$', caseSensitive: false).hasMatch(uri.path)
+                  ? Icons.open_in_new
+                  : Icons.insert_drive_file_outlined,
+              size: 18,
+            ),
             label: Text(uri.pathSegments.last),
           ),
     ],

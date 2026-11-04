@@ -80,7 +80,7 @@ Opening a conversation from a card supplies its references to ordinary chat. Con
 
 ## Feeds
 
-Articles ranked to your interests, split into "For you" and "Saved". Until Nova has learned enough about what you read, it falls back to chronological order and asks you to confirm before switching to interest ranking. Each article shows why it was recommended. From an article you can read the original, save it, or convert it into a Todo, Idea or Goal — none of that authorizes Nova to act on it, it only records it. You can also tell Nova to show more or less of a given interest.
+Articles ranked to your interests, split into "For you" and "Saved". Nova-mined, unconfirmed interests may rank this page (sending those interests and public article excerpts to the ranking provider), but never become personal facts or authorize push notifications. Fresh, source-diverse articles fill weak matches; without scores the page falls back to a timeline. A compact Interests row lets you add or remove words without opening settings. Each article shows why it was recommended. From an article you can read the original, save it, or convert it into a Todo, Idea or Goal — none of that authorizes Nova to act on it, it only records it. You can also tell Nova to show more or less of a given interest.
 
 ## Profile
 

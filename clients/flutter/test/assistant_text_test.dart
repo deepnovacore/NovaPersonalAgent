@@ -68,14 +68,42 @@ void main() {
             '`nova-file:///workspace/../../outside.html`\n'
             '`nova-file:///workspace/%2e%2e/outside.html`\n'
             '`nova-file:///workspace/game.html?remote=1`\n'
-            '`nova-file:///workspace/game.html#remote`\n'
-            '`nova-file:///workspace/check.py`',
+            '`nova-file:///workspace/game.html#remote`',
             onArtifactLink: (_) async => fail('unexpected preview'),
           ),
         ),
       ),
     );
     expect(find.byType(TextButton), findsNothing);
+  });
+
+  testWidgets('document links render deduplicated tappable file chips', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssistantText(
+            '[Report](nova-file:///workspace/outputs/report.pdf)\n'
+            '`nova-file:///workspace/outputs/report.pdf`\n'
+            '`nova-file:///workspace/inbox/sales.xlsx`\n'
+            '`nova-file:///workspace/outputs/%E6%91%98%E8%A6%81.txt`',
+            onArtifactLink: (value) async => opened.add(value),
+          ),
+        ),
+      ),
+    );
+    expect(find.widgetWithText(TextButton, 'report.pdf'), findsOneWidget);
+    expect(find.byIcon(Icons.insert_drive_file_outlined), findsNWidgets(3));
+    for (final name in ['report.pdf', 'sales.xlsx', '摘要.txt']) {
+      await tester.tap(find.widgetWithText(TextButton, name));
+    }
+    expect(opened, [
+      'nova-file:///workspace/outputs/report.pdf',
+      'nova-file:///workspace/inbox/sales.xlsx',
+      'nova-file:///workspace/outputs/%E6%91%98%E8%A6%81.txt',
+    ]);
   });
 
   testWidgets('preview action requires a local preview handler', (

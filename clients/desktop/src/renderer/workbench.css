@@ -1017,3 +1017,6 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .card-close{position:absolute;top:10px;right:10px;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--ink-dim);cursor:pointer}
 .workbench .card-close:hover:not(:disabled),.workbench .card-close:focus-visible{background:var(--surface-hover,rgba(127,127,127,.18));color:var(--ink)}
 .workbench .card-close:disabled{opacity:.4;cursor:default}
+.news-interests{display:flex;align-items:center;flex-wrap:wrap;gap:6px;margin:8px 0 12px;font-size:12px}
+.news-interests input{width:130px;min-width:0;padding:4px 8px}
+.news-interests button{font-size:12px}

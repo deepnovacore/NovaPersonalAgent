@@ -2,6 +2,10 @@ package com.nova.nova_mobile
 
 import android.app.Activity
 import android.app.Dialog
+import android.content.Intent
+import android.webkit.MimeTypeMap
+import androidx.core.content.FileProvider
+import java.io.File
 import android.graphics.Color
 import android.net.Uri
 import android.os.Build
@@ -51,6 +55,42 @@ internal class ArtifactWebHost(private val activity: Activity, messenger: Binary
         channel.setMethodCallHandler { call, reply ->
             // Flutter's default channel executor and all lifecycle hooks are UI-thread.
             check(Looper.myLooper() == Looper.getMainLooper())
+            if (call.method == "shareFile") {
+                try {
+                    check(!disposed && foreground && !activity.isFinishing && !activity.isDestroyed)
+                    val input = call.arguments as? Map<*, *> ?: error("invalid_document")
+                    val name = input["name"] as? String ?: error("invalid_document")
+                    val bytes = input["bytes"] as? ByteArray ?: error("invalid_document")
+                    require(name.isNotEmpty() && name.length <= 200 && name != "." && name != ".." &&
+                        name.none { it == '/' || it == '\\' || it.code < 32 || it.code == 127 } && bytes.size <= 25 * 1024 * 1024)
+                    val root = File(activity.cacheDir, "nova-documents").apply { mkdirs() }
+                    root.listFiles()?.filter { it.lastModified() < System.currentTimeMillis() - 86_400_000 }?.forEach { it.deleteRecursively() }
+                    val folder = File(root, UUID.randomUUID().toString()).apply { check(mkdir()) }
+                    val file = File(folder, name)
+                    file.writeBytes(bytes)
+                    val uri = FileProvider.getUriForFile(activity, "${activity.packageName}.documents", file)
+                    val mime = MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.', "").lowercase()) ?: "application/octet-stream"
+                    val send = Intent(Intent.ACTION_SEND).apply {
+                        type = mime
+                        putExtra(Intent.EXTRA_STREAM, uri)
+                        clipData = android.content.ClipData.newRawUri(name, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    val view = Intent(Intent.ACTION_VIEW).apply {
+                        setDataAndType(uri, mime)
+                        clipData = android.content.ClipData.newRawUri(name, uri)
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    // The chooser always offers sharing, even without a viewer.
+                    val chooser = Intent.createChooser(send, name).apply {
+                        putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(view))
+                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    }
+                    activity.startActivity(chooser)
+                    reply.success(null)
+                } catch (_: Exception) { reply.error("document_share_failed", null, null) }
+                return@setMethodCallHandler
+            }
             if (call.method != "open" && call.method != "inspect") {
                 reply.error("unsupported_artifact_command", null, null)
                 return@setMethodCallHandler

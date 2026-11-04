@@ -1,0 +1,62 @@
+{
+  "schema": 1,
+  "python": "3.12",
+  "wheels": [
+    {
+      "name": "openpyxl",
+      "version": "3.1.5",
+      "filename": "openpyxl-3.1.5-py2.py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl",
+      "sha256": "5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2",
+      "build_only": false
+    },
+    {
+      "name": "et_xmlfile",
+      "version": "2.0.0",
+      "filename": "et_xmlfile-2.0.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/c1/8b/5fe2cc11fee489817272089c4203e679c63b570a5aaeb18d852ae3cbba6a/et_xmlfile-2.0.0-py3-none-any.whl",
+      "sha256": "7a91720bc756843502c3b7504c77b8fe44217c85c537d85037f0f536151b2caa",
+      "build_only": false
+    },
+    {
+      "name": "pypdf",
+      "version": "6.1.1",
+      "filename": "pypdf-6.1.1-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/07/ed/adae13756d9dabdddee483fc7712905bb5585fbf6e922b1a19aca3a29cd1/pypdf-6.1.1-py3-none-any.whl",
+      "sha256": "7781f99493208a37a7d4275601d883e19af24e62a525c25844d22157c2e4cde7",
+      "build_only": false
+    },
+    {
+      "name": "reportlab",
+      "version": "4.4.4",
+      "filename": "reportlab-4.4.4-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/57/66/e040586fe6f9ae7f3a6986186653791fb865947f0b745290ee4ab026b834/reportlab-4.4.4-py3-none-any.whl",
+      "sha256": "299b3b0534e7202bb94ed2ddcd7179b818dcda7de9d8518a57c85a58a1ebaadb",
+      "build_only": false
+    },
+    {
+      "name": "pillow",
+      "version": "13.0.0",
+      "filename": "pillow-13.0.0-cp312-cp312-musllinux_1_2_aarch64.whl",
+      "url": "https://files.pythonhosted.org/packages/26/9b/f38b7c4d8f599537e2d1a6d546cec9beef7536ff8f5c49a3f9c78179d8ac/pillow-13.0.0-cp312-cp312-musllinux_1_2_aarch64.whl",
+      "sha256": "4bd024d567eca931b668978d672dba914d4b8e2628e2c3073a2ad178de8a2620",
+      "build_only": false
+    },
+    {
+      "name": "charset-normalizer",
+      "version": "3.5.2",
+      "filename": "charset_normalizer-3.5.2-cp312-cp312-musllinux_1_2_aarch64.whl",
+      "url": "https://files.pythonhosted.org/packages/7e/24/76d2cefc25472531e4c5c7dfff68865eb1c39b78482f0fdc15b46f047830/charset_normalizer-3.5.2-cp312-cp312-musllinux_1_2_aarch64.whl",
+      "sha256": "ae4f5fea5b8b8ccff88238cc8569303e5ee95efae67fa62922a311397a71f346",
+      "build_only": false
+    },
+    {
+      "name": "fonttools",
+      "version": "4.68.0",
+      "filename": "fonttools-4.68.0-py3-none-any.whl",
+      "url": "https://files.pythonhosted.org/packages/35/74/4ea331ecc65ba05a58b1e4e8ccd604c8a15565f876dfbf93fc2a2ea2e22b/fonttools-4.68.0-py3-none-any.whl",
+      "sha256": "d76f8fdcb6936f5e1045a0c9dd721a4bf11112e60d1e243bfa1d39f06a8b3104",
+      "build_only": true
+    }
+  ]
+}

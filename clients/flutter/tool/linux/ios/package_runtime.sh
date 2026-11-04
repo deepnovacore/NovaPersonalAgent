@@ -25,6 +25,8 @@ for item in libish.a libish_emu.a libfakefs.a; do
   test -s "$NOVA_LINUX_ROOT/build-$PLATFORM_NAME/$item"
 done
 test -s "$NOVA_LINUX_ROOT/resources/NovaAlpine/meta.db"
+test -s "$NOVA_LINUX_ROOT/resources/NovaAlpine.sha256"
+test -s "$NOVA_LINUX_ROOT/documents-ios/manifest.json"
 mkdir -p "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH"
 # Ditto copies fakefs metadata and regular-file payloads; only this build's app is changed.
 ditto "$NOVA_LINUX_ROOT/resources/NovaAlpine" "$TARGET_BUILD_DIR/$UNLOCALIZED_RESOURCES_FOLDER_PATH/NovaAlpine"

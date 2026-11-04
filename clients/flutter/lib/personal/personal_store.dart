@@ -130,6 +130,9 @@ final class PersonalStore extends ChangeNotifier {
       if (method == 'news.refresh' && news != null) {
         return news!.refresh().then((_) => news!.snapshot());
       }
+      if (method == 'news.configure' && news != null) {
+        return news!.configure(params).then((_) => news!.snapshot());
+      }
       if (method == 'news.action' && news != null) {
         return news!.action(params).then((_) => news!.snapshot());
       }

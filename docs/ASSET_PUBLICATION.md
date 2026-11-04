@@ -66,3 +66,77 @@ The UI review polish merges the approved Nova avatar with the "Nova" app-bar tit
 `chat-tasks.png` also reflects the Tasks-tab restyle (Tasks/Schedules segmented control, Today/Earlier sections and session-duration labels) added in the same polish pass; the fixture text is still synthetic and no character or organization data was added.
 
 `chat-home-empty.png` and `workbench-nova.png` share a hash because both capture the same empty Nova chat screen. `chat-task-draft.png` matches the 2026-10-19 approved version again: the task chat has no pet avatar in its app bar, and the old body avatar is gone. The pet avatar photo library permission string in `clients/flutter/ios/Runner/Info.plist` is generic; user-chosen photos stay in the app-support directory and are never bundled or synced.
+
+## Mobile document font feasibility review (2026-11-04; not bundled)
+
+Historical pre-bake feasibility record (superseded for new images by the exact
+subset approval below): the earlier document acceptance fixture downloaded a
+public upstream font only into its isolated test workspace; no font or derivative is added to source, defaults or
+packages by this change. This is licence/compatibility evidence, **not owner
+publication approval** for a future bundled subset.
+
+- Source: Google Fonts commit `2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc`,
+  [`ofl/notosanssc/NotoSansSC[wght].ttf`](https://github.com/google/fonts/blob/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf).
+- Name/version read from the font's name table: Noto Sans SC Thin;
+  `Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603` (variable TrueType).
+- Original bytes: 17,772,300; SHA-256
+  `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
+- Licence: [OFL.txt at the same commit](https://github.com/google/fonts/blob/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/OFL.txt),
+  SHA-256 `1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9`.
+  Reviewed text states SIL OFL 1.1, Copyright 2014–2021 Adobe, reserved font name
+  “Source”. It permits bundling/embedding/redistribution with the copyright and
+  licence, forbids selling fonts alone, and constrains reserved names for
+  modifications. A bundled derivative would need its own exact hash, retained
+  licence and publication review; this record does not approve one.
+- Compatibility: the original TrueType font round-trips Chinese PDF text through
+  ReportLab 4.4.4 and pypdf 6.1.1 on Android PRoot and iOS iSH simulators.
+  fpdf2 2.8.4 incorrectly drops `fvar` while leaving `avar`; this variable font
+  fails its subset path. Static instantiation is diagnostic only, not shipped.
+
+At that earlier measurement no CJK font was guaranteed in production. New baked
+images now include the approved subset below; older installed rootfs images
+still require availability checks.
+
+## Approved mobile document font subset (2026-11-04)
+
+Approval evidence: **仓库所有者（用户），会话内口头批准** on 2026-11-04
+explicitly authorized the renamed common-character Noto Sans SC subset to be
+baked into both mobile rootfs images by default. No personal name or ticket was
+provided. This approval covers **only the exact derivative below**, not a new
+weight, character set, font revision or unrelated asset. Those require renewed
+owner approval. This records permission; it does not initiate a push/release or
+establish App Store policy compliance.
+
+- Source/version and source SHA-256: the 2.004-H2 variable TrueType at Google
+  Fonts commit `2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc` recorded above,
+  SHA-256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
+- Derivative: **Nova Document Sans SC Regular**, PostScript name
+  `NovaDocumentSansSC-Regular`, static `wght=400`; 2,357,940 bytes (original
+  17,772,300 bytes). No 700 weight is bundled. Generated with fontTools 4.68.0,
+  locked in `clients/flutter/tool/linux/documents/locks/wheels.json`.
+- Approved derivative SHA-256:
+  `88f7c79e5b9b132c8b455ad2ff8e943d36b5f65aef653c6327e604646f0617e9`.
+- Character input: all valid GB2312 characters, ASCII U+0020–007E, U+00A0–024F,
+  U+2000–206F, U+3000–303F, U+FF00–FFEF; sorted unique codepoints, UTF-8 with
+  trailing newline in `clients/flutter/tool/linux/documents/font-charset.txt`.
+  SHA-256 `9bc10dc9de455e72e726e756d8923f6f470d2e39bc3691e17e8c588f860de4b7`.
+  This is a common-character subset, not full CJK coverage; missing glyphs must
+  not be represented as successfully rendered text.
+- Licence/copyright: SIL OFL 1.1, Copyright 2014–2021 Adobe, reserved name
+  “Source”. Renamed derivative does not use “Source” in family/full/PostScript
+  names; original copyright and licence name records are retained. The exact
+  upstream OFL text SHA-256 remains
+  `1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9`.
+  Retain that text/copyright alongside the font and in the app licence list;
+  do not sell the font alone. Font binaries remain generated build outputs,
+  not checked-in media.
+- Review evidence: static instantiation + subset + name-table rewrite in
+  `prepare_font.py`; both digest-pinned ARM64 Alpine containers generated the
+  same derivative hash and ReportLab 4.4.4 → pypdf 6.1.1 read back
+  `中文汇总：总和 1001000` offline. This is compatibility/licence evidence in
+  addition to, not a replacement for, the owner approval above.
+- Installed path: `/usr/share/fonts/nova/NovaDocumentSansSC-Regular.ttf`;
+  licence alongside it and `/usr/share/licenses/nova-document-font/OFL.txt`.
+
+The ReportLab default-font `sitecustomize` hook is code, not a new font asset;
+the approved font bytes, character subset, weight and SHA-256 above are unchanged.
