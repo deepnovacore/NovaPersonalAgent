@@ -976,7 +976,7 @@ export class PersonalAgentHost {
                 material.push(JSON.stringify({kind:ref.kind,title:row.title,note:row.note,status:row.status,...('due' in row?{due:row.due}:{success_criteria:row.success_criteria})}));
                 if(ref.kind==='todo'&&references.filter(item=>item.kind==='todo').length===1)sourceTodo={id:ref.id,version:ref.version};
             }else if(ref.kind==='timeline'){
-                await this.#ensureTimeline();const selected=this.timeline.discussion(ref.id,ref.version);
+                await this.#ensureTimeline(ref.id,ref.version);const selected=this.timeline.discussion(ref.id,ref.version);
                 material.push(JSON.stringify({kind:'timeline',...selected}));evidenceRefs.push(...selected.evidence_refs);
             }else if(ref.kind==='news'){
                 const input=this.news.conversionInput({id:ref.id,content_hash:ref.content_hash,kind:'idea',title:'Discussion'});
@@ -1935,9 +1935,25 @@ export class PersonalAgentHost {
         const fresh=this.#timelineFresh;
         return this.#opened&&fresh?.host===this.#timelineEpoch&&fresh.brief===this.timeline.epoch&&fresh.scope===this.#timelineScope()&&Date.now()-fresh.at<TIMELINE_FRESH_MS;
     }
-    /** A timeline read for a click: reuses a still-valid refresh, otherwise reads as before. */
-    #ensureTimeline():Promise<void>{
-        if(this.#timelineCurrent()){if(acceptanceEnabled())appendAcceptanceCounts('timeline_refresh',{skipped:1});return Promise.resolve()}
+    /**
+     * Cheap live check of only the refs one card cites, for reuse of a cached read. Authorization is checked per turn elsewhere; this covers
+     * what a cached read alone would miss: a message whose body was deleted or whose retention lapsed, and a memory that expired or closed.
+     * Any doubt (a resource that cannot answer, a file ref, a missing entry) sends the caller to the full refresh instead.
+     */
+    async #citedRefsLive(id:string,version:string):Promise<boolean>{
+        let refs:readonly string[];
+        try{refs=this.timeline.discussion(id,version).card.refs}catch{return false}
+        const memory=this.#productMemory();
+        for(const ref of refs){
+            if(ref.startsWith('source:'))continue; // Files are re-read live by canReadContext on every turn.
+            if(ref.startsWith('memory:')){if(!memoryEligibleForDiscovery(await memory?.get?.(ref.slice(7))))return false;continue}
+            if(!memory?.readEvidence||await memory.readEvidence(ref)===null)return false;
+        }
+        return true;
+    }
+    /** A timeline read for a click: reuses a still-valid refresh when the cited evidence is verifiably still there, otherwise reads as before. */
+    async #ensureTimeline(id:string,version:string):Promise<void>{
+        if(this.#timelineCurrent()&&await this.#citedRefsLive(id,version)&&this.#timelineCurrent()){if(acceptanceEnabled())appendAcceptanceCounts('timeline_refresh',{skipped:1});return}
         return this.refreshTimeline();
     }
     refreshTimeline():Promise<void>{
@@ -1948,7 +1964,7 @@ export class PersonalAgentHost {
     }
     async timelineAuthorized(id:string,version:string,consumer:string|undefined):Promise<boolean>{
         if(!consumer)return false;
-        await this.#ensureTimeline();
+        await this.#ensureTimeline(id,version);
         try{this.timeline.discussion(id,version)}catch{return false}
         for(const ref of this.timeline.basis(id)){
             if(ref.id.startsWith('source:')){if(!this.#sources?.canReadContext?.(ref.id,ref.version,consumer))return false}

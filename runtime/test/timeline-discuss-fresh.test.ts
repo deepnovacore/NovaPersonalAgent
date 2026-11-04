@@ -11,8 +11,8 @@ import type {TimelineInput} from '../src/personal-agent/timeline-brief.js'
 
 async function fixture(t:TestContext){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-fresh-'))
- let inputs:TimelineInput[]=[{id:'personal:fresh:1',version:'v1',kind:'im',text:'Synthetic approval is pending',observed_at:new Date().toISOString(),relation:'participant'}],reads=0,account:string|undefined
- const memory={productSurfaces:true,timelineEvidence:()=>{reads++;return Promise.resolve(inputs)},canReadConversationEvidence:()=>Promise.resolve(true)} as unknown as PersonalMemoryResource
+ let bodies=new Set(['personal:fresh:1']),inputs:TimelineInput[]=[{id:'personal:fresh:1',version:'v1',kind:'im',text:'Synthetic approval is pending',observed_at:new Date().toISOString(),relation:'participant'}],reads=0,account:string|undefined
+ const memory={productSurfaces:true,timelineEvidence:()=>{reads++;return Promise.resolve(inputs)},canReadConversationEvidence:()=>Promise.resolve(true),readEvidence:(id:string)=>Promise.resolve(bodies.has(id)?{evidence_id:id,locator:'l',text:'Synthetic approval is pending',source_kind:'im',observed_at:new Date().toISOString(),trust:'untrusted_external' as const}:null)} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,
   generateTimeline:items=>Promise.resolve({cards:[{category:'Approval',title:'Review the approval',why_now:'Its state needs checking',facts:[{text:'An approval is pending',quote:'approval is pending',ref:items[0]!.id}],uncertainty:'No deadline known',actions:[{label:'Discuss',kind:'discuss'}],refs:[items[0]!.id]}]})})
  host.setFeishu({restore:()=>Promise.resolve(),snapshot:()=>({account_id:account}),open:()=>Promise.resolve(),close:()=>Promise.resolve(),command:()=>Promise.resolve(null)})
@@ -20,7 +20,7 @@ async function fixture(t:TestContext){
  await host.open({deferBackground:true});await host.refreshTimeline();await host.timeline.refresh()
  const card=host.snapshot().timeline.cards[0]!
  assert.ok(card)
- return {host,card,reference:{kind:'timeline' as const,id:card.id,version:card.version,interaction:'discuss' as const},reads:()=>reads,setInputs:(next:TimelineInput[])=>{inputs=next},setAccount:(next:string|undefined)=>{account=next}}
+ return {host,card,reference:{kind:'timeline' as const,id:card.id,version:card.version,interaction:'discuss' as const},reads:()=>reads,setInputs:(next:TimelineInput[])=>{inputs=next},deleteBody:(id:string)=>{bodies.delete(id)},setAccount:(next:string|undefined)=>{account=next}}
 }
 
 test('a discussion reuses the completed timeline read and costs no ledger read',async t=>{
@@ -64,4 +64,26 @@ test('an old completed read is not reused after the freshness window',async t=>{
  const before=f.reads()
  await f.host.discussionContext([f.reference]).catch(()=>undefined)
  assert.ok(f.reads()-before>=1)
+})
+
+test('a message deleted after the last read is rejected even when no source event arrived yet',async t=>{
+ const f=await fixture(t)
+ // The ledger already hides the body, but the host has not been told (the projection refresh is still pending or failed).
+ f.deleteBody('personal:fresh:1');f.setInputs([])
+ await assert.rejects(f.host.discussionContext([f.reference]),/stale_reference/)
+ assert.equal(await f.host.timelineAuthorized(f.card.id,f.card.version,'consumer'),false)
+})
+
+test('a resource that cannot confirm the cited evidence falls back to the full read',async t=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-fresh-noread-'))
+ let reads=0
+ const input:TimelineInput={id:'personal:fresh:2',version:'v1',kind:'im',text:'Synthetic approval is pending',observed_at:new Date().toISOString(),relation:'participant'}
+ const memory={productSurfaces:true,timelineEvidence:()=>{reads++;return Promise.resolve([input])}} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,
+  generateTimeline:items=>Promise.resolve({cards:[{category:'Approval',title:'Review the approval',why_now:'Its state needs checking',facts:[{text:'An approval is pending',quote:'approval is pending',ref:items[0]!.id}],uncertainty:'No deadline known',actions:[{label:'Discuss',kind:'discuss'}],refs:[items[0]!.id]}]})})
+ t.after(async()=>{await host.close();await rm(dir,{recursive:true,force:true})})
+ await host.open({deferBackground:true});await host.refreshTimeline();await host.timeline.refresh()
+ const card=host.snapshot().timeline.cards[0]!,before=reads
+ await host.discussionContext([{kind:'timeline',id:card.id,version:card.version}])
+ assert.equal(reads-before,1,'without readEvidence the cached read is not trusted')
 })
