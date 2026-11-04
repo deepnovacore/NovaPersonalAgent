@@ -257,7 +257,12 @@ for (const mutation of ['none', 'forget', 'revoke', 'legacy'] as const) test(`pr
   release.resolve()
   const content = await consuming
   if (mutation === 'forget' || mutation === 'revoke') assert.equal(content, null, 'any authority change drops both facts and hints')
-  else {assert.match(content!, /I prefer tea/); assert.match(content!, /response_style_hint/)}
+  else {
+    assert.match(content!, /I prefer tea/)
+    // Without a recall-authority revision a style hint cannot be fenced against forget/revoke, so it fails closed.
+    if (mutation === 'legacy') assert.doesNotMatch(content!, /response_style_hint/)
+    else assert.match(content!, /response_style_hint/)
+  }
 })
 
 test('ledger-recall-engine and rendering drop style that expires during async authorization', async t => {

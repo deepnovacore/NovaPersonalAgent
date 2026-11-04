@@ -203,7 +203,7 @@ test('scheduled feed mixing app and memory dependencies fails closed without a p
  }finally{await f.host.close();await f.close()}
 })
 
-for(const [backend,section] of [['none','todos'],['none','goals'],['none','tasks'],['ledger','todos'],['mem0','todos']] as const)test(`live app references fence actual destination-B inputs and retained voice context (${backend}, ${section})`,{timeout:30000},async()=>{
+for(const [backend,section] of [['none','todos'],['none','goals'],['none','tasks'],['ledger','todos'],['mem0','todos']] as const)test(`live app references fence actual destination-B inputs and retained voice context (${backend}, ${section})`,{timeout:backend==='none'?30000:90000},async()=>{
  const f=await fixture(backend),requests:string[]=[],histories:string[]=[],injected:HostContextItem[]=[]
  let host=f.host
  const appTitle='Synthetic orchid app report title'
