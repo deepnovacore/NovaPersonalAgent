@@ -1,5 +1,10 @@
 import {normalizeToolTrace,TOOL_TRACE_LIMIT} from './chat-tool-trace.mjs'
 
+/** Appends the still-unconfirmed request as a pending user message; the real message replaces it under the same request_id. */
+export function withPendingMessage(messages,pending){
+ if(!pending||messages.some(message=>message.request_id===pending.request_id))return messages
+ return [...messages,pending]
+}
 export function homeTranscript(conversations){
  const rows=[...(conversations?.messages??[]).filter(message=>message.conversation_id==='chat:main'),...(conversations?.home_messages??[])];
  return [...new Map(rows.map(message=>[message.id,message])).values()].sort((a,b)=>(a.created_at??'').localeCompare(b.created_at??''))

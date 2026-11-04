@@ -314,9 +314,22 @@ export class PersonalController {
   async submit(){
     const id=this.selectedId,state=this.state(id)
     if(!this.presentationReady||!id||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
-    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.references?.length?{references:structuredClone(state.references)}:{}),...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
+    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,created_at:new Date().toISOString(),...(state.references?.length?{references:structuredClone(state.references)}:{}),...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
     state.submission=request;state.draft='';state.source_todo=null;state.references=[];state.error='';this.changed();return true
+  }
+  /**
+   * The message a reference-carrying request is still waiting on, shown at once so the click feels instant. It exists only while
+   * the request is unconfirmed (the host persists the real message under the same request_id) and only for the main conversation.
+   */
+  pendingUserMessage(id=this.selectedId){
+    const request=this.drafts.get(id)?.submission
+    if(id!=='chat:main'||!request?.references?.length||request.restored)return null
+    const rows=[...(this.snapshot?.conversations?.messages??[]),...(this.snapshot?.conversations?.home_messages??[])]
+    if(rows.some(message=>message.request_id===request.request_id))return null
+    // Relies on the host broadcasting the committed message (personal.state) before it answers the command, so the stored row exists
+    // by the time state.submission is cleared; carrying the references keeps the confirmed bubble from changing height on the swap.
+    return {id:'pending:'+request.request_id,conversation_id:id,role:'user',text:request.text,request_id:request.request_id,created_at:request.created_at??'',references:structuredClone(request.references),pending:true}
   }
   /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
   /** Sends text to conversation `id` without touching its draft; text that cannot be sent is left in that draft instead. */
@@ -324,7 +337,7 @@ export class PersonalController {
     const state=this.state(id),keep=()=>{if(!state.draft){state.draft=text;state.references=references;}this.changed();return false}
     if(!id||!text.trim()||text.length>4000)return false
     if(!this.presentationReady||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
-    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,...(references.length?{references:structuredClone(references)}:{})}
+    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,created_at:new Date().toISOString(),...(references.length?{references:structuredClone(references)}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';return keep()}
     state.submission=request;state.error='';this.changed();return true
   }

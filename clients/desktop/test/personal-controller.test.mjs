@@ -291,6 +291,38 @@ test('a failed independent card request never replaces an existing draft referen
  assert.equal(h.c.draft,'Draft about A');assert.deepEqual(h.c.state().references,[a]);assert.equal(h.c.state().failed_card.text,'Plan B');assert.deepEqual(h.c.state().failed_card.references,[b]);h.c.disconnect()
 })
 
+test('a card request is shown as a pending main message at once, then replaced by the stored one',async()=>{
+ const h=harness();h.snapshot('chat:main');const ref={kind:'timeline',id:'card',version:'v1'}
+ assert.equal(h.c.pendingUserMessage('chat:main'),null,'nothing pending before a request')
+ assert.equal(h.c.submitText('Discuss this card','chat:main',[ref]),true);const request=h.sent.at(-1)
+ const pending=h.c.pendingUserMessage('chat:main')
+ assert.equal(pending.pending,true);assert.equal(pending.text,'Discuss this card');assert.equal(pending.request_id,request.request_id)
+ assert.equal(h.c.pendingUserMessage('a'),null,'only the main conversation shows it')
+ h.c.receive({type:'personal.state',revision:99,feed:[],memory:{entries:[]},conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat',title:'Main'}],messages:[{id:'m1',conversation_id:'chat:main',role:'user',text:'Discuss this card',request_id:request.request_id,created_at:new Date().toISOString()}]}})
+ assert.equal(h.c.pendingUserMessage('chat:main'),null,'the stored message with the same request id replaces it, even before the result arrives')
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{accepted:true}});await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(h.c.pendingUserMessage('chat:main'),null);h.c.disconnect()
+})
+
+test('a refused card request removes the pending message and keeps the text recoverable',async()=>{
+ const h=harness();h.snapshot('chat:main');const ref={kind:'timeline',id:'card',version:'v1'}
+ assert.equal(h.c.submitText('Discuss this card','chat:main',[ref]),true);const request=h.sent.at(-1)
+ assert.ok(h.c.pendingUserMessage('chat:main'))
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'stale_reference'});await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(h.c.pendingUserMessage('chat:main'),null,'a definitive refusal never leaves a phantom message')
+ assert.equal(h.c.draft,'Discuss this card');assert.deepEqual(h.c.state().references,[ref]);h.c.disconnect()
+})
+
+test('an unknown outcome keeps the pending message until the request is settled',async()=>{
+ const h=harness();h.snapshot('chat:main');const ref={kind:'timeline',id:'card',version:'v1'}
+ assert.equal(h.c.submitText('Discuss this card','chat:main',[ref]),true);const request=h.sent.at(-1)
+ h.c.disconnect();await Promise.resolve()
+ // Disconnect restores the text to the draft, so the bubble is withdrawn and cannot duplicate the restored draft.
+ assert.equal(h.c.pendingUserMessage('chat:main'),null)
+ await h.c.connect();const replay=h.sent.at(-1)
+ assert.equal(replay.request_id,request.request_id,'the replay keeps the command identity');h.c.disconnect()
+})
+
 test('every finished Build is locked, not just the first one in the list',()=>{
  const {c}=harness()
  const item=(id,status)=>({id,kind:'build',build:{status}})

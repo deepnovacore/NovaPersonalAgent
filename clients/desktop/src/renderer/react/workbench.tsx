@@ -46,7 +46,17 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
  const openDecision=async(item:any)=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);await c.setPresentation(item.approval_id?'workbench':'orb');if(item.approval_id)runtime.chat.current?.reveal()}
  const closeTask=()=>{opening.current++;setTaskId(null);queueMicrotask(()=>originFocus.current?.isConnected&&originFocus.current.focus({preventScroll:true}))}
  const showHome=async()=>{if(c.snapshot?.conversations?.items?.some((item:any)=>item.id==='chat:main'))await c.home();runtime.chat.current?.reveal()}
- const discuss=async(references:any[],text?:string)=>{await showHome();if(text){if(!c.submitText(text,'chat:main',references))throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'));runtime.chat.current?.reveal()}else await runtime.chat.current?.focusReference(references)}
+ const discuss=async(references:any[],text?:string)=>{
+  if(!text){await showHome();await runtime.chat.current?.focusReference(references);return}
+  // Selecting the main conversation and sending to it are independent (submitText addresses chat:main directly), so the send does not
+  // wait for the selection round trip. A selection failure is still reported after the send was queued.
+  const home=showHome(),sent=c.submitText(text,'chat:main',references)
+  let homeError:unknown
+  try{await home}catch(error){homeError=error}
+  if(!sent)throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'))
+  runtime.chat.current?.reveal()
+  if(homeError)throw homeError
+ }
  const startConversation=async(request:any)=>{await c.startConversationWithReference(request);runtime.chat.current?.reveal()}
  const openSchedule=(id:string)=>{setSelected('tasks');setPreviewPlan(false);setTaskId(null);setTaskTab('schedules');setScheduleId(id)}
  const openPlan=()=>{setSelected('tasks');setTaskId(null);setPreviewPlan(true);setPlanPending(false)}

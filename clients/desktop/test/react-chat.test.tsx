@@ -17,6 +17,20 @@ async function mount(overrides:any={},props:any={}){
  return {c,calls,ref,dom,replace:async(node:any)=>act(async()=>root.render(node)),render:async()=>act(async()=>{render()}),close:async()=>{await act(async()=>root.unmount());dom.window.close()},click:async(node:any)=>act(async()=>{node.click()}),key:async(node:any,init:any)=>act(async()=>node.dispatchEvent(new dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}))),byLabel:(label:string)=>document.querySelector(`[aria-label="${label}"]`) as any}
 }
 
+test('a pending card request renders as a quiet user bubble and never as a duplicate of the stored one',async()=>{
+ const h=await mount();try{
+  const request={request_id:'req-1',text:'Discuss this card',references:[{kind:'timeline',id:'card',version:'v1'}],restored:false}
+  h.c.pendingUserMessage=()=>{const rows=h.c.snapshot.conversations.messages;return rows.some((m:any)=>m.request_id==='req-1')?null:{id:'pending:req-1',conversation_id:'chat:main',role:'user',text:request.text,request_id:'req-1',created_at:'',pending:true}}
+  await h.render()
+  const bubble=document.querySelector('[data-pending="true"]') as HTMLElement
+  assert.ok(bubble,'the pending message is visible immediately');assert.match(bubble.textContent??'',/Discuss this card/)
+  assert.ok(bubble.className.includes('message-pending'))
+  h.c.snapshot.conversations.messages=[{id:'m1',conversation_id:'chat:main',role:'user',text:'Discuss this card',request_id:'req-1',created_at:new Date().toISOString()}]
+  await h.render()
+  assert.equal(document.querySelector('[data-pending="true"]'),null,'the stored message replaces it')
+  assert.equal([...document.querySelectorAll('.message.user')].filter(n=>(n.textContent??'').includes('Discuss this card')).length,1,'exactly one bubble')
+ }finally{await h.close()}
+})
 test('IME Enter preserves draft; normal Enter sends current draft',async()=>{
  const h=await mount();try{h.c.draft='组合输入';await h.render();const input=h.byLabel('消息草稿');await h.key(input,{key:'Enter',isComposing:true});assert.equal(h.calls.length,0);await h.key(input,{key:'Enter'});assert.deepEqual(h.calls,[['submit','组合输入']])}finally{await h.close()}
 })

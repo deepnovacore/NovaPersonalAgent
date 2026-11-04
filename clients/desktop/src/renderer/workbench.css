@@ -208,6 +208,8 @@ body[data-platform="win32"] .workbench{border-radius:0}
 .message-role{font:11px/1 var(--mono);color:var(--ink-faint)}
 .message.user{align-self:flex-end;align-items:flex-end;max-width:88%}
 .message.user p{background:var(--accent-wash);border-radius:var(--radius) var(--radius-sm) var(--radius) var(--radius);padding:8px 12px;white-space:pre-wrap;overflow-wrap:anywhere}
+/* An unconfirmed card request: the same bubble, slightly quieter until the host stores the real message under the same request id. */
+.message.message-pending p{opacity:.72}
 .message.assistant .md{display:flex;flex-direction:column;gap:8px;overflow-wrap:anywhere}
 .md h1,.md h2,.md h3{font-size:15px;font-weight:600;line-height:1.4;margin-top:4px}
 .md h4,.md h5,.md h6{font-size:13px;font-weight:600}
