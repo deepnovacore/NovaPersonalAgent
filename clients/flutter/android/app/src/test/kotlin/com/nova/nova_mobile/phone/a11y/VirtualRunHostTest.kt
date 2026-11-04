@@ -113,9 +113,29 @@ class VirtualRunHostTest {
         assertEquals(listOf("1:open_app:running", "1:open_app:failed"), steps())
     }
 
-    @Test fun firstObservationWaitsForTheTargetWithoutATakeover() {
+    @Test fun unreadableAppWindowAfterObservationIsRetriedWithoutAskingToMoveTheApp() {
+        val port = Port()
+        val t = takeover(port)
+        val device = Device(target)
+        val h = host(device, Gate(), t)
+        h.observe()
+        device.foreground = null
+        try { h.observe(); fail() }
+        catch (e: IllegalStateException) { assertEquals("screen_changed_during_capture", e.message) }
+        assertNull(t.state)
+        assertTrue(port.moves.isEmpty())
+    }
+
+    @Test fun unreadableWindowBeforeFirstObservationIsTheLaunchGrace() {
         val port = Port()
         val h = host(Device(null), Gate(), takeover(port))
+        try { h.observe(); fail() } catch (e: IllegalStateException) { assertEquals("outside_target_app", e.message) }
+        assertTrue(port.moves.isEmpty())
+    }
+
+    @Test fun firstObservationWaitsForTheTargetWithoutATakeover() {
+        val port = Port()
+        val h = host(Device("com.other.app"), Gate(), takeover(port))
         try { h.observe(); fail() } catch (e: IllegalStateException) { assertEquals("outside_target_app", e.message) }
         assertTrue(port.moves.isEmpty())
     }
@@ -134,7 +154,7 @@ class VirtualRunHostTest {
         val h = host(device, Gate(), t)
         h.observe()
         device.foreground = "com.other.app"
-        val handBack = Thread { while (!t.pending) Thread.sleep(10); device.foreground = target; t.handBack() }.apply { start() }
+        val handBack = Thread { while (!t.pending) Thread.sleep(10); t.request(false, null); device.foreground = target; t.handBack() }.apply { start() }
         val observation = h.observe()
         handBack.join(5000)
         assertEquals(target, observation.getString("package"))
@@ -199,7 +219,7 @@ class VirtualRunHostTest {
         assertEquals(listOf("提交"), events.map { it.getString("label") }.distinct())
     }
 
-    @Test fun securePageHandsOtherActionsToTheUserWithoutDispatching() {
+    @Test fun securePageRequestsHelpWithoutDispatchingOrMovingTheApp() {
         val device = Device(target).apply { secure = true }
         val gate = Gate()
         val port = Port()
@@ -209,8 +229,8 @@ class VirtualRunHostTest {
         h.observe()
         try { h.execute(JSONObject("""{"type":"tap","ref":"@e1","snapshot_id":"ph-1"}""")); fail() }
         catch (e: IllegalStateException) { assertEquals("screen_changed", e.message) }
-        assertEquals(TakeoverState.ACTIVE, t.state)
-        assertEquals(listOf("main"), port.moves)
+        assertEquals(TakeoverState.REQUESTED, t.state)
+        assertTrue(port.moves.isEmpty())
         assertTrue(reasons.all { it == "secure_page" })
         assertTrue(device.dispatched.isEmpty())
         assertTrue(gate.begun.isEmpty())
@@ -226,7 +246,7 @@ class VirtualRunHostTest {
         assertEquals("dispatched", h.execute(JSONObject("""{"type":"back"}""")))
         assertEquals("dispatched", h.execute(JSONObject("""{"type":"hand_to_user","reason":"Payment"}""")))
         assertEquals(listOf("back"), device.dispatched)
-        assertEquals(TakeoverState.ACTIVE, t.state)
+        assertEquals(TakeoverState.REQUESTED, t.state)
     }
 
     @Test fun securePageWithoutTakeoverEndsTheRun() {
@@ -338,7 +358,7 @@ class VirtualRunHostTest {
         assertTrue(gate.begun.isEmpty())
     }
 
-    @Test fun handToUserNeedsNoApprovalAndPausesTheNextObservation() {
+    @Test fun handToUserRequestsHelpAndPausesUntilUserTakeoverAndReturn() {
         val device = Device(target)
         val gate = Gate()
         val t = takeover()
@@ -348,10 +368,10 @@ class VirtualRunHostTest {
         assertTrue(h.approve(d, observation))
         assertTrue(gate.approvals.isEmpty())
         assertEquals("dispatched", h.execute(d.action!!))
-        assertEquals(TakeoverState.ACTIVE, t.state)
+        assertEquals(TakeoverState.REQUESTED, t.state)
         assertEquals(listOf("a1" to null), gate.begun)
         assertEquals(listOf("1:hand_to_user:running", "1:hand_to_user:completed"), steps())
-        Thread { Thread.sleep(100); t.handBack() }.start()
+        Thread { Thread.sleep(100); t.request(false, null); t.handBack() }.start()
         val after = h.observe()
         assertEquals("ph-2", after.getString("snapshot_id"))
         assertEquals(1, device.forgotten)
@@ -359,7 +379,7 @@ class VirtualRunHostTest {
 
     @Test fun failedHandToUserEndsWithTakeoverUnavailable() {
         val gate = Gate()
-        val h = host(Device(target), gate, takeover(Port(toMain = false)))
+        val h = host(Device(target), gate, takeover(Port(top = -1)))
         h.observe()
         try { h.execute(JSONObject("""{"type":"hand_to_user","reason":"Login"}""")); fail() }
         catch (e: IllegalStateException) { assertEquals("takeover_unavailable", e.message) }

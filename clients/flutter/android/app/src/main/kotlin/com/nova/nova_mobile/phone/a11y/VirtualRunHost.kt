@@ -165,6 +165,9 @@ class VirtualRunHost(
                 if (e.message == PhoneActionErrors.DISPLAY_UNAVAILABLE && takeover.pending) return@repeat
                 throw e
             }
+            // Activity transitions can briefly have no readable application root; retry the read, never move the app.
+            // Before the first observation this is the launch grace (outside_target_app); afterwards a capture retry.
+            if (snapshot.packageName == null) throw IllegalStateException(if (observedOnce) "screen_changed_during_capture" else OUTSIDE_TARGET_APP)
             if (scope.allows(snapshot.packageName)) {
                 observedOnce = true
                 observedGeneration = generation
@@ -215,7 +218,7 @@ class VirtualRunHost(
      * observes again after the hand-back. Without a takeover the run ends with `secure_page`.
      */
     private fun securePage(): Nothing {
-        if (takeover.request(byModel = true, reason = SECURE_PAGE) == TakeoverState.ACTIVE) throw IllegalStateException(SCREEN_CHANGED)
+        if (takeover.request(byModel = true, reason = SECURE_PAGE) in setOf(TakeoverState.REQUESTED, TakeoverState.ACTIVE)) throw IllegalStateException(SCREEN_CHANGED)
         gate.interrupt(SECURE_PAGE)
         throw IllegalStateException(PhoneActionErrors.TAKEOVER_UNAVAILABLE)
     }
@@ -223,7 +226,7 @@ class VirtualRunHost(
     private fun handToUser(attemptId: String, action: JSONObject, parsed: PhoneAction.HandToUser, evidence: String): String {
         val step = startStep("hand_to_user", parsed.reason, null)
         try { gate.begin(attemptId, action, null) } catch (e: Exception) { endStep(step, "hand_to_user", parsed.reason, null, StepStatus.FAILED, null); throw e }
-        if (takeover.request(byModel = true, reason = parsed.reason) != TakeoverState.ACTIVE) {
+        if (takeover.request(byModel = true, reason = parsed.reason) !in setOf(TakeoverState.REQUESTED, TakeoverState.ACTIVE)) {
             gate.finish(attemptId, action, "rejected", evidence)
             endStep(step, "hand_to_user", parsed.reason, null, StepStatus.FAILED, null)
             throw IllegalStateException(PhoneActionErrors.TAKEOVER_UNAVAILABLE)

@@ -20,17 +20,21 @@ class RunTakeoverTest {
     private val events = mutableListOf<PhoneTakeoverEvent>()
     private fun takeover(port: Port, timeout: Long = TAKEOVER_TIMEOUT_MS) = RunTakeover("t1", port, { events += it }, { clock }, { false }, timeout)
 
-    @Test fun modelTakeoverMovesTheTopTaskToMainAndBack() {
+    @Test fun modelTakeoverWaitsForTheUserBeforeMovingTheTopTask() {
         val port = Port()
         val t = takeover(port)
-        assertEquals(TakeoverState.ACTIVE, t.request(byModel = true, reason = "Login required"))
+        assertEquals(TakeoverState.REQUESTED, t.request(byModel = true, reason = "Login required"))
+        assertTrue(port.moves.isEmpty())
+        assertTrue(!port.pausedNow)
+        assertEquals(TakeoverState.ACTIVE, t.request(byModel = false, reason = null))
         assertTrue(port.pausedNow)
         assertEquals(TakeoverState.RETURNED, t.handBack())
         assertEquals(listOf("main:7", "back:7"), port.moves)
         assertEquals(1, t.returns)
         assertEquals(false, port.pausedNow)
         assertEquals(listOf(TakeoverState.REQUESTED, TakeoverState.ACTIVE, TakeoverState.RETURNED), events.map { it.state })
-        assertTrue(events.all { it.byModel && it.reason == "Login required" && it.taskId == "t1" })
+        assertEquals(listOf(true, false, false), events.map { it.byModel })
+        assertTrue(events.all { it.reason == "Login required" && it.taskId == "t1" })
     }
 
     @Test fun aPendingTakeoverIsNotStartedTwice() {
@@ -45,7 +49,7 @@ class RunTakeoverTest {
     @Test fun anotherTakeoverMayFollowAHandBack() {
         val port = Port()
         val t = takeover(port)
-        t.request(true, "a"); t.handBack()
+        t.request(false, "a"); t.handBack()
         port.top = 9
         assertEquals(TakeoverState.ACTIVE, t.request(false, null))
         assertEquals(TakeoverState.RETURNED, t.handBack())
@@ -105,12 +109,36 @@ class RunTakeoverTest {
     @Test fun activeLongerThanTheLimitTimesOutAndLeavesTheAppWithTheUser() {
         val port = Port()
         val t = takeover(port)
-        t.request(true, "pay")
+        t.request(false, "pay")
         clock = TAKEOVER_TIMEOUT_MS
         assertEquals(TakeoverState.TIMED_OUT, t.await { true })
         assertEquals(TakeoverState.TIMED_OUT, t.handBack())
         assertEquals(listOf("main:7"), port.moves)
         assertEquals(TakeoverState.TIMED_OUT, events.last().state)
+    }
+
+    @Test fun pendingModelRequestTimesOutWithoutMovingTheApp() {
+        val port = Port()
+        val t = takeover(port)
+        t.request(true, "Login")
+        clock = TAKEOVER_TIMEOUT_MS
+        assertEquals(TakeoverState.TIMED_OUT, t.await { true })
+        assertTrue(port.moves.isEmpty())
+    }
+
+    @Test fun awaitBlocksWhileTheModelWaitsForUserConsent() {
+        val port = Port()
+        val t = RunTakeover("t1", port, {}, System::currentTimeMillis, { false })
+        t.request(true, "Login")
+        val result = CompletableFuture<TakeoverState?>()
+        Thread { result.complete(t.await { true }) }.start()
+        Thread.sleep(50)
+        assertTrue(!result.isDone && port.moves.isEmpty())
+        t.cancel()
+        assertEquals(TakeoverState.REQUESTED, result.get(5, TimeUnit.SECONDS))
+        try { t.request(false, null); throw AssertionError("accepted") }
+        catch (e: IllegalStateException) { assertEquals("task_not_running", e.message) }
+        assertTrue(port.moves.isEmpty())
     }
 
     @Test fun awaitReturnsImmediatelyWithoutATakeover() {

@@ -6,7 +6,7 @@ package com.nova.nova_mobile.phone
 import android.os.Looper
 import kotlin.math.min
 
-/** Longest time the task may stay on the main display before the run ends with `takeover_timeout`. */
+/** Longest time a takeover may stay REQUESTED or ACTIVE (waiting for, or on, the main display) before the run ends with `takeover_timeout`. */
 const val TAKEOVER_TIMEOUT_MS = 10 * 60 * 1000L
 /** [RunTakeover.request] was called on the main thread, which must stay free to deliver gesture results. */
 const val TAKEOVER_ON_MAIN_THREAD = "takeover_on_main_thread"
@@ -25,10 +25,10 @@ interface TakeoverPort {
 }
 
 /**
- * One run's takeover (contract "Takeover"): [request] → REQUESTED → move the display's top task to the main display →
- * ACTIVE; [handBack] moves it back → RETURNED. A failed move is FAILED; ACTIVE longer than [timeoutMs] is TIMED_OUT.
+ * One run's takeover (contract "Takeover"): a model [request] → REQUESTED (no move); a user [request] → move the display's top task to the main display →
+ * ACTIVE; [handBack] moves it back → RETURNED. A failed move is FAILED; REQUESTED or ACTIVE longer than [timeoutMs] is TIMED_OUT.
  * FAILED and TIMED_OUT end the run, so they are final. [request] and [handBack] do the moves on the calling thread
- * (two Binder calls); the agent loop blocks in [await] while a takeover is ACTIVE. Every state change goes to [emit].
+ * (two Binder calls); the agent loop blocks in [await] while a takeover is REQUESTED or ACTIVE. Every state change goes to [emit].
  * [request] is serialized against effects run through [withoutMoves]: it waits for an effect in progress and bumps
  * [generation] before it moves anything, so an effect admitted later can see that its plan is stale.
  * An effect can be a gesture whose result Android delivers through the main thread (even with a callback handler), so
@@ -78,14 +78,23 @@ class RunTakeover(
     }
 
     private fun requestOffMain(byModel: Boolean, reason: String?): TakeoverState = synchronized(moveLock) { synchronized(lock) {
-        state?.let { if (it != TakeoverState.RETURNED) return it }
+        state?.let { if (it != TakeoverState.RETURNED && !(it == TakeoverState.REQUESTED && !byModel)) return it }
         check(!cancelled) { "task_not_running" }
-        this.byModel = byModel
-        this.reason = reason
-        generation++
-        set(TakeoverState.REQUESTED)
+        if (state != TakeoverState.REQUESTED) {
+            this.byModel = byModel
+            this.reason = reason
+            generation++
+            activeSince = now()
+            set(TakeoverState.REQUESTED)
+        } else {
+            // The user answers the model's request: the move is theirs; the reason stays for the UI.
+            this.byModel = false
+        }
         val top = runCatching { port.topTask() }.getOrDefault(-1)
-        if (top < 0 || !runCatching { port.moveToMain(top) }.getOrDefault(false)) return set(TakeoverState.FAILED)
+        if (top < 0) return set(TakeoverState.FAILED)
+        // A model can ask for help; only the user's Take over command may move the app to the main screen.
+        if (byModel) return TakeoverState.REQUESTED
+        if (!runCatching { port.moveToMain(top) }.getOrDefault(false)) return set(TakeoverState.FAILED)
         task = top
         activeSince = now()
         runCatching { port.paused(true) }
@@ -104,11 +113,11 @@ class RunTakeover(
     }
 
     /**
-     * Blocks while a takeover is ACTIVE and [active] holds. Returns the state afterwards: null when there never was a
-     * takeover, else RETURNED, FAILED or TIMED_OUT (or still ACTIVE when [active] turned false or the run was cancelled).
+     * Blocks while a takeover is REQUESTED or ACTIVE and [active] holds. Returns the state afterwards: null when there never was a
+     * takeover, else RETURNED, FAILED or TIMED_OUT (or still REQUESTED/ACTIVE when [active] turned false or the run was cancelled).
      */
     fun await(active: () -> Boolean): TakeoverState? = synchronized(lock) {
-        while (state == TakeoverState.ACTIVE && active() && !cancelled) {
+        while ((state == TakeoverState.REQUESTED || state == TakeoverState.ACTIVE) && active() && !cancelled) {
             if (expired()) { set(TakeoverState.TIMED_OUT); break }
             lock.wait(min(POLL_MS, activeSince + timeoutMs - now()).coerceAtLeast(1))
         }

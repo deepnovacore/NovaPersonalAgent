@@ -233,9 +233,9 @@ events and so never reach the pet.
 
 ## Takeover
 
-`hand_to_user` or a `takeover` call → `requested` → `moveTask(topTaskId(display), 0)` → `active` (loop paused, app audible
+`hand_to_user` → `requested` (loop paused, app stays on its virtual display; the UI shows why help is needed). Only the user pressing Take over triggers `moveTask(topTaskId(display), 0)` → `active` (loop paused, app audible
 on the main screen) → `handBack` → `moveTask(task, display)` → `returned` → loop resumes with a new observation (all refs are stale).
-`active` longer than 10 min → `timed_out` and the run ends `interrupted`/`takeover_timeout`. If `moveTask` fails, the state is `failed`
+`requested` or `active` longer than 10 min → `timed_out` and the run ends `interrupted`/`takeover_timeout`. If `moveTask` fails, the state is `failed`
 and the run ends `interrupted`/`takeover_unavailable`. Locked screen, payment, login and FLAG_SECURE pages all go through takeover
 (`secure_page`, see `secure_frame`). Takeover moves are serialized with effects: a `takeover` call waits for an effect in
 progress, and nothing planned before it is dispatched afterwards. `takeover`/`handBack` fail with `task_not_running` when

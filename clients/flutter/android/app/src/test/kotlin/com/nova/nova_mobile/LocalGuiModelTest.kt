@@ -59,6 +59,7 @@ class LocalGuiModelTest {
             val body = LocalGuiModel.requestBody("m", task, virtualScreen(), 2, protocol, tier = com.nova.nova_mobile.phone.PhoneTier.VIRTUAL)
             val messages = body.getJSONArray(if (protocol == "chatCompletions") "messages" else "input")
             val instructions = messages.getJSONObject(0).getString("content")
+            assertTrue(instructions.contains("only after the user taps Take over"))
             assertTrue(instructions.contains("snapshot_id") && instructions.contains("hand_to_user(reason)") && instructions.contains("automatically authorized"))
             assertTrue(instructions.contains("changed_during_read is true") && instructions.contains("belong to the selected app"))
             assertTrue(instructions.contains("secure_frame true") && instructions.contains("only submit does"))
