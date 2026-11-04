@@ -6,6 +6,12 @@ import {markOpensConversation} from './new-conversation-mark.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
 const STATUS={open:'待开始',doing:'进行中',waiting:'等待回复'}
 export const TIMELINE_LABELS=LABEL,TIMELINE_STATUS_LABELS=STATUS
+/** Legacy cards use their saved reference day, never today's clock, for placement. */
+export function effectiveTimelineAnchor(time){
+ const anchor_date=time?.anchor_date??null,anchor_basis=time?.anchor_basis??'unknown'
+ if(['deadline','scheduled'].includes(anchor_basis)&&anchor_date&&time?.as_of&&anchor_date>time.as_of&&time.last_reported_on)return {anchor_date:time.last_reported_on,anchor_basis:'reported'}
+ return {anchor_date,anchor_basis}
+}
 export function timelineDate(snapshot,now=new Date()){return now.toLocaleDateString('en-CA',{timeZone:snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})}
 export function timelineGroups(snapshot,now=new Date()){
  const currentDate=timelineDate(snapshot,now),week=new Date(Date.parse(currentDate+'T00:00:00Z')+7*86400000).toISOString().slice(0,10)
@@ -57,7 +63,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
   const header=el('div',undefined,'timeline-attention-header');header.append(el('p',t(attention.status==='working'?'正在整理近期进展…':'近期进展与值得关注的事'),'timeline-briefing-caption'));section.append(header)
   if(command){const refresh=button(t(attention.status==='working'?'正在整理…':'刷新'),()=>command('timeline.refresh',{force:true}),header,'timeline:refresh');refresh.className='quiet';refresh.disabled=attention.status==='working'||attention.available===false}
   const latestReport=item=>Math.max(0,...(item.sources??[]).map(source=>Date.parse(source.observed_at??'')||0))
-  const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(b.time?.anchor_date??'').localeCompare(a.time?.anchor_date??'')||latestReport(b)-latestReport(a))
+  const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(effectiveTimelineAnchor(b.time).anchor_date??'').localeCompare(effectiveTimelineAnchor(a.time).anchor_date??'')||latestReport(b)-latestReport(a))
   // Active cards still have their evidence; archived cards are retained history whose sources moved or were withdrawn.
   const archived=Math.max(0,Math.min(attention.archived_count??orderedBriefs.filter(item=>item.sources_available===false||item.historical===true).length,orderedBriefs.length))
   const meta=timelineMeta({attention,sources:snapshot.sources??[],status:snapshot.profile_preparation?.status,total:orderedBriefs.length,shown:Math.min(visibleCount,orderedBriefs.length),archived,timeZone:snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})
@@ -75,15 +81,17 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    if(item.status_label)meta.append(el('span',item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
    if(historical&&item.time?.as_of)card.append(el('p',t('整理于 {0}',formatDate(item.time.as_of)),'hint timeline-history-note'))
    if(item.people?.length){const people=renderCardTags(card,item.people.map(person=>({label:person.name,tone:'person'})),{el});people.className+=' timeline-people';people.setAttribute('aria-label',t('相关同事'))}
-   const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
-   if(time?.anchor_date){
-    label(t({occurred:'发生于 {0}',deadline:'截止 {0}',scheduled:'安排于 {0}',reported:'最近记录 {0}'}[time.anchor_basis]??'记录于 {0}',formatDate(time.anchor_date)))
-    if(time.last_reported_on&&time.anchor_basis!=='reported')label(t('最近记录 {0}',formatDate(time.last_reported_on)))
+   const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,anchor=effectiveTimelineAnchor(time),label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
+   if(anchor.anchor_date){
+    label(t({occurred:'发生于 {0}',deadline:'截止 {0}',scheduled:'安排于 {0}',reported:'最近记录 {0}'}[anchor.anchor_basis]??'记录于 {0}',formatDate(anchor.anchor_date)))
+    if(anchor.anchor_basis==='reported'&&time.scheduled_on)label(t('安排于 {0}',formatDate(time.scheduled_on)))
+    if(time.due_on&&anchor.anchor_basis!=='deadline')label(t('截止 {0}',formatDate(time.due_on)))
+    if(time.last_reported_on&&anchor.anchor_basis!=='reported')label(t('最近记录 {0}',formatDate(time.last_reported_on)))
     if(time.evidence_from&&time.evidence_to&&time.evidence_from!==time.evidence_to)label(t('依据 {0}—{1}',formatDate(time.evidence_from),formatDate(time.evidence_to)))
     if(time.started_on){label(t('始于 {0}',formatDate(time.started_on)));if(time.last_reported_on)label(t('记录跨度 {0} 天',Math.max(0,Math.round((Date.parse(time.last_reported_on)-Date.parse(time.started_on))/86400000))))}
     if(time.due_on){const days=Math.round((Date.parse(time.due_on)-Date.parse(currentDate))/86400000);label(t(days>0?'距截止 {0} 天':days===0?'今天截止':'原截止已过 {0} 天，结果以最新记录为准',Math.abs(days)))}
     if(time.kind==='ongoing'&&time.last_reported_on<currentDate)label(t('当前状态待更新'))
-    if(time.anchor_basis==='reported'&&time.kind==='event')label(t('发生日期未明确'))
+    if(anchor.anchor_basis==='reported'&&time.kind==='event')label(t('发生日期未明确'))
    }else label(t('时间待明确'))
    card.append(timeMeta)
    const facts=el('div',undefined,'timeline-attention-facts');facts.dataset.count=String(item.facts?.length??0);for(const fact of item.facts??[]){const panel=el('div',undefined,'timeline-fact');panel.dataset.tone=['risk','warning','positive'].includes(fact.tone)?fact.tone:'neutral';if(fact.label)panel.append(el('h4',fact.label));panel.append(el('p',fact.text));facts.append(panel)}card.append(facts)
@@ -114,8 +122,8 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    if(!dates.has(item.date))dates.set(item.date,{id:group.id,date:item.date,items:[]})
    dates.get(item.date).items.push(item)
   }
-  for(const entry of briefCards){const date=entry.item.time?.anchor_date;if(!date)continue;if(!dates.has(date))dates.set(date,{id:date===currentDate?'current':date<currentDate?'history':'future',date,items:[]});const group=dates.get(date);(group.briefs??=[]).push(entry.card)}
-  if(briefCards.some(entry=>entry.item.time?.anchor_date)&&!dates.get(currentDate).items.length&&!dates.get(currentDate).briefs?.length)dates.delete(currentDate)
+  for(const entry of briefCards){const date=effectiveTimelineAnchor(entry.item.time).anchor_date;if(!date)continue;if(!dates.has(date))dates.set(date,{id:date===currentDate?'current':date<currentDate?'history':'future',date,items:[]});const group=dates.get(date);(group.briefs??=[]).push(entry.card)}
+  if(briefCards.some(entry=>effectiveTimelineAnchor(entry.item.time).anchor_date)&&!dates.get(currentDate).items.length&&!dates.get(currentDate).briefs?.length)dates.delete(currentDate)
   const dateGroups=[...dates.values()].sort((a,b)=>b.date.localeCompare(a.date))
   displayGroups=[...dateGroups,...groups.filter(group=>['waiting','unscheduled','completed'].includes(group.id))]
   axis=el('div',undefined,'timeline-axis');axis.setAttribute('aria-label',t(attention?'近期简报':'待办截止日期'));root.append(axis)
@@ -189,7 +197,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
   }
  }
  displayGroups.forEach(renderGroup)
- if(!compact){const unplaced=briefCards.filter(entry=>!entry.item.time?.anchor_date);if(unplaced.length){const section=el('section',undefined,'timeline-unplaced');section.append(el('h3',t('时间待明确'),'timeline-group-title'),el('p',t('以下事项尚无可用于排序的日期。'),'hint'),...unplaced.map(entry=>entry.card));root.append(section)}}
+ if(!compact){const unplaced=briefCards.filter(entry=>!effectiveTimelineAnchor(entry.item.time).anchor_date);if(unplaced.length){const section=el('section',undefined,'timeline-unplaced');section.append(el('h3',t('时间待明确'),'timeline-group-title'),el('p',t('以下事项尚无可用于排序的日期。'),'hint'),...unplaced.map(entry=>entry.card));root.append(section)}}
  if(!compact&&(attention?.cards?.length??0)>visibleCount){
   const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
    expanded.add(pageKey+pages);disposeSources(root)

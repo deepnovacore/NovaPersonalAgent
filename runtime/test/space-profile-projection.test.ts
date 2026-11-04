@@ -44,3 +44,15 @@ test('shared mobile pages receive real timeline structure and conversation metad
  assert.equal(value.conversations?.[0]?.preview,'Latest reply');assert.equal(value.conversations?.[0]?.build_status,'paused');
  assert.equal(JSON.stringify(value).includes('PRIVATE_'),false);
 });
+
+test('timeline projection normalizes legacy future placement and carries temporal kind and basis',()=>{
+ for(const kind of ['scheduled','deadline'] as const){
+  const planned=kind==='scheduled'?'2026-12-11':'2026-11-24'
+  const time={kind,anchor_basis:kind,anchor_date:planned,occurred_on:null,started_on:null,due_on:kind==='deadline'?planned:null,scheduled_on:kind==='scheduled'?planned:null,last_reported_on:'2026-10-28',evidence_from:'2026-10-28',evidence_to:'2026-10-28',as_of:'2026-11-02'}
+  const host={options:{memory:()=>undefined},snapshot:()=>({revision:1,profile_preparation:{status:'idle'},timeline:{cards:[{id:'legacy',time}]},feed:[]}),life:{snapshot:()=>({profile:{about:'',version:0},goals:[],todos:[],ideas:[]})},notifications:{display:()=>[]},spaceChatMessages:()=>[]} as unknown as PersonalAgentHost
+  const value=displaySnapshot(host)
+  assert.equal(value.timeline[0]?.date,'2026-10-28')
+  assert.deepEqual(value.timeline_entries?.[0]?.time,{...time,anchor_date:'2026-10-28',anchor_basis:'reported'})
+  assert.equal(time.anchor_date,planned,'projection must not mutate saved history')
+ }
+})

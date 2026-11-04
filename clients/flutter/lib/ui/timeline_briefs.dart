@@ -3,6 +3,7 @@ import 'package:flutter/cupertino.dart';
 import 'theme.dart';
 import 'components.dart';
 import 'timeline_page.dart';
+import '../context/timeline_time.dart';
 
 String timelineSourceTime(String value, String language) {
   final date = DateTime.parse(value).toLocal();
@@ -33,7 +34,7 @@ class TimelineBriefs extends StatefulWidget implements TimelineBriefSummary {
   @override
   int todayBriefCount(DateTime now) => entries.where((entry) {
     final date = DateTime.tryParse(
-      '${(entry['time'] as Map?)?['anchor_date'] ?? entry['observed_at'] ?? ''}',
+      '${effectiveTimelineAnchor(entry['time'] as Map?)['anchor_date'] ?? entry['observed_at'] ?? ''}',
     )?.toLocal();
     return entry['brief'] is Map &&
         date != null &&
@@ -77,10 +78,10 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
       ..sort(
         (a, b) =>
             DateTime.parse(
-              '${(b['time'] as Map?)?['anchor_date'] ?? b['observed_at']}',
+              '${effectiveTimelineAnchor(b['time'] as Map?)['anchor_date'] ?? b['observed_at']}',
             ).compareTo(
               DateTime.parse(
-                '${(a['time'] as Map?)?['anchor_date'] ?? a['observed_at']}',
+                '${effectiveTimelineAnchor(a['time'] as Map?)['anchor_date'] ?? a['observed_at']}',
               ),
             ),
       );
@@ -109,11 +110,13 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
     entries.sort(
       (a, b) =>
           DateTime.parse(
-            (b['time'] as Map?)?['anchor_date'] as String? ??
+            effectiveTimelineAnchor(b['time'] as Map?)['anchor_date']
+                    as String? ??
                 b['observed_at'] as String,
           ).compareTo(
             DateTime.parse(
-              (a['time'] as Map?)?['anchor_date'] as String? ??
+              effectiveTimelineAnchor(a['time'] as Map?)['anchor_date']
+                      as String? ??
                   a['observed_at'] as String,
             ),
           ),
@@ -121,7 +124,8 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
     final days = <DateTime, List<Map>>{};
     for (final entry in entries) {
       final date = DateTime.parse(
-        (entry['time'] as Map?)?['anchor_date'] as String? ??
+        effectiveTimelineAnchor(entry['time'] as Map?)['anchor_date']
+                as String? ??
             entry['observed_at'] as String,
       ).toLocal();
       days
@@ -285,12 +289,58 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
     );
   }
 
+  List<String> _timeLabels(Map? time) {
+    final labels = <String>[];
+    String dateLabel(String value) {
+      final date = DateTime.parse(value);
+      return t('${date.month}月${date.day}日', value);
+    }
+
+    final scheduled = time?['scheduled_on'], due = time?['due_on'];
+    if (scheduled is String) {
+      labels.add(
+        t(
+          '安排于 ${dateLabel(scheduled)}',
+          'Scheduled for ${dateLabel(scheduled)}',
+        ),
+      );
+    }
+    if (due is String) {
+      labels.add(t('截止 ${dateLabel(due)}', 'Due ${dateLabel(due)}'));
+      final now = DateTime.now();
+      final days = DateTime.parse(
+        '${due}T00:00:00Z',
+      ).difference(DateTime.utc(now.year, now.month, now.day)).inDays;
+      labels.add(
+        days > 0
+            ? t('距截止 $days 天', 'Due in $days days')
+            : days == 0
+            ? t('今天截止', 'Due today')
+            : t(
+                '原截止已过 ${-days} 天，结果以最新记录为准',
+                '${-days} days past the original deadline; check the latest record',
+              ),
+      );
+    }
+    final reported = time?['last_reported_on'];
+    if ((scheduled is String || due is String) && reported is String) {
+      labels.add(
+        t(
+          '最近记录 ${dateLabel(reported)}',
+          'Last recorded ${dateLabel(reported)}',
+        ),
+      );
+    }
+    return labels;
+  }
+
   Widget _briefCard(BuildContext context, Map entry) {
     final brief = entry['brief'] as Map;
     final facts = (brief['facts'] as List? ?? []).whereType<Map>();
     final steps = (brief['next_steps'] as List? ?? [])
         .whereType<Map>()
         .toList();
+    final timeLabels = _timeLabels(entry['time'] as Map?);
     final status = brief['status_label'] as String? ?? '';
     final uncertainty = brief['uncertainty'] as String? ?? '';
     final actions = (brief['actions'] as List? ?? [])
@@ -371,6 +421,20 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
               fontWeight: FontWeight.w600,
             ),
           ),
+          if (timeLabels.isNotEmpty) ...[
+            const SizedBox(height: 8),
+            Wrap(
+              spacing: 10,
+              runSpacing: 4,
+              children: [
+                for (final label in timeLabels)
+                  Text(
+                    label,
+                    style: const TextStyle(fontSize: 11, color: Nova.secondary),
+                  ),
+              ],
+            ),
+          ],
           const SizedBox(height: 12),
           for (final fact in facts)
             Padding(

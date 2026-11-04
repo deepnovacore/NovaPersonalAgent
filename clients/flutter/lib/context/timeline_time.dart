@@ -54,6 +54,22 @@ bool _supportsDate(String date, String quote, String? reported) {
   return dates.contains(date);
 }
 
+/// Legacy cards retain stable placement against their saved reference day.
+Map<String, dynamic> effectiveTimelineAnchor(Map? time) {
+  final anchor = time?['anchor_date'],
+      basis = time?['anchor_basis'] ?? 'unknown';
+  final asOf = time?['as_of'], reported = time?['last_reported_on'];
+  if ((basis == 'deadline' || basis == 'scheduled') &&
+      anchor is String &&
+      asOf is String &&
+      anchor.compareTo(asOf) > 0 &&
+      reported is String &&
+      reported.isNotEmpty) {
+    return {'anchor_date': reported, 'anchor_basis': 'reported'};
+  }
+  return {'anchor_date': anchor, 'anchor_basis': basis};
+}
+
 /// Records must be the card's cited originals, with device-local local_date.
 /// Mirrors desktop timeline-time; never infers occurrence from message metadata.
 Map<String, dynamic>? resolveTimelineTime(
@@ -156,7 +172,7 @@ Map<String, dynamic>? resolveTimelineTime(
     'reported' => last,
     _ => null,
   };
-  return {
+  final time = <String, dynamic>{
     'kind': kind,
     'anchor_date': anchor,
     'anchor_basis': basis,
@@ -169,6 +185,7 @@ Map<String, dynamic>? resolveTimelineTime(
     'evidence_to': last,
     'as_of': localDate,
   };
+  return {...time, ...effectiveTimelineAnchor(time)};
 }
 
 bool timelineTimeOutsideWindow(Map<String, dynamic> time, String recentSince) {

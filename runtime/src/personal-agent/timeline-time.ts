@@ -2,6 +2,15 @@ import {z} from 'zod'
 const date=z.string().regex(/^\d{4}-\d{2}-\d{2}$/u)
 export const temporalSchema=z.object({kind:z.enum(['event','ongoing','deadline','scheduled','synthesis','background','unknown']),dates:z.array(z.object({role:z.enum(['occurred','started','deadline','scheduled']),date,ref:z.string().min(1).max(600),quote:z.string().min(1).max(600)}).strict()).max(3)}).strict()
 export const resolvedTimeSchema=z.object({kind:temporalSchema.shape.kind,anchor_date:date.nullable(),anchor_basis:z.enum(['occurred','deadline','scheduled','reported','unknown']),occurred_on:date.nullable(),started_on:date.nullable(),due_on:date.nullable(),scheduled_on:date.nullable(),last_reported_on:date.nullable(),evidence_from:date.nullable(),evidence_to:date.nullable(),as_of:date})
+type TimelineAnchorTime=Pick<z.infer<typeof resolvedTimeSchema>,'anchor_date'|'anchor_basis'|'due_on'|'scheduled_on'|'last_reported_on'|'as_of'>
+
+/** Use the saved as-of day so persisted cards keep stable placement. */
+export function effectiveTimelineAnchor(time:TimelineAnchorTime):Pick<TimelineAnchorTime,'anchor_date'|'anchor_basis'>{
+ const planned=time.anchor_basis==='deadline'?time.due_on:time.anchor_basis==='scheduled'?time.scheduled_on:null
+ if(planned&&planned>time.as_of&&time.last_reported_on)return {anchor_date:time.last_reported_on,anchor_basis:'reported'}
+ return {anchor_date:time.anchor_date,anchor_basis:time.anchor_basis}
+}
+
 interface TimeInput {id:string;kind:string;text:string;observed_at:string}
 const validDate=(value:string)=>/^\d{4}-\d{2}-\d{2}$/u.test(value)&&Number.isFinite(Date.parse(value))&&new Date(value+'T00:00:00Z').toISOString().slice(0,10)===value
 const reportedDate=(input:TimeInput,timezone:string)=>['im','mail'].includes(input.kind)&&Number.isFinite(Date.parse(input.observed_at))?new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:timezone}):null
@@ -37,5 +46,6 @@ export function resolveTimelineTime(temporal:z.infer<typeof temporalSchema>,inpu
  if(temporal.kind==='deadline'&&!due_on||temporal.kind==='scheduled'&&!scheduled_on)return null
  const anchor_basis=temporal.kind==='unknown'?'unknown':temporal.kind==='deadline'?'deadline':temporal.kind==='scheduled'?'scheduled':temporal.kind==='event'&&occurred_on?'occurred':last_reported_on?'reported':occurred_on?'occurred':'unknown'
  const anchor_date=anchor_basis==='deadline'?due_on:anchor_basis==='scheduled'?scheduled_on:anchor_basis==='occurred'?occurred_on:anchor_basis==='reported'?last_reported_on:null
- return {kind:temporal.kind,anchor_date,anchor_basis,occurred_on,started_on,due_on,scheduled_on,last_reported_on,evidence_from,evidence_to:last_reported_on,as_of:context.local_date}
+ const time:z.infer<typeof resolvedTimeSchema>={kind:temporal.kind,anchor_date,anchor_basis,occurred_on,started_on,due_on,scheduled_on,last_reported_on,evidence_from,evidence_to:last_reported_on,as_of:context.local_date}
+ return {...time,...effectiveTimelineAnchor(time)}
 }

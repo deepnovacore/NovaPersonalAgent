@@ -133,10 +133,86 @@ void main() {
       final time = resolve(kind, [
         claim(kind, '2026-10-31', '明天'),
       ], record('明天'))!;
-      expect(time['anchor_basis'], kind);
-      expect(time['anchor_date'], '2026-10-31');
+      expect(time['anchor_basis'], 'reported');
+      expect(time['anchor_date'], today);
+      expect(
+        time[kind == 'deadline' ? 'due_on' : 'scheduled_on'],
+        '2026-10-31',
+      );
     }
   });
+  test(
+    'future activities place on reports and keep activity dates in the window',
+    () {
+      for (final item in [
+        ('scheduled', '2026-12-11', '2026-10-28'),
+        ('deadline', '2026-11-24', '2026-10-27'),
+      ]) {
+        final time = resolve(item.$1, [
+          claim(item.$1, item.$2, item.$2),
+        ], record(item.$2, day: item.$3))!;
+        expect(time['anchor_date'], item.$3);
+        expect(time['anchor_basis'], 'reported');
+        expect(
+          time[item.$1 == 'deadline' ? 'due_on' : 'scheduled_on'],
+          item.$2,
+        );
+        expect(timelineTimeOutsideWindow(time, '2026-11-01'), isFalse);
+      }
+    },
+  );
+  test(
+    'past and today activities and activities without a report keep their dates',
+    () {
+      for (final kind in ['scheduled', 'deadline']) {
+        for (final date in ['2026-10-29', today]) {
+          final time = resolve(kind, [claim(kind, date, date)], record(date))!;
+          expect(time['anchor_basis'], kind);
+          expect(time['anchor_date'], date);
+        }
+        final time = resolve(kind, [
+          claim(kind, '2026-12-11', '2026-12-11'),
+        ], record('2026-12-11', day: null))!;
+        expect(time['anchor_basis'], kind);
+        expect(time['anchor_date'], '2026-12-11');
+      }
+    },
+  );
+  test(
+    'effectiveTimelineAnchor repairs legacy placement using saved as_of only',
+    () {
+      for (final basis in ['scheduled', 'deadline']) {
+        final time = {
+          'anchor_basis': basis,
+          'anchor_date': '2026-12-11',
+          'as_of': '2026-11-02',
+          'last_reported_on': '2026-10-28',
+        };
+        expect(effectiveTimelineAnchor(time), {
+          'anchor_date': '2026-10-28',
+          'anchor_basis': 'reported',
+        });
+        expect(time['anchor_date'], '2026-12-11');
+        for (final patch in [
+          {'anchor_date': '2026-11-01'},
+          {'anchor_date': '2026-11-02'},
+          {'as_of': null},
+          {'last_reported_on': null},
+          {'anchor_basis': 'occurred'},
+        ]) {
+          final unchanged = {...time, ...patch};
+          expect(effectiveTimelineAnchor(unchanged), {
+            'anchor_date': unchanged['anchor_date'],
+            'anchor_basis': unchanged['anchor_basis'],
+          });
+        }
+      }
+      expect(effectiveTimelineAnchor(null), {
+        'anchor_date': null,
+        'anchor_basis': 'unknown',
+      });
+    },
+  );
   test(
     'strict trust boundary rejects wrong schema, refs, quote and lengths',
     () {

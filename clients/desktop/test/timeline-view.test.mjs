@@ -1,6 +1,6 @@
 import test,{beforeEach,afterEach} from 'node:test'
 import assert from 'node:assert/strict'
-import {timelineGroups,renderTimeline} from '../src/renderer/timeline-view.mjs'
+import {timelineGroups,renderTimeline,effectiveTimelineAnchor} from '../src/renderer/timeline-view.mjs'
 import {disposeSources} from '../src/renderer/source-popover.mjs'
 import {setLanguage} from '../src/renderer/locale.mjs'
 const snapshot={settings:{timezone:'Asia/Shanghai'},life:{goals:[{id:'g',title:'Ship Nova'}],todos:[
@@ -444,3 +444,54 @@ test('briefing metadata is at most two lines and picks one problem sentence by p
  assert.equal(lines({timeline:{...base,status:'working',diagnostics:{pending_batches:1}}}).length,1,'no partial warning while working')
 })
 
+
+test('effectiveTimelineAnchor uses saved as_of and preserves past, today and unreported activities',()=>{
+ for(const basis of ['deadline','scheduled']){
+  const time={anchor_date:'2026-12-11',anchor_basis:basis,as_of:'2026-11-02',last_reported_on:'2026-10-28'}
+  assert.deepEqual(effectiveTimelineAnchor(time),{anchor_date:'2026-10-28',anchor_basis:'reported'})
+  assert.equal(time.anchor_date,'2026-12-11','legacy data is not mutated')
+  for(const patch of [{anchor_date:'2026-11-01'},{anchor_date:'2026-11-02'},{last_reported_on:null},{as_of:null},{anchor_basis:'occurred'}]){
+   const unchanged={...time,...patch}
+   assert.deepEqual(effectiveTimelineAnchor(unchanged),{anchor_date:unchanged.anchor_date,anchor_basis:unchanged.anchor_basis})
+  }
+ }
+ assert.deepEqual(effectiveTimelineAnchor(null),{anchor_date:null,anchor_basis:'unknown'})
+})
+
+test('future scheduled and deadline briefs group on reports but retain activity dates and countdown',()=>{
+ const cards=[
+  datedBrief('schedule',{kind:'scheduled',anchor_date:'2026-12-11',anchor_basis:'scheduled',scheduled_on:'2026-12-11',last_reported_on:'2026-10-28',as_of:'2026-11-02'}),
+  datedBrief('deadline',{kind:'deadline',anchor_date:'2026-11-24',anchor_basis:'deadline',due_on:'2026-11-24',last_reported_on:'2026-10-27',as_of:'2026-11-02'}),
+  datedBrief('past',{kind:'deadline',anchor_date:'2026-10-26',anchor_basis:'deadline',due_on:'2026-10-26',last_reported_on:'2026-10-29',as_of:'2026-11-02'}),
+  datedBrief('unreported',{kind:'scheduled',anchor_date:'2026-12-12',anchor_basis:'scheduled',scheduled_on:'2026-12-12',as_of:'2026-11-02'}),
+ ]
+ const state={life:{todos:[],goals:[]},timeline:{cards}}
+ const {parent}=render(state,{now:new Date('2026-11-02T08:00:00Z')})
+ const groups=parent.querySelectorAll('.timeline-date-group')
+ assert.deepEqual(groups.map(n=>n.dataset.date),['2026-12-12','2026-10-28','2026-10-27','2026-10-26'])
+ assert.deepEqual(groups.map(n=>n.querySelectorAll('article')[0].dataset.objectId),['unreported','schedule','deadline','past'])
+ const labels=id=>parent.querySelectorAll('article').find(n=>n.dataset.objectId===id).querySelectorAll('.timeline-time-label').map(n=>n.textContent)
+ assert.deepEqual(labels('schedule'),['最近记录 10月28日','安排于 12月11日'])
+ assert.deepEqual(labels('deadline'),['最近记录 10月27日','截止 11月24日','距截止 22 天'])
+ assert.deepEqual(labels('past'),['截止 10月26日','最近记录 10月29日','原截止已过 7 天，结果以最新记录为准'])
+ const later=render(state,{now:new Date('2026-12-20T08:00:00Z')}).parent
+ assert.deepEqual(later.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),groups.map(n=>n.dataset.date),'placement does not drift when the wall clock passes the activity')
+ const normalized=structuredClone(state)
+ normalized.timeline.cards[0].time={...cards[0].time,anchor_basis:'reported',anchor_date:'2026-10-28'}
+ const reported=render(normalized,{now:new Date('2026-11-02T08:00:00Z')}).parent.querySelectorAll('article').find(n=>n.dataset.objectId==='schedule')
+ assert.deepEqual(reported.querySelectorAll('.timeline-time-label').map(n=>n.textContent),labels('schedule'),'new and legacy cards have identical labels')
+ setLanguage('en')
+ try{
+  const en=render(state,{now:new Date('2026-11-02T08:00:00Z')}).parent
+  assert.deepEqual(en.querySelectorAll('article').find(n=>n.dataset.objectId==='schedule').querySelectorAll('.timeline-time-label').map(n=>n.textContent),['Last recorded Oct 28','Scheduled for Dec 11'])
+  assert.deepEqual(en.querySelectorAll('article').find(n=>n.dataset.objectId==='deadline').querySelectorAll('.timeline-time-label').map(n=>n.textContent),['Last recorded Oct 27','Due Nov 24','Due in 22 days'])
+ }finally{setLanguage('zh-CN')}
+})
+
+test('effective briefing placement is applied before pagination and compact selection',()=>{
+ const cards=[datedBrief('future-activity',{anchor_date:'2026-12-11',anchor_basis:'scheduled',scheduled_on:'2026-12-11',last_reported_on:'2026-10-01',as_of:'2026-11-02'}),...Array.from({length:8},(_,i)=>datedBrief(String(i),{anchor_date:`2026-10-${20+i}`,anchor_basis:'reported'}))]
+ const state={life:{todos:[],goals:[]},timeline:{cards}}
+ const {parent}=render(state)
+ assert.equal(parent.querySelectorAll('article').some(n=>n.dataset.objectId==='future-activity'),false)
+ assert.deepEqual(render(state,{compact:true}).parent.querySelectorAll('article').map(n=>n.dataset.objectId),['7','6','5'])
+})

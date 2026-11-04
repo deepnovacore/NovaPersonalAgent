@@ -13,6 +13,7 @@ import '../context/profile_repository.dart';
 import '../context/secure_persistence.dart';
 import '../context/source_store.dart' show sourceAccessExpiry;
 import '../context/local_publication.dart';
+import '../context/timeline_time.dart';
 
 /// Local projection; only individually confirmed candidates enter the Life path.
 class LocalProfileResults extends StatelessWidget
@@ -74,7 +75,7 @@ class LocalProfileResults extends StatelessWidget
       if ((entry['kind'] ?? 'profile') != 'timeline') return false;
       if (entry['brief'] is! Map) return false;
       final at = DateTime.tryParse(
-        '${(entry['time'] as Map?)?['anchor_date'] ?? entry['observed_at'] ?? ''}',
+        '${effectiveTimelineAnchor(entry['time'] as Map?)['anchor_date'] ?? entry['observed_at'] ?? ''}',
       )?.toLocal();
       return at != null &&
           at.year == day.year &&

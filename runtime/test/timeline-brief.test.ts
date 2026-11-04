@@ -102,12 +102,16 @@ test('old reports stay out of recent briefing while future deadlines remain, and
  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>Promise.resolve({cards:[
   {...base,title:'Old report',refs:['old'],facts:[{text:old.text,quote:old.text,ref:'old'}],temporal:{kind:'event',dates:[]}},
   {...base,title:'Future deadline',refs:['old'],facts:[{text:old.text,quote:old.text,ref:'old'}],temporal:{kind:'deadline',dates:[{role:'deadline',date:'2026-10-20',quote:old.text,ref:'old'}]}},
+  {...base,title:'Future schedule',refs:['old'],facts:[{text:old.text,quote:old.text,ref:'old'}],temporal:{kind:'scheduled',dates:[{role:'scheduled',date:'2026-10-20',quote:old.text,ref:'old'}]}},
   {...base,title:'Saved context',refs:[memory.id],facts:[{text:memory.text,quote:memory.text,ref:memory.id}],temporal:{kind:'unknown',dates:[]}},
  ]}),()=>undefined)
  try{
   await brief.open();brief.update([old,memory],'2026-10-17','Asia/Shanghai');await brief.refresh()
-  assert.deepEqual(brief.snapshot().cards.map(card=>card.title),['Future deadline','Saved context'])
-  const saved=brief.snapshot().cards[1]!;assert.deepEqual(brief.discussion(saved.id,saved.version).evidence_refs,['original-evidence'])
+  assert.deepEqual(brief.snapshot().cards.map(card=>card.title),['Future deadline','Future schedule','Saved context'])
+  for(const card of brief.snapshot().cards.slice(0,2)){
+   assert.equal(card.time.anchor_date,'2026-09-30');assert.equal(card.time.anchor_basis,'reported','planned dates retain cards even when their report anchor is outside the window')
+  }
+  const saved=brief.snapshot().cards[2]!;assert.deepEqual(brief.discussion(saved.id,saved.version).evidence_refs,['original-evidence'])
  }finally{await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 

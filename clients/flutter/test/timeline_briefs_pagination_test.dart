@@ -11,6 +11,63 @@ Map<String, dynamic> entry(int i) => {
 };
 void main() {
   testWidgets(
+    'effective anchors sort before paging, not just within the visible page',
+    (tester) async {
+      final rows = [
+        {
+          ...entry(1),
+          'text': 'future activity',
+          'time': {
+            'anchor_date': '2026-12-11',
+            'anchor_basis': 'scheduled',
+            'scheduled_on': '2026-12-11',
+            'as_of': '2026-11-02',
+            'last_reported_on': '2026-01-01',
+          },
+        },
+        for (var i = 2; i <= 9; i++) entry(i),
+      ];
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: SingleChildScrollView(child: TimelineBriefs(entries: rows)),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('future activity'), findsNothing);
+      expect(find.text('近况 2'), findsOneWidget);
+      await tester.scrollUntilVisible(
+        find.text('继续查看进展'),
+        500,
+        scrollable: find.byType(Scrollable).first,
+      );
+      await tester.tap(find.text('继续查看进展'));
+      await tester.pumpAndSettle();
+      expect(find.text('future activity'), findsOneWidget);
+      expect(
+        find.byKey(
+          const ValueKey('brief-timeline-date-2026-01-01T00:00:00.000'),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.byKey(
+          const ValueKey('brief-timeline-date-2026-12-11T00:00:00.000'),
+        ),
+        findsNothing,
+      );
+      expect(
+        tester.getTopLeft(find.byKey(const ValueKey('timeline-card-1'))).dy,
+        greaterThan(
+          tester.getTopLeft(find.byKey(const ValueKey('timeline-card-2'))).dy,
+        ),
+      );
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets(
     'shared brief list pages by eight and preserves progress across equivalent snapshots',
     (tester) async {
       final rows = [for (var i = 1; i <= 20; i++) entry(i)];
