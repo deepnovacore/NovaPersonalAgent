@@ -11,7 +11,7 @@ import type {TimelineInput} from '../src/personal-agent/timeline-brief.js'
 
 async function fixture(t:TestContext){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-fresh-'))
- let bodies=new Set(['personal:fresh:1']),inputs:TimelineInput[]=[{id:'personal:fresh:1',version:'v1',kind:'im',text:'Synthetic approval is pending',observed_at:new Date().toISOString(),relation:'participant'}],reads=0,account:string|undefined
+ const bodies=new Set(['personal:fresh:1']);let inputs:TimelineInput[]=[{id:'personal:fresh:1',version:'v1',kind:'im',text:'Synthetic approval is pending',observed_at:new Date().toISOString(),relation:'participant'}],reads=0,account:string|undefined
  const memory={productSurfaces:true,timelineEvidence:()=>{reads++;return Promise.resolve(inputs)},canReadConversationEvidence:()=>Promise.resolve(true),readEvidence:(id:string)=>Promise.resolve(bodies.has(id)?{evidence_id:id,locator:'l',text:'Synthetic approval is pending',source_kind:'im',observed_at:new Date().toISOString(),trust:'untrusted_external' as const}:null)} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,
   generateTimeline:items=>Promise.resolve({cards:[{category:'Approval',title:'Review the approval',why_now:'Its state needs checking',facts:[{text:'An approval is pending',quote:'approval is pending',ref:items[0]!.id}],uncertainty:'No deadline known',actions:[{label:'Discuss',kind:'discuss'}],refs:[items[0]!.id]}]})})
