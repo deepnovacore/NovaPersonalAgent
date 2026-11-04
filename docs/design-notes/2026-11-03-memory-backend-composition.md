@@ -336,8 +336,10 @@ Read-only inspection of retained state confirmed source-one grant revision 2, de
 extraction/embedding authorization and an empty conversation-recipient grant list.
 
 The failed assertion prevented observation of the subsequent real post-revocation style,
-forget and restart checks. Those missing live observations are not marked passed;
-existing deterministic real-SDK lifecycle checks remain valid separate evidence. No old
+forget and restart checks in that attempt. Those observations remain absent from the
+immutable v2 report; the later independent VoiceMem acceptance below supplies separate
+fresh lifecycle evidence without rewriting v2. Existing deterministic real-SDK lifecycle
+checks remain valid separate evidence. No old
 source was restamped, no TTL was extended and no corpus was replayed to turn the report
 green. An additional private lifecycle-probe draft was stopped without execution when
 work narrowed to documentation delivery. All failed trial/report history remains intact.
@@ -351,3 +353,73 @@ and backup/file-protection effects still require device verification. Host Swift
 checks are not iOS-device evidence. First upgrade may interrupt unfinished uploads that
 lack the new persistent authority without deleting saved chats, memory or workspaces;
 future-backup exclusion cannot erase historical backups or exported copies.
+
+## Independent final-code acceptance (2026-11-03)
+
+Two new execution agents, neither the implementation author, independently built and
+ran separate bounded real-provider matrices at exact commit
+`d3dc9b761c8525bea2813cb6338cc685327553e4`. Both began/ended at that HEAD with zero
+repository changes or staged files. Only their actual `execute-v1` reports count here;
+earlier read-only NOT_RUN reports are not execution evidence. Subsequent docs-only
+commits do not change the accepted code. The user-facing matrix is
+[记忆后端独立验收](../zh-CN/memory-backends-acceptance.md).
+
+| Independent execution | Actual configuration and scope | Outcome |
+| --- | --- | --- |
+| MEM0 | `MEMORY_RECALL_ENGINE=mem0`, `MEMORY_EXTRACTORS=ledger`; mem0ai/oss 3.2.0, one active engine, styles off | 13 live stages PASS; 10/10 configuration/composition fixture tests; one remember plus two explicit writes; 17.894 seconds total. |
+| VoiceMem | `MEMORY_RECALL_ENGINE=voicemem`; separate fresh fact (`ledger`) and style (`ledger,voicemem`) stores, each one active engine; private patched 0.0.1 grounded-v1 protocol | 19 live stages PASS; 4/4 SDK/upgrade/cache fixture tests; eight unique remembers (one fact, seven style sources) plus two explicit writes; 90.877 seconds total. |
+
+Both used real `qwen-plus` and `text-embedding-v4`. Ledger extraction, embeddings,
+SDK admission/search, canonical hydration, source authorization and persistent cleanup
+were real, not fake engine ports. Mem0 indexed ledger facts with `infer:false`, not a
+second mem0 LLM extractor. Realtime audio transport was stubbed; actual ASR, answer
+LLM, TTS, listening quality, GUI/App and devices were not exercised. The corpora and
+steps differ: these single total times are not backend speed comparisons or percentiles.
+
+Both fact matrices passed current id/text/revision/evidence hydration, receiver allow
+and deny, explicit general/userOnly scope separation, revision correction, fresh
+composition/client restart, forget/restart and physical purge. Purge completion followed
+recursive scanning of the whole owned engine directory, including SDK, manifest and
+existing WAL/journal files, for sentinel-byte absence. Default fact scenarios had no
+contextHits. MEM0 additionally passed processing revoke/restore, same-database isolation
+via public MEMORY_USER_ID, and actual prerecall general exclusion. This MEM0 run did
+not execute mixed VoiceMem styles or legacy standalone mem0 live acceptance.
+
+VoiceMem's independent style scenario passed three repeated one-off controls with no
+trait or canonical fact/preference. Temporary emotion produced experience, not trait,
+and was forgotten before no-hint checks. The standing positive yielded no trait at one or
+two sources, then length/directness with EXACT3 supports mapped to the correct sources;
+actual projection/prerecall consumed the hint. Revocation correctly awaited the void
+public API: revision 2 persisted, all three authorization purposes denied source one,
+sources two/three remained allowed, and the SDK manifest removed the revoked source;
+fresh recall/projection had no trait/hint. Revision 3 restored both dimensions without
+another remember, still EXACT3, with recordedAt/expiresAt unchanged. Forgetting source
+two and restarting with a new composition/client still yielded no trait/hint. Both TTLs
+were anchored to the earliest observed evidence plus exactly 600000ms, without restamp.
+
+MEM0's eleven explicit flush calls needed no retry. VoiceMem made twenty-four explicit
+flush calls, including two bounded known-pending retries; no query or quality assertion
+was retried. Existing same-source durable timers are not additional independent evidence
+and these counts are not total HTTP-request counts. Both executions completed within
+their step/overall/cleanup budgets.
+
+VoiceMem live cross-user isolation, natural ten-minute expiration, and additional
+paraphrase/opposite samples were NOT RUN in this independent execution. Earlier v2
+paraphrase/conflict observations and current deterministic fixtures remain separate;
+they are not relabeled as this run's samples. Full-suite, broader language/corpus,
+statistical performance, audio, mobile, remote and backup/device acceptance remain out
+of scope. These PASS verdicts cover only the two explicit limited synthetic matrices.
+
+Private machine-result indexes (no private paths or source text are published):
+
+- MEM0 `live-result.json`: status PASS, 13 stages;
+  SHA256 `15ce829920b33851cfd1c9e391b4d8b6c28217d29be715206ff1dc1b3c85b485`.
+- VoiceMem `result.json`: status passed, 19 stages, eight admissions;
+  SHA256 `fd04cedad2614e37ec7e7eea196e19d5f0692cfed4a4e2fc9c05a298d71050ab`.
+
+The historical v1 interruption and v2 quality_failed records remain byte-for-byte intact.
+V2's lifecycle observations were missing at that time; this newly requested independent
+VoiceMem execution has now supplied revoke/restore/forget/restart evidence. It is not a
+resume of v2, a conversion of its result to PASS, or input tuning until an old trial turns
+green. Three-source/ten-minute derived-style safeguards do not require a user's explicit
+ledger preference to be saved three times. Defaults for styles/prerecall remain off.
