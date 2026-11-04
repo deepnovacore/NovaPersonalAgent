@@ -20,7 +20,7 @@ B 有虚假阅读覆盖声明、B2 有不存在的引文，均 FAIL。模拟器 
 
 | 环境 | 系统/设备 | 独立验收包 | 安装方式/结果 |
 |---|---|---|---|
-| iPhone 真机 | fishwowater的iPhone / iPhone13 Pro / iOS27.2 / UDID `00008110-001A19563A39801E` | `com.nova.novaMobile.thinkingAcceptance` | devicectl install：签名构建成功，但安装被拒；A/B未运行 |
+| iPhone 真机 | 测试用 iPhone（iPhone13 Pro / iOS27.2） | `com.nova.novaMobile.thinkingAcceptance` | devicectl install：签名构建成功，但安装被拒；A/B未运行 |
 | Android 真机 | houji / Xiaomi23127PN0CC / Android14 / arm64-v8a | `com.nova.nova_mobile.autonomy`，最终标签 **Nova Accept** | `adb install` / `install -r`，最终轮只卸载自己先前安装的包后全新安装 |
 | iOS **模拟器** | 本会话新建 iPhone15 / iOS27.2(24B8117) | `com.nova.novaMobile.thinkingAcceptance` | simctl install；UUID `FFE715B8-A30B-4637-A2C3-5E47F56E9BC4` |
 
@@ -41,7 +41,7 @@ entitlements；Manual 因 Xcode-managed profile 被拒，改 cached Automatic �
 
 安装失败原文要点：`MIInstallerErrorDomain 13 / ApplicationVerificationFailed`，
 “This device has reached the maximum number of installed apps using a free developer profile”，
-占位的三个 ID 为 `com.fishwowater.AvatarForcingLab`、`com.nova.novaMobile`、
+占位的三个 ID 为 `<占位应用 ID>`、`com.nova.novaMobile`、
 `com.nova.novaMobile.internal`。**没有卸载这三个中的任何一个**。
 经协调决定停止安装，不要求用户腾名额/付费；未将模拟器当真机通过。
 
@@ -50,7 +50,7 @@ entitlements；Manual 因 Xcode-managed profile 被拒，改 cached Automatic �
 ```sh
 SESSION="$HOME/Library/Caches/nova-build/f289c529c78f/device-e2e-worker-20261104"
 # 仅供用户以后自行腾出名额且profile仍有效时补测；本任务没有再次执行此安装。
-xcrun devicectl device install app --device 00008110-001A19563A39801E "$SESSION/ios-derived/Build/Products/Debug-iphoneos/Runner.app"
+xcrun devicectl device install app --device <设备 UDID> "$SESSION/ios-derived/Build/Products/Debug-iphoneos/Runner.app"
 ```
 
 现成 profile 到期2026-11-05，之后须重新签名；不能保证旧工件继续可装。
