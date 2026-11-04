@@ -98,13 +98,18 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #maintenanceRun:Promise<void>|undefined
   #maintenance:ReturnType<typeof setInterval>|undefined
   #filesFlushTimer:ReturnType<typeof setTimeout>|undefined
+  #filesPendingSince=0
+  /** Debounced so a burst of writes shares one publish, but bounded so continuous writing cannot defer the mirror forever. */
   #scheduleFilesFlush():void{
     clearTimeout(this.#filesFlushTimer)
     if(!this.#opened)return
+    const now=Date.now()
+    if(!this.#filesPendingSince)this.#filesPendingSince=now
+    const delay=Math.max(0,Math.min(1500,this.#filesPendingSince+5000-now))
     this.#filesFlushTimer=setTimeout(()=>{
-      this.#filesFlushTimer=undefined
+      this.#filesFlushTimer=undefined;this.#filesPendingSince=0
       void this.#flushFiles('background')
-    },1500)
+    },delay)
     this.#filesFlushTimer.unref()
   }
   async #flushFiles(priority:MemoryRequestPriority):Promise<void>{
@@ -197,7 +202,7 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   }
   async close():Promise<void>{
     const wasOpened=this.#opened
-    this.#opened=false;clearTimeout(this.#filesFlushTimer);this.#filesFlushTimer=undefined
+    this.#opened=false;clearTimeout(this.#filesFlushTimer);this.#filesFlushTimer=undefined;this.#filesPendingSince=0
     this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort()
     await Promise.all([...this.#engines,...this.#cleanupEngines].map(engine=>engine.close()));this.#engines=[];this.#cleanupEngines=[]
     await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;await this.#diaryRun

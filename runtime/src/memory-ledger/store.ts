@@ -358,6 +358,7 @@ export class MemoryLedgerStore {
       try {
       if(operation==='flush_files'){
         z.object({}).strict().parse(input)
+        this.#joinMemoryFileAuthority()
         return {flushed:flushMemoryFiles(this.#requireDatabase())}
       }
       if(operation==='purge')return purgeEntry(this.#requireDatabase(),this.#path,input)
