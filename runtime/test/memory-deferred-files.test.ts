@@ -129,7 +129,7 @@ for(const operation of ['list','explicit_begin','explicit_lookup'] as const)test
 
 async function resourceFixture(t:TestContext){
  const root=mkdtempSync(join(tmpdir(),'nova-resource-deferred-')),path=join(root,'ledger.sqlite'),client=new MemoryLedgerClient(path)
- const memory=new SubstrateMemoryResource({client,userId:'test',model:'fixture',gateway:{async *stream(){},complete(){throw Error('unexpected model')}},inputConsent:true,conversationProviders:[consumer]})
+ const memory=new SubstrateMemoryResource({client,userId:'test',model:'fixture',gateway:{async *stream(){/* never called */},complete(){throw Error('unexpected model')}},inputConsent:true,conversationProviders:[consumer]})
  await memory.open({deferBackground:true})
  const db=new DatabaseSync(path,{readOnly:true}),pending=()=>db.prepare('SELECT 1 FROM memory_file_outbox WHERE slot=1').get()!==undefined
  t.after(async()=>{t.mock.timers.reset();await memory.close();db.close();rmSync(root,{recursive:true,force:true})})
@@ -150,7 +150,7 @@ test('writeExplicit defers through refresh and lookup; idle timer resets after t
  await f.write(2);assert.ok(f.pending())
  t.mock.timers.tick(1499);assert.equal(flushes.length,0)
  t.mock.timers.tick(1);await settle();assert.equal(flushes.length,1);assert.equal(flushes[0]?.priority,'background')
- await flushes[0]!.done;assert.equal(f.pending(),false)
+ await flushes[0].done;assert.equal(f.pending(),false)
  assert.equal(new MarkdownRepository(f.path+'.memory').read().revisions.length,2)
 })
 
@@ -170,7 +170,7 @@ test('Git flush failure does not fail write receipt or leak rejection; close ret
  t.mock.timers.enable({apis:['setTimeout']})
  writeFileSync(lock,'external git lock')
  const receipt=await f.write(1);assert.equal(receipt.state,'committed');assert.ok(f.pending())
- t.mock.timers.tick(1500);await settle();assert.ok(background);await assert.rejects(background!)
+ t.mock.timers.tick(1500);await settle();assert.ok(background);await assert.rejects(background)
  assert.ok(f.pending());assert.equal((await f.memory.lookupExplicit({},consumer)).entries[0]?.id,receipt.id)
  rmSync(lock);await f.memory.close();assert.equal(f.pending(),false)
  assert.equal(new MarkdownRepository(f.path+'.memory').read().revisions[0]?.entry_id,receipt.id)

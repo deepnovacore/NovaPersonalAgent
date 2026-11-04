@@ -73,7 +73,7 @@ test('remember traces use only fixed action and slot labels for raw and wrapped 
    assert.equal(memoryRememberSummary(args,result,true),expected)
    const events:unknown[]=[]
    const core={tools:{schemas:[{function:{name:'memory__remember',parameters:{type:'object'}}}],bindings:new Map([['memory__remember',{kind:'host'}]]),hidden:new Set()},runtime:{executors:new Map(),observe:()=>()=>undefined}}
-   const graph={bridge:{acceptUserTranscript:async()=> 'origin'},service:{session:{sessionEpoch:1},invokeConversationTool:async()=>({accepted:true,host_item:{content:JSON.stringify(result)}})}}
+   const graph={bridge:{acceptUserTranscript:()=>Promise.resolve('origin')},service:{session:{sessionEpoch:1},invokeConversationTool:()=>Promise.resolve({accepted:true,host_item:{content:JSON.stringify(result)}})}}
    const bridge=conversationToolBridge(core as never,graph as never,{chat:true,onTool:event=>events.push(event)})
    await bridge.invoke('PRIVATE_QUOTE',{id:'call',name:'memory__remember',arguments:args},new AbortController().signal)
    assert.deepEqual(events,[{name:'memory__remember',state:'running',summary:''},{name:'memory__remember',state:'ok',summary:expected}])
@@ -90,7 +90,7 @@ test('lookup traces count entries in raw and wrapped results without exposing en
  for(const result of [{entries:[{text:'PRIVATE_NAME'}]},{accepted:true,result:{entries:[{text:'PRIVATE_NAME'}]}}]){
   const events:unknown[]=[]
   const core={tools:{schemas:[{function:{name:'memory__lookup',parameters:{type:'object'}}}],bindings:new Map([['memory__lookup',{kind:'host'}]]),hidden:new Set()},runtime:{executors:new Map(),observe:()=>()=>undefined}}
-  const graph={bridge:{acceptUserTranscript:async()=> 'origin'},service:{session:{sessionEpoch:1},invokeConversationTool:async()=>({accepted:true,host_item:{content:JSON.stringify(result)}})}}
+  const graph={bridge:{acceptUserTranscript:()=>Promise.resolve('origin')},service:{session:{sessionEpoch:1},invokeConversationTool:()=>Promise.resolve({accepted:true,host_item:{content:JSON.stringify(result)}})}}
   await conversationToolBridge(core as never,graph as never,{chat:true,onTool:event=>events.push(event)}).invoke('lookup',{id:'lookup',name:'memory__lookup',arguments:{}},new AbortController().signal)
   assert.deepEqual(events,[{name:'memory__lookup',state:'running',summary:''},{name:'memory__lookup',state:'ok',summary:'1 条'}])
  }
