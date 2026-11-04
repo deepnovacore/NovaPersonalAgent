@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/foundation.dart' show debugPrint;
+import 'package:flutter/services.dart' show PlatformException;
 import 'local_agent.dart';
 
 /// Owns the lifetime of the native work performed for one chat tool call.
@@ -41,6 +42,7 @@ class NativeChatTaskRunner {
     _cancelled = false;
     final started = DateTime.now();
     var deadline = started.add(timeout);
+    var admitted = false;
     try {
       if (request.containsKey('target_package')) {
         try {
@@ -70,6 +72,7 @@ class NativeChatTaskRunner {
                 .timeout(const Duration(seconds: 15))
             as Map,
       );
+      admitted = true;
       if (task['tier'] == 'virtual') deadline = started.add(virtualTimeout);
       while (true) {
         switch (task['phase']) {
@@ -139,7 +142,17 @@ class NativeChatTaskRunner {
         if (current == null) throw StateError('task_missing');
         task = Map<String, dynamic>.from(current);
       }
-    } catch (_) {
+    } catch (error) {
+      // These native admission checks run before creating or launching a task.
+      if (!admitted &&
+          error is PlatformException &&
+          error.code == 'local_agent_error' &&
+          [
+            'accessibility_required',
+            'model_settings_required',
+          ].contains(error.message)) {
+        return {'status': 'failed', 'task_id': id, 'reason': error.message};
+      }
       await cancel();
       return {'status': 'outcome_unknown', 'task_id': id};
     } finally {

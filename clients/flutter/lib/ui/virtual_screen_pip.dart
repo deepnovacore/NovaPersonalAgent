@@ -18,6 +18,18 @@ const _pipRadius = 14.0;
 const pipWorkingColor = Nova.mint;
 const pipNeedsYouColor = Color(0xffe8913a);
 
+String _takeoverPrompt(PhoneRun run, String language) {
+  final zh = language == 'zh';
+  final reason = switch (run.takeoverReason) {
+    'secure_page' => zh ? '页面受保护，需要你处理。' : 'This protected page needs you.',
+    'outside_target_app' =>
+      zh ? '当前页面超出任务范围，需要你处理。' : 'The current page is outside this task.',
+    final String reason when reason.isNotEmpty => reason,
+    _ => zh ? '需要你处理后才能继续；' : 'Your help is needed to continue. ',
+  };
+  return '$reason${zh ? '点“我来”接管到主屏。' : 'Tap Take over to open it on your screen.'}';
+}
+
 enum PipCorner { topLeft, topRight, bottomLeft, bottomRight }
 
 /// Holds [PhonePreview] open while something on screen wants the frames and
@@ -317,6 +329,7 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
       }),
       child: Semantics(
         container: true,
+        explicitChildNodes: true,
         label: _stateLabel(run),
         hint: expanded
             ? null
@@ -367,7 +380,7 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
     children: [
       ValueListenableBuilder<Uint8List?>(
         valueListenable: tracker.preview.frame,
-        builder: (context, frame, _) => frame == null || run.takeoverActive
+        builder: (context, frame, _) => frame == null || run.needsUser
             ? _placeholder(run)
             : Image.memory(
                 frame,
@@ -425,11 +438,13 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
   Widget _placeholder(PhoneRun run) => ColoredBox(
     color: const Color(0xff1d2226),
     child: Center(
-      child: expanded && run.takeoverActive
+      child: expanded && run.needsUser
           ? Padding(
               padding: const EdgeInsets.all(12),
               child: Text(
-                t('你正在手机上操作这个 App', 'You have the app on your phone'),
+                run.takeoverActive
+                    ? t('你正在手机上操作这个 App', 'You have the app on your phone')
+                    : _takeoverPrompt(run, widget.language),
                 textAlign: TextAlign.center,
                 style: const TextStyle(color: Colors.white70, fontSize: 13),
               ),
@@ -604,18 +619,20 @@ class _VirtualScreenViewState extends State<VirtualScreenView>
                     child: ValueListenableBuilder<Uint8List?>(
                       valueListenable: tracker.preview.frame,
                       builder: (context, frame, _) =>
-                          frame == null || run.takeoverActive
+                          frame == null || run.needsUser
                           ? ColoredBox(
                               color: const Color(0xff1d2226),
                               child: Center(
-                                child: run.takeoverActive
+                                child: run.needsUser
                                     ? Padding(
                                         padding: const EdgeInsets.all(10),
                                         child: Text(
-                                          t(
-                                            '你正在手机上操作这个 App',
-                                            'You have the app on your phone',
-                                          ),
+                                          run.takeoverActive
+                                              ? t(
+                                                  '你正在手机上操作这个 App',
+                                                  'You have the app on your phone',
+                                                )
+                                              : _takeoverPrompt(run, widget.language),
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(
                                             color: Colors.white70,

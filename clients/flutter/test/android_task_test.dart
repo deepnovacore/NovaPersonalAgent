@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'package:nova_mobile/agent/native_chat_task.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
@@ -13,6 +14,7 @@ class Device implements LocalAgent {
   Completer<void>? appsGate;
   Completer<Map<String, dynamic>>? runGate;
   String? runTier;
+  PlatformException? runError, pollError;
   Map<String, dynamic> terminal = {
     'phase': 'verifying',
     'summary': '小红书已在前台',
@@ -33,6 +35,7 @@ class Device implements LocalAgent {
       ];
     }
     if (method == 'run') {
+      if (runError != null) throw runError!;
       dispatched = input;
       return runGate == null
           ? {
@@ -43,6 +46,7 @@ class Device implements LocalAgent {
           : await runGate!.future;
     }
     if (method == 'tasks') {
+      if (pollError != null) throw pollError!;
       return [
         {'id': dispatched!['id'], ...terminal},
       ];
@@ -52,6 +56,46 @@ class Device implements LocalAgent {
 }
 
 void main() {
+  for (final reason in ['accessibility_required', 'model_settings_required']) {
+    test(
+      'native admission rejection preserves $reason without stopping',
+      () async {
+        final device = Device()
+          ..runError = PlatformException(
+            code: 'local_agent_error',
+            message: reason,
+          );
+        final result = await NativeChatTaskRunner(agent: device).run({
+          'target_package': 'com.xingin.xhs',
+          'goal': 'open',
+          'acceptance': 'visible',
+        }, 'rejected');
+        expect(result['status'], 'failed');
+        expect(result['reason'], reason);
+        expect(device.calls, ['apps', 'run']);
+      },
+    );
+  }
+
+  test('a channel error after dispatch still has an unknown outcome', () async {
+    final device = Device()
+      ..pollError = PlatformException(
+        code: 'local_agent_error',
+        message: 'accessibility_required',
+      );
+    final result =
+        await NativeChatTaskRunner(
+          agent: device,
+          pollInterval: Duration.zero,
+        ).run({
+          'target_package': 'com.xingin.xhs',
+          'goal': 'open',
+          'acceptance': 'visible',
+        }, 'dispatched');
+    expect(result['status'], 'outcome_unknown');
+    expect(device.calls.last, 'stop');
+  });
+
   test('chat completion requires native screen evidence', () async {
     final device = Device()
       ..terminal = {'phase': 'verifying', 'summary': 'unverified'};

@@ -205,6 +205,8 @@ void main() {
     await _emit(tester, h, stepEvent());
     expect(_working, findsOneWidget);
     await _emit(tester, h, takeoverEvent(TakeoverState.requested));
+    expect(find.text('需要你处理后才能继续；点“我来”接管到主屏。'), findsOneWidget);
+    expect(h.channel.calls.where((c) => c.startsWith('takeover:')), isEmpty);
     // It breathes, so time is advanced by hand.
     await tester.pump(const Duration(milliseconds: 300));
     expect(_needsYou, findsOneWidget);
