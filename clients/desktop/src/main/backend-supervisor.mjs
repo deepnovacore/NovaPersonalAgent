@@ -1,6 +1,6 @@
 import {publicUsageReport} from './frontend-usage.mjs'
 import {randomUUID} from 'node:crypto'
-import {publicStartupConfiguration} from '../startup-configuration.mjs'
+import {publicStartupConfiguration} from '../renderer/startup-configuration.mjs'
 
 const FAILURE_KINDS = new Set([
   'configuration_required', 'authentication_failed', 'unavailable', 'recoverable',

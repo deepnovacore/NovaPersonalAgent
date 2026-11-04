@@ -1,5 +1,5 @@
 import {t} from './locale.mjs'
-import {publicStartupConfiguration} from '../startup-configuration.mjs'
+import {publicStartupConfiguration} from './startup-configuration.mjs'
 
 // Fixed stage labels for the bounded configuration waits. Codes carry no paths
 // or credentials, so they are safe to show and to log.
