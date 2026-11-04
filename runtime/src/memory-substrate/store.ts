@@ -152,10 +152,16 @@ function write(db:LedgerDatabase,candidate:Candidate,deleted=false):EntryRevisio
   }
   return next??current(db,candidate.entry_id)
 }
-export type MemoryOperation = 'engine_outbox'|'space_source_input'|'space_source_snapshot'|'explicit_begin'|'explicit_write'|'explicit_lookup'|'timeline_evidence'|'timeline_retired'|'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_diary'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
+export type MemoryOperation = 'engine_outbox'|'flush_files'|'space_source_input'|'space_source_snapshot'|'explicit_begin'|'explicit_write'|'explicit_lookup'|'timeline_evidence'|'timeline_retired'|'source_search'|'source_processing'|'append_evidence_batch'|'invalidate_message'|'profile_evidence'|'purge_index_complete'|'purge'|'purge_status'|'conversation_snapshot'|'enable_files'|'commit_diary'|'commit_consolidation'|'life_load'|'life_mutate'|'life_capture_im'|'daily_evidence'|'im_context'|'append_evidence'|'merge'|'list'|'history'|'evidence'|'delete_source'|'expire'|'forget'|'record_extraction'|'record_evidence_batch'|'migrate_legacy'|'pending_evidence'|'extraction_done'|'pending_vectors'|'write_vectors'|'search'|'retrieval_evidence'|'source_connection'|'source_apply_page'|'source_pending'|'source_revision'|'invalidate_evidence'|'source_grant'|'processing_evidence'|'extraction_ticket'|'commit_extraction'|'processing_stamp'|'source_events'
 export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,input:unknown,transaction=true):unknown {
   const value=z.record(z.string(),z.unknown()).parse(input)
-  const ledgerOnly=isLedgerOnlyOperation(operation,value)
+  const deferFiles=operation==='explicit_write'&&z.boolean().parse(value.defer_files??false)
+  const skipFileReconcile=operation==='list'&&z.boolean().parse(value.skip_file_reconcile??false)
+  // These ledger reads may observe committed state while its mirror is pending. With
+  // no outbox, retain normal reconciliation (including admission of hand edits).
+  const pendingRead=(operation==='explicit_begin'||operation==='explicit_lookup'||skipFileReconcile)
+    &&db.prepare('SELECT 1 FROM memory_file_outbox WHERE slot=1').get()!==undefined
+  const ledgerOnly=isLedgerOnlyOperation(operation,value)||pendingRead
   if(transaction&&!ledgerOnly)reconcileMemoryFiles(db)
   if(transaction)db.exec('BEGIN IMMEDIATE')
   let committed=false
@@ -400,7 +406,7 @@ export function memoryOperation(db:LedgerDatabase,operation:MemoryOperation,inpu
       }
       default:throw new Error('STORE_INVALID_OPERATION')
     }
-    if(transaction){validateMemoryFiles(db);db.exec('COMMIT');committed=true;if(!ledgerOnly)flushMemoryFiles(db)}
+    if(transaction){validateMemoryFiles(db);db.exec('COMMIT');committed=true;if(!ledgerOnly&&!deferFiles)flushMemoryFiles(db)}
     return result
   }catch(error){if(transaction&&!committed)db.exec('ROLLBACK');throw error}
 }
@@ -428,7 +434,7 @@ export function reconcileMemoryFiles(db:LedgerDatabase):void {
 
 /** Raw admission and permission fences remain usable when editable documents need repair. */
 export function isLedgerOnlyOperation(operation:MemoryOperation,value:Record<string,unknown>):boolean {
- if(['engine_outbox','timeline_evidence','timeline_retired','source_search','source_processing','append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
+ if(['engine_outbox','flush_files','timeline_evidence','timeline_retired','source_search','source_processing','append_evidence_batch','profile_evidence','append_evidence','evidence','retrieval_evidence','processing_evidence','processing_stamp','source_grant','expire','source_revision','extraction_ticket','source_pending','source_events'].includes(operation))return true
  // An extraction marker only records that an attempt ran; it never writes entries.
  if(operation==='record_extraction'||operation==='record_evidence_batch')return true
  return operation==='source_connection'&&['get','list','create','fence','sync_status','reset_sync'].includes(String(value.action))

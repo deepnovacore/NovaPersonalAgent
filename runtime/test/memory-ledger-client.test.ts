@@ -78,10 +78,11 @@ test('background context survives awaits and never leaks into the caller',async(
 
 test('close runs after every queued request and a worker failure rejects queued requests',async()=>{
  const fake=heldWorker(),client=new MemoryLedgerClient(':memory:',{workerFactory:()=>fake.worker})
- const queued=[client.memory('list',{}),runInMemoryBackground(()=>client.memory('source_processing',{}))]
+ const queued=[client.memory('list',{}),runInMemoryBackground(()=>client.memory('source_processing',{})),client.memory('explicit_write',{},{priority:'interactive'})]
  const closing=client.close()
- await fake.release();await fake.release();await fake.release();await closing
- assert.deepEqual(fake.seen,['list','source_processing','close']);await Promise.all(queued)
+ await assert.rejects(client.memory('explicit_write',{},{priority:'interactive'}),{code:'CLIENT_CLOSED'})
+ await fake.release();await fake.release();await fake.release();await fake.release();await closing
+ assert.deepEqual(fake.seen,['list','explicit_write','source_processing','close']);await Promise.all(queued)
 
  const broken=heldWorker(),other=new MemoryLedgerClient(':memory:',{workerFactory:()=>broken.worker})
  const inService=other.memory('list',{}),waiting=other.memory('life_load',{},{priority:'interactive'})

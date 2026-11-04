@@ -356,6 +356,10 @@ export class MemoryLedgerStore {
         reconcileMemoryFiles(this.#requireDatabase());return {enabled:true}
       }
       try {
+      if(operation==='flush_files'){
+        z.object({}).strict().parse(input)
+        return {flushed:flushMemoryFiles(this.#requireDatabase())}
+      }
       if(operation==='purge')return purgeEntry(this.#requireDatabase(),this.#path,input)
       if(operation==='purge_index_complete')return completePurgeIndex(this.#requireDatabase(),this.#path,input)
       if(operation==='purge_status')return purgeStatus(this.#requireDatabase(),z.object({entry_prefix:z.string().min(1)}).strict().parse(input).entry_prefix,this.#path)

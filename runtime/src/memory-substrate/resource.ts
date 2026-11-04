@@ -21,7 +21,7 @@ import type {JsonValue} from '../core/events.js'
 import {createHash, randomUUID} from 'node:crypto'
 import {z} from 'zod'
 import type {ModelGateway} from '../model/model-gateway.js'
-import {MemoryLedgerClientError,runInMemoryBackground,type MemoryLedgerClient} from '../memory-ledger/store-client.js'
+import {MemoryLedgerClientError,runInMemoryBackground,type MemoryLedgerClient,type MemoryRequestPriority} from '../memory-ledger/store-client.js'
 import {ledgerMemoryScope, MemoryObservationSchema, MemoryListOptionsSchema, MemorySourceRefSchema, LifeMemorySchema, type MemoryEntry, type MemoryObservation, type MemorySourceRef, type MemoryVersion} from '../memory/entry.js'
 import type {PersonalMemoryResource, PersonalMemoryRememberTurn, PersonalMemoryResponseAdaptation, PersonalMemoryPurgeResult, PersonalMemoryRecallHit} from '../memory/personal-memory.js'
 import {CandidateSchema, EntryRevisionSchema, EvidenceRecordSchema, contentHash, type Candidate,type EntryRevision, type EvidenceRecord} from './store.js'
@@ -97,6 +97,20 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
   #backgroundStarted=false
   #maintenanceRun:Promise<void>|undefined
   #maintenance:ReturnType<typeof setInterval>|undefined
+  #filesFlushTimer:ReturnType<typeof setTimeout>|undefined
+  #scheduleFilesFlush():void{
+    clearTimeout(this.#filesFlushTimer)
+    if(!this.#opened)return
+    this.#filesFlushTimer=setTimeout(()=>{
+      this.#filesFlushTimer=undefined
+      void this.#flushFiles('background')
+    },1500)
+    this.#filesFlushTimer.unref()
+  }
+  async #flushFiles(priority:MemoryRequestPriority):Promise<void>{
+    try{await this.options.client.memory('flush_files',{}, {priority})}
+    catch{ /* A failed mirror never invalidates a receipt; the durable outbox retries on the next drain or open. */ }
+  }
   #queued=new Set<string>()
   #extracting=new Map<string,Promise<void>>()
   #opened=false
@@ -181,13 +195,24 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const maintain=()=>{if(!this.#opened||this.#maintenanceRun)return;this.#maintenanceRun=runInMemoryBackground(()=>this.#maintain()).catch(()=>{/* Durable work retries at the next tick. */}).finally(()=>{this.#maintenanceRun=undefined})}
     maintain();this.#maintenance=setInterval(maintain,60000);this.#maintenance.unref()
   }
-  async close():Promise<void>{this.#opened=false;this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort();await Promise.all([...this.#engines,...this.#cleanupEngines].map(engine=>engine.close()));this.#engines=[];this.#cleanupEngines=[];await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;await this.#diaryRun;this.#adaptation={revision:0,replyPreferences:[]};if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}}
+  async close():Promise<void>{
+    const wasOpened=this.#opened
+    this.#opened=false;clearTimeout(this.#filesFlushTimer);this.#filesFlushTimer=undefined
+    this.#backgroundStarted=false;this.#preparedSignatures.clear();this.#snapshotSignature='';clearInterval(this.#maintenance);this.#abort.abort()
+    await Promise.all([...this.#engines,...this.#cleanupEngines].map(engine=>engine.close()));this.#engines=[];this.#cleanupEngines=[]
+    await this.#maintenanceRun;await this.#sourceWork;await this.#sourceEvents;await this.#pending;await this.#indexing;await this.#consolidating;await this.#diaryRun
+    this.#adaptation={revision:0,replyPreferences:[]}
+    // Drain admitted work first, then flush before client.close stops accepting RPCs.
+    // Explicit priority also prevents an inherited background context starving this drain.
+    if(wasOpened)await this.#flushFiles('interactive')
+    if(this.options.closeClient!==false){await this.options.client.close();this.options.onClose?.()}
+  }
   async #maintain():Promise<void>{this.#wakeSources();await this.options.client.memory('expire',{});if(!this.#opened||this.options.personalMemoryEnabled===false)return;await this.#refresh();if(!this.#opened)return;this.#queueIndex();const pending=z.array(EvidenceRecordSchema).parse(await this.options.client.memory('pending_evidence',{source_prefix:this.prefix,provider:this.#extractionFingerprint(),limit:20}));if(!this.#opened)return;for(const e of pending)this.#queue(e);this.#queueConsolidation();this.#queueDiary()}
   #ready():void{if(!this.#opened)throw Error('personal_memory_unavailable')}
   async beginExplicitTurn(input:ExplicitMemoryTurn):Promise<ExplicitMemoryTurn>{
     this.#ready();if(this.options.personalMemoryEnabled===false||this.options.inputConsent!==true)throw Error('personal_memory_disabled')
     const turn=explicitMemoryTurn.parse(input)
-    await this.options.client.memory('explicit_begin',{prefix:this.prefix,turn})
+    await this.options.client.memory('explicit_begin',{prefix:this.prefix,turn},{priority:'interactive'})
     return turn
   }
   async writeExplicit(turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string):Promise<ExplicitMemoryReceipt>{
@@ -196,8 +221,9 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     const sourceId='explicit:'+digest(turn.sourceId+':'+requestId)
     const evidence=this.#evidenceRecord({type:'conversation',ref:sourceId,observed_at:turn.occurredAt},args.quote,'user_correction',sourceId,undefined,true,undefined,this.options.inputConsent===true)
     // Distinct explicit operations keep distinct evidence even when the user quoted the same sentence.
-    const receipt=await this.options.client.memory('explicit_write',{prefix:this.prefix,turn,requestId,arguments:args,consumer,evidence:{...evidence,hash:digest(this.options.userId+':'+sourceId)},automaticHash:contentHash(this.options.userId+':'+turn.text),grant:this.processingGrant(true)}) as ExplicitMemoryReceipt
-    await this.#refresh()
+    const receipt=await this.options.client.memory('explicit_write',{defer_files:true,prefix:this.prefix,turn,requestId,arguments:args,consumer,evidence:{...evidence,hash:digest(this.options.userId+':'+sourceId)},automaticHash:contentHash(this.options.userId+':'+turn.text),grant:this.processingGrant(true)},{priority:'interactive'}) as ExplicitMemoryReceipt
+    this.#scheduleFilesFlush()
+    await this.#refresh(true,'interactive',true)
     return receipt
   }
   async lookupExplicit(query:ExplicitMemoryLookup,consumer:string):Promise<ExplicitMemoryPage>{
@@ -278,9 +304,9 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     if(this.options.conversationProviders?.includes(consumer))this.#preparedSignatures.set(consumer,{signature,revision})
     return {revision,...enriched}
   }
-  async #rows(history=false,workspace=false,personalView=false):Promise<EntryRevision[]>{
+  async #rows(history=false,workspace=false,personalView=false,priority?:MemoryRequestPriority,skipFileReconcile=false):Promise<EntryRevision[]>{
     this.#ready()
-    return z.array(EntryRevisionSchema).parse(await this.options.client.memory('list',{include_history:history,...(personalView?{exclude_file_inferences:true}:{})})).filter(row=>row.entry_id.startsWith(this.prefix)||(workspace&&this.options.includeWorkspaceGraph===true&&row.entry_id.startsWith('workspace:')))
+    return z.array(EntryRevisionSchema).parse(await this.options.client.memory('list',{include_history:history,...(skipFileReconcile?{skip_file_reconcile:true}:{}),...(personalView?{exclude_file_inferences:true}:{})},priority?{priority}:{})).filter(row=>row.entry_id.startsWith(this.prefix)||(workspace&&this.options.includeWorkspaceGraph===true&&row.entry_id.startsWith('workspace:')))
   }
   async #fileInference(row:EntryRevision):Promise<boolean>{
     if(row.origin!=='inferred'||row.written_by==='user_correction')return false
@@ -310,19 +336,19 @@ export class SubstrateMemoryResource implements PersonalMemoryResource {
     }
     return Promise.all(rows.map(row=>this.#entry(row,evidence,tags)))
   }
-  async #authorizedRows(rows:EntryRevision[]):Promise<{entries:EntryRevision[];contexts:Map<string,ResolutionContext>}>{
+  async #authorizedRows(rows:EntryRevision[],priority?:MemoryRequestPriority):Promise<{entries:EntryRevision[];contexts:Map<string,ResolutionContext>}>{
     const entries:EntryRevision[]=[],contexts=new Map<string,ResolutionContext>()
     const eligible=rows.filter(row=>row.kind!=='memory_summary'&&row.kind!=='diary'&&row.evidence_refs.length>0&&row.evidence_refs.length<=256)
     for(let offset=0;offset<eligible.length;offset+=256){
       const batch=eligible.slice(offset,offset+256)
-      const stamps=z.array(z.string().nullable()).length(batch.length).parse(await this.options.client.memory('processing_stamp',{groups:batch.map(row=>row.evidence_refs),purpose:'extraction',provider:this.#extractionFingerprint()}))
+      const stamps=z.array(z.string().nullable()).length(batch.length).parse(await this.options.client.memory('processing_stamp',{groups:batch.map(row=>row.evidence_refs),purpose:'extraction',provider:this.#extractionFingerprint()},priority?{priority}:{}))
       for(const [index,row] of batch.entries()){const stamp=stamps[index];if(typeof stamp==='string'){entries.push(row);contexts.set(row.entry_id,{entry_id:row.entry_id,revision:row.revision,stamp})}}
     }
     return {entries,contexts}
   }
-  async #refresh(notify=true):Promise<void>{
+  async #refresh(notify=true,priority?:MemoryRequestPriority,skipFileReconcile=false):Promise<void>{
     for(const engine of [...this.#engines,...this.#cleanupEngines])void engine.flush().catch(()=>{/* Content-free status is exposed by engineIndexStatus; the transactional job remains pending. */})
-    const epoch=++this.#refreshEpoch,rows=await this.#rows(false,false,true),authorized=await this.#authorizedRows(rows)
+    const epoch=++this.#refreshEpoch,rows=await this.#rows(false,false,true,priority,skipFileReconcile),authorized=await this.#authorizedRows(rows,priority)
     if(epoch!==this.#refreshEpoch||!this.#opened)return
     const signature=JSON.stringify({rows,contexts:[...authorized.contexts.values()]})
     if(signature===this.#snapshotSignature)return
