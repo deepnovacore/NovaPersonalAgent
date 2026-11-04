@@ -15,7 +15,7 @@ async function fixture(t:TestContext){
  const memory={productSurfaces:true,timelineEvidence:()=>{reads++;return Promise.resolve(inputs)},canReadConversationEvidence:()=>Promise.resolve(true)} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'state.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,
   generateTimeline:items=>Promise.resolve({cards:[{category:'Approval',title:'Review the approval',why_now:'Its state needs checking',facts:[{text:'An approval is pending',quote:'approval is pending',ref:items[0]!.id}],uncertainty:'No deadline known',actions:[{label:'Discuss',kind:'discuss'}],refs:[items[0]!.id]}]})})
- host.setFeishu({restore:()=>Promise.resolve(),snapshot:()=>({account_id:account}),open:()=>Promise.resolve(),close:()=>Promise.resolve(),command:()=>Promise.resolve(null)} as never)
+ host.setFeishu({restore:()=>Promise.resolve(),snapshot:()=>({account_id:account}),open:()=>Promise.resolve(),close:()=>Promise.resolve(),command:()=>Promise.resolve(null)})
  t.after(async()=>{await host.close();await rm(dir,{recursive:true,force:true})})
  await host.open({deferBackground:true});await host.refreshTimeline();await host.timeline.refresh()
  const card=host.snapshot().timeline.cards[0]!

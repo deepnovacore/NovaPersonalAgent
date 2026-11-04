@@ -1933,7 +1933,7 @@ export class PersonalAgentHost {
     /** True only when a completed refresh is still valid; the card itself is always re-checked by timeline.discussion(). */
     #timelineCurrent():boolean{
         const fresh=this.#timelineFresh;
-        return this.#opened&&fresh!==undefined&&fresh.host===this.#timelineEpoch&&fresh.brief===this.timeline.epoch&&fresh.scope===this.#timelineScope()&&Date.now()-fresh.at<TIMELINE_FRESH_MS;
+        return this.#opened&&fresh?.host===this.#timelineEpoch&&fresh.brief===this.timeline.epoch&&fresh.scope===this.#timelineScope()&&Date.now()-fresh.at<TIMELINE_FRESH_MS;
     }
     /** A timeline read for a click: reuses a still-valid refresh, otherwise reads as before. */
     #ensureTimeline():Promise<void>{
