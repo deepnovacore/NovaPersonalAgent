@@ -370,8 +370,26 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   try{
    // Prepare identity before opening/restoring provider history; restoration requires a fresh session.
    if(!execution&&provider.capabilities?.protocol.conversationItems!==false)await abortable(options.host.synchronizePreferredName(),startupSignal)
-   startupSignal.throwIfAborted();await abortable(graph.start(),startupSignal);await authorizeContext(true);startupSignal.throwIfAborted()
-   if(provider.restoreHistory){await authorizeContext(true);startupSignal.throwIfAborted();await provider.restoreHistory(recentHistory,startupSignal)}
+   // Restoration needs a fresh provider session, so it runs right after the raw connect and before response adaptation or
+   // host context create conversation items; context authority is re-read after the asynchronous transport setup.
+   let historyFailure:unknown
+   if(provider.restoreHistory){
+    const connect=provider.connect.bind(provider)
+    let historyRestored=false
+    provider.connect=async connectOptions=>{
+     const identity=await connect(connectOptions)
+     if(!historyRestored){
+      try{await authorizeContext(true);connectOptions.signal.throwIfAborted();await provider.restoreHistory!(recentHistory,connectOptions.signal)}
+      catch(error){historyFailure=error;throw error}
+      historyRestored=true
+     }
+     return identity
+    }
+   }
+   startupSignal.throwIfAborted()
+   // The session wraps connect failures; the caller needs the authorization or restoration cause.
+   try{await abortable(graph.start(),startupSignal)}catch(error){throw historyFailure??error}
+   await authorizeContext(true);startupSignal.throwIfAborted()
    if(!execution&&provider.capabilities?.protocol.conversationItems!==false)await syncIdentityContext(startupSignal)
    await authorizeContext(true);startupSignal.throwIfAborted();
    if(mode==='voice'&&provider.capabilities?.protocol.conversationItems!==false){
