@@ -23,6 +23,23 @@ export function createMem0PersonalMemory(options: PersonalMemoryStoreClientOptio
     },
   })
   return {
+    maxRecallLimit: store.maxRecallLimit,
+    recallEngine: 'mem0',
+    requiresConversationConsumer: true,
+    capabilities: () => ({list:true,get:true,correct:true,forgetEntry:true,forgetSource:true}),
+    get: id => store.get(id),
+    getMany: ids => store.getMem0Many(ids),
+    list: options => store.list(options),
+    correct: (...args) => store.correct(...args),
+    forgetEntry: (...args) => store.forgetEntry(...args),
+    readEvidence: id => store.readMem0Evidence(id),
+    canReadConversationEvidence: (id,consumer) => store.canReadMem0ConversationEvidence(id,consumer),
+    forgetSource: ref => store.forgetSource(ref),
+    forgetSources: async refs => {
+      let failed=false
+      for (const ref of refs) {try {await store.forgetSource(ref)} catch {failed=true}}
+      if (failed) throw new PersonalMemoryError('error')
+    },
     open: () => store.open(),
     inspect: query => store.inspectStore(query),
     close: () => store.close(),

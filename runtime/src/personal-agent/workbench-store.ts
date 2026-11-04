@@ -1,3 +1,4 @@
+import {contextDependenciesSchema,type ContextDependencies} from './context-dependencies.js'
 import {createHash,randomUUID} from 'node:crypto'
 import {mkdir,open,rename,unlink} from 'node:fs/promises'
 import {dirname,join,resolve} from 'node:path'
@@ -8,7 +9,7 @@ import {validateToolImage,type CascadedLlmInput} from '../realtime/cascaded/llm.
 import {computerApplicationSchema,type ToolImage} from './computer-use/contract.js'
 import type {LocalShellProcess} from './local-shell.js'
 
-export const planSchema=z.object({id:z.string(),version:z.number().int().positive(),title:z.string().min(1).max(120),content:z.string().min(1).max(131072),conversation_id:z.string(),generation:z.number().int().nonnegative(),created_at:z.string(),publication_key:z.string().optional()}).strict()
+export const planSchema=z.object({context_dependencies:contextDependenciesSchema.optional(),id:z.string(),version:z.number().int().positive(),title:z.string().min(1).max(120),content:z.string().min(1).max(131072),conversation_id:z.string(),generation:z.number().int().nonnegative(),created_at:z.string(),publication_key:z.string().optional()}).strict()
 export type WorkbenchPlan=z.infer<typeof planSchema>
 export const buildStatusSchema=z.enum(['idle','running','awaiting_approval','paused','completed','failed','outcome_unknown','finished'])
 export type BuildStatus=z.infer<typeof buildStatusSchema>
@@ -19,6 +20,7 @@ export const MAX_WORKBENCH_THOUGHTS=64
 export const MAX_WORKBENCH_THOUGHT_CODEPOINTS=8000
 export const MAX_WORKBENCH_THOUGHT_BYTES=256*1024
 export interface WorkbenchCheckpoint {
+ context_dependencies?:ContextDependencies
  version:1;conversation_id:string;generation:number;run_version:number;status:BuildStatus;reason:string|null;model:JsonValue|null;
  inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;assistant:string;updated_at:string
  voice_message_ids?:string[]
@@ -143,7 +145,7 @@ export class WorkbenchStore {
  async checkpoint(id:string,generation:number):Promise<WorkbenchCheckpoint>{
   const value=await this.#images(await this.#readCheckpoint(id,generation),id,generation,true)
   if(value===null)return emptyWorkbenchCheckpoint(id,generation)
-  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
+  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),context_dependencies:contextDependenciesSchema.optional(),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
   const calls=new Map(checked.calls.map(call=>[call.id,call]));if(calls.size!==checked.calls.length)throw Error('duplicate_tool_call')
   checked.pending_calls=checked.pending_calls.map(call=>{const prior=calls.get(call.id);if(prior?.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');return prior})
   checked.thoughts=boundWorkbenchThoughts((checked.thoughts??[]).map(thought=>({id:thought.id,text:thought.text,created_at:thought.created_at,...(thought.message_id===undefined?{}:{message_id:thought.message_id})})))

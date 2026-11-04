@@ -43,26 +43,31 @@ port.on('message', message => {
     port.postMessage({kind: 'protocol_error'})
     return
   }
+  const authorityRevision = store.recallAuthorityRevision()
   try {
-    const result=store.withMemoryFilesLock(()=>{
+    const result=request.operation==='life_authorization_revision'?execute(request):store.withMemoryFilesLock(()=>{
       if(request.operation!=='memory'&&request.operation!=='close')store.syncMemoryFiles()
       const response=execute(request)
       if(request.operation!=='memory'&&request.operation!=='close')store.flushMemoryFiles()
       return response
     })
-    port.postMessage({kind: 'response', request_id: request.request_id, ok: true, result})
+    port.postMessage({kind: 'response', request_id: request.request_id, ok: true, result, authority_changed: store.recallAuthorityRevision() !== authorityRevision, authority_epoch: store.recallAuthorityEpoch()})
   } catch (error) {
     port.postMessage({
       kind: 'response',
       request_id: request.request_id,
       ok: false,
       error_code: safeErrorCode(error),
+      authority_changed: store.recallAuthorityRevision() !== authorityRevision,
+      authority_epoch: store.recallAuthorityEpoch(),
     })
   }
 })
 
 function execute(request: StoreRequest): unknown {
   switch (request.operation) {
+    case 'life_authorization_revision':
+      return store.lifeAuthorizationRevision(stringField(request,'namespace'))
     case 'memory': {
       const operation=stringField(request,'memoryOperation') as MemoryOperation
       return store.memory(operation,request.input,path=>new DatabaseSync(path,{readOnly:true,allowExtension:false}))

@@ -42,3 +42,24 @@ test('Chat bridge hides and refuses dispatch; the explicit host bridge still all
   assert.equal(hostAllowed.accepted, true)
   assert.equal(calls.length, 1)
 })
+
+test('conversation tool bridge binds write authority to the same typed-user snapshot', async () => {
+  const {memoryHostToolNames} = await import('../src/personal-agent/conversation-tool-bridge.js')
+  assert.deepEqual([...memoryHostToolNames], ['memory__remember', 'memory__lookup'])
+  const text = 'Remember my preferred name is River', origin = 'memory:typed-user'
+  const core = {tools: {schemas: [{type: 'function', function: {name: 'memory__remember', parameters: {type: 'object'}}}], bindings: new Map([['memory__remember', {kind: 'host'}]]), hidden: new Set()}, runtime: {executors: new Map(), observe: () => () => undefined}}
+  const graph = {
+    bridge: {acceptUserTranscript: (value: string) => {assert.equal(value, text); return Promise.resolve(origin)}},
+    service: {session: {sessionEpoch: 7}, invokeConversationTool: (_event: unknown, turn: {user: {text: string;origin_ref: string};authority: {originRef: string;stillWanted: () => boolean}}) => {
+      assert.equal(turn.user.text, text)
+      assert.equal(turn.user.origin_ref, origin)
+      assert.equal(turn.authority.originRef, origin)
+      assert.equal(turn.authority.stillWanted(), true)
+      return Promise.resolve({accepted: true, code: 'committed', host_item: {content: '{"state":"committed"}'}})
+    }},
+  }
+  const bridge = conversationToolBridge(core as never, graph as never)
+  assert.deepEqual(bridge.readonlyNames, [], 'memory host writes must not enter concurrent query batches')
+  const result = await bridge.invoke(text, {id: 'save', name: 'memory__remember', arguments: {}}, new AbortController().signal) as {code: string}
+  assert.equal(result.code, 'committed')
+})

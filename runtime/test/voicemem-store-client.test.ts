@@ -50,7 +50,7 @@ class FakeWorker implements PersonalMemoryStoreWorker {
 function client(worker = new FakeWorker()): {readonly client: PersonalMemoryStoreClient; readonly worker: FakeWorker; readonly configurations: WorkerOptions[]} {
   const configurations: WorkerOptions[] = []
   const instance = new PersonalMemoryStoreClient({
-    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    path: join(tmpdir(), 'nova-personal-test', 'personal.sqlite'),
     userId: 'host-user',
     embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
     extractionModel: 'extract-test',
@@ -86,7 +86,7 @@ test('client fixes path, host user, and serializable embedding config in worker 
   assert.equal(configurations.length, 0)
   const opening = store.open()
   assert.deepEqual(configurations[0]?.workerData, {
-    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    path: join(tmpdir(), 'nova-personal-test', 'personal.sqlite'),
     userId: 'host-user',
     embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
     extractionModel: 'extract-test',
@@ -146,7 +146,7 @@ test('previous assistant reply preserves the 40,000 UTF-16-unit boundary', async
 })
 
 test('read-only clients do not expose durable admission', () => {
-  const store=new PersonalMemoryStoreClient({path:'/private/tmp/read-only.sqlite',userId:'host-user',
+  const store=new PersonalMemoryStoreClient({path:join(tmpdir(), 'read-only.sqlite'),userId:'host-user',
     embedding:{baseUrl:'https://example.invalid/v1',apiKey:'test-key',model:'embed-test'}})
   assert.equal(store.remember,undefined)
   assert.equal(Object.hasOwn(store,'remember'),false)
@@ -365,7 +365,7 @@ test('real worker durably admits, recalls during learning, retries only on reope
   const owners: {directory?: string; store?: PersonalMemoryStoreClient; db?: DatabaseSync} = {}
   t.after(() => cleanup([() => provider.release(), () => owners.store?.close(), () => owners.db?.close(), () => provider.close(),
     () => owners.directory === undefined ? undefined : rm(owners.directory, {recursive:true,force:true})]))
-  const directory=owners.directory=await mkdtemp(join(process.cwd(),'voicemem-worker-'))
+  const directory=owners.directory=await mkdtemp(join(await realpath(tmpdir()),'voicemem-worker-'))
   let store=owners.store=new PersonalMemoryStoreClient({path:join(directory,'personal.sqlite'),userId:'host-user',
     embedding:{baseUrl:provider.baseUrl,apiKey:'loopback',model:'embed-test',dimensions:2},extractionModel:'extract-test'})
   await store.open()
@@ -405,7 +405,7 @@ test('real worker persists the exact previous reply and republishes learned glob
   const owners: {directory?: string; store?: PersonalMemoryStoreClient; db?: DatabaseSync} = {}
   t.after(() => cleanup([() => provider.release(), () => owners.store?.close(), () => owners.db?.close(), () => provider.close(),
     () => owners.directory === undefined ? undefined : rm(owners.directory, {recursive:true,force:true})]))
-  const directory=owners.directory=await mkdtemp(join(process.cwd(),'voicemem-worker-preferences-'))
+  const directory=owners.directory=await mkdtemp(join(await realpath(tmpdir()),'voicemem-worker-preferences-'))
   const path=join(directory,'personal.sqlite')
   let store=owners.store=new PersonalMemoryStoreClient({path,userId:'host-user',
     embedding:{baseUrl:provider.baseUrl,apiKey:'loopback',model:'embed-test',dimensions:2},extractionModel:'extract-test'})
@@ -428,7 +428,7 @@ test('real worker persists the exact previous reply and republishes learned glob
 })
 
 test('real worker snapshots only host-user reply preferences', async t => {
-  const directory=await mkdtemp(join(process.cwd(),'voicemem-worker-preference-filter-'))
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'voicemem-worker-preference-filter-'))
   const path=join(directory,'personal.sqlite')
   const options={path,userId:'host-user',embedding:{baseUrl:'https://example.invalid/v1',apiKey:'test-key',model:'embed-test',dimensions:2}}
   const initialized=new PersonalMemoryStoreClient(options)
@@ -461,7 +461,7 @@ test('storage damage fails a read or background drain without terminating the wo
   const owners: {directory?: string; store?: PersonalMemoryStoreClient; db?: DatabaseSync} = {}
   t.after(() => cleanup([() => provider.release(), () => owners.store?.close(), () => owners.db?.close(), () => provider.close(),
     () => owners.directory === undefined ? undefined : rm(owners.directory, {recursive:true,force:true})]))
-  const directory=owners.directory=await mkdtemp(join(process.cwd(),'voicemem-worker-damage-'))
+  const directory=owners.directory=await mkdtemp(join(await realpath(tmpdir()),'voicemem-worker-damage-'))
   const path=join(directory,'personal.sqlite')
   const store=owners.store=new PersonalMemoryStoreClient({path,userId:'host-user',
     embedding:{baseUrl:provider.baseUrl,apiKey:'loopback',model:'embed-test',dimensions:2},extractionModel:'extract-test'})
@@ -490,7 +490,7 @@ test('storage damage fails a read or background drain without terminating the wo
 test('source deletion is opt-in and requires a matching durable tombstone receipt', async () => {
   assert.equal(client().client.forget, undefined)
   const worker = new FakeWorker()
-  const store = new PersonalMemoryStoreClient({path:'/private/tmp/mem0-client-test',userId:'host-user',
+  const store = new PersonalMemoryStoreClient({path:join(tmpdir(), 'mem0-client-test'),userId:'host-user',
     embedding:{baseUrl:'https://example.invalid/v1',apiKey:'test',model:'test'},
     supportsForget:true,workerFactory:()=>worker})
   const opening=store.open();worker.respond(requestId(worker,0),opened());await opening
@@ -547,7 +547,7 @@ test('a crashed worker is respawned after a bounded backoff', async t => {
   t.mock.timers.enable({apis: ['setTimeout', 'Date']})
   const workers: FakeWorker[] = []
   const store = new PersonalMemoryStoreClient({
-    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    path: join(tmpdir(), 'nova-personal-test', 'personal.sqlite'),
     userId: 'host-user',
     embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
     extractionModel: 'extract-test',
@@ -577,7 +577,7 @@ test('a timed-out first open replaces the worker so a retry can succeed', async 
   t.mock.timers.enable({apis: ['setTimeout', 'Date']})
   const workers: FakeWorker[] = []
   const store = new PersonalMemoryStoreClient({
-    path: '/private/tmp/nova-personal-test/personal.sqlite',
+    path: join(tmpdir(), 'nova-personal-test', 'personal.sqlite'),
     userId: 'host-user',
     embedding: {baseUrl: 'https://example.invalid/v1', apiKey: 'test-key', model: 'embed-test', dimensions: 2},
     extractionModel: 'extract-test',
@@ -616,4 +616,14 @@ test('VoiceMem uses separate extraction and embedding transports', {timeout: 100
   await eventually(async () => (await store.recall('separate')).hits.length > 0)
   assert.equal(extraction.calls.get('separate'), 1)
   assert.equal(embedding.calls.size, 0)
+})
+
+
+test('client preserves STORE_READ_FAILED as a content-free read error',async()=>{
+  const {client:store,worker}=client(),opening=store.open()
+  worker.respond(requestId(worker,0),opened());await opening
+  const read=store.list()
+  worker.refuse(requestId(worker,1),'STORE_READ_FAILED')
+  await assert.rejects(read,error=>error instanceof PersonalMemoryStoreClientError&&error.code==='STORE_READ_FAILED'&&error.state==='error'&&error.message==='personal_memory_error')
+  await store.close()
 })

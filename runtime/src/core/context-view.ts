@@ -32,6 +32,13 @@ export interface Affordance {
   readonly conclusive: boolean | null
 }
 
+/** Personal-feed suggestions must be reauthorized at the destination's model boundary. */
+export function personalFeedIdForAffordance(affordance:Affordance):string|undefined {
+  const suggestion=affordance.source==='suggestion'?affordance.content.suggestion:undefined
+  if(!suggestion||typeof suggestion!=='object'||Array.isArray(suggestion))return undefined
+  return typeof suggestion.personal_feed_id==='string'?suggestion.personal_feed_id:undefined
+}
+
 export interface ChannelView {
   readonly name: string
   readonly summary: string | null

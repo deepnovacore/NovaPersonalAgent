@@ -56,6 +56,14 @@ export class ScheduledAppContext{
   }
   return true
  }
+ async validateRecord(section:'todos'|'goals',id:string,version:number,consumer:string|null):Promise<boolean>{
+  const row=await this.host.life.authorizationRecord(section,id)
+  if(row?.version!==version||row.source_changed)return false
+  const sources=[...new Set([...(row.provenance_refs??[]),...(row.sources??[]).map(source=>source.evidence_id)])]
+  if(row.auto_recorded&&!sources.length)return false
+  for(const ref of sources)if(!consumer||!await this.host.options.memory()?.canReadConversationEvidence?.(ref,consumer))return false
+  return true
+ }
  async validateRefs(refs:readonly string[],consumer:string|null,taskId:string):Promise<boolean>{
   for(const ref of refs){
    const match=/^app:(todos|goals|tasks|profile|projects):([a-f0-9]{64})$/.exec(ref)

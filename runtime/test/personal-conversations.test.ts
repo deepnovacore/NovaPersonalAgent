@@ -353,11 +353,12 @@ function announcementHarness(name:string,voiceReady:Promise<void>=Promise.resolv
  const check=new Promise<boolean>(resolve=>{releaseCheck=resolve})
  const tick=()=>new Promise(resolve=>setImmediate(resolve))
  return {pool,created,delivered,turns,released,errors,releaseCheck:(value:boolean)=>releaseCheck(value),tick,async setup(){
-  const dir=await dirPromise,host=new PersonalAgentHost({path:join(await realpath(dir),'state.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
+  const dir=await dirPromise,host=new PersonalAgentHost({path:join(await realpath(dir),'state.json'),userScope:'test',memory:()=>undefined,pool,evidenceRefs:()=>['fixture'],evidence:ref=>ref==='fixture'?{subject_key:'fixture',source:{type:'file',ref}}:null})
   await host.open()
+  await host.admit({kind:'notify',summary:'Ready',why_now:'Ready',evidence_refs:['fixture'],memory_refs:[]},await host.discoverySnapshot())
   host.setConversationRuntime(async(c,_emit,mode)=>{const label=c.id+':'+mode;created.push(label);if(mode==='voice')await voiceReady;return {runTurn:text=>{turns.push(text);return Promise.resolve({assistant:'ok'})},deliverSuggestion:s=>{delivered.push(s.id)},parkVoice:()=>{released.push('park:'+label);return Promise.resolve()},close:()=>{released.push('close:'+label);return Promise.resolve()}}},frame=>{if(frame.type==='conversation.error')errors.push(frame.error)})
   host.canDeliver=()=>check
-  const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready',personal_feed_id:'feed-gated'},salience:40,expires_at:1e15})
+  const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready',personal_feed_id:host.snapshot().feed[0]!.id},salience:40,expires_at:1e15})
   const reason={kind:'suggestion_selected',priority:40,routing_class:'ambient' as const,origin:null,selected_suggestion:suggestion.id}
   await host.command({type:'personal.command',request_id:'mode-o',method:'presentation.set',params:{mode:'orb'}})
   return {dir,host,suggestion,reason}

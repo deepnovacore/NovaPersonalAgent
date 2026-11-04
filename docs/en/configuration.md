@@ -46,7 +46,9 @@ Set only what you need to change. Keep credentials out of Git.
 | `CODEX_APPROVAL_MODE` | ask | Coding approval mode for Codex and ACP backends; Pi refuses ask. |
 | `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | Capabilities registry path. |
 | `MEMORY_CONNECTION` | local | Memory connection: disabled, local, or remote. |
-| `MEMORY_PROVIDER` | None | Local engine: voicemem (default; unified ledger) or explicit mem0. Remote engines are service-owned. |
+| `MEMORY_PROVIDER` | None | Deprecated local provider: voicemem keeps ledger migration; mem0 keeps standalone mode. Conflicts with new memory variables. |
+| `MEMORY_RECALL_ENGINE` | ledger | Expert local recall engine: ledger, voicemem or mem0; ledger remains authority. No UI picker. |
+| `MEMORY_EXTRACTORS` | ledger | Comma-separated ledger or ledger,voicemem. VoiceMem adds temporary response-style context, not facts. Cannot combine with MEMORY_PROVIDER. |
 | `DASHSCOPE_API_KEY` | None | Qwen realtime credential. |
 | `QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen realtime model. |
 | `QWEN_REALTIME_VOICE` | longanqian | Qwen realtime voice. |
@@ -86,3 +88,8 @@ A target-validation retry currently reruns both stages; at most four model calls
 [Back to getting started](getting-started.md)
 
 See [OpenAI and Gemini providers](../en/global-providers.md) for model presets, credential routing and protocol limitations.
+
+
+### Memory engine provider requirements
+
+For ledger-authoritative SDK recall, set `MEMORY_RECALL_ENGINE=mem0` or `voicemem`; optionally add `MEMORY_EXTRACTORS=ledger,voicemem` for temporary response-style extraction. Leave `MEMORY_PROVIDER` unset. There is no `MEMORY_BACKEND` alias. Existing embedding and fast/extraction model routes supply credentials and OpenAI-compatible `/embeddings` and `/chat/completions` endpoints; DashScope defaults reuse `DASHSCOPE_API_KEY`, not a Mem0 cloud key. Defaults stay ledger-only. See [production memory composition](../design-notes/2026-11-03-memory-backend-composition.md) for consent, TTL, durable retry and evaluation limitations.

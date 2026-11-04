@@ -67,7 +67,7 @@ test('source withdrawal during composition cancels automatic persistence',async(
 
 test('host wires the shared generator and rejects direct automatic write injection',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-host-'))
- const memory={timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:generate})
  host.setSources({list:()=>[{scope:'computer',scan_pending:true,indexed:2000}],command:()=>Promise.resolve({})})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().life.todos.length,0);assert.equal(host.snapshot().life.goals.length,1)
@@ -107,7 +107,8 @@ test('source notification hides pending cards but a no-change refresh preserves 
 
 test('host waits for the first successful selected-chat sync before shared generation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-sync-'));let lastSync:string|undefined,calls=0
- const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>({timelineEvidence:()=>Promise.resolve([input()])}) as unknown as PersonalMemoryResource,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  host.setFeishu({open:()=>Promise.resolve(),close:()=>Promise.resolve(),snapshot:()=>({state:'ready',chats:[{selected:true}],last_sync:lastSync}),command:()=>Promise.resolve({})})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(calls,0);lastSync=new Date().toISOString();await host.workbenchContext.refresh();assert.equal(calls,3)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -226,7 +227,7 @@ test('state reads do not queue shared refresh behind a slow memory projection',a
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-state-responsive-'))
  let slow=false,reads=0,release!:()=>void
  const gate=new Promise<void>(resolve=>{release=resolve})
- const memory={timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{if(slow){reads++;await gate}return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{if(slow){reads++;await gate}return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:generate})
  try{
   await host.open();slow=true
@@ -244,7 +245,7 @@ test('shared generation waits for the first complete memory projection after def
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-memory-ready-'))
  let release!:()=>void,started!:()=>void,calls=0
  const gate=new Promise<void>(resolve=>{release=resolve}),loading=new Promise<void>(resolve=>{started=resolve})
- const memory={timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{started();await gate;return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{started();await gate;return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  try{
   await host.open({deferBackground:true});host.startBackgroundWork();await loading
@@ -282,7 +283,7 @@ test('inferred records pushing stated memory to a later UI page do not change sh
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-stated-pages-'))
  let paginated=false,calls=0
  const entry={id:'stated-memory',version:1,content:input().text,kind:'fact',origin:'stated',source_refs:[{type:'conversation',ref:'own',observed_at:input().observed_at}],evidence_refs:['own-evidence'],observed_at:input().observed_at,recorded_at:input().observed_at,topic:'',status:'active',corrected_to:null,confidence_note:null}
- const memory={timelineEvidence:()=>Promise.resolve([input()]),canProcessEvidence:()=>Promise.resolve(true),getMany:(ids:readonly string[])=>Promise.resolve(ids.map(id=>id===entry.id?entry:null)),list:(options?:{cursor?:string})=>Promise.resolve(!paginated||options?.cursor==='next'?{entries:[entry],cursor:null}:{entries:[],cursor:'next'})} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()]),canProcessEvidence:()=>Promise.resolve(true),getMany:(ids:readonly string[])=>Promise.resolve(ids.map(id=>id===entry.id?entry:null)),list:(options?:{cursor?:string})=>Promise.resolve(!paginated||options?.cursor==='next'?{entries:[entry],cursor:null}:{entries:[],cursor:'next'})} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(host.workbenchContext.snapshot().status,'ready');const previous=calls;paginated=true;await host.refreshMemory();await host.workbenchContext.refresh();assert.equal(calls,previous,'UI pagination must not cause a paid re-extraction or recomposition')}
  finally{await host.close();await rm(dir,{recursive:true,force:true})}

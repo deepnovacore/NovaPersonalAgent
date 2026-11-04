@@ -2,6 +2,7 @@ import {hostWorkspacePath} from '../src/executors/codex/process-owner.js'
 import {CodingTargetController} from '../src/personal-agent/coding-targets.js'
 import {fixture as projectFixture} from './fixtures/codex/project-adapter-fixture.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
+import {FULL_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
 import assert from 'node:assert/strict'
 import {mkdtemp, realpath, rm, writeFile, readFile, stat} from 'node:fs/promises'
 import {once} from 'node:events'
@@ -3660,11 +3661,14 @@ test('personal host shares opened memory, persists configuration and closes with
 test('knowledge-only composition opens canonical originals without enabling personal capture', async () => {
   const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-knowledge-only-'))
   const capabilities=parseCapabilityRegistry({version:1,modules:{search:{enabled:false},coding:{enabled:false},knowledge:{enabled:true}}},{})
-  const settings=settingsSchema.parse({executors:[],deepseek_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const settings=settingsSchema.parse({executors:[],pipeline_mode:'cascaded',cascade_llm_provider:'deepseek',deepseek_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const {configuredMemoryConsumer}=await import('../src/memory/consumer.js')
+  const consumer=configuredMemoryConsumer(settings,'text')
+  assert.ok(consumer,'knowledge evidence requires a configured receiving model')
   const knowledge=await prepareKnowledge(settings,capabilities)
   assert.ok(knowledge)
   const core=buildAssembly({settings,capabilities,knowledge,frameSource:new RecordingFrameSource(),gateway:new NeverCalledGateway()})
-  const realtime=composeRealtime(core,new AbortAwareProvider(),{settings,idFactory:()=> 'knowledge-only-id'},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:2})
+  const realtime=composeRealtime(core,new AbortAwareProvider(),{settings,memoryReadMode:'text',idFactory:()=> 'knowledge-only-id'},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:2})
   try {
     await realtime.start()
     const memory=realtime.personalMemory
@@ -3672,16 +3676,82 @@ test('knowledge-only composition opens canonical originals without enabling pers
     assert.equal(memory.remember,undefined)
     assert.equal(memory.list,undefined)
     assert.equal(memory.responseAdaptation,undefined)
-    const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
-    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence?.text,'Demo notes')
-    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
+    assert.ok(memory.processingGrant)
+    const processingConsent=memory.processingGrant(true)
+    assert.ok(processingConsent.conversation_providers?.includes(consumer),'knowledge ingestion grants the actual receiving model')
+    const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true,processingConsent})
+    assert.equal(realtime.memoryConsumerFingerprint,consumer)
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id,{consumer})).evidence?.text,'Demo notes')
+    assert.deepEqual(await realtime.retrieval.evidence(saved.evidence_id),{state:'unavailable',evidence:null},'an absent consumer cannot read canonical originals')
+    assert.deepEqual(await realtime.retrieval.evidence(saved.evidence_id,{consumer:'unconfigured-recipient'}),{state:'gone',evidence:null},'an ungranted consumer cannot read canonical originals')
+    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true,processingConsent})
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id,{consumer})).evidence?.text,'More notes')
     assert.ok(memory.forgetSources,'knowledge-only facade exposes batched source erasure')
     await memory.forgetSources(['knowledge:document','knowledge:document-two'])
-    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence,null)
-    assert.equal((await realtime.retrieval.evidence(second.evidence_id)).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id,{consumer})).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id,{consumer})).evidence,null)
     assert.deepEqual((await memory.recall('demo')).hits,[])
   } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })
+for(const [recipient,scenario] of [['provider-a','immediate'],['provider-b','immediate'],['provider-a','valid'],['provider-a','revoked'],['provider-a','receiver'],['provider-a','reconnect'],['provider-a','shutdown']] as const)test(`primary nonpooled personal delivery authorizes actual receiving provider (${recipient}, ${scenario})`,async t=>{
+ const directory=await realpath(await mkdtemp(join(tmpdir(),'nova-primary-recipient-'))),core=realCore(),provider=new RecordingProgressProvider()
+ const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),canReadConversationEvidence:(_ref:string,consumer:string)=>Promise.resolve(consumer==='provider-a')} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:core.runtime.core.suggestions,evidence:()=>null,now:()=>new Date('2026-11-02T12:00:00Z')})
+ let selected:Parameters<typeof core.runtime.bindSuggestionSelected>[0]|undefined
+ t.mock.method(core.runtime,'bindSuggestionSelected',(observer:Parameters<typeof core.runtime.bindSuggestionSelected>[0])=>{selected=observer;return ()=>{/* isolated binding */}})
+ const realtime=buildRealtimeAssembly({core,provider,sharedPersonal:{host,memory},memoryConsumerFingerprint:recipient,onDiagnostic:()=>undefined})
+ try{
+  await host.open();await host.scheduledTaskTick()
+  await host.life.mutate({op:'from_suggestion',kind:'todo',title:'Private receiving-provider fact',note:'Private receiving-provider body',suggestion_id:'derived',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'derived')
+  const context={todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}
+  const schedule=await host.schedules.create('create',{title:'Private receiving-provider fact',goal:'Review',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context},{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context})
+  const run=await host.schedules.runNow('run',schedule.id,1),task=await host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  const page=await host.readAppContext('todos',null,host.scheduledRunGrant(run.run_id,new AbortController().signal,'provider-a'))
+  await host.tasks.recordDelivery(fence,'answer','Private receiving-provider body');await host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:answer'],criteria:[{index:0,evidence_refs:['task-delivery:answer']}]})
+  await host.schedules.markFinished(run.run_id,{outcome:'completed',text:'Private receiving-provider body',evidence_refs:page.evidence_refs,consumer:'provider-a',published:false})
+  await host.publishScheduledResult(run.run_id);await realtime.start()
+  const feed=host.snapshot().feed.find(item=>item.schedule_ref?.run_id===run.run_id)!
+  assert.equal(await host.canDeliver(feed.id),true,'saved producer remains authorized in both controls')
+  let authorizationFinished=false
+  const originalAuthorization=host.productFeedAuthorized.bind(host)
+  const delivered=t.mock.method(realtime.service,'onSuggestionSelected',realtime.service.onSuggestionSelected.bind(realtime.service))
+  const checked=t.mock.method(host,'productFeedAuthorized',async(id:string,consumer:string|null)=>{try{return await originalAuthorization(id,consumer)}finally{authorizationFinished=true}})
+  const suggestion=core.runtime.core.suggestions.add({origin:'surrogate',kind:'notify',content:{summary:feed.title,why_now:feed.prepared!.text,personal_feed_id:feed.id}})
+  if(scenario!=='immediate')await realtime.session.accept({kind:'user_speech_started',session_epoch:1,speech_id:'held-floor',provider_item_id:'held-user'})
+  assert.ok(selected);selected(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+  await waitNamed('actual receiving-provider authorization',()=>authorizationFinished)
+  if(scenario!=='immediate'){
+   await waitNamed('personal item accepted into busy-floor queue',()=>delivered.mock.callCount()===1)
+   await realtime.service.flushHostItems()
+   assert.ok(provider.injected.every(item=>!item.content.includes('Private receiving-provider')),'admission is not provider delivery while the floor is busy')
+   if(scenario==='revoked')await host.life.mutate({op:'create',kind:'todo',title:'Changed collection after queue admission'},'change-after-queue')
+   if(scenario==='receiver')Object.defineProperty(realtime,'memoryConsumerFingerprint',{value:'provider-b'})
+   let guardEntered=false,releaseGuard=()=>{/* assigned below */}
+   if(scenario==='reconnect'){const gate=new Promise<void>(resolve=>{releaseGuard=resolve});let held=false;checked.mock.mockImplementation(async(id,consumer)=>{const allowed=await originalAuthorization(id,consumer);if(!held){held=true;guardEntered=true;await gate}return allowed})}
+   if(scenario==='shutdown')checked.mock.mockImplementation(()=>{guardEntered=true;return new Promise<boolean>(()=>{/* deliberately uncooperative source */})})
+   await realtime.session.accept({kind:'user_speech_ended',session_epoch:1,speech_id:'held-floor',provider_item_id:'held-user'})
+   await realtime.session.accept({kind:'user_transcript_failed',session_epoch:1,item_id:'held-user'})
+   const flushing=realtime.service.flushHostItems()
+   if(scenario==='reconnect'){await waitNamed('old-session authorization held',()=>guardEntered);await realtime.session.reconnect({tools:core.tools.schemas});await host.life.mutate({op:'create',kind:'todo',title:'Changed during reconnect'},'reconnect-change');releaseGuard()}
+   if(scenario==='shutdown'){
+    await waitNamed('queued authorization began',()=>guardEntered)
+    const {abortable}=await import('../src/core/camera-session.js')
+    await abortable(realtime.stop(),AbortSignal.timeout(1000))
+   }
+   const {abortable}=await import('../src/core/camera-session.js')
+   await abortable(flushing,AbortSignal.timeout(1000))
+   if(scenario==='reconnect'){await realtime.service.flushHostItems();assert.equal(realtime.session.sessionEpoch,2)}
+  }else await realtime.service.flushHostItems()
+  if(recipient==='provider-a'&&(scenario==='immediate'||scenario==='valid'))await waitNamed('authorized primary delivery',()=>provider.injected.some(item=>item.content.includes('Private receiving-provider fact')))
+  else {for(let i=0;i<10;i++)await yieldImmediate();assert.ok(provider.injected.every(item=>!item.content.includes('Private receiving-provider')))}
+  assert.equal(delivered.mock.callCount(),recipient==='provider-a'?1:0)
+  assert.ok(checked.mock.calls.some(call=>call.arguments[1]===recipient))
+  if(scenario==='receiver')assert.ok(checked.mock.calls.some(call=>call.arguments[1]==='provider-b'),'the queued guard reads the actual replacement receiver')
+  assert.ok(!JSON.stringify(provider.injected).includes('authorizeBeforeInject'),'authorization callbacks never enter provider content')
+ }finally{await realtime.stop();await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
 }
 
 {
@@ -4438,7 +4508,7 @@ test('qwen rejects the final tool budget after evaluating the provider view once
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   let views = 0
   assert.throws(() => buildQwenRealtimeAssembly({
-    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+    settings: configured, capabilities, memoryTools: FULL_MEMORY_TOOLS, providerToolView: tools => { views++; return tools },
   }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 7, toolBudget: 1})
   assert.equal(views, 1)
 })
@@ -5298,8 +5368,10 @@ test('cascaded rejects the final tool budget after evaluating the provider view 
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   let views = 0
   assert.throws(() => buildCascadedRealtimeAssembly({
-    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+    settings: configured, capabilities, memoryTools: FULL_MEMORY_TOOLS, providerToolView: tools => { views++; return tools },
   }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 7, toolBudget: 1})
   assert.equal(views, 1)
 })
+
+
 }

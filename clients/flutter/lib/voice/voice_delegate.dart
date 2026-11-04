@@ -51,6 +51,7 @@ class VoiceDelegateBridge extends ChangeNotifier {
         store: store,
         settings: primary.settings,
         tools: primary.tools,
+        allowLocalMemory: false,
         // A separate Dart HTTP client avoids the iOS singleton stream handler.
       ),
     );
@@ -184,6 +185,8 @@ class VoiceDelegateBridge extends ChangeNotifier {
       await worker.send(
         context,
         request,
+        // The request includes model-generated task text, not just user speech.
+        userAuthored: false,
         language: language,
         approve: (ApprovalOffer _) async =>
             worker.tools?.registry.automaticExecution == true,

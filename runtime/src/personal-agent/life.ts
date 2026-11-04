@@ -22,6 +22,7 @@ export type LifeState=z.infer<typeof lifeStateSchema>
 export interface LifeProvenance {type:'accepted_candidate'|'explicit_candidate';row:EvaluatedCandidate;resolution?:LifeResolution}
 export interface LifeSnapshot {state:LifeState;revision:number}
 export interface LifeBackend {
+ authorizationRevision?(signal?:AbortSignal):Promise<string>
  peek?():Promise<LifeSnapshot|null>
  load(legacy:LifeState,options?:{legacyPath?:string}):Promise<LifeSnapshot>
  mutate(value:{input:unknown;requestId:string;expectedRevision:number;provenance?:LifeProvenance}):Promise<LifeSnapshot&{result:{id:string;version:number}}>
@@ -134,7 +135,7 @@ export function goalCheckinEligible(life:{goals:readonly {id:string;status:strin
 }
 // ponytail: bounded personal collections, linear link lookup; add indexes only beyond these small limits.
 export class LifeService{
- #store:BoundedJsonStore<LifeState>;#state:LifeState=emptyLifeState();#revision=0;#tail:Promise<unknown>=Promise.resolve();#backend:LifeBackend|undefined;#selectedAuthority=false
+ #store:BoundedJsonStore<LifeState>;#state:LifeState=emptyLifeState();#revision=0;#tail:Promise<unknown>=Promise.resolve();#backend:LifeBackend|undefined;#selectedAuthority=false;#authorizationGeneration=0
  constructor(readonly path:string,readonly changed:()=>void=()=>{/* optional observer */},readonly backend?:LifeBackendSource){this.#store=new BoundedJsonStore(path,lifeStateSchema,8*1024*1024)}
  async open(){
   this.#backend=typeof this.backend==='function'?this.backend():this.backend
@@ -150,12 +151,28 @@ export class LifeService{
   const loaded=await this.#backend.load(legacy,legacyRead?{legacyPath:this.path}:undefined);this.#state=lifeStateSchema.parse(loaded.state);this.#revision=loaded.revision
  }
  async close(){await this.#tail}
+ authorizationRevision(signal?:AbortSignal):Promise<string|undefined>{return this.#backend?this.#backend.authorizationRevision?.(signal)??Promise.resolve(undefined):Promise.resolve('local:'+this.#authorizationGeneration)}
  async refresh():Promise<void>{const run=this.#tail.then(async()=>{
   if(!this.#backend?.peek)return
   const fresh=await this.#backend.peek();if(!fresh)throw Error('life_backend_unavailable')
   if(fresh.revision===this.#revision&&JSON.stringify(fresh.state)===JSON.stringify(this.#state))return
   this.#state=lifeStateSchema.parse(fresh.state);this.#revision=fresh.revision;this.changed()
  });this.#tail=run.catch(()=>{/* preserve the mutation queue after a failed refresh */});return run}
+ #recordAuthorityRevision:string|undefined
+ record(section:'todos'|'goals',id:string){const row=this.#state[section].find(item=>item.id===id);return row?structuredClone(row):undefined}
+ async authorizationRecord(section:'todos'|'goals',id:string){
+  for(let attempt=0;attempt<2;attempt++){
+   const before=await this.authorizationRevision()
+   if(this.#backend&&(before===undefined||before!==this.#recordAuthorityRevision)){
+    await this.refresh()
+    const after=await this.authorizationRevision()
+    if(before!==after)continue
+    this.#recordAuthorityRevision=after
+   }
+   return this.record(section,id)
+  }
+  throw Error('context_authorization_changed')
+ }
  receipt(requestId:string){return structuredClone(this.#state.receipts[requestId]?.result)}
  snapshot(){const state=structuredClone(this.#state);return {todos:state.todos.map(r=>({...r,kind:'todo' as const})),ideas:state.ideas.map(r=>({...r,kind:'idea' as const})),profile:state.profile,goals:state.goals.map(g=>{const todos=state.todos.filter(t=>t.goal_id===g.id&&t.status!=='cancelled');return {...g,kind:'goal' as const,progress:{done:todos.filter(t=>t.status==='done').length,total:todos.length}}})}}
  async completeTaskTodo(task:TaskRecord):Promise<'synced'|'conflict'>{
@@ -183,6 +200,6 @@ export class LifeService{
    }
   }
   const next=applyLifeMutation(this.#state,p,requestId)
-  await this.#store.write(next.state);this.#state=next.state;this.changed();return next.result
+  await this.#store.write(next.state);this.#state=next.state;this.#authorizationGeneration++;this.changed();return next.result
  });this.#tail=run.catch(()=>{/* keep serial queue usable after rejected command */});return run}
 }

@@ -7,18 +7,32 @@ enum NovaSpaceScope {
   struct Selection: Equatable { let id: String; let mode: String }
   static private(set) var selected: Selection?
   static let changed = Notification.Name("NovaSpaceScopeChanged")
+  private static let privateDirectories = PrivateSpaceDirectory()
   private static var channels: [ObjectIdentifier: FlutterMethodChannel] = [:]
   static func install(messenger: FlutterBinaryMessenger) {
     let channel = FlutterMethodChannel(name: "nova/space_scope", binaryMessenger: messenger)
     channels[ObjectIdentifier(messenger as AnyObject)] = channel
     channel.setMethodCallHandler { call, reply in
+      if call.method == "prepareSpaceDirectory" || call.method == "invalidateModelTransfers" {
+        do {
+          guard let args = call.arguments as? [String: Any], let id = args["spaceId"] as? String, validID(id) else { throw LocalAgentError("invalid_space_scope") }
+          if call.method == "prepareSpaceDirectory" { reply(try supportDirectory(id).path) }
+          else { try NativeModelTransfer.shared.invalidate(spaceId: id); reply(nil) }
+        } catch { reply(FlutterError(code: "space_privacy_unavailable", message: nil, details: nil)) }
+        return
+      }
       guard call.method == "setSpaceScope" else { reply(FlutterMethodNotImplemented); return }
       guard let args = call.arguments as? [String: Any], let id = args["spaceId"] as? String,
         validID(id), let mode = args["mode"] as? String, ["standalone", "client"].contains(mode) else {
         reply(FlutterError(code: "invalid_space_scope", message: nil, details: nil)); return
       }
       let next = Selection(id: id, mode: mode)
-      if selected != next { selected = next; NotificationCenter.default.post(name: changed, object: nil) }
+      if selected != next {
+        do { if let old = selected { try NativeModelTransfer.shared.invalidate(spaceId: old.id) } }
+        catch { reply(FlutterError(code: "space_privacy_unavailable", message: nil, details: nil)); return }
+        selected = next; NotificationCenter.default.post(name: changed, object: nil)
+        NativeModelTransfer.shared.reconcile(spaceId: id)
+      }
       reply(nil)
     }
   }
@@ -32,9 +46,18 @@ enum NovaSpaceScope {
     guard let selected, selected.mode == "standalone" else { throw LocalAgentError("local_runtime_unavailable") }
     return selected.id
   }
-  static func supportDirectory(_ id: String) throws -> URL {
+  static func modelTransferControlDirectory() throws -> URL {
+    try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true).appendingPathComponent("ModelTransferAuthority", isDirectory: true)
+  }
+  static func supportPath(_ id: String) throws -> URL {
     guard validID(id) else { throw LocalAgentError("invalid_space_scope") }
     let root = try FileManager.default.url(for: .applicationSupportDirectory, in: .userDomainMask, appropriateFor: nil, create: true)
     return root.appendingPathComponent("spaces", isDirectory: true).appendingPathComponent(id, isDirectory: true)
+  }
+  static func supportDirectory(_ id: String) throws -> URL {
+    try privateDirectories.prepare(supportPath(id))
+  }
+  static func invalidateProtection(_ id: String) throws {
+    privateDirectories.invalidate(try supportPath(id))
   }
 }

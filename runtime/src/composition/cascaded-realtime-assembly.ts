@@ -1,3 +1,4 @@
+import {configuredPrerecallMeta, retrievalPrerecall} from '../memory/prerecall-port.js'
 import {SglangNativeDuplexAdapter} from '../realtime/sglang-native.js'
 import {ResponsesModelGateway} from '../model/responses-model-gateway.js'
 import {createCompatibleAsrFactory,createCompatibleTtsFactory} from '../realtime/cascaded/openai-compatible-speech.js'
@@ -41,11 +42,13 @@ import {
 import {RealClock, type Clock} from '../core/clock.js'
 import {type CodingExecutorResource} from '../executors/coding-executor.js'
 import {MonotonicIdFactory, type IdFactory} from '../core/ids.js'
-import {personalMemoryFactory} from '../memory/factory.js'
+import {factoryForMemoryComposition, personalMemoryFactory} from '../memory/factory.js'
 import {unconfiguredModelGateway, OpenAIModelGateway, type ModelGateway} from '../model/model-gateway.js'
 import {stripLikePython} from '../text/python-text.js'
 import {
   composeRealtime,
+  configuredMemoryConsumer,
+  plannedMemoryTools,
   validateCodingResource,
   filterDisabledCoding,
   defaultIntake,
@@ -62,10 +65,10 @@ import {
   type TtsClient,
   type TtsFactory,
 } from '../realtime/cascaded/ports.js'
-import {CascadedRealtimeAdapter,CascadedRealtimeError} from '../realtime/cascaded/adapter.js'
+import {CascadedRealtimeAdapter,CascadedRealtimeError,type CascadedRealtimeAdapterOptions} from '../realtime/cascaded/adapter.js'
 import {CascadedRealtimeProvider} from '../realtime/cascaded/provider.js'
 import {createQwenCascadedLlmFactory} from '../realtime/cascaded/qwen-llm.js'
-import {frontendInstructions} from '../realtime/frontend-instructions.js'
+import {frontendInstructions, type FrontendModuleSelection} from '../realtime/frontend-instructions.js'
 import {DoubaoAsrClient} from '../realtime/volcengine/asr.js'
 import {
   createEndpointingCapabilityFactory,
@@ -127,6 +130,7 @@ export interface BuildCascadedRealtimeAssemblyOptions
     | 'preemptiveAlertHistoryRecovery'
     | 'preemptiveAlertHistoryPairs'
   > {
+  readonly prerecallPolicy?: CascadedRealtimeAdapterOptions['prerecallPolicy']
   readonly registries?: CascadedProviderRegistries
   readonly supportGateway?: ModelGateway
   readonly endpointingCapability?: EndpointingCapabilityFactory
@@ -265,13 +269,18 @@ export function buildTextRealtimeAssembly(
   const selected=requireSelectedCascadedLlmConfig(options.settings)
   const clock=options.clock??new RealClock(),ids=options.ids??new MonotonicIdFactory()
   const capabilities=options.capabilities??capabilitiesFromSettings(options.settings)
-  const instructions=frontendInstructions({search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
+  const memoryTools=options.memoryTools??plannedMemoryTools({...options,...(createPersonalMemory?{createPersonalMemory}:{})})
+  const instructions=frontendInstructions({memoryTools,search:capabilities.modules.search.enabled,camera:false,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled},(options.executorApproval??options.codexResource?.approvalController)!=null)
   const common={clock,ids,instructions,...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
   const llmFactory=selected.provider!=='ark'
     ?registry.llm.qwen({...common,config:selected.config,...(options.qwenLlmFactory===undefined?{}:{factory:options.qwenLlmFactory})})
     :registry.llm.ark({...common,config:selected.config,...(options.arkLlmFactory===undefined?{}:{factory:options.arkLlmFactory})})
   const support=supportComposition(options,selected.provider,selected.config.model,selected.config.apiKey,selected.config.baseUrl,clock)
-  const core=buildAssembly({...options,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
+  const core=buildAssembly({...options,memoryTools,settings:support.settings,clock,ids,gateway:support.gateway,...((options.executors===undefined&&options.codexResource===undefined)?{}:{executors:[...(options.executors??[]),...(options.codexResource===undefined?[]:[options.codexResource.adapter])]})})
   const provider=Object.assign(new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,llm:llmFactory.open(),llmFactory,idFactory:()=>ids.next('text'),
     ...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),
   }),{
@@ -283,7 +292,6 @@ export function buildTextRealtimeAssembly(
     },
   })
   const intake=options.intake??defaultIntake(core,core.gateway,core.settings)
-  const createPersonalMemory=options.createPersonalMemory??personalMemoryFactory(options.settings)
   const composition=composeRealtime(core,provider,{...options,memoryReadMode:'text',...(createPersonalMemory===undefined?{}:{createPersonalMemory}),...(intake===undefined?{}:{intake}),idFactory:()=>ids.next('realtime')},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:4})
   return composition
 }
@@ -296,12 +304,16 @@ export function buildCascadedRealtimeAssembly(
   const selected = requireSelectedCascadedRealtimeConfig(options.settings)
   const selection = selected.selection
   validateCodingResource(options)
-  const createPersonalMemory = options.createPersonalMemory
-    ?? personalMemoryFactory(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
+  const memoryTools = options.memoryTools ?? plannedMemoryTools({...options, ...(createPersonalMemory ? {createPersonalMemory} : {})})
   const currentInstructions = () => frontendInstructions({
+    memoryTools,
     search: capabilities.modules.search.enabled,
     camera: options.cameraModuleEnabled ?? capabilities.modules.camera.enabled,
     coding: capabilities.modules.coding.enabled,
@@ -364,6 +376,7 @@ export function buildCascadedRealtimeAssembly(
   )
   const core = buildAssembly({
     ...options,
+    memoryTools,
     settings: support.settings,
     clock,
     ids,
@@ -372,7 +385,11 @@ export function buildCascadedRealtimeAssembly(
       ? {}
       : {executors: [...(options.executors ?? []), ...(options.codexResource === undefined ? [] : [options.codexResource.adapter])]}),
   })
+  let graphRef: RealtimeAssembly | undefined = undefined
+  const consumer = configuredMemoryConsumer(options.settings, 'voice') ?? ''
   const provider = new CascadedRealtimeProvider({
+    ...(options.settings.memory_prerecall_enabled ? {prerecall: retrievalPrerecall(() => graphRef?.retrieval, () => graphRef?.memoryConsumerFingerprint ?? consumer), prerecallMeta: configuredPrerecallMeta(options.settings)} : {}),
+    ...(options.prerecallPolicy ? {prerecallPolicy: options.prerecallPolicy} : {}),
     language: options.settings.language,
     endpointingFactory,
     asrFactory,
@@ -392,6 +409,7 @@ export function buildCascadedRealtimeAssembly(
     preemptiveAlertHistoryRecovery: 'none',
     preemptiveAlertHistoryPairs: 4,
   })
+  graphRef = composition
   return composition
 }
 
@@ -528,7 +546,7 @@ export interface BuildQwenRealtimeProviderOptions {
   readonly idFactory: () => string
   readonly now: () => number
   readonly executorApproval: boolean
-  readonly modules?: {readonly schedules?: boolean; readonly workspace?: boolean; readonly search: boolean; readonly camera: boolean; readonly coding: boolean; readonly knowledge?: boolean; readonly gui?: boolean; readonly chatToolPolicy?: boolean}
+  readonly modules?: FrontendModuleSelection
 }
 
 function buildIntegratedWireProvider(options: BuildQwenRealtimeProviderOptions, profile?: IntegratedWireProfile): QwenAudioRealtimeAdapter {
@@ -574,8 +592,10 @@ export function buildQwenRealtimeAssembly(
   const integratedProvider = options.settings.integrated_provider
   const nativeProvider = integratedProvider === 'minicpm-o' || integratedProvider === 'personaplex'
   const supportConnection = nativeProvider ? null : resolveProviderModelConnection(options.settings, integratedProvider)
-  const createPersonalMemory = options.createPersonalMemory
-    ?? personalMemoryFactory(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   // The support gateway stays on the selected provider: its own model URL and the credential the
@@ -590,6 +610,7 @@ export function buildQwenRealtimeAssembly(
   })
   const core = buildAssembly({
     ...options,
+    memoryTools: options.memoryTools ?? plannedMemoryTools({...options, ...(createPersonalMemory ? {createPersonalMemory} : {})}),
     settings: options.settings,
     clock,
     ids,
@@ -606,6 +627,7 @@ export function buildQwenRealtimeAssembly(
     idFactory: () => ids.next('qwen'),
     now: () => clock.now(),
     modules: {
+      memoryTools: core.memoryTools,
       search: core.capabilities.modules.search.enabled,
       camera: options.cameraModuleEnabled ?? core.capabilities.modules.camera.enabled,
       coding: core.capabilities.modules.coding.enabled,
@@ -664,6 +686,11 @@ export function buildIntegratedRealtimeAssembly(
   const clock = options.clock ?? new RealClock()
   const ids = options.ids ?? new MonotonicIdFactory()
   const capabilities = options.capabilities ?? capabilitiesFromSettings(options.settings)
+  const configuredMemory = options.createPersonalMemory || options.memoryComposition ? undefined : personalMemoryFactory(options.settings)
+  const createPersonalMemory = options.createPersonalMemory ?? configuredMemory?.factory ?? (options.memoryComposition ? factoryForMemoryComposition(options.memoryComposition, options.settings) : undefined)
+  const memoryComposition = options.memoryComposition ?? configuredMemory?.composition
+  options = {...options, ...(memoryComposition ? {memoryComposition} : {})}
+  const memoryTools = options.memoryTools ?? plannedMemoryTools({...options, ...(createPersonalMemory ? {createPersonalMemory} : {})})
   const qwenProvider = factory({
     language: options.settings.language,
     ...(options.onUsage === undefined ? {} : {onUsage: options.onUsage}),
@@ -672,6 +699,7 @@ export function buildIntegratedRealtimeAssembly(
     idFactory: () => ids.next(provider),
     now: () => clock.now(),
     modules: {
+      memoryTools,
       search: capabilities.modules.search.enabled,
       camera: options.cameraModuleEnabled ?? capabilities.modules.camera.enabled,
       coding: capabilities.modules.coding.enabled,
@@ -686,6 +714,8 @@ export function buildIntegratedRealtimeAssembly(
     ids,
     qwenConfig: config,
     qwenProvider,
+    memoryTools,
+    ...(createPersonalMemory ? {createPersonalMemory} : {}),
   })
 }
 

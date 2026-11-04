@@ -10,7 +10,7 @@ const adaptationSchema = z.object({
   replyPreferences: z.array(z.object({id, text, evidenceIds: evidence}).strict()).max(128),
 }).strict()
 const hitSchema = z.object({
-  memoryId: id, text, evidenceIds: evidence,
+  memoryId: id, text, evidenceIds: evidence, memory_scope:z.enum(['user','general']).optional(),
   kind: z.enum(['fact', 'experience', 'trait']).optional(),
   subject: z.string().max(40000).optional(), attributedTo: z.string().max(40000).optional(), attribute: z.string().max(40000).optional(),
   emotion: z.string().max(40000).optional(), occurredAt: z.string().max(256).nullable().optional(),
@@ -109,6 +109,7 @@ export class RemotePersonalMemoryResource implements PersonalMemoryResource {
 
   readonly recall: PersonalMemoryRecallPort['recall'] = async (query, options = {}) => {
     const lifetime = this.#ready()
+    if(options.userOnly)throw new PersonalMemoryError('unavailable')
     const scope = options.scope ?? 'recent'
     const limit = options.limit ?? 5
     if (!text.safeParse(query).success || !['recent', 'any'].includes(scope) || !Number.isInteger(limit) || limit < 1 || limit > 20) throw new PersonalMemoryError('error')

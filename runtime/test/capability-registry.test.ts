@@ -10,6 +10,7 @@ import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realt
 import {buildQwenRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
 import {frontendInstructions} from '../src/realtime/qwen.js'
 import {CODEX_PROJECT_MANIFEST} from '../src/executors/codex/contract.js'
+import {FULL_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
 
 const settings = () => settingsSchema.parse({memory_connection: 'disabled', executors: [], fast_model: 'qwen-flash', dashscope_api_key: 'test-only'})
 const server = {transport: 'streamable-http', url: 'https://example.test/mcp', tools: {lookup: {enabled: true}}}
@@ -111,14 +112,15 @@ test('production disables Coding by role and preserves Vision host tools; all co
     assert.equal(assembly.runtime.executors.has('codex'), false)
     assert.equal(assembly.core.visionController !== undefined, camera)
     for (const tool of ['dispatch', 'cancel', 'confirm']) assert.equal(assembly.tools.bindings.has(tool), camera)
-    assert.equal(assembly.tools.schemas.length, camera ? 7 : 4)
+    assert.equal(assembly.tools.schemas.length, camera ? 4 : 1)
+    assert.deepEqual([...assembly.tools.bindings.keys()].filter(name => name.startsWith('memory__')), ['memory__recall'])
     await assembly.core.stop()
   }
 })
 
 test('final provider tool composition enforces exact N/B without partial exposure', () => {
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
-  assert.throws(() => buildQwenRealtimeAssembly({settings: settings(), capabilities}), error => {
+  assert.throws(() => buildQwenRealtimeAssembly({settings: settings(), capabilities, memoryTools: FULL_MEMORY_TOOLS}), error => {
     assert.equal((error as {code: string}).code, 'frontbrain_tool_budget_exceeded')
     assert.match(String(error), /7\/1/u)
     return true

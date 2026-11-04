@@ -79,7 +79,7 @@ test('failed batch refresh remains retryable and arrivals during refresh are dra
   assert.equal(discoveries,1)
  }finally{await f.close()}
 })
-async function fixture() { const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-host-')); const entries = new Map([['plan', entry()]]); const memory = { get: (id: string) => Promise.resolve(entries.get(id) ?? null), list: () => Promise.resolve({ entries: [...entries.values()], cursor: null }) } as unknown as PersonalMemoryResource; const make = () => new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0}, path: join(dir, 'feed.json'), userScope: 'local', memory: () => memory, pool: new SuggestionPool(), now: () => now, evidence: ref => ref.startsWith('task:') ? { subject_key: 'task:demo', source: { type: 'task', ref }, task_ref: { work_id: 'demo' } } : ref.startsWith('conversation:') ? {subject_key:ref,source:{type:'conversation',ref}} : null }); const host = make(); await host.open(); return { dir, entries, host, make, close: async () => { await host.close(); await rm(dir, { recursive: true, force: true }); } }; }
+async function fixture() { const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-host-')); const entries = new Map([['plan', entry()]]); const memory = { productSurfaces:true, get: (id: string) => Promise.resolve(entries.get(id) ?? null), list: () => Promise.resolve({ entries: [...entries.values()], cursor: null }) } as unknown as PersonalMemoryResource; const make = () => new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0}, path: join(dir, 'feed.json'), userScope: 'local', memory: () => memory, pool: new SuggestionPool(), now: () => now, evidence: ref => ref.startsWith('task:') ? { subject_key: 'task:demo', source: { type: 'task', ref }, task_ref: { work_id: 'demo' } } : ref.startsWith('conversation:') ? {subject_key:ref,source:{type:'conversation',ref}} : null }); const host = make(); await host.open(); return { dir, entries, host, make, close: async () => { await host.close(); await rm(dir, { recursive: true, force: true }); } }; }
 test('ten positive deterministic admission cases with stable evidence; not live model quality', async () => { const f = await fixture(); try {
     const cases=JSON.parse(readFileSync(new URL('../../../tests/fixtures/personal-agent/v1/discovery-cases.json',import.meta.url),'utf8')) as {positive:{id:string;content:string;summary:string}[]};
     assert.equal(cases.positive.length,10);
@@ -334,7 +334,7 @@ test('shared C retrieval reuses exact prefetch and rereads originals before admi
     const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-host-c-'));
     let live=true, recalls=0;
     const original={evidence_id:'canonical:one',source_kind:'file',locator:'notes/demo',text:'The demo is today',observed_at:now.toISOString(),trust:'untrusted_external' as const};
-    const memory:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),readEvidence:()=>Promise.resolve(live?original:null)};
+    const memory:PersonalMemoryResource={productSurfaces:true,open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),readEvidence:()=>Promise.resolve(live?original:null)};
     const retrieval=new UnifiedRetrieval({memory:()=>memory,rawRecall:()=>{recalls++;return Promise.resolve([{evidence_id:original.evidence_id}])}});
     const host=new PersonalAgentHost({path:join(dir,'feed.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),now:()=>now,evidence:()=>null});
     host.setRetrieval(retrieval);
@@ -423,7 +423,7 @@ test('local evidence survives a full runtime evidence budget and host selects na
  const f=await fixture()
  const host=new PersonalAgentHost({path:join(f.dir,'balanced.json'),userScope:'local',memory:()=>undefined,pool:new SuggestionPool(),newsLanguage:'zh-CN',evidence:()=>null,evidenceRefs:()=>Array.from({length:32},(_,i)=>'task:'+i)})
  try{
-  host.setSources({list:()=>[],command:()=>Promise.resolve({}),evidenceSnapshot:()=>[{ref:'file:local',summary:'Independent collection'}]})
+  host.setSources({list:()=>[],command:()=>Promise.resolve({}),evidence:ref=>ref==='file:local'?{subject_key:'file:local',source:{type:'file',ref}}:null,evidenceSnapshot:()=>[{ref:'file:local',summary:'Independent collection'}]})
   await host.open();assert.ok((await host.discoverySnapshot()).evidence_refs.includes('file:local'))
   const sources=host.snapshot().news.sources;assert.ok(sources.length>0);assert.ok(sources.every(s=>s.language==='zh-CN'))
  }finally{await host.close();await f.close()}

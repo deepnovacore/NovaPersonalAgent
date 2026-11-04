@@ -44,6 +44,7 @@
   ],
   "scripts": {
     "build": "npm run clean && tsc -p tsconfig.json",
+    "postbuild": "node scripts/prepare-voicemem-sdk.mjs",
     "server": "node dist/src/server-entry.js",
     "server:pair": "node scripts/pair-device.mjs",
     "test:pair": "node --test scripts/pair-device.test.mjs",

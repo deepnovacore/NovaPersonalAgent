@@ -19,6 +19,9 @@ export type PersonalMemoryRecallScope = 'recent' | 'any'
 export interface PersonalMemoryPurgeResult {status:'complete'|'incomplete';operation_id:string;removed_entries:number;removed_evidence:number;removed_entry_ids?:string[];removed_evidence_ids?:string[];index_evidence_ids?:string[];backup_cleanup:{status:'complete'|'incomplete';unresolved:string[]}}
 
 export interface PersonalMemoryRecallHit {
+  readonly memory_scope?: 'user'|'general'
+  /** Fixed engine-record expiry; response style only, never renewed by recall. */
+  readonly expiresAt?: string
   readonly revision?: MemoryVersion
   readonly memoryId: string
   readonly text: string
@@ -89,9 +92,13 @@ export interface PersonalMemoryAdmissionReceipt {
 }
 
 export interface PersonalMemoryRecallPort {
+  readonly maxRecallLimit?: number
+  readonly recallEngine?: 'ledger' | 'mem0' | 'voicemem' | 'remote' | 'knowledge'
   recall(query: string, options?: {
     /** Recent is a bounded candidate window; any searches the full authorized namespace. */
     readonly scope?: PersonalMemoryRecallScope
+    /** Host-only automatic projection; never a model tool argument. Defaults to explicit/all. */
+    readonly userOnly?: boolean
     /** Maximum hits per result group; adapters own relevance filtering. */
     readonly limit?: number
     readonly signal?: AbortSignal
@@ -100,6 +107,12 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** Host-configured internal style channel, independent of the factual recall engine. */
+  readonly supportsResponseStyle?: boolean
+  /** In-memory ledger mutation fence; compare only within this resource instance. */
+  readonly recallAuthorityRevision?: () => number
+  /** Only the Nova ledger supplies memory to proactive/product surfaces. */
+  readonly productSurfaces?: true
   readonly beginExplicitTurn?: (turn:ExplicitMemoryTurn)=>Promise<ExplicitMemoryTurn>
   readonly writeExplicit?: (turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string)=>Promise<ExplicitMemoryReceipt>
   readonly lookupExplicit?: (query:ExplicitMemoryLookup,consumer:string)=>Promise<ExplicitMemoryPage>
@@ -122,6 +135,7 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
   readonly canProcessEvidence?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
   readonly canProcessEvidenceMany?: (ids:readonly string[],purpose:'extraction'|'embedding')=>Promise<string[]>
+  readonly requiresConversationConsumer?: boolean
   readonly canReadConversationEvidence?: (id:string,consumer:string)=>Promise<boolean>
   readonly processingStamp?: (ids:string[])=>Promise<string|null>
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant

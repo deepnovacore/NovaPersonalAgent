@@ -1,3 +1,4 @@
+import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
@@ -8,6 +9,7 @@ import {settingsSchema} from '../src/config/config.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
 import {createConversation} from '../src/personal-agent/conversations.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {emptyContextDependencies} from '../src/personal-agent/context-dependencies.js'
 import {realtimeCapabilities} from '../src/realtime/capabilities.js'
 import type {RealtimeProvider,HostContextItem} from '../src/realtime/protocol.js'
 import {RealtimeService} from '../src/realtime/service.js'
@@ -84,7 +86,10 @@ for(const mode of ['chat','plan','build'] as const)test(`${mode} voice factory i
  try{
   await host.open()
   const conversation=createConversation(mode==='build'?'build':'chat','Context');conversation.mode=mode==='plan'?'plan':'chat'
-  if(mode==='plan')conversation.plan={id:'plan',version:3,title:'Current plan'}
+  if(mode==='plan'){
+   conversation.plan={id:'plan',version:3,title:'Current plan'}
+   await host.workbench.savePlan({...conversation.plan,content:'Discuss the current plan',conversation_id:conversation.id,generation:conversation.generation,created_at:new Date().toISOString(),context_dependencies:emptyContextDependencies()})
+  }
   if(mode==='build')conversation.build={project:dir,status:'paused',approval:null,reason:null,log_revision:0,source_conversation_id:'chat:main'}
   conversation.messages=Array.from({length:20},(_,index)=>({id:'m'+index,conversation_id:conversation.id,role:index%2?'assistant' as const:'user' as const,text:'message '+index+'\n'.repeat(1000),created_at:new Date().toISOString()}))
   const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test',deepseek_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})
@@ -139,4 +144,27 @@ test('a new readonly Chat preserves the delegated host task port and does not re
   await runtime.close()
   assert.equal(host.taskRuntime(task.id),port,'closing Chat must leave task control available')
  }finally{await runtime?.close();await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+
+for(const mode of ['chat','plan','build'] as const)test(`${mode} voice automatic memory capture respects the Workbench explicit-only boundary`,async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-voice-memory-'))
+ let remembers=0
+ const memory:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'any',hits:[],degraded:false}),remember:()=>{remembers++;return Promise.resolve({sourceId:'voice',state:'stored'})}}
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ const provider:RealtimeProvider={connect:()=>Promise.resolve({epoch:1,provider_session_id:'voice-memory'}),sendAudio:()=>Promise.resolve(),injectHostItem:()=>Promise.resolve(),createResponse:()=>Promise.resolve(),cancelResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}
+ try{
+  await host.open()
+  const conversation=createConversation(mode==='build'?'build':'chat','Voice memory');conversation.mode=mode==='plan'?'plan':'chat'
+  if(mode==='build')conversation.build={project:dir,status:'paused',approval:null,reason:null,log_revision:0,source_conversation_id:'chat:main'}
+  const factory=conversationRuntimeFactory({host,memory:()=>memory,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test',deepseek_api_key:'test'}),createVoiceProvider:()=>provider})
+  const runtime=await factory(conversation,()=>{ /* no renderer */ },'voice')
+  try{
+   const service=runtime.bridgeService as RealtimeService
+   await service.handleEvent({kind:'user_speech_started',session_epoch:1,speech_id:'voice',provider_item_id:'voice'})
+   await service.handleEvent({kind:'user_speech_ended',session_epoch:1,speech_id:'voice',provider_item_id:'voice'})
+   await service.handleEvent({kind:'user_transcript_final',session_epoch:1,item_id:'voice',text:'Use strict TypeScript in this repository'})
+   assert.equal(remembers,mode==='chat'?1:0)
+  }finally{await runtime.close()}
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

@@ -1,3 +1,4 @@
+import {retrievalPrerecall} from '../memory/prerecall-port.js'
 import {randomUUID} from 'node:crypto'
 import type {Assembly} from '../composition/assembly.js'
 import type {RealtimeAssembly} from '../composition/realtime-assembly.js'
@@ -12,7 +13,10 @@ export interface ConversationToolEvent {
   readonly summary: string
 }
 
+export const memoryHostToolNames: ReadonlySet<string> = new Set(['memory__remember', 'memory__lookup'])
+
 interface ConversationToolBridgeOptions {
+  readonly memoryConsumer?: string
   /** True only for the text Chat mode; Plan/Build keep their own tool sets. */
   readonly chat?: boolean
   readonly onTool?: (event: ConversationToolEvent) => void
@@ -66,5 +70,5 @@ export function conversationToolBridge(core:Assembly,graph:RealtimeAssembly,opti
    throw error
   }finally{unsubscribe()}
  }
- return {tools,readonlyNames:[...readonlyNames],chatTools,origin:text=>graph.bridge.acceptUserTranscript(text),invoke}
+ return {...(graph.retrieval ? {prerecall:retrievalPrerecall(()=>graph.retrieval,()=>options.memoryConsumer??'')} : {}),tools,readonlyNames:[...readonlyNames],chatTools,origin:text=>graph.bridge.acceptUserTranscript(text),invoke}
 }

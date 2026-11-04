@@ -1,3 +1,6 @@
+import {abortable} from '../core/camera-session.js'
+import {contextDependenciesSchema,emptyContextDependencies,mergeContextDependencies,type ContextDependencies} from './context-dependencies.js'
+import {factoryForMemoryComposition, personalMemoryFactory} from '../memory/factory.js'
 const VOICE_CONTEXT_MESSAGES=12
 import {bindUsageReporter} from '../realtime/usage.js'
 import type {RealtimeTelemetry} from '../realtime/telemetry.js'
@@ -21,14 +24,15 @@ import {CodingTargetController} from './coding-targets.js'
 import {ProjectResolutionError, type ProjectExecutorAdapter} from '../executors/coding-executor.js'
 import {projectExecutorEvent,type ExecutorProgress,type ExecutorResult} from '../desktop/desktop-progress.js'
 import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
-import {prerecallContext} from '../memory/prerecall.js'
+import {configuredPrerecallMeta, retrievalPrerecall} from '../memory/prerecall-port.js'
+import {NO_MEMORY_TOOLS,resolveMemoryToolCapabilities} from '../memory/tool-capabilities.js'
 import {ProjectConfirmationController} from '../projects/project-confirmation.js'
 import {buildConversationVoiceProvider} from '../conversation-voice-provider.js'
 import {realtimeCapabilities} from '../realtime/capabilities.js'
 import {randomUUID} from 'node:crypto'
 import {createHash} from 'node:crypto'
 import {buildAssembly,type AssemblyOptions} from '../composition/assembly.js'
-import {buildRealtimeAssembly,configuredMemoryConsumer,configuredTaskVerifierConsumer,defaultIntake,type RealtimeAssemblyOptions} from '../composition/realtime-assembly.js'
+import {plannedMemoryTools,buildRealtimeAssembly,configuredMemoryConsumer,configuredTaskVerifierConsumer,defaultIntake,type RealtimeAssemblyOptions} from '../composition/realtime-assembly.js'
 import {buildCascadedTextProvider} from '../cascaded-text-provider.js'
 import {configuredTextLlm} from '../cascaded-text-provider.js'
 import {BUILD_LLM_TRANSPORT,PLAN_LLM_TRANSPORT} from '../realtime/cascaded/llm-stream-limits.js'
@@ -40,7 +44,7 @@ import {workbenchInstructions} from './workbench-instructions.js'
 import {RealClock} from '../core/clock.js'
 import type {PersonalAgentHost} from './host.js'
 import type {PersonalMemoryResource} from '../memory/personal-memory.js'
-import type {ConversationRuntimeFactory} from './conversations.js'
+import type {ConversationRuntimeFactory,ConversationTurnResult} from './conversations.js'
 import {scopeApprovalController} from './approval-scope.js'
 import {deliveryToEvent,executorApprovalMessage,projectStateMessage} from '../desktop/desktop-wire.js'
 
@@ -66,7 +70,7 @@ export function preparedReferenceParts(material:PreparedContent):string[]{
 }
 
 /** Reuses deployment resources while allocating a separate causal runtime, provider and session. */
-export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'|'additionalAgentControllers'|'executorApproval'> & {
+export function conversationRuntimeFactory(options:AssemblyOptions & Pick<RealtimeAssemblyOptions,'codexResource'|'onDiagnostic'|'onAudioFrame'|'onAudioClear'|'onAudioAlert'|'onAudioTerminal'|'nextPlaybackGeneration'|'onUsage'|'additionalAgentControllers'|'executorApproval'|'memoryComposition'> & {
  onExecutorProgress?:(progress:ExecutorProgress,result?:ExecutorResult)=>void;
  createTextProvider?:typeof buildCascadedTextProvider;
  createVoiceProvider?:typeof buildConversationVoiceProvider;
@@ -79,32 +83,62 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  try{const selected=requireSelectedCascadedLlmConfig(options.settings);options.host.setWorkbenchModel({provider:selected.provider,model:selected.config.model})}
  catch{options.host.setWorkbenchModel({provider:'',model:''})}
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
- return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides:{chat?:boolean}={})=>{
+ return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides:{chat?:boolean}={},startup)=>{
+  const startupSignal=startup??AbortSignal.any([lifetime,AbortSignal.timeout(10000)])
+  startupSignal.throwIfAborted()
+  if(!execution)conversation=await options.host.productConversation(conversation,configuredMemoryConsumer(options.settings,mode)??null,startupSignal)
+  startupSignal.throwIfAborted()
+  let contextDependencies:ContextDependencies=emptyContextDependencies()
+  let authorizationRevision:string|undefined
+  let authorizationCacheable=false
+  const addDependencies=(value:ContextDependencies)=>{contextDependencies=mergeContextDependencies(contextDependencies,value);authorizationRevision=undefined}
+  const authorizeContext=async(force=false)=>{
+   lifetime.throwIfAborted()
+   if(execution||contextDependencies.state==='tracked'&&!contextDependencies.items.length)return
+   const authorizationSignal=AbortSignal.any([lifetime,AbortSignal.timeout(5000)])
+   for(let attempt=0;attempt<2;attempt++){
+    const before=await abortable(options.host.contextAuthorizationRevision(authorizationSignal),authorizationSignal)
+    if(!force&&authorizationCacheable&&before!==undefined&&before===authorizationRevision)return
+    if(!await abortable(options.host.contextDependenciesAuthorized(contextDependencies,configuredMemoryConsumer(options.settings,mode)??null),authorizationSignal))throw Error('context_authorization_changed')
+    const after=await abortable(options.host.contextAuthorizationRevision(authorizationSignal),authorizationSignal)
+    lifetime.throwIfAborted()
+    if(before===after){authorizationRevision=after;authorizationCacheable=options.host.contextDependenciesCacheable(contextDependencies);return}
+   }
+   throw Error('context_authorization_changed')
+  }
+  const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
+   record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
+   close:()=>{/* the deployment owns the shared telemetry sink */},
+  }:undefined
+  addDependencies(options.host.conversationContextDependencies({...conversation,messages:mode==='voice'||conversation.kind==='build'||conversation.mode==='plan'?conversation.messages:conversation.messages.filter(message=>!message.schedule_ref?.run_id),prepared:null}))
+  const planReference=conversation.kind==='build'&&conversation.build?.plan_id&&conversation.build.plan_version?{id:conversation.build.plan_id,version:conversation.build.plan_version}:conversation.mode==='plan'||mode==='voice'?conversation.plan:undefined
+  if(planReference){
+   const plan=await abortable(options.host.workbench.plan(planReference.id,planReference.version),startupSignal)
+   addDependencies(await abortable(options.host.planContextDependencies(plan),startupSignal))
+   await abortable(authorizeContext(true),startupSignal);startupSignal.throwIfAborted()
+  }
   const workbenchVoice=mode==='voice'&&(conversation.kind==='build'||conversation.mode==='plan')&&!execution
   const chatMode=overrides?.chat!==false&&!execution&&['chat','topic'].includes(conversation.kind)&&(conversation.mode??'chat')==='chat'
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution&&mode==='text'){
    const workbenchMode=conversation.kind==='build'?'build':'plan'
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
    const factory=configuredTextLlm({settings:options.settings,clock:options.clock??new RealClock(),idFactory:randomUUID,instructions:workbenchInstructions(workbenchMode,options.settings.language,!!conversation.build?.plan_id),transport:workbenchMode==='build'?BUILD_LLM_TRANSPORT:PLAN_LLM_TRANSPORT,...(reporter?{onUsage:reporter}:{})})
-   const scopedEmit=(frame:Record<string,unknown>)=>emit({...frame,...(workbenchMode==='build'?{local_build:true}:{})})
-   return createWorkbenchRuntime({conversation,host:options.host,factory,emit:scopedEmit,lifetime,language:options.settings.language,reasoning:options.settings.build_reasoning===true,approval:()=>options.host.localToolApproval??options.settings.local_tool_approval,...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
+   const scopedEmit=(frame:Record<string,unknown>)=>emit({...frame,...(frame.role==='assistant'?{context_dependencies:mergeContextDependencies(contextDependencies,frame.context_dependencies===undefined?undefined:contextDependenciesSchema.parse(frame.context_dependencies))}:{}),...(workbenchMode==='build'?{local_build:true}:{})})
+   const workbench=await createWorkbenchRuntime({...(telemetry?{telemetry}:{}),conversation,host:options.host,contextConsumer:configuredMemoryConsumer(options.settings,'text')??null,factory,emit:scopedEmit,lifetime,language:options.settings.language,reasoning:options.settings.build_reasoning===true,approval:()=>options.host.localToolApproval??options.settings.local_tool_approval,...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
     createBridge:()=>conversationRuntimeFactory(options)({...conversation,kind:'chat',mode:'chat'},scopedEmit,'text',lifetime,recovery,undefined,{chat:false}),
    })
+   return {...workbench,runTurn:async(text,signal,context)=>{addDependencies(options.host.referenceContextDependencies(context?.references??[]));await authorizeContext(true);const result=await workbench.runTurn(text,signal,context);return {...result,context_dependencies:mergeContextDependencies(contextDependencies,result.context_dependencies)}}}
   }
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
   const processing=execution&&options.host.schedules.getRun(execution.run_id).processing
   const audioDrops:Record<string,number>={};let audioDropReportedAt=0
   let audioIdentityEpoch=-1;let audioIdentitySync:Promise<void>|undefined
-  const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
-   record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
-   close:()=>{/* the deployment owns the shared telemetry sink */},
-  }:undefined
   const processingLlm=processing?options.memory()?.sourceProcessingLlm?.():undefined
   if(processing&&!processingLlm)throw Error('processing_model_unavailable')
   const settings=processingLlm?{...options.settings,cascade_llm_provider:processingLlm.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?'qwen' as const:'self-hosted' as const,dashscope_api_key:processingLlm.apiKey,cascade_llm_model:processingLlm.model,self_hosted_llm_base_url:processingLlm.baseUrl,self_hosted_llm_api_key:processingLlm.apiKey}:options.settings
   const selectedProcessing=processing?requireSelectedCascadedLlmConfig(settings):undefined
   const memoryConsumerFingerprint=selectedProcessing?createHash('sha256').update(selectedProcessing.config.baseUrl+'|'+selectedProcessing.config.model).digest('hex'):configuredMemoryConsumer(settings,mode)
-  const verifierConsumerFingerprint=configuredTaskVerifierConsumer(options.settings)
+  const verifierConsumerFingerprint=configuredTaskVerifierConsumer(options.settings)??null
   if(execution){options.host.scheduledAuthority.validate(execution);execution=options.host.scheduledRunGrant(execution.run_id,lifetime,memoryConsumerFingerprint??null)}
   const targetPort=options.codexResource?.mode==='project'?(options.codexResource.adapter as ProjectExecutorAdapter).targetPort:undefined
   const codingTarget=targetPort?new CodingTargetController(targetPort,(target,stillCurrent)=>options.host.rememberCodingTarget(conversation.id,conversation.generation,target,()=>!lifetime.aborted&&stillCurrent())):undefined
@@ -132,7 +166,11 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   if(recovery){if(!options.blackboard)throw Error('task_blackboard_unavailable');try{await access(options.blackboard.path+'.conversation-'+suffix)}catch{throw Error('task_blackboard_unavailable')}}
   const usageContext:UsageContext={feature:processing?'source_processing':execution?'scheduled':mode==='voice'?'voice':'conversation',conversationId:conversation.id,...(execution?{runId:execution.run_id,taskId:execution.fence.task_id,trigger:'scheduled' as const}:{trigger:'manual' as const})}
   const onUsage=bindUsageReporter(options.onUsage,usageContext)
-  const core=buildAssembly({...options,...(onUsage?{onUsage}:{}),...(options.gateway?{gateway:gatewayWithUsage(options.gateway,usageContext)}:{}),taskHost:!execution,includeSpaceMobile:options.host.spaceHostStatus().mode==='host',includeSchedules:!execution,scheduledContext:!!execution,sourceProcessingContext:!!processing,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
+  const configuredMemory=options.memoryComposition?undefined:personalMemoryFactory(options.settings)
+  const memoryComposition=options.memoryComposition??configuredMemory!.composition
+  const createPersonalMemory=configuredMemory?.factory??factoryForMemoryComposition(memoryComposition,options.settings)
+  const memoryTools=options.memoryTools??resolveMemoryToolCapabilities(options.memory(),plannedMemoryTools({...options,memoryComposition,...(createPersonalMemory?{createPersonalMemory}:{})}))
+  const core=buildAssembly({...options,memoryTools,...(onUsage?{onUsage}:{}),...(options.gateway?{gateway:gatewayWithUsage(options.gateway,usageContext)}:{}),taskHost:!execution,includeSpaceMobile:options.host.spaceHostStatus().mode==='host',includeSchedules:!execution,scheduledContext:!!execution,sourceProcessingContext:!!processing,sharedResources:true,cameraModuleEnabled:false,conversationId:conversation.id+':'+conversation.generation,
    ...(options.blackboard?{blackboard:{...options.blackboard,path:options.blackboard.path+'.conversation-'+suffix}}:{}),
    ids:{next:namespace=>namespace+'-'+randomUUID()},
    ...(options.codexResource?{executors:[...(options.executors??[]),options.codexResource.adapter],agentDescriptors:[...(options.agentDescriptors??[]),...(options.codexResource.agentDescriptor?[options.codexResource.agentDescriptor]:[])]}:{}),
@@ -144,9 +182,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const broker=options.executorApproval??options.codexResource?.approvalController
   const approval=broker?scopeApprovalController(broker,view=>!!view.work&&core.runtime.inFlightDelegate(view.work.work_id)!==undefined):undefined
   const unsubscribeApproval=approval?.observe(view=>{options.host.recordTaskApproval(conversation.id,conversation.generation,view);notifyWaiting();if(view.work)void options.host.rememberWorkOwner(view.work.work_id,conversation.id,view.pending_approval_id).catch(()=>{ /* durable projection retried on work event */ });const identity=view.executorIdentity??{executor:options.codexResource?.adapter.manifest.name??'agent',display_name:options.codexResource?.adapter.manifest.display_name??'Agent'};emit(JSON.parse(executorApprovalMessage(view,core.runtime.clock.now(),identity)) as Record<string,unknown>)})
-   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),history:recentHistory,executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&mode==='text'&&options.settings.memory_prerecall_enabled?{prerecall:async(query:string,signal:AbortSignal)=>{const result=await graph.retrieval.recall(query,{scope:'any',limit:3,signal,consumer:memoryConsumerFingerprint??''});signal.throwIfAborted();return async(consumeSignal:AbortSignal)=>{const current=await graph.retrieval.revalidate(result,consumeSignal);consumeSignal.throwIfAborted();return prerecallContext(query,current)}}}:{})})
+  let graphRef: ReturnType<typeof buildRealtimeAssembly> | undefined = undefined
+   const provider=(mode==='voice'?(options.createVoiceProvider??buildConversationVoiceProvider):(options.createTextProvider??buildCascadedTextProvider))({settings,memoryTools:workbenchVoice?NO_MEMORY_TOOLS:core.memoryTools,schedules:!execution,scheduledTask:!!execution,sourceProcessingTask:!!processing,chatToolPolicy:chatMode,clock:core.runtime.clock,idFactory:()=>randomUUID(),executorApproval:approval!==undefined,...(onUsage?{onUsage}:{}),...(telemetry?{telemetry}:{}),...(!execution&&options.settings.memory_prerecall_enabled?{prerecall:retrievalPrerecall(()=>graphRef?.retrieval,()=>memoryConsumerFingerprint??''),prerecallMeta:configuredPrerecallMeta(settings)}:{})})
   if(provider.capabilities)emit({type:'conversation.capabilities',conversation_id:conversation.id,conversation_generation:conversation.generation,mode,capabilities:provider.capabilities})
-  let pending:{resolve:(result:{assistant:string;turn_id?:string})=>void;reject:(error:unknown)=>void}|undefined
+  let pending:{resolve:(result:ConversationTurnResult)=>void;reject:(error:unknown)=>void}|undefined
   const textOnly=mode==='text'
   let voiceEnabled=!textOnly
   let audioGeneration=0
@@ -163,6 +202,12 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const deferredTaskWakes=new Set<string>()
   const taskHostItems=new Map<string,TaskFence>()
   const taskResponseItems=new Map<string,string>()
+  const taskProvenance=(responseId:string)=>{
+   const selected=taskResponses.get(responseId),taskIds=[...(selected?.keys()??[])].slice(0,16)
+   if(!taskIds.length&&!graph.service.isTaskContinuationResponse(responseId))return {context_dependencies:contextDependencies}
+   const memory=options.memory()
+   return {context_dependencies:contextDependencies,task_ids:taskIds,...(memory&&memory.productSurfaces!==true?{memory_origin:'non_product' as const}:{})}
+  }
   const taskToolResponses=new Set<string>()
   let taskTurnContinuing=false
   let currentResponse:string|undefined
@@ -214,10 +259,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if (mode !== 'voice') return
    emit({type: 'conversation.notice', code, message})
   }
-  const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})}),toolGate:name=>chatToolNames.has(name),onTool:recordToolEvent}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:()=>options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null)}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
+  const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})}),toolGate:name=>chatToolNames.has(name),onTool:recordToolEvent}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:async()=>{const value=await options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null);if(value){const parsed=JSON.parse(value) as {results:{run_id:string;text?:string}[]};addDependencies({state:'tracked',items:parsed.results.filter(item=>item.text!==undefined).map(item=>({kind:'scheduled',run_id:item.run_id}))});await authorizeContext(true)}return value}}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
    ...(execution?{scopedTool:event=>scheduledTools!.accept(event),validateScopedContext:()=>scheduledTools!.validateContext()}:{scheduleHost:new ScheduleAgentController(options.host,core.gateway,options.settings.support_model,conversation.id,conversation.generation)}),
    ...(execution?{providerToolView:tools=>{if(options.host.schedules.getRun(execution!.run_id).processing)return {...tools,schemas:tools.schemas.filter(schema=>(schema.function as {name?:string}|undefined)?.name==='source__process')};const context=options.host.schedules.getRun(execution!.run_id).definition.context;return {...tools,schemas:tools.schemas.filter(schema=>{const fn=schema.function;if(!fn||typeof fn!=='object'||Array.isArray(fn)||typeof fn.name!=='string')return false;const binding=tools.bindings.get(fn.name);return fn.name==='app__context'||(context.memory||context.knowledge)&&['memory__recall','memory__evidence'].includes(fn.name)||context.search&&binding?.executor==='search'&&core.runtime.executors.get('search')?.manifest.ops.some(op=>op.name===binding.op&&op.readonly)===true})}}}:{}),
-   ...(workbenchVoice?{providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
+   ...(workbenchVoice?{suppressConversationMemoryCapture:true,providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
    ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:main'||options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
@@ -227,7 +272,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(defaultIntake(core,core.gateway,options.settings)?{intake:defaultIntake(core,core.gateway,options.settings)!}:{}),
    ...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
     ...(telemetry?{telemetry}:{}),
-   onDelivery:completion=>{if(mode==='voice'&&!taskToolResponses.has(completion.response_id))void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({delivery_class:graph.service.isTaskContinuationResponse(completion.response_id)?'task_output':graph.service.isProactiveResponse(completion.response_id)?'proactive':'reply',type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
+   onDelivery:completion=>{const provenance=taskProvenance(completion.response_id);if(mode==='voice'&&!taskToolResponses.has(completion.response_id))void settleTaskResponse(completion.response_id,completion.text,completion.disposition==='spoken').finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)});const payload=deliveryToEvent(completion);if(payload)core.runtime.post({kind:'assistant_spoken',payload});if(completion.disposition!=='suppressed'&&completion.text)emit({...provenance,delivery_class:graph.service.isTaskContinuationResponse(completion.response_id)?'task_output':graph.service.isProactiveResponse(completion.response_id)?'proactive':'reply',type:'conversation.delivered',role:'assistant',text:completion.text,turn_id:captionIds.get(completion.response_id)??completion.utterance_id,delivery:completion.disposition==='spoken'?'completed':'interrupted',final:true})},
    onCaption:frame=>{
     let outgoing=frame
     if(frame.role==='assistant'){
@@ -246,7 +291,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
      }
      if(frame.turn_id){const marker=frame.turn_id.indexOf(':assistant:');if(marker>=0)captionIds.set(frame.turn_id.slice(marker+11),frame.turn_id);if(captionIds.size>128)captionIds.delete(captionIds.keys().next().value!)}
     }
-    emit({delivery_class:frame.role==='assistant'&&currentResponse?(graph.service.isTaskContinuationResponse(currentResponse)?'task_output':graph.service.isProactiveResponse(currentResponse)?'proactive':'reply'):'reply',type:'caption',...outgoing})
+    emit({delivery_class:frame.role==='assistant'&&currentResponse?(graph.service.isTaskContinuationResponse(currentResponse)?'task_output':graph.service.isProactiveResponse(currentResponse)?'proactive':'reply'):'reply',type:'caption',...outgoing,...(frame.role==='assistant'?{context_dependencies:contextDependencies}:{})})
    },
    onProviderEvent:event=>{
     if(event.kind==='provider_reconnected'){
@@ -295,15 +340,16 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     if(event.kind==='response_terminal'){
      const hasTools=taskToolResponses.delete(event.response_id)
      const externalTask=!options.host.localNotifications&&graph.service.isTaskContinuationResponse(event.response_id)
-     captureTaskResponse();if(currentResponse===event.response_id)currentResponse=undefined
+     captureTaskResponse();const provenance=taskProvenance(event.response_id);if(currentResponse===event.response_id)currentResponse=undefined
      if(!hasTools||event.status!=='completed')taskTurnContinuing=false
-     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending)){emit({delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true,...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});if(mode==='voice')turnToolTrace=[]}
+     if(event.status==='completed'&&assistant.trim()&&(mode==='voice'||!pending)){emit({...provenance,delivery_class:taskResponseItems.has(event.response_id)?'task_output':graph.service.isProactiveResponse(event.response_id)?'proactive':'reply',type:mode==='voice'?'conversation.generated':'conversation.completed',role:'assistant',text:assistant,turn_id:assistantTurnId??event.response_id,delivery:mode==='voice'?'generated':'completed',final:true,...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});if(mode==='voice')turnToolTrace=[]}
      if(hasTools&&event.status==='completed'){taskResponseItems.delete(event.response_id);taskResponses.delete(event.response_id);taskForegroundResponses.delete(event.response_id)}
      else if(mode==='text'||event.status!=='completed'||externalTask)void settleTaskResponse(event.response_id,assistant,event.status==='completed',externalTask?'generated':'delivered').then(async()=>{if(externalTask)await graph.service.session.quarantineActiveOrAwaitingResponse()}).finally(()=>{const deferred=[...deferredTaskWakes];deferredTaskWakes.clear();for(const taskId of deferred)void options.host.wakeTask(taskId)})
-     if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...(assistantTurnId?{turn_id:assistantTurnId}:{}),...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});else current.reject(Object.assign(Error('response_'+event.status),{reason:event.reason}))}
+     if(pending&&(event.status!=='completed'||(!hasTools&&assistant.trim()!==''))){const current=pending;pending=undefined;if(event.status==='completed')current.resolve({assistant,...provenance,...(assistantTurnId?{turn_id:assistantTurnId}:{}),...(turnToolTrace.length?{tool_trace:structuredClone(turnToolTrace)}:{})});else current.reject(Object.assign(Error('response_'+event.status),{reason:event.reason}))}
     }
    },
   })
+  graphRef=graph
   const bindScheduledTools=()=>{if(execution&&scheduledScope)scheduledTools=new ScheduledToolRuntime({host:options.host,grant:execution,scope:scheduledScope,tools:core.tools,retrieval:graph.retrieval,session:()=>graph.service.session,
    readonlyOperation:(executor,op)=>core.runtime.executors.get(executor)?.manifest.ops.some(operation=>operation.name===op&&operation.readonly)===true,
    dispatch:(binding,args)=>{const grant=options.host.tasks.continuationContext(execution!.fence);return core.runtime.dispatchTaskExternal({executor:binding.executor!,op:binding.op!,request:args,origin_ref:grant.origin_ref},{kind:'realtime_tool',priority:100,routing_class:'user_awaited',origin:null,selected_suggestion:null},grant)},
@@ -321,16 +367,22 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   const syncIdentityContext=createIdentityContextSync({identity:()=>options.host.identity(),epoch:()=>graph.service.session.sessionEpoch,
    inject:(content,signal)=>provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})})
   const syncIdentity=async(signal:AbortSignal)=>{if(execution||provider.capabilities?.protocol.conversationItems===false)return;await options.host.synchronizePreferredName();signal.throwIfAborted();await syncIdentityContext(signal)}
-  try{await graph.start();await syncIdentity(AbortSignal.timeout(10000));
+  try{
+   // Prepare identity before opening/restoring provider history; restoration requires a fresh session.
+   if(!execution&&provider.capabilities?.protocol.conversationItems!==false)await abortable(options.host.synchronizePreferredName(),startupSignal)
+   startupSignal.throwIfAborted();await abortable(graph.start(),startupSignal);await authorizeContext(true);startupSignal.throwIfAborted()
+   if(provider.restoreHistory){await authorizeContext(true);startupSignal.throwIfAborted();await provider.restoreHistory(recentHistory,startupSignal)}
+   if(!execution&&provider.capabilities?.protocol.conversationItems!==false)await syncIdentityContext(startupSignal)
+   await authorizeContext(true);startupSignal.throwIfAborted();
    if(mode==='voice'&&provider.capabilities?.protocol.conversationItems!==false){
     const messages=conversation.messages.filter(message=>message.generation_status!=='pending')
     // shortcut: older context is a bounded excerpt, replace with semantic summary when truncation loses needed detail.
     const summary=messages.slice(0,-VOICE_CONTEXT_MESSAGES).map(message=>message.role+': '+message.text).join('\n').slice(-2000)
     const handoff={purpose:'conversation_handoff',trust:'untrusted_external',summary,recent_messages:messages.slice(-VOICE_CONTEXT_MESSAGES).map(message=>({role:message.role,text:message.text.slice(0,600)})),state:{mode:conversation.kind==='build'?'build':conversation.mode??'chat',...(conversation.plan?{plan:{title:conversation.plan.title,version:conversation.plan.version}}:{}),...(conversation.build?{build:{project:conversation.build.project.slice(0,512),status:conversation.build.status,pending_approval:!!conversation.build.approval}}:{})},...(workbenchVoice?{instruction:'Voice is only for conversation and clarification. No tools or local actions are allowed. Ask the user to return to text mode to confirm execution.'}:{})}
     while([...JSON.stringify(handoff)].length>3900){handoff.summary=handoff.summary.slice(Math.ceil(handoff.summary.length/2));for(const message of handoff.recent_messages)message.text=message.text.slice(0,Math.floor(message.text.length/2));if(!handoff.summary&&handoff.recent_messages.every(message=>!message.text)){if(handoff.state.plan)handoff.state.plan.title=handoff.state.plan.title.slice(0,Math.floor(handoff.state.plan.title.length/2));if(handoff.state.build)handoff.state.build.project=handoff.state.build.project.slice(0,Math.floor(handoff.state.build.project.length/2))}}
-    await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify(handoff)},{confirmationTimeout:null,asUserActivation:false,signal:AbortSignal.timeout(10000)})
+    await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify(handoff)},{confirmationTimeout:null,asUserActivation:false,signal:startupSignal})
    }else if(workbenchVoice)throw Error('voice_context_unavailable');
-   if(provider.capabilities?.protocol.conversationItems!==false&&conversation.prepared&&await (conversation.subject_key?.startsWith('scheduled-result:')?options.host.scheduledResultAuthorized(conversation.subject_key.slice(17),memoryConsumerFingerprint??null):maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,conversation.prepared.evidence_refs)))await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({trust:'untrusted_external',purpose:'read_only_topic_background',text:conversation.prepared.text.slice(0,2000),evidence_refs:conversation.prepared.evidence_refs.slice(0,2)})},{confirmationTimeout:null,asUserActivation:false,signal:AbortSignal.timeout(10000)})}catch(error){unsubscribeTarget?.();unsubscribePresentation();unsubscribeProgress();unsubscribeApproval?.();await graph.stop();await core.stop();throw error}
+   if(provider.capabilities?.protocol.conversationItems!==false&&conversation.prepared&&await (conversation.subject_key?.startsWith('scheduled-result:')?options.host.scheduledResultAuthorized(conversation.subject_key.slice(17),memoryConsumerFingerprint??null):maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,conversation.prepared.evidence_refs))){addDependencies(options.host.conversationContextDependencies({...conversation,messages:[]}));await authorizeContext(true);startupSignal.throwIfAborted();await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({trust:'untrusted_external',purpose:'read_only_topic_background',text:conversation.prepared.text.slice(0,2000),evidence_refs:conversation.prepared.evidence_refs.slice(0,2)})},{confirmationTimeout:null,asUserActivation:false,signal:startupSignal})}}catch(error){unsubscribeTarget?.();unsubscribePresentation();unsubscribeProgress();unsubscribeApproval?.();await graph.stop();await core.stop();throw error}
   const detachForeground=()=>{if(ownsTask()){graph.service.detachTaskConversation();voiceEnabled=false;void graph.service.playbackDisconnected({resumeDelivery:false})}}
   lifetime.addEventListener('abort',detachForeground,{once:true})
   const adapter=options.codexResource?.mode==='project'?options.codexResource.adapter as ProjectExecutorAdapter:undefined
@@ -393,7 +445,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   })
   const unsubscribeTaskCapture=options.host.subscribe(()=>{captureTaskResponse();const response=graph.playback.current?.response_id??currentResponse;if(response&&!options.host.localNotifications&&graph.service.isProactiveResponse(response))void graph.service.session.quarantineActiveOrAwaitingResponse().catch(()=>options.onDiagnostic?.('[runtime-diagnostic] notification_audio_fence_failed'))})
   let closed=false
-  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,...(chatMode?{onTool:recordToolEvent}:{})})
+  const toolBridge=conversationToolBridge(core,graph,{chat:chatMode,memoryConsumer:memoryConsumerFingerprint??'',...(chatMode?{onTool:recordToolEvent}:{})})
   const close=async()=>{if(closed)return;closed=true;lifetime.removeEventListener('abort',detachForeground);unsubscribeTasks();unsubscribeTaskCapture();detachTaskRuntime();unsubscribeTarget?.();options.host.recordConfirmation(conversation.id,{pending_confirmation:false,pending_confirmation_busy:false,workspace_display_name:null,session_title:null});unsubscribePresentation();approval?.invalidate('conversation_closed');unsubscribeProgress();unsubscribeApproval?.();pending?.reject(Error('conversation_closed'));pending=undefined;await graph.stop();await core.stop()}
   const unsubscribeTasks=options.host.subscribe(()=>{if(lifetime.aborted&&!ownsTask()&&core.runtime.core.activeDelegates().length===0)void close()})
   return {
@@ -402,8 +454,19 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    retainTasks:ownsTask,
    parkVoice:async()=>{audioGeneration++;voiceEnabled=false;try{await graph.service.playbackDisconnected({resumeDelivery:false})}finally{if(provider.capabilities?.model.nativeFullDuplex)await close()}},
    canSwitch:()=>!pending&&!approval?.pending&&!projectConfirmation?.pending&&core.runtime.core.activeDelegates().length===0&&(voiceEnabled?graph.service.pendingHostItemCount===0:true)&&graph.playback.current===null,
-   deliverSuggestion:(suggestion,reason)=>graph.service.onSuggestionSelected(suggestion,reason),
+   deliverSuggestion:(suggestion,reason)=>{void (async()=>{
+    const feedId=suggestion.content.personal_feed_id
+    const deliveryDependencies=typeof feedId==='string'?options.host.feedContextDependencies(feedId):emptyContextDependencies()
+    await authorizeContext()
+    if(typeof feedId==='string'){if(!await options.host.productFeedAuthorized(feedId,memoryConsumerFingerprint??null)||!await options.host.contextDependenciesAuthorized(deliveryDependencies,memoryConsumerFingerprint??null))return;addDependencies(deliveryDependencies);await authorizeContext(true)}
+    graph.service.onSuggestionSelected(suggestion,reason,typeof feedId==='string'?{authorizeBeforeInject:async signal=>{
+     lifetime.throwIfAborted();signal.throwIfAborted()
+     const allowed=await abortable(options.host.productFeedAuthorized(feedId,memoryConsumerFingerprint??null),signal)&&await abortable(options.host.contextDependenciesAuthorized(deliveryDependencies,memoryConsumerFingerprint??null),signal)
+     lifetime.throwIfAborted();signal.throwIfAborted();return allowed
+    }}:{})
+   })().catch(()=>close())},
    ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:async(pcm)=>{
+    await authorizeContext()
     const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
     const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.voiceConversationId()!==conversation.id?'other_voice_owner':undefined
     const current=()=>reason()===undefined
@@ -415,6 +478,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     if(audioIdentityEpoch!==epoch){
       audioIdentitySync??=syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)])).then(()=>{audioIdentityEpoch=epoch}).finally(()=>{audioIdentitySync=undefined})
       await audioIdentitySync
+      await authorizeContext()
     }
     if(current())await graph.service.sendAudio(pcm);else dropped(reason()??'unknown')
    },
@@ -436,12 +500,17 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     signal.addEventListener('abort',abort,{once:true})
     try{
      await syncIdentity(signal)
+     addDependencies(options.host.referenceContextDependencies(context?.references??[]))
+     if(context?.source_todo)addDependencies({state:'tracked',items:[{kind:'app_record',section:'todos',id:context.source_todo.id,version:context.source_todo.version}]})
+     await authorizeContext(true)
+     signal.throwIfAborted()
      if(context?.prepared){
       for(const ref of context.references??[])if(ref.kind==='timeline'&&!await options.host.timelineAuthorized(ref.id,ref.version,memoryConsumerFingerprint))throw Error('reference_not_authorized');
       const material=context.prepared;
-      if(material.evidence_refs.length&&!await maySendPreparedMemory(options.memory(),memoryConsumerFingerprint,material.evidence_refs))throw Error('reference_not_authorized');
-      for(const content of preparedReferenceParts(material))await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal});
+      if(material.evidence_refs.length&&!await options.host.preparedContextAuthorized(material.evidence_refs,context.references??[],memoryConsumerFingerprint??null))throw Error('reference_not_authorized');
+      for(const content of preparedReferenceParts(material)){await authorizeContext(true);signal.throwIfAborted();await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})}
      }
+     await authorizeContext(true);signal.throwIfAborted()
      if(sourceTodo)await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify({purpose:'selected_todo_context',linked_todo_available:true,instruction:(context?.source_todo?'The upcoming user text has a selected Todo source.':'An earlier user turn in this conversation selected a Todo source and no task has handled it yet.')+' Only declarations explicitly handling that Todo should set link_source_todo=true. Independent tasks must omit it. This context does not authorize execution.'})},{confirmationTimeout:null,asUserActivation:false,signal});const [,result]=await Promise.all([graph.service.submitText(text),done]);return result}
      catch(error){telemetry?.record('conversation.turn.failed',{reason:error instanceof Error&&error.name==='TimeoutError'?'turn_timeout':error instanceof Error&&/^response_(cancelled|failed)$/u.test(error.message)?error.message:'conversation_turn_failed',tool_continuing:taskTurnContinuing,active_response:currentResponse??null,project_confirmation_pending:projectConfirmation?.pending===true,executor_approval_pending:approval?.pending===true});throw error}
      finally{sourceOrigin=undefined;deadline.close();if(pending===current)pending=undefined;signal.removeEventListener('abort',abort)}

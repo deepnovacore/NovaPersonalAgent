@@ -15,7 +15,12 @@ export const LifeMemorySchema = z.object({
   due:z.string().date().nullable(),goal_id:z.string().nullable(),idea_id:z.string().nullable(),
   success_criteria:z.string().max(2000).nullable(),
 }).strict()
+/** Only ledger-owned records may apply this legacy default; provider metadata is never defaulted. */
+export function ledgerMemoryScope(value:unknown):'user'|'general'|null {
+  return value===undefined?'user':value==='user'||value==='general'?value:null
+}
 export const MemoryEntrySchema = z.object({
+  memory_scope:z.enum(['user','general']).optional(),
   id: text(256), version: MemoryVersionSchema, content: z.string().max(500),
   kind: z.enum(['fact', 'preference', 'plan', 'concern', 'commitment', 'entity', 'topic', 'todo', 'idea', 'goal', 'profile']),
   life:LifeMemorySchema.optional(),
@@ -37,7 +42,7 @@ export function memoryEligibleForDiscovery(entry:MemoryEntry|null|undefined):ent
     &&(entry.life===undefined||['open','doing','waiting','active'].includes(entry.life.status))
 }
 export type MemoryVersion = z.infer<typeof MemoryVersionSchema>
-export interface MemoryCapabilities {readonly list:boolean;readonly get:boolean;readonly correct:boolean;readonly forgetEntry:boolean;readonly forgetSource:boolean;readonly observeSource?:boolean}
+export interface MemoryCapabilities {readonly includeExpired?:boolean;readonly list:boolean;readonly get:boolean;readonly correct:boolean;readonly forgetEntry:boolean;readonly forgetSource:boolean;readonly observeSource?:boolean}
 export const MemoryListOptionsSchema = z.object({cursor:text(256).optional(),limit:z.number().int().min(1).max(100).optional(),include_expired:z.boolean().optional()}).strict()
 export type MemoryListOptions = z.infer<typeof MemoryListOptionsSchema>
 export const MemoryPageSchema = z.object({entries:z.array(MemoryEntrySchema).max(100),cursor:z.string().nullable()}).strict()

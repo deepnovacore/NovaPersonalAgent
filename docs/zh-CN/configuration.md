@@ -46,7 +46,9 @@ DASHSCOPE_API_KEY=你的百炼密钥
 | `CODEX_APPROVAL_MODE` | ask | 编程审批模式，适用于 Codex 与 ACP 执行器；Pi 不接受询问模式。 |
 | `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | 能力注册表路径。 |
 | `MEMORY_CONNECTION` | local | 记忆连接：disabled、local 或 remote。 |
-| `MEMORY_PROVIDER` | 无 | 本地引擎：voicemem（默认，统一账本）或显式选择 mem0。远程引擎由服务端选择。 |
+| `MEMORY_PROVIDER` | 无 | 已弃用本地提供方：voicemem 保留账本迁移；mem0 保留独立模式。不能与新记忆变量共用。 |
+| `MEMORY_RECALL_ENGINE` | ledger | 高级本地召回引擎：ledger、voicemem 或 mem0；账本仍是权威。无界面选择器。 |
+| `MEMORY_EXTRACTORS` | ledger | 提取器 ledger 或 ledger,voicemem；VoiceMem 仅增加短期回复风格背景，不写事实。不能与 MEMORY_PROVIDER 共用。 |
 | `DASHSCOPE_API_KEY` | 无 | Qwen 实时凭据。 |
 | `QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen 实时模型。 |
 | `QWEN_REALTIME_VOICE` | longanqian | Qwen 实时音色。 |
@@ -86,3 +88,8 @@ TypeScript API 变化：`Settings.surrogate_model` 改为 `support_model`；原�
 [返回上手指南](getting-started.md)
 
 OpenAI 与 Gemini 的模型选项、独立密钥、级联配置和协议限制见 [海外模型接入说明](global-providers.md)。
+
+
+### 记忆引擎服务要求
+
+账本权威的 SDK 召回可用 `MEMORY_RECALL_ENGINE=mem0` 或 `voicemem`；可选 `MEMORY_EXTRACTORS=ledger,voicemem` 增加短期回复风格抽取。请勿同时设置 `MEMORY_PROVIDER`；没有 `MEMORY_BACKEND` 别名。复用现有 embedding 与 fast/抽取路由的凭据及 OpenAI 兼容 `/embeddings`、`/chat/completions` 端点；DashScope 默认复用 `DASHSCOPE_API_KEY`，无需 Mem0 云密钥。默认仍是纯账本。处理同意、有效期、持久重试及评估限制见[生产组合说明](../design-notes/2026-11-03-memory-backend-composition.md)。

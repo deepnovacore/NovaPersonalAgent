@@ -1,3 +1,16 @@
+import {conversationToolBridge} from '../src/personal-agent/conversation-tool-bridge.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {buildRealtimeAssembly,configuredMemoryConsumer} from '../src/composition/realtime-assembly.js'
+import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
+import {memoryDocuments} from '../src/memory-substrate/memory-documents.js'
+import type {EntryRevision} from '../src/memory-substrate/store.js'
+import {FULL_MEMORY_TOOLS, NO_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import type {RealtimeProvider} from '../src/realtime/protocol.js'
+import {retrievalPrerecall} from '../src/memory/prerecall-port.js'
+import {UnifiedRetrieval} from '../src/memory/retrieval.js'
+import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises'
@@ -37,12 +50,12 @@ function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
 async function until<T>(read:()=>T,predicate:(value:T)=>boolean):Promise<T>{
  for(let count=0;count<500;count++){const value=read();if(predicate(value))return value;await new Promise(resolve=>setTimeout(resolve,10))}throw Error('state wait expired')
 }
-async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean){
+async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean,telemetry?:Parameters<typeof createWorkbenchRuntime>[0]['telemetry']){
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-loop-')),script=scripted(reply),invocations:{name:string;arguments:Record<string,JsonValue>}[]=[],frames:Record<string,unknown>[]=[]
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[{name:'monitor',parameters:{type:'object'}},{name:'dispatch',parameters:{type:'object',properties:{executor:{enum:['codex']}}}}],readonlyNames:['monitor'],origin:()=>Promise.resolve('memory:test-user'),invoke:(_text,call,_signal,grant)=>{invocations.push(call);if(call.name!=='dispatch'||!grant)return Promise.resolve({accepted:true});const delegate_id='fixture-work-'+invocations.length;return host.tasks.bindWork(grant.fence,delegate_id).then(()=>({accepted:true,delegate_id}))}}
  const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
- const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
+ const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({...(telemetry?{telemetry}:{}),conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
  let request=0
  const raw=(method:string,params:Record<string,unknown>={},local=true)=>host.command({type:'personal.command',request_id:'r'+request++,method,params},{client_id:local?'desktop:local':'remote:test'}) as Promise<{ok:boolean;error?:string;data:unknown}>
  const command=async(method:string,params:Record<string,unknown>={})=>{const result=await raw(method,params);if(!result.ok)throw Error(result.error);return result.data}
@@ -1363,5 +1376,431 @@ test('a long paused Plan keeps full output and directs the user to send another 
   limited=false;await f.host.submitConversationText('chat:main','continue the plan');await f.host.waitConversation('chat:main')
   assert.ok(f.host.conversationSnapshot().messages.at(-1)!.text.endsWith('Plan continued'))
   assert.equal((await f.host.workbench.checkpoint('chat:main',0)).status,'completed')
+ }finally{await f.close()}
+})
+
+async function memoryBridgeFixture(f: Awaited<ReturnType<typeof fixture>>, full = true) {
+ const gateway={complete:()=>Promise.reject(Error('automatic learning is forbidden')),async *stream(){await Promise.reject(Error('automatic learning is forbidden'))}}
+ const client=new MemoryLedgerClient(join(f.root,'memory.sqlite'))
+ const memory=new SubstrateMemoryResource({client,userId:'workbench-test',model:'fixture',gateway,inputConsent:true,conversationProviders:['workbench-model']})
+ await memory.open({deferBackground:true})
+ const core=buildAssembly({settings:settingsSchema.parse({executors:[]}),gateway,memoryTools:full?FULL_MEMORY_TOOLS:{...NO_MEMORY_TOOLS,recall:true,engine:'mem0'},blackboard:{path:join(f.root,'board.sqlite'),ownerId:'fixture'},capabilities:parseCapabilityRegistry({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}})})
+ const provider:RealtimeProvider={connect:()=>Promise.resolve({epoch:1,provider_session_id:'workbench'}),sendAudio:()=>Promise.resolve(),replaceResponseAdaptation:()=>Promise.resolve(),injectHostItem:item=>Promise.resolve({session_epoch:1,host_item_id:item.host_item_id,provider_item_id:item.host_item_id}),createResponse:()=>Promise.resolve(),cancelResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}
+ const graph=buildRealtimeAssembly({core,provider,createPersonalMemory:()=>memory,memoryConsumerFingerprint:'workbench-model',memoryReadMode:'text',onDiagnostic:()=>undefined})
+ await graph.start()
+ const tools=conversationToolBridge(core,graph,{memoryConsumer:'workbench-model'})
+ f.plain.toolBridge=tools
+ f.plain.close=async()=>{await graph.stop();await core.stop()}
+ return {memory,client,tools}
+}
+
+for(const mode of ['plan','build'] as const)for(const full of [true,false])test(`${mode} exposes only supported memory host tools (${full?'ledger':'recall-only'})`,{skip:mode==='build'&&!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  await memoryBridgeFixture(f,full)
+  if(mode==='build')await f.command('build.begin',{text:'Discuss constraints',project:f.root})
+  else {await f.command('conversations.mode',{id:'chat:main',mode:'plan'});await f.host.submitConversationText('chat:main','Discuss constraints')}
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  const names=f.script.requests[0]!.tools.map(tool=>tool.name)
+  for(const name of ['memory__remember','memory__lookup'])assert.equal(names.includes(name),full)
+  assert.ok(names.includes('memory__recall'))
+  assert.equal(names.includes('file_write'),mode==='build')
+  assert.ok(!f.script.requests[0]!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('memory_scope')))
+ }finally{await f.close()}
+})
+
+for(const mode of ['plan','build'] as const)test(`${mode} quotes only typed user text through the real service; general memory is not user background`,{skip:mode==='build'&&!supported},async()=>{
+ const project='Use strict TypeScript in this repository',user='I prefer concise answers',legacy='I prefer examples',toolQuote='I love durian'
+ const userText=`Remember: ${project}; ${user}; ${legacy}`
+ const writes=[{scope:'general',text:project},{scope:'user',text:user},{text:legacy}]
+ const f=await fixture((_request,step)=>{
+  if(step===0)return {call:{name:'monitor',arguments:{}}}
+  if(step===1)return {call:{name:'memory__remember',arguments:{action:'set',kind:'preference',scope:'user',text:toolQuote,quote:toolQuote}}}
+  if(step===2)return {call:{name:'memory__remember',arguments:{action:'set',kind:'fact',scope:'user',text:'voice-only secret',quote:'voice-only secret'}}}
+  const write=writes[step-3]
+  if(write)return {call:{name:'memory__remember',arguments:{action:'set',kind:'preference',...write,quote:write.text}}}
+  if(step===6)return {call:{name:'memory__lookup',arguments:{}}}
+  return {text:'done'}
+ })
+ try{
+  const {memory,client,tools}=await memoryBridgeFixture(f)
+  const seen:string[]=[]
+  f.plain.toolBridge={...tools,tools:[...tools.tools,{name:'monitor',parameters:{type:'object'}}],readonlyNames:[...tools.readonlyNames,'monitor'],invoke:(text,call,signal)=>{
+   seen.push(text)
+   return call.name==='monitor'?Promise.resolve({text:toolQuote}):tools.invoke(text,call,signal)
+  }}
+  // Voice is host context, never part of the typed-user authorization snapshot.
+  f.host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation:{...conversation,messages:[...conversation.messages,{id:'voice-only',conversation_id:conversation.id,role:'user',input_mode:'voice',text:'voice-only secret',created_at:new Date().toISOString()}]},host:f.host,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),frame=>f.frames.push(frame))
+  if(mode==='build')await f.command('build.begin',{text:userText,project:f.root})
+  else {await f.command('conversations.mode',{id:'chat:main',mode:'plan'});await f.host.submitConversationText('chat:main',userText)}
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  const state=await f.host.workbench.checkpoint(id,0)
+  assert.equal(state.status,'completed',JSON.stringify(state))
+  assert.equal(state.last_user,userText)
+  assert.ok(seen.length>0);assert.ok(seen.every(text=>text===userText))
+  const results=state.calls.map(call=>call.result as {code?:string;result?:{state?:string;entries?:{text:string}[]}})
+  assert.equal(results[1]?.code,'invalid_source_quote');assert.equal(results[2]?.code,'invalid_source_quote')
+  for(const result of results.slice(3,6))assert.equal(result.result?.state,'committed','same-invoke userTurn must pass superseded check')
+  const saved=await memory.lookupExplicit({},'workbench-model')
+  assert.deepEqual(saved.entries.map(entry=>entry.text).sort(),[project,user,legacy].sort())
+  assert.ok(results[6]?.result?.entries?.some(entry=>entry.text===project),'lookup keeps general facts readable')
+  assert.ok((await memory.recall('strict TypeScript',{scope:'any'})).hits.some(hit=>hit.text===project),'recall keeps general facts readable')
+  const rows=await client.memory('conversation_snapshot',{entry_prefix:memory.prefix,consumer:'workbench-model'}) as EntryRevision[]
+  const docs=memoryDocuments(rows)
+  assert.doesNotMatch(docs.get('USER.md')!,/strict TypeScript/)
+  assert.match(docs.get('MEMORY.md')!,/strict TypeScript/)
+  assert.match(docs.get('USER.md')!,/concise answers/);assert.match(docs.get('USER.md')!,/prefer examples/)
+  for(const adaptation of [memory.responseAdaptation(),await memory.prepareResponseAdaptation('workbench-model')]){
+   assert.doesNotMatch(adaptation.memoryContext!.voice,/strict TypeScript/)
+   assert.match(adaptation.memoryContext!.voice,/concise answers/);assert.match(adaptation.memoryContext!.voice,/prefer examples/)
+   assert.deepEqual(adaptation.replyPreferences.map(entry=>entry.text).sort(),[user,legacy].sort())
+   const [userContext,directory]=adaptation.memoryContext!.text.split('Memory directory')
+   assert.doesNotMatch(userContext!,/strict TypeScript/);assert.match(directory!,/strict TypeScript/)
+  }
+  const sources=JSON.stringify(await memory.lookupExplicit({},'workbench-model'))
+  assert.ok(!sources.includes(toolQuote));assert.ok(!sources.includes('voice-only secret'))
+ }finally{await f.close()}
+})
+
+for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async()=>{
+ const events:{kind:string;payload:Readonly<Record<string,JsonValue>>}[]=[]
+ const f=await fixture(()=>({text:'done'}),'ask',undefined,undefined,undefined,{record:(kind,payload)=>events.push({kind,payload}),close:()=>undefined})
+ try{
+  let allowed=true,recalls=0,authorizationChecks=0,recallSignal:AbortSignal|undefined
+  const text=outcome==='irrelevant'?'unrelated tea':'TypeScript project constraints'
+  const resource:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:(_query,options)=>{
+   recalls++;recallSignal=options?.signal
+   if(outcome==='timeout')return new Promise(()=>{ /* ignores cancellation to exercise the outer budget */ })
+   if(outcome==='failure')return Promise.reject(Error('unavailable'))
+   return Promise.resolve({source:'personal',state:'ok',scope:'any',degraded:false,hits:[{memoryId:'project',text,revision:1,evidenceIds:['source'],score:1}]})
+  },get:()=>Promise.resolve({memory_scope:'user',id:'project',version:1,status:'active',kind:'fact',origin:'stated',content:text,source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_ref,consumer)=>{authorizationChecks++;assert.equal(consumer,'configured-text-model');return Promise.resolve(allowed)}}
+  const retrieval=new UnifiedRetrieval({memory:()=>resource})
+  const prepare=retrievalPrerecall(()=>retrieval,()=> 'configured-text-model')
+  f.plain.toolBridge={...f.bridge,prerecall:async(query,signal)=>{
+   const prepared=await prepare(query,signal)
+   if(outcome==='revoked')allowed=false
+   return prepared
+  }}
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const start=performance.now()
+  await f.host.submitConversationText('chat:main','TypeScript project constraints');await f.host.waitConversation('chat:main')
+  assert.ok(performance.now()-start<2000)
+  assert.equal(recalls,1)
+  const inputs=f.script.requests[0]!.inputs,index=inputs.findIndex(input=>input.kind==='host_context'&&input.content.includes('possible_memory'))
+  assert.equal(index>=0,outcome==='relevant')
+  if(index>=0){assert.ok(index<inputs.findIndex(input=>input.kind==='user_text'));assert.match(JSON.stringify(inputs[index]),/untrusted_external/)}
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).last_user,'TypeScript project constraints')
+  assert.deepEqual(events,[{kind:'workbench.memory.injected',payload:{injected:outcome==='relevant'}}])
+  if(outcome==='timeout')assert.equal(recallSignal?.aborted,true)
+  if(['relevant','revoked'].includes(outcome))assert.ok(authorizationChecks>=2,'authorization is rechecked at consumption')
+ }finally{await f.close()}
+})
+
+for(const mode of ['chat','plan','build'] as const)test(`production ${mode} text memory capture and Workbench authorized retrieval with prerecall flag off`,{skip:mode==='build'&&!supported},async context=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-workbench-memory-'))
+ const settings=settingsSchema.parse({executors:[],camera_module_enabled:false,pipeline_mode:'cascaded',cascade_llm_provider:'deepseek',cascade_llm_model:'deepseek-flash',deepseek_api_key:'test',memory_prerecall_enabled:false})
+ const consumer=configuredMemoryConsumer(settings,'text'),text='TypeScript project constraints',requests:Record<string,unknown>[]=[],consumers:string[]=[]
+ let rememberCalls=0,observedSources=0
+ const memory:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'ok',scope:'any',hits:[{memoryId:'project',revision:1,text,evidenceIds:['source'],score:1}],degraded:false}),get:()=>Promise.resolve({memory_scope:'user',id:'project',version:1,content:text,kind:'fact',origin:'stated',source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',status:'active',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_id,recipient)=>{consumers.push(recipient);return Promise.resolve(recipient===consumer)},remember:()=>{rememberCalls++;return Promise.resolve({sourceId:'text',state:'stored'})},observeSource:()=>{observedSources++;return Promise.resolve(null)}}
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ context.mock.method(globalThis,'fetch',(_url:unknown,init?:RequestInit)=>{
+  requests.push(JSON.parse(init!.body as string) as Record<string,unknown>)
+  return Promise.resolve(new Response('data: '+JSON.stringify({id:'response',choices:[{delta:{content:'done'},finish_reason:'stop'}]})+'\n\n',{headers:{'content-type':'text/event-stream'}}))
+ })
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>memory,settings,gateway:{complete:()=>Promise.reject(Error('automatic learning forbidden')),async *stream(){await Promise.reject(Error('automatic learning forbidden'))}},onDiagnostic:()=>undefined}),()=>undefined)
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:mode==='chat'?'chat':'plan'}]] as const){const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(result.ok,true)}
+  if(mode==='build'){
+   const result=await host.command({type:'personal.command',request_id:'build',method:'build.begin',params:{text,project:root}},{client_id:'desktop:local'}) as {ok:boolean}
+   assert.equal(result.ok,true)
+  }else await host.submitConversationText('chat:main',text)
+  await host.waitConversation(host.conversationSnapshot().selected_id)
+  assert.equal(requests.length,1)
+  if(mode!=='chat'){
+   assert.match(JSON.stringify(requests[0]!.messages),/possible_memory/)
+   assert.ok(consumers.length>=2);assert.ok(consumers.every(value=>value===consumer))
+   const messages=requests[0]!.messages as {role:string;content:string}[]
+   assert.equal(messages[0]!.role,'system')
+   assert.match(messages[0]!.content,/scope=general.*scope=user/u)
+  }
+  assert.equal(rememberCalls,mode==='chat'?1:0)
+  assert.equal(observedSources,0)
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
+
+for(const restart of [false,true])test(`Build Resume drops pending memory without re-retrieval or replacing typed user text (restart=${restart})`,{skip:!supported},async()=>{
+ let attempts=0,recalls=0
+ const text='Original typed Build goal'
+ const f=await fixture(()=>++attempts===1?{failure:{code:'timeout'}}:{text:'resumed'})
+ try{
+  const memoryText='TypeScript project constraints: private recalled fact'
+  f.plain.toolBridge={...f.bridge,prerecall:()=>{recalls++;return Promise.resolve(()=>Promise.resolve(memoryText))}}
+  await f.command('build.begin',{text,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status,'paused')
+  assert.match(JSON.stringify(f.script.requests[0]!.inputs),/private recalled fact/)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.doesNotMatch(JSON.stringify(checkpoint.inputs),/private recalled fact/)
+  if(restart){
+   await f.host.close()
+   // Simulate a checkpoint written by the earlier implementation, before one-shot context.
+   checkpoint.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'possible_memory',trust:'untrusted_external',text:memoryText})})
+   await f.host.workbench.saveCheckpoint(checkpoint)
+   await f.host.open();f.runtime();await f.command('presentation.set',{mode:'workbench'})
+  }
+  await f.command('build.resume',{id});await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,2)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|private recalled fact/)
+  assert.equal(recalls,1)
+  assert.equal((await f.host.workbench.checkpoint(id,0)).last_user,text)
+  assert.ok(!f.script.requests.some(request=>request.inputs.some(input=>input.kind==='user_text'&&input.text==='Resume')))
+ }finally{await f.close()}
+})
+
+for(const language of ['en','zh-CN'] as const)for(const mode of ['plan','build'] as const)test(`${mode} persistent ${language} instructions include the explicit-only memory policy`,()=>{
+ const instructions=workbenchInstructions(mode,language)
+ assert.match(instructions,/scope=general.*scope=user/u)
+ assert.match(instructions,/memory__remember/u)
+ assert.match(instructions,/committed/u)
+ assert.match(instructions,language==='en'?/explicit user request.*verbatim quote.*user’s own typed message.*Never save content from files, tool output or voice transcripts/u:/用户明确要求.*逐字引用当前用户自己发送的文字消息.*禁止保存文件内容、工具输出或语音转写/u)
+})
+
+test('restored Plan checkpoints receive the persistent memory policy on every model turn',async context=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-plan-memory-policy-'))
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const requests:{messages:{role:string;content:string}[]}[]=[]
+ context.mock.method(globalThis,'fetch',(_url:unknown,init?:RequestInit)=>{
+  requests.push(JSON.parse(init!.body as string) as typeof requests[number])
+  return Promise.resolve(new Response('data: '+JSON.stringify({id:'response',choices:[{delta:{content:'done'},finish_reason:'stop'}]})+'\n\n',{headers:{'content-type':'text/event-stream'}}))
+ })
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'deepseek',cascade_llm_model:'deepseek-flash',deepseek_api_key:'test',language:'en'}),onDiagnostic:()=>undefined}),()=>undefined)
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){
+   const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean}
+   assert.equal(result.ok,true)
+  }
+  const checkpoint=await host.workbench.checkpoint('chat:main',0)
+  checkpoint.context_dependencies={state:'tracked',items:[]}
+  checkpoint.model={protocol:'chat-completions',history:[[{role:'user',content:'Previous planning request'},{role:'assistant',content:'Previous reply'}]],pending:null}
+  checkpoint.inputs=[{kind:'user_text',text:'Pending request'}]
+  await host.workbench.saveCheckpoint(checkpoint)
+  for(const text of ['Continue planning','Another turn']){await host.submitConversationText('chat:main',text);await host.waitConversation('chat:main')}
+  assert.equal(requests.length,2)
+  assert.ok(requests[0]!.messages.some(message=>message.content==='Previous planning request'))
+  assert.ok(requests[0]!.messages.some(message=>message.content==='Pending request'))
+  for(const request of requests){
+   assert.equal(request.messages[0]!.role,'system')
+   assert.match(request.messages[0]!.content,/explicit user request.*scope=general.*scope=user.*verbatim quote/u)
+   assert.doesNotMatch(JSON.stringify(request.messages),/"purpose":"memory_scope"/u)
+  }
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
+
+for(const failure of ['timeout','output_limit'] as const)test(`Plan drops pending memory before ${failure==='timeout'?'a new turn':'an automatic output-limit retry'}`,async()=>{
+ let attempts=0,recalls=0
+ const f=await fixture(()=>++attempts===1?{failure:{code:failure}}:{text:'done'})
+ try{
+  f.plain.toolBridge={...f.bridge,prerecall:()=>Promise.resolve(++recalls===1?()=>Promise.resolve('one-shot recalled secret'):null)}
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Plan the project');await f.host.waitConversation('chat:main')
+  if(failure==='timeout'){await f.host.submitConversationText('chat:main','Continue');await f.host.waitConversation('chat:main')}
+  assert.equal(f.script.requests.length,2)
+  assert.match(JSON.stringify(f.script.requests[0]!.inputs),/one-shot recalled secret/)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|one-shot recalled secret/)
+  assert.equal(recalls,failure==='timeout'?2:1)
+ }finally{await f.close()}
+})
+
+for(const legacy of [false,true])test(`app-informed Workbench checkpoint persists dependencies and rejects revoked model reuse (${legacy?'legacy':'tracked'})`,async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-workbench-deps-')),path=join(directory,'personal.json'),secret='Synthetic checkpoint app fact L-917'
+ const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let host=make(),runtime:ConversationRuntime|undefined
+ const first=scripted(()=>({text:secret})),next=scripted(()=>({text:'Current valid answer'})),rejected=scripted(()=>({text:'Must not run'}))
+ const bridge:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:''}),close:()=>Promise.resolve(),toolBridge:{tools:[],readonlyNames:[],origin:()=>Promise.resolve('conversation:1'),invoke:()=>Promise.reject(Error('must not replay tools'))}}
+ try{
+  await host.open();await host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const row=host.life.snapshot().todos[0]!,at=new Date().toISOString(),conversation={id:'chat:main',kind:'chat' as const,mode:'plan' as const,title:'Plan',subject_key:null,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[{id:'user',conversation_id:'chat:main',role:'user' as const,text:'Previous question',created_at:at},{id:'answer',conversation_id:'chat:main',role:'assistant' as const,text:secret,context_dependencies:{state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]},created_at:at}],feed_ids:[],prepared:null,read_through_id:null}
+  const open=(factory:CascadedLlmFactory)=>createWorkbenchRuntime({conversation,host,factory,contextConsumer:null,createBridge:()=>Promise.resolve(bridge),emit:()=>{/* local */},lifetime:new AbortController().signal,language:'en',approval:'never'})
+  runtime=await open(first.factory);const result=await runtime.runTurn('Plan from report',new AbortController().signal)
+  assert.equal(result.assistant,secret);assert.ok(JSON.stringify(first.requests).includes(secret))
+  const checkpoint=await host.workbench.checkpoint(conversation.id,0)
+  assert.deepEqual(checkpoint.context_dependencies,result.context_dependencies)
+  await runtime.close();runtime=undefined;await host.close();host=make();await host.open()
+  runtime=await open(next.factory);await runtime.runTurn('Continue authorized plan',new AbortController().signal)
+  assert.equal(next.restores.length,1,'valid model state survives restart')
+  assert.equal(next.requests.length,1)
+  await runtime.close();runtime=undefined
+  const saved=await host.workbench.checkpoint(conversation.id,0)
+  saved.calls.push({id:'already-executed',name:'file_write',arguments:{path:'evidence.txt'},state:'completed',result:{status:'ok'}})
+  saved.pending_calls=[saved.calls.at(-1)!]
+  if(legacy)delete saved.context_dependencies
+  await host.workbench.saveCheckpoint(saved)
+  await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed app authority'},'revoke')
+  await host.close();host=make();await host.open();runtime=await open(rejected.factory)
+  await assert.rejects(runtime.runTurn('Resume old plan',new AbortController().signal),/context_authorization_changed/)
+  assert.equal(rejected.restores.length,0);assert.equal(rejected.requests.length,0,'no revoked model/inputs reach the actual model port')
+  const withheld=await host.workbench.checkpoint(conversation.id,0)
+  assert.equal(withheld.reason,'context_authorization_changed')
+  assert.deepEqual(withheld.calls,saved.calls);assert.deepEqual(withheld.pending_calls,saved.pending_calls,'tool receipts survive invalidation without replay/reset')
+  assert.deepEqual(withheld.model,saved.model,'private model checkpoint remains locally preserved')
+ }finally{await runtime?.close();await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('owned legacy no-app Workbench checkpoint remains resumable without dependency fields',async()=>{
+ const f=await fixture(()=>({text:'Independent plan reply'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Independent planning request','legacy-user');await f.host.waitConversation('chat:main')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  delete checkpoint.context_dependencies;await f.host.workbench.saveCheckpoint(checkpoint)
+  await f.host.close();await f.host.open();f.runtime()
+  await f.host.submitConversationText('chat:main','Continue unrelated plan','legacy-resume');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests.length,2)
+  assert.equal(f.script.restores.length,1)
+  assert.deepEqual((await f.host.workbench.checkpoint('chat:main',0)).context_dependencies,{state:'tracked',items:[]})
+ }finally{await f.close()}
+})
+
+test('unverifiable legacy Workbench model text is not treated as an empty dependency set',async()=>{
+ const f=await fixture(()=>({text:'Independent planning reply'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Owned planning request','first');await f.host.waitConversation('chat:main')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  delete checkpoint.context_dependencies;checkpoint.model={unknown_history:'Unattributed synthetic app fact'}
+  await f.host.workbench.saveCheckpoint(checkpoint);await f.host.close();await f.host.open();f.runtime()
+  await f.host.submitConversationText('chat:main','Do not reconstruct unknown text','next');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests.length,1);assert.equal(f.script.restores.length,0)
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).reason,'context_authorization_changed')
+ }finally{await f.close()}
+})
+
+for(const scenario of ['revoked','valid','no-app','legacy'] as const)test(`confirmed Plan provenance follows a fresh empty-history Build (${scenario})`,{skip:!supported},async()=>{
+ const secret='Synthetic confirmed app plan L-917'
+ const f=await fixture((request,step)=>request.tools.some(tool=>tool.name==='finish_build')?{text:'Build checked current context'}:step===0?{call:{name:'publish_plan',arguments:{title:'Versioned plan',content:secret}}}:{text:'Plan ready'},'never')
+ try{
+  await f.host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const row=f.host.life.snapshot().todos[0]!
+  if(scenario!=='no-app'){
+   await f.host.close()
+   const {PersonalStore}=await import('../src/personal-agent/store.js'),store=new PersonalStore(join(f.root,'personal.json')),state=await store.read(),at=new Date().toISOString()
+   state.conversations.items[0]!.messages=[{id:'report-user',conversation_id:'chat:main',role:'user',text:'Review app source',created_at:at},{id:'report-answer',conversation_id:'chat:main',role:'assistant',text:secret,context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:at}]
+   await store.write(state);await f.host.open();f.runtime()
+  }
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main',scenario==='no-app'?'Publish the complete plan: '+secret:'Publish the complete plan','plan');await f.host.waitConversation('chat:main')
+  const reference=f.host.conversationSnapshot().items.find(item=>item.id==='chat:main')!.plan!
+  let plan=await f.host.workbench.plan(reference.id,reference.version)
+  assert.deepEqual(plan.context_dependencies,scenario==='no-app'?{state:'tracked',items:[]}:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  assert.ok(JSON.stringify(f.script.requests).includes(secret),'actual Plan request/publication chain carries synthetic plan text')
+  if(scenario==='valid'){const firstVersion=plan.version;const edited=await f.host.publishPlan('chat:main',0,plan.title,plan.content+'\nUser clarification');assert.equal(edited.id,plan.id);assert.equal(edited.version,firstVersion+1);assert.deepEqual(edited.context_dependencies,plan.context_dependencies);assert.deepEqual((await f.host.workbench.plan(plan.id,firstVersion)).context_dependencies,plan.context_dependencies);plan=edited}
+  if(scenario==='legacy'){
+   delete plan.context_dependencies;await f.host.workbench.savePlan(plan)
+   const checkpoint=await f.host.workbench.checkpoint('chat:main',0);delete checkpoint.context_dependencies;await f.host.workbench.saveCheckpoint(checkpoint)
+  }
+  if(scenario==='revoked'||scenario==='legacy')await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed source'},'revoke')
+  const count=f.script.requests.length
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id;assert.notEqual(id,'chat:main');await f.host.waitConversation(id)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.ok(!f.host.conversationSnapshot().messages.some(message=>message.id==='report-answer'),'fresh Build contains no source transcript')
+  if(scenario==='valid'||scenario==='no-app'){
+   assert.equal(f.script.requests.length,count+1)
+   assert.ok(f.script.requests.at(-1)!.workspaceContext?.includes(secret),'actual Build model input receives the authorized confirmed plan')
+   assert.deepEqual(checkpoint.context_dependencies,plan.context_dependencies)
+  }else{
+   assert.equal(f.script.requests.length,count,'no revoked plan reaches any fresh Build model request')
+   assert.equal(checkpoint.reason,'context_authorization_changed')
+  }
+  const retained=await f.host.workbench.plan(plan.id,plan.version)
+  assert.equal(retained.content,plan.content);assert.equal(retained.id,plan.id);assert.equal(retained.version,plan.version)
+ }finally{await f.close()}
+})
+
+for(const scenario of ['manual','no-app','source-backed','revoked-during-preparation','revoked-after-reservation'] as const)test(`external confirmed plan revalidates canonical dependencies before bridge invocation (${scenario})`,async()=>{
+ const f=await fixture(()=>({text:'unused'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const row=scenario==='source-backed'?await f.host.life.mutate({op:'from_suggestion',kind:'todo',suggestion_id:'source',title:'Private source record',note:'Private plan fact',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'source'):await f.host.life.mutate({op:'create',kind:'todo',title:'Manual plan record'},'manual')
+  const dependencies=scenario==='no-app'?{state:'tracked' as const,items:[]}:{state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]}
+  const plan=await f.host.publishPlan('chat:main',0,'Delegation plan','Complete local plan text',undefined,dependencies)
+  if(scenario==='revoked-during-preparation')f.bridge.origin=async()=>{await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed while preparing'},'change');return 'memory:test-user'}
+  if(scenario==='revoked-after-reservation'){const mark=f.host.tasks.markEffectDispatching.bind(f.host.tasks);f.host.tasks.markEffectDispatching=async id=>{await mark(id);await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed after reservation'},'change-reservation')}}
+  const result=await f.raw('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  if(scenario==='source-backed'||scenario==='revoked-during-preparation'||scenario==='revoked-after-reservation'){
+   assert.equal(result.ok,false);assert.equal(result.error,'context_authorization_changed');assert.equal(f.invocations.length,0)
+   assert.equal(f.host.conversationSnapshot().items[0]!.mode,'plan')
+   assert.ok(f.host.tasks.list().every(task=>!task.work_ids.length),'authorization denial cannot claim external delivery')
+   if(scenario==='revoked-after-reservation')for(const task of f.host.tasks.list()){assert.equal(task.waiting_reason,'plan_delegation_refused');assert.equal(f.host.tasks.pendingEffect(task.id),null)}
+  }else{
+   assert.equal(result.ok,true);assert.equal(f.invocations.length,1)
+   assert.ok(f.host.tasks.list().some(task=>task.work_ids.length===1))
+   assert.ok(!JSON.stringify(f.invocations).includes('context_dependencies'),'executor tool arguments contain no provenance/guard callback')
+  }
+  assert.equal((await f.host.workbench.plan(plan.id,plan.version)).content,plan.content)
+ }finally{await f.close()}
+})
+
+for(const receiver of ['build-a','build-b'])test(`confirmed source-backed plan uses the actual Build recipient (${receiver})`,{skip:!supported},async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-build-recipient-')),script=scripted(()=>({text:'Current Build result'}))
+ const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),canReadConversationEvidence:(_ref:string,consumer:string)=>Promise.resolve(consumer==='build-a')} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:''}),close:()=>Promise.resolve(),toolBridge:{tools:[],readonlyNames:[],origin:()=>Promise.resolve('conversation:1'),invoke:()=>Promise.reject(Error('unused'))}}
+ try{
+  await host.open()
+  host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,contextConsumer:receiver,factory:script.factory,createBridge:()=>Promise.resolve(bridge),emit,lifetime:lifetime??new AbortController().signal,language:'en',approval:'never'}),()=>{/* local */})
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){const ack=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(ack.ok,true)}
+  const row=await host.life.mutate({op:'from_suggestion',kind:'todo',suggestion_id:'source',title:'Receiver-scoped app plan fact',note:'Private source',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'source')
+  const plan=await host.publishPlan('chat:main',0,'Scoped plan','Receiver-scoped app plan fact',undefined,{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  const ack=await host.command({type:'personal.command',request_id:'confirm',method:'build.start',params:{id:'chat:main',plan_id:plan.id,version:plan.version,project:directory}},{client_id:'desktop:local'}) as {ok:boolean}
+  assert.equal(ack.ok,true);const id=host.conversationSnapshot().selected_id;await host.waitConversation(id)
+  assert.equal(script.requests.length,receiver==='build-a'?1:0)
+  if(receiver==='build-a')assert.ok(script.requests[0]!.workspaceContext?.includes(plan.content))
+  else assert.equal((await host.workbench.checkpoint(id,0)).reason,'context_authorization_changed')
+ }finally{await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('excluded non-product report does not taint an independent Plan publication, fresh Build or delegation',{skip:!supported},async()=>{
+ const excluded='Synthetic retained non-product scheduled report L-917',content='Independent no-app plan: inspect the local project'
+ const f=await fixture((request,step)=>request.tools.some(tool=>tool.name==='finish_build')?{text:'Independent Build reply'}:step===0?{call:{name:'publish_plan',arguments:{title:'Independent plan',content}}}:{text:'Independent plan ready'},'never')
+ try{
+  const context={todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}
+  const schedule=await f.host.schedules.create('create',{title:'Retained report',goal:'Review todos',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context},{user_scope:'local-test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context})
+  const run=await f.host.schedules.runNow('run',schedule.id,1),task=await f.host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await f.host.schedules.bindTask(run.run_id,task.id);await f.host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  const page=await f.host.readAppContext('todos',null,f.host.scheduledRunGrant(run.run_id,new AbortController().signal,null))
+  await f.host.tasks.recordDelivery(fence,'report',excluded);await f.host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:report'],criteria:[{index:0,evidence_refs:['task-delivery:report']}]})
+  await f.host.schedules.markFinished(run.run_id,{memory_origin:'non_product',outcome:'completed',text:excluded,evidence_refs:page.evidence_refs,consumer:null,published:false})
+  await f.host.publishScheduledResult(run.run_id)
+  assert.equal(await f.host.scheduledResultAuthorized(run.run_id),false)
+  const report=f.host.conversationSnapshot().messages.find(message=>message.schedule_ref?.run_id===run.run_id)!
+  assert.equal(report.memory_origin,'non_product');assert.ok(report.text.includes(excluded))
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Publish an independent no-app plan','independent');await f.host.waitConversation('chat:main')
+  const reference=f.host.conversationSnapshot().items.find(item=>item.id==='chat:main')!.plan!
+  const published=await f.host.workbench.plan(reference.id,reference.version)
+  assert.deepEqual(published.context_dependencies,{state:'tracked',items:[]},'host publication preserves actual filtered-input provenance')
+  const plan=await f.host.publishPlan('chat:main',0,published.title,published.content+'\nUser clarification')
+  assert.equal(plan.version,published.version+1);assert.deepEqual(plan.context_dependencies,published.context_dependencies,'host-only edit fallback also excludes non-product history')
+  const count=f.script.requests.length
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const build=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(build)
+  assert.equal(f.script.requests.length,count+1);assert.equal((JSON.parse(f.script.requests.at(-1)!.workspaceContext!) as {confirmed_plan:{content:string}}).confirmed_plan.content,plan.content,'actual fresh Build receives the independent confirmed plan')
+  assert.deepEqual((await f.host.workbench.checkpoint(build,0)).context_dependencies,{state:'tracked',items:[]})
+  await f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  assert.equal(f.invocations.length,1)
+  const delegated=f.host.tasks.list().find(task=>task.approved_plan?.id===plan.id)!
+  assert.equal(delegated.approved_plan!.content,plan.content);assert.equal(delegated.work_ids.length,1);assert.equal(f.host.tasks.pendingEffect(delegated.id),null)
+  const executorInput=approvedPlanWorkOrder({workOrder:'Execute confirmed plan',approvedPlan:delegated.approved_plan!})
+  assert.ok(executorInput.includes(plan.content))
+  assert.ok(!JSON.stringify(f.script.requests).includes(excluded),'neither actual Plan nor Build model inputs contain the excluded report')
+  assert.ok(!JSON.stringify(f.invocations).includes(excluded)&&!executorInput.includes(excluded),'executor inputs contain no excluded report')
+  await f.command('conversations.select',{id:'chat:main'})
+  assert.ok(f.host.conversationSnapshot().messages.some(message=>message.id===report.id&&message.text.includes(excluded)),'original report remains locally visible')
  }finally{await f.close()}
 })

@@ -109,6 +109,8 @@ export interface ServiceRuntime {
   }
 }
 export interface HostItemOptions {
+  /** Internal destination authorization; never serialized into provider/wire content. */
+  readonly authorizeBeforeInject?:(signal:AbortSignal)=>Promise<boolean>
       readonly stillWanted?:()=>boolean
   readonly onNotDelivered?:()=>Promise<void>
       readonly semanticEventId?: string | null

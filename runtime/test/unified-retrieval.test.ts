@@ -1,3 +1,8 @@
+import {mkdtemp,realpath,rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {createMem0PersonalMemory} from '../src/mem0/resource.js'
+import {provider,eventually,turn} from './helpers/mem0-fixture.js'
 import {currentUsageContext,type UsageContext} from '../src/usage/context.js'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -130,4 +135,39 @@ test('shared retrieval work inherits its caller task without cross-conversation 
   assert(calls.every(value=>value.runId==='run-'+id&&value.taskId==='task-'+id&&value.feature==='recall'))
  }
  assert.deepEqual(currentUsageContext(),{})
+})
+
+test('recall-only engine failure emits safe class telemetry and remains degraded',async()=>{
+  const personal=memory([])
+  personal.recallEngine='mem0'
+  personal.recall=()=>Promise.reject(Object.assign(Error('private query https://secret.invalid'),{code:'https://secret.invalid'}))
+  const events:unknown[]=[]
+  const result=await new UnifiedRetrieval({memory:()=>personal,telemetry:{record:(kind,payload)=>events.push({kind,payload})}}).recall('private query')
+  assert.deepEqual(events,[{kind:'memory.recall.engine_failed',payload:{engine:'mem0',code:'error'}}])
+  assert.equal(result.degraded,true);assert.equal(result.state,'unavailable')
+})
+
+
+
+test('mem0 adapter with an 8-hit request returns entries and evidence with degraded=false; in-flight and restarted recall cannot revive forgotten sources', {timeout:20000},async t=>{
+  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-mem0-unified-')),endpoint=await provider()
+  const options={path:join(directory,'memory.sqlite'),userId:'host-user',conversationProviders:['model-a'],embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'}
+  let store=createMem0PersonalMemory(options)
+  t.after(async()=>{await store.close();await endpoint.close();await rm(directory,{recursive:true,force:true})})
+  await store.open();await store.remember!(turn('raw-source','I really enjoy fresh apples'))
+  await eventually(async()=> (await store.recall('apples',{scope:'any'})).hits.length===1)
+  const retrieval=new UnifiedRetrieval({memory:()=>store})
+  const result=await retrieval.recall('apples',{limit:8,consumer:'model-a'})
+  assert.equal(result.degraded,false);assert.equal(result.entries.length,1);assert.equal(result.entries[0]?.text,'likes apples')
+  assert.equal(result.snippets[0]?.text,'I really enjoy fresh apples')
+  assert.equal((await retrieval.evidence('raw-source',{consumer:'model-a'})).evidence?.text,'I really enjoy fresh apples')
+  const inflight=retrieval.recall('blocked recall',{limit:8,consumer:'model-a'})
+  await eventually(()=>endpoint.recallStarted)
+  await store.forgetSource!('raw-source');endpoint.releaseRecall()
+  const forgotten=await inflight
+  assert.deepEqual(forgotten.entries,[]);assert.deepEqual(forgotten.snippets,[])
+  assert.equal((await retrieval.evidence('raw-source',{consumer:'model-a'})).evidence,null)
+  await store.close();store=createMem0PersonalMemory(options);await store.open()
+  assert.deepEqual((await retrieval.recall('apples',{consumer:'model-a'})).entries,[])
+  assert.equal((await store.remember!(turn('raw-source','I really enjoy fresh apples'))).state,'deleted')
 })

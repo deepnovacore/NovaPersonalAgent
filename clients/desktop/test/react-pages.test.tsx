@@ -198,3 +198,15 @@ test('profile shows warmup status, icon work cards and read-only interest tags',
   assert.equal(p.host.querySelector('[aria-label="资讯兴趣"]'),null)
  }finally{await p.close()}
 })
+
+
+test('memory expired-history control is unavailable unless the backend supports it',async()=>{
+ for(const includeExpired of [false,true]){
+  const p=await mount('profile',{life,memory:{entries:[]},capabilities:{memory:{list:true,includeExpired}}})
+  const checkbox=p.host.querySelector('.memory-section input[type="checkbox"]') as HTMLInputElement
+  assert.ok(checkbox);assert.equal(checkbox.disabled,!includeExpired)
+  await act(async()=>checkbox.click())
+  assert.deepEqual(p.calls,includeExpired?[['memory.list',{limit:50,include_expired:true}]]:[])
+  await p.close()
+ }
+})

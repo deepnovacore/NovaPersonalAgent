@@ -4,6 +4,22 @@ import 'package:nova_mobile/ui/tool_step.dart';
 import 'package:nova_mobile/ui/tool_timeline.dart';
 
 void main() {
+  test(
+    'memory tool labels follow the Chinese and English tool string pattern',
+    () {
+      for (final (name, zh, en) in [
+        ('memory_remember', '保存记忆', 'Save memory'),
+        ('memory_recall', '召回记忆', 'Recall memory'),
+        ('memory_forget', '忘记记忆', 'Forget memory'),
+      ]) {
+        expect(ToolStep(name: name, status: 'completed').label, zh);
+        expect(
+          ToolStep(name: name, status: 'completed', language: 'en').label,
+          en,
+        );
+      }
+    },
+  );
   testWidgets('finished group is one line that expands to its steps', (
     tester,
   ) async {

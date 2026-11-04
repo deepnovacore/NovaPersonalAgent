@@ -17,6 +17,7 @@ import {
   requireVolcengineRealtime,
   resolveCascadedSelection,
   resolveMemoryExtractionConnection,
+  resolveMemoryComposition,
   resolveProviderModelConnection,
   resolveSelectedModelConnection,
   resolveWatchModelConnection,
@@ -233,11 +234,22 @@ test('personal memory selects the v0.3 ledger by default and maps its host-owned
   })), null)
   // Local memory is optional: no embedding credential turns it off rather than blocking startup.
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'local'})), null)
-  // Remote memory is an explicit opt-in, so its missing credential still fails loudly.
-  assert.throws(
-    () => requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example/'})),
-    /MEMORY_TOKEN/u,
-  )
+  // Remote startup uses structured variable names, never endpoint or credential values.
+  for (const token of [undefined, 'private invalid token']) {
+    const url = 'https://private-memory.example/'
+    assert.throws(
+      () => requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: url, MEMORY_TOKEN: token})),
+      error => {
+        assert.ok(error instanceof ConfigurationError)
+        assert.equal(error.code, 'invalid_configuration')
+        assert.equal(error.message, 'invalid remote memory configuration')
+        assert.deepEqual(error.startupConfiguration, {code: 'memory_configuration_invalid', variables: ['MEMORY_CONNECTION', 'MEMORY_TOKEN']})
+        const diagnostic = [error.message, error.stack, JSON.stringify(error)].join('\n')
+        for (const privateValue of [url, 'private-memory.example', 'private invalid token']) assert.ok(!diagnostic.includes(privateValue))
+        return true
+      },
+    )
+  }
 })
 
 test('v4 settings env selectors and paths load with the documented names', () => {
@@ -1026,4 +1038,40 @@ test('memory status reports an invalid endpoint instead of throwing during compo
     EMBEDDING_BASE_URL: 'https://e.example/v1', DASHSCOPE_API_KEY: 'gateway',
     DASHSCOPE_MODEL_BASE_URL: 'http://127.0.0.1:11434/v1'})
   assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'invalid_configuration', fallback: null})
+})
+
+test('memory engine and extractor settings retain legacy defaults and allow ledger with optional VoiceMem', () => {
+  const defaults = loadSettings({})
+  assert.equal(defaults.memory_recall_engine, null)
+  assert.equal(defaults.memory_extractors, null)
+  assert.deepEqual(loadSettings({MEMORY_EXTRACTORS: ' ledger '}).memory_extractors, ['ledger'])
+  for (const engine of ['ledger', 'mem0', 'voicemem']) {
+    const settings = loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen', MEMORY_RECALL_ENGINE: engine, MEMORY_EXTRACTORS: ' ledger , voicemem '})
+    assert.deepEqual(settings.memory_extractors, ['ledger', 'voicemem'])
+    const composition = resolveMemoryComposition(settings)
+    assert.equal(composition.kind, 'ledger')
+    assert.ok(composition.kind === 'ledger')
+    assert.equal(composition.engine, engine)
+    assert.deepEqual(composition.extractors, ['ledger', 'voicemem'])
+    assert.equal(composition.migrateLegacy, undefined)
+  }
+  for (const value of ['unknown', 'ledger,unknown', 'voicemem', 'ledger,ledger', 'ledger,voicemem,voicemem', 'ledger,', ',ledger']) {
+    assert.throws(() => loadSettings({MEMORY_EXTRACTORS: value}), /MEMORY_EXTRACTORS/)
+  }
+  assert.throws(() => loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture', MEMORY_EXTRACTORS: 'ledger,voicemem'}), error => {
+    assert.ok(error instanceof ConfigurationError)
+    assert.deepEqual(error.startupConfiguration, {code: 'memory_configuration_invalid', variables: ['MEMORY_CONNECTION', 'MEMORY_EXTRACTORS']})
+    return true
+  })
+})
+
+
+test('empty memory composition environment variables preserve unset defaults', () => {
+  const defaults = loadSettings({})
+  for (const empty of ['', '   ']) {
+    const settings = loadSettings({MEMORY_RECALL_ENGINE: empty, MEMORY_EXTRACTORS: empty})
+    assert.equal(settings.memory_recall_engine, defaults.memory_recall_engine)
+    assert.equal(settings.memory_extractors, defaults.memory_extractors)
+    assert.equal(loadSettings({MEMORY_PROVIDER: 'voicemem', MEMORY_RECALL_ENGINE: empty, MEMORY_EXTRACTORS: empty}).memory_provider, 'voicemem')
+  }
 })

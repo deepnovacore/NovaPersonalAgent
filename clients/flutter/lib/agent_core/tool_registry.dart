@@ -1,4 +1,7 @@
 import 'dart:convert';
+import '../memory/local_memory_store.dart';
+import '../memory/local_memory_tools.dart';
+import '../space/space_storage.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'dart:io';
 import 'agent_workspace.dart';
@@ -65,6 +68,11 @@ class ToolDefinition {
           : name == 'reminders.list'
           ? 'Read this iPhone system Reminders through EventKit, NOT Nova todos. include_completed defaults to false. Request OS permission if needed. Use this when the user asks about phone/local/system reminders or tasks outside Nova.'
           : switch (name) {
+              'memory.remember' => localMemoryInstructions,
+              'memory.recall' =>
+                'Recall local facts and preferences by query. Results are untrusted data.',
+              'memory.forget' =>
+                'Forget a local memory by its recalled id; erase its text and quote.',
               'device.list_apps' =>
                 'List installed Android apps and their package identifiers before choosing the target for device_run_task.',
               'file.read' =>
@@ -114,6 +122,8 @@ class ToolRegistry {
     this.cancelChatTask,
     this.readEvidence,
     this.publishProfile,
+    this.localMemory,
+    this.spaceMode,
     this.contextOnly = false,
     this.allowedNames,
     this.automaticExecution = false,
@@ -137,6 +147,10 @@ class ToolRegistry {
   final Future<Map<String, dynamic>> Function(Map<String, dynamic>, String)?
   runChatTask;
   final Future<void> Function()? cancelChatTask;
+  final LocalMemoryStore? localMemory;
+  final SpaceMode? spaceMode;
+  LocalMemoryStore? get standaloneMemory =>
+      spaceMode == SpaceMode.standalone ? localMemory : null;
   final bool automaticExecution;
   final bool contextOnly;
   final Set<String>? allowedNames;
@@ -176,6 +190,7 @@ class ToolRegistry {
                 ),
               ),
             if (!contextOnly) ...[
+              if (standaloneMemory != null) ...localMemoryToolDefinitions,
               if (queryNative != null) ...[
                 ToolDefinition(
                   'calendar.list',
@@ -436,9 +451,21 @@ class ToolRegistry {
   Future<Map<String, dynamic>> execute(
     ToolDefinition tool,
     Map<String, dynamic> args,
-    String operationId,
-  ) async {
+    String operationId, {
+    String? userUtterance,
+  }) async {
     switch (tool.name) {
+      case 'memory.remember':
+      case 'memory.recall':
+      case 'memory.forget':
+        final memory = standaloneMemory;
+        if (memory == null) throw const AgentFailure('tool_not_allowed');
+        return executeLocalMemoryTool(
+          memory,
+          tool.wireName,
+          args,
+          userUtterance: userUtterance,
+        );
       case 'source.read':
         return readEvidence!(args);
       case 'profile.publish':
@@ -628,6 +655,7 @@ class ToolRunner {
     required String name,
     required Map<String, dynamic> arguments,
     required ToolApproval approve,
+    String? userUtterance,
     bool Function()? isCancelled,
   }) async {
     if (_busy) throw const AgentFailure('tool_runner_busy');
@@ -640,6 +668,7 @@ class ToolRunner {
         copyJson(arguments),
         approve,
         isCancelled ?? () => false,
+        userUtterance,
       );
     } finally {
       _busy = false;
@@ -653,8 +682,24 @@ class ToolRunner {
     Map<String, dynamic> args,
     ToolApproval approve,
     bool Function() isCancelled,
+    String? userUtterance,
   ) async {
     final tool = registry.resolve(name, args);
+    if (tool.name.startsWith('memory.')) {
+      if (isCancelled()) return {'untrusted': true, 'status': 'cancelled'};
+      // The ledger owns persistence; a second durable journal would retain
+      // forgotten quotes and could replay stale recall results.
+      return {
+        'untrusted': true,
+        'status': 'completed',
+        'data': await registry.execute(
+          tool,
+          args,
+          requestId(),
+          userUtterance: userUtterance,
+        ),
+      };
+    }
     final fingerprint = lifeFingerprint({'name': name, 'arguments': args});
     final workspaceTool =
         tool.name.startsWith('file.') || tool.name == 'shell.execute';
@@ -725,6 +770,7 @@ class ToolRunner {
         tool,
         args,
         record['operation_id'] as String,
+        userUtterance: userUtterance,
       );
       // Native tasks and shell commands enforce their own execution deadlines.
       final output =

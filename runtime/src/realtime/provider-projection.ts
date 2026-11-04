@@ -218,7 +218,8 @@ projectRuntimeEvent(event: EventRecord, currentConversation = true): void {
     this.publishExecutorState()
   }
 
-onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
+onSuggestionSelected(suggestion: Suggestion, reason: WakeReason,authorization:Pick<HostItemOptions,'authorizeBeforeInject'>={}): void {
+    if(typeof suggestion.content.personal_feed_id==='string'&&!authorization.authorizeBeforeInject)return
     const progress = this.#isSelectedProgress(suggestion)
     const coding = progress && suggestion.evidence_refs[0]?.startsWith(`${this.ports.coding?.channel}:`) === true
     if (coding && this.ports.codingProgressNarration.mode !== 'smart') return
@@ -236,6 +237,7 @@ onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
       ...(reason.origin === null ? {} : {source: this.#workSource(reason.origin)}),
       content: suggestionSpeechView(suggestion.content),
     }), {
+      ...authorization,
       priority: hit ? Math.max(reason.priority, HIT_ALERT_MIN_PRIORITY) : reason.priority,
       preemptive: false,
       ...(coding ? {owner: {delegate_id: reason.origin!, channel: delegate!.executor}, expiresAt: this.ports.clock.now() + PROGRESS_HOST_ITEM_TTL_S} : {}),
