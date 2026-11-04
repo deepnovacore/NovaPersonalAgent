@@ -94,7 +94,7 @@ export class TimelineBrief {
  #persisted:State=empty()
  #loadFailed=false
  get loadFailed(){return this.#loadFailed}
- #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#suspendedAt=0;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
+ #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#epoch=0;#suspendedAt=0;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
  constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
  async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}
   if(this.#dropDuplicates())await this.#save()
@@ -106,11 +106,13 @@ export class TimelineBrief {
  /** IDs only: each cached citation must be re-read under current source permissions. */
  retainedEvidenceIds(){return [...new Set(this.#state.cards.filter(card=>!this.#dismissed(card)).flatMap(card=>card.refs))]}
  basis(id?:string){return structuredClone([...new Map(this.#visibleCards().filter(card=>(!id||card.id===id)&&this.#sourcesAvailable(card)).flatMap(card=>(card.evidence_basis??this.#state.basis).filter(input=>card.refs.includes(input.id))).map(input=>[input.id,input])).values()])}
- async clear(){this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.#loadFailed=false;this.changed()}
- suspend(){if(!this.#pendingValidation)this.#suspendedAt=Date.now();this.#pendingValidation=true;this.changed()}
+ async clear(){this.#epoch++;this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.#loadFailed=false;this.changed()}
+ /** Counts every event after which previously read inputs may no longer be authorized; a cached read is reusable only within one epoch. */
+ get epoch():number{return this.#epoch}
+ suspend(){this.#epoch++;if(!this.#pendingValidation)this.#suspendedAt=Date.now();this.#pendingValidation=true;this.changed()}
  /** A recheck that finishes within the grace window is invisible; only a slow one shows the checking state, so source events do not make cards and their buttons blink. */
  #checking(){return this.#pendingValidation&&Date.now()-this.#suspendedAt>CHECKING_GRACE_MS}
- invalidate(){this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
+ invalidate(){this.#epoch++;this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
  unavailable(){this.invalidate();this.#status='failed';this.#error='timeline_sources_unavailable';this.changed()}
  #key(){return hash(['timeline-scope-v15',this.#date,this.#timezone,this.#inputs.map(({id,version})=>({id,version}))])}
  #compatible(basis:readonly {id:string;version:string}[],date:string,timezone:string|null){
@@ -119,7 +121,7 @@ export class TimelineBrief {
   return basis.every(input=>versions.get(input.id)===input.version)
  }
  setAccess(access:TimelineAccess){
-  if(this.#access?.scope!==access.scope||!access.allowed){this.#abort.abort();this.#abort=new AbortController();this.#inputs=[]}
+  if(this.#access?.scope!==access.scope||!access.allowed){this.#epoch++;this.#abort.abort();this.#abort=new AbortController();this.#inputs=[]}
   this.#access={...access,legacy_refs:[...access.legacy_refs]}
  }
  #dismissed(card:State['cards'][number],state=this.#state){return state.dismissed.includes(`${card.artifact_scope??''}:${card.id}`)||!card.artifact_scope&&state.dismissed.includes(card.id)}
@@ -277,6 +279,7 @@ export class TimelineBrief {
   this.#run=work;await work
  }
  async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id))throw Error('stale_reference');this.#state.dismissed=[...new Set([...this.#state.dismissed,`${this.#access!.scope}:${id}`])].slice(-256);await this.#save();this.#loadFailed=false;this.changed()}
- discussion(id:string,version:string){const card=this.snapshot().cards.find(card=>card.id===id&&card.version===version);if(!card||!this.#sourcesAvailable(card)||card.policy_revision!==1)throw Error('stale_reference');return {card,evidence_refs:[...new Set(card.refs.flatMap(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return input.kind==='file'?[]:input.evidence_refs??[ref]}))],originals:card.refs.map(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return {text:input.text,observed_at:input.observed_at,relation:input.relation,author:input.author}})}}
+ /** Looks the card up directly: a full snapshot() would also format a date for every input, which is the slow part with thousands of messages. */
+ discussion(id:string,version:string){const card=this.#visibleCards().find(card=>card.id===id&&card.version===version);if(!card||!this.#sourcesAvailable(card)||card.policy_revision!==1)throw Error('stale_reference');return {card:structuredClone({...card,sources_available:true,sources_checking:this.#checking(),historical:false}),evidence_refs:[...new Set(card.refs.flatMap(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return input.kind==='file'?[]:input.evidence_refs??[ref]}))],originals:card.refs.map(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return {text:input.text,observed_at:input.observed_at,relation:input.relation,author:input.author}})}}
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#timer=undefined;this.#abort.abort();await this.#run;await this.#tail}
 }

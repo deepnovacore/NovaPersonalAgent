@@ -198,6 +198,9 @@ export interface TaskRuntimePort {
 }
 /** The completion line is spoken, so a long goal is cut to its first sentence or 40 characters. */
 export function announcedGoal(goal:string):string{const line=goal.trim().split(/[\n。！？!?]/)[0]!.trim();return [...line].length>40?[...line].slice(0,39).join('')+'…':line}
+/** Upper bound on reusing a completed timeline read for discussions, a backstop for any invalidation that has no explicit epoch hook. */
+const TIMELINE_FRESH_MS=15_000
+
 export class PersonalAgentHost {
     readonly workbench:WorkbenchStore;
     readonly #localBuildAuthority=new Set<string>();
@@ -778,6 +781,10 @@ export class PersonalAgentHost {
     #timelineRefresh:Promise<void>|undefined;
     #stateRefresh:Promise<void>|undefined;
     #timelineRevision=0;
+    /** Bumped on every host-level event that can change what a timeline read was allowed to see (source, connection/consent, purge, failure, close). */
+    #timelineEpoch=0;
+    /** The last refresh that fully completed, valid only while neither the host nor the timeline epoch moved, the scope matches and it is recent. */
+    #timelineFresh:{host:number;brief:number;scope:string;at:number}|undefined;
     readonly projectDigests:ProjectDigests;
     readonly understanding:PersonalUnderstanding;
     readonly news: NewsService;
@@ -969,7 +976,7 @@ export class PersonalAgentHost {
                 material.push(JSON.stringify({kind:ref.kind,title:row.title,note:row.note,status:row.status,...('due' in row?{due:row.due}:{success_criteria:row.success_criteria})}));
                 if(ref.kind==='todo'&&references.filter(item=>item.kind==='todo').length===1)sourceTodo={id:ref.id,version:ref.version};
             }else if(ref.kind==='timeline'){
-                await this.refreshTimeline();const selected=this.timeline.discussion(ref.id,ref.version);
+                await this.#ensureTimeline();const selected=this.timeline.discussion(ref.id,ref.version);
                 material.push(JSON.stringify({kind:'timeline',...selected}));evidenceRefs.push(...selected.evidence_refs);
             }else if(ref.kind==='news'){
                 const input=this.news.conversionInput({id:ref.id,content_hash:ref.content_hash,kind:'idea',title:'Discussion'});
@@ -1266,7 +1273,7 @@ export class PersonalAgentHost {
       },code=>options.onDiagnostic?.(code));
       this.#timelineCache=new TimelineCache(options.path+'.timeline-cache.json');
       this.timeline=new TimelineBrief(options.path+'.timeline.json',options.generateTimeline?async(inputs,context,signal,progress,run)=>{
-        const authorize=async()=>{signal.throwIfAborted();const allowed=await this.#timelineInputs();signal.throwIfAborted();if(inputs.some(input=>!allowed.some(current=>current.id===input.id&&current.version===input.version))){this.timeline.invalidate();void this.#timelineCache.clear();throw Error('processing_consent_required')}}
+        const authorize=async()=>{signal.throwIfAborted();const allowed=await this.#timelineInputs();signal.throwIfAborted();if(inputs.some(input=>!allowed.some(current=>current.id===input.id&&current.version===input.version))){this.#timelineInvalidated();this.timeline.invalidate();void this.#timelineCache.clear();throw Error('processing_consent_required')}}
         await authorize();const result=await options.generateTimeline!(inputs,context,signal,async partial=>{await authorize();await progress?.(partial)},run);await authorize();return result
       }:undefined,()=>this.#notify(),{cache:this.#timelineCache}); this.notifications=new NotificationService({path:options.path+'.notifications.json',userScope:options.userScope,adapters:[novaNotificationAdapter(message=>this.#presentNotification(message)),spaceRelayNotificationAdapter(()=>this.#spaceHost?.service),...(options.notificationAdapters??[])],now:()=>this.#now().getTime(),valid:message=>this.notificationValidity(message),changed:()=>this.#notify()}); this.profileWarmup=new ProfileWarmup(options.path+'.profile-draft.json',!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?async(entries,signal)=>{
           const authorize=async()=>{signal.throwIfAborted();const memory=this.#productMemory(),current=await this.#generationMemories(entries.map(e=>e.id));const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[]),...await memory?.profileSources?.(entries.filter(entry=>entry.source?.kind).map(entry=>entry.id))??[]],digests=new Map(profileInputsFromDigests(this.projectDigests.digests()).map(input=>[input.id,input]));if(entries.some(e=>{const digest=digests.get(e.id);return digest?digest.version!==e.version||digest.refs.some(ref=>!allowed.some(a=>a.id===ref.entry_id&&a.version===ref.version)):!allowed.some(a=>a.id===e.id&&a.version===e.version)}))throw Error('processing_consent_required');};
@@ -1275,7 +1282,7 @@ export class PersonalAgentHost {
           await authorize();signal.throwIfAborted();return result;
         }:undefined,()=>{this.#notify();this.#seedNews()},{participants:options.profileParticipantMessages===true,report:result=>appendAcceptanceCounts('profile_result',{['outcome_'+result.outcome]:1,latency_ms:result.latency_ms,items:result.items})}); this.workbenchContext=options.generateWorkbench?new DailyWorkbench({path:options.path+'.workbench-daily.json',legacyPath:options.path+'.context.json',generate:options.generateWorkbench,life:()=>this.life,changed:()=>this.#notify(),inputs:()=>this.#timelineInputs(),inputsReady:()=>this.#memoryReady,timezone:()=>dailyBriefSettings(this.#state.settings).timezone,now:()=>this.#now(),ready:()=>this.#workbenchReady()}):new WorkbenchContext(options.path+'.context.json',!options.memory()?.sourceProcessing&&options.generateContext?async(entries,signal)=>{const refs=[...new Set(entries.flatMap(entry=>entry.refs.map(ref=>ref.entry_id)))];const current=await this.#generationMemories(refs);const allowed=[...await this.authorizedGenerationEntries(current.filter((e):e is MemoryEntry=>e!==null)),...(this.#sources?.contextEntries?.()??[])];const authorized=entries.filter(entry=>entry.refs.every(ref=>allowed.some(item=>item.id===ref.entry_id&&item.version===ref.version)));signal.throwIfAborted();appendAcceptanceCounts('context_model',{eligible_candidates:authorized.length,model_calls:1});return withModelPurpose('context',()=>options.generateContext!(authorized,signal))}:undefined,()=>this.#notify()); this.projectDigests=new ProjectDigests(options.path+'.project-digests.json',options.generateDigests&&!options.memory()?.sourceProcessing&&options.generateProfile&&(!acceptanceEnabled()||acceptanceProfileGenerationEnabled())?(projects,signal)=>{const authorize=()=>{const allowed=new Map((this.#sources?.contextEntries?.()??[]).map(entry=>[entry.id,entry.version]));if(projects.some(project=>project.documents.some(d=>allowed.get(d.entry_id)!==d.version)))throw Error('processing_consent_required')};try{authorize()}catch(error){return Promise.reject(error instanceof Error?error:Error('processing_consent_required'))}appendAcceptanceCounts('digest_model',{projects:projects.length,model_calls:1});return withModelPurpose('digest',()=>options.generateDigests!(projects,signal,authorize))}:undefined,()=>this.#digestsChanged(),{report:result=>appendAcceptanceCounts('digest_result',{['outcome_'+result.outcome]:1,projects:result.projects,digests:result.digests,latency_ms:result.latency_ms})}); this.#store = new PersonalStore(options.path); this.tasks=new TaskService(options.path+'.tasks.json',()=>this.#contextAuthorityChanged(),taskId=>{if(this.#recovering||this.#recoveryBlocked.has(taskId))throw new TaskExecutionRejected('task_recovery_blocked')}); this.schedules=new ScheduleService(options.path+'.schedules.json',()=>this.#contextAuthorityChanged(),()=>this.#now());this.scheduledAuthority=new ScheduledRunAuthority(this.schedules,this.tasks);this.life=new LifeService(options.path+'.life.json',()=>this.#notify(),()=>options.memory()?.lifeBackend?.());this.taskLoop=new TaskLoop(this.tasks,{validateEvidence:task=>{if(!task.trigger)return Promise.resolve(true);return this.taskRuntime(task.id).validateEvidence?.(task)??Promise.resolve(false)},ready:task=>{if(this.#recovering||this.#recoveryBlocked.has(task.id))return false;try{return this.taskRuntime(task.id).ready?.(task)??true}catch{return true}},evaluate:(task,signal)=>{const port=this.taskRuntime(task.id);if(!port.evaluate)throw Error('task_evaluation_unavailable');return port.evaluate(task,signal)},execute:async(task,instruction,fence)=>{if(!task.execution_route)throw new TaskExecutionRejected('execution_route_required');try{this.taskRuntime(fence.task_id)}catch{throw new TaskExecutionRejected('task_runtime_unavailable')}let grant:TaskDispatchContext;try{grant=this.tasks.continuationContext(fence);this.tasks.validateContinuation(grant)}catch{throw new TaskExecutionRejected('task_continuation_stale')}await this.continueTask(grant,instruction)},publish:task=>task.trigger?this.publishScheduledResult(task.trigger.run_id):this.taskResult('verified:'+task.id+':'+task.goal_revision,'任务已完成：'+announcedGoal(task.goal),task),syncTodo:task=>this.life.completeTaskTodo(task)}); this.news=new NewsService({path:options.path+'.news.json',...(options.newsLanguage?{language:options.newsLanguage}:{}),...(options.rankNews&&!acceptanceEnabled()?{rank:options.rankNewsFallback?(interests,articles,signal)=>(this.#state.settings.news_rank_fallback!==false?options.rankNewsFallback!:options.rankNews!)(interests,articles,signal):options.rankNews}:{}),...(acceptanceEnabled()&&!acceptanceNewsEnabled()?{firstRefreshMs:null}:{}),changed:()=>this.#notify(),ranked:()=>{void this.#pushNews()}}); this.understanding=new PersonalUnderstanding({...(options.understand&&!acceptanceEnabled()?{pipeline:options.understand}:{}),life:this.life,changed:()=>this.#notify(),resolveCandidate:(row,signal,guard)=>{const memory=options.memory();if(!memory?.lifeBackend)return Promise.resolve(undefined);if(!memory.resolveLifeCandidate)throw Error('candidate_resolution_unavailable');return memory.resolveLifeCandidate(row,signal,guard)},source:()=>this.#understandingSource()}); }
     get path(): string { return this.options.path; }
-    connectionChanged(): void { this.#contextAuthorityChanged(); }
+    connectionChanged(): void { this.#timelineInvalidated();this.#contextAuthorityChanged(); }
     setConnectors(connectors: PersonalFeishu): void { this.#connectors = connectors; }
     setFeishu(feishu: PersonalFeishu): void { this.#feishu = feishu; }
     setSources(sources: PersonalSources): void { this.#sources = sources; }
@@ -1415,6 +1422,7 @@ export class PersonalAgentHost {
         this.#memoryReady = false;
         clearInterval(this.#scheduledTimer);
         this.#discoveryWindow.cancel();
+        this.#timelineInvalidated();
         await this.timeline.close();
         await this.#timelineCache.flush();
         await this.#timelineRefresh;
@@ -1920,15 +1928,27 @@ export class PersonalAgentHost {
         const gone=await this.#productMemory()?.timelineRetired?.(missing).catch(()=>[] as string[])??[]
         if(gone.length)await this.timeline.retire(new Set(gone))
     }
+    #timelineScope():string{const account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id;return account?'feishu:'+account:'local'}
+    #timelineInvalidated():void{this.#timelineEpoch++;this.#timelineFresh=undefined}
+    /** True only when a completed refresh is still valid; the card itself is always re-checked by timeline.discussion(). */
+    #timelineCurrent():boolean{
+        const fresh=this.#timelineFresh;
+        return this.#opened&&fresh!==undefined&&fresh.host===this.#timelineEpoch&&fresh.brief===this.timeline.epoch&&fresh.scope===this.#timelineScope()&&Date.now()-fresh.at<TIMELINE_FRESH_MS;
+    }
+    /** A timeline read for a click: reuses a still-valid refresh, otherwise reads as before. */
+    #ensureTimeline():Promise<void>{
+        if(this.#timelineCurrent()){if(acceptanceEnabled())appendAcceptanceCounts('timeline_refresh',{skipped:1});return Promise.resolve()}
+        return this.refreshTimeline();
+    }
     refreshTimeline():Promise<void>{
         if(!this.#opened)return Promise.resolve();
         if(this.#timelineRefresh)return this.#timelineRefresh;
-        const run=(async()=>{try{while(this.#opened){const revision=this.#timelineRevision,account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id,scope=account?'feishu:'+account:'local';if(this.#timelineCacheScope!==undefined&&this.#timelineCacheScope!==scope)void this.#timelineCache.clear();this.#timelineCacheScope=scope;this.timeline.setAccess({scope,allowed:true,legacy_refs:[]});const inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone,{scope,allowed:true,legacy_refs:inputs.filter(input=>input.kind==='file'||input.kind==='memory'||!!account&&input.account_scope===account).map(input=>input.id)});await this.#retireDeletedTimelineMessages();return}}catch(error){this.timeline.unavailable();throw error}})();
+        const run=(async()=>{try{while(this.#opened){const started=performance.now(),revision=this.#timelineRevision,hostEpoch=this.#timelineEpoch,account=(this.#feishu?.snapshot() as {account_id?:string}|undefined)?.account_id,scope=account?'feishu:'+account:'local';if(this.#timelineCacheScope!==undefined&&this.#timelineCacheScope!==scope)void this.#timelineCache.clear();this.#timelineCacheScope=scope;this.timeline.setAccess({scope,allowed:true,legacy_refs:[]});const briefEpoch=this.timeline.epoch;const inputs=await this.#timelineInputs(true);if(!this.#opened)return;if(revision!==this.#timelineRevision)continue;const timezone=dailyBriefSettings(this.#state.settings).timezone;this.timeline.update(inputs,this.#now().toLocaleDateString('en-CA',{timeZone:timezone}),timezone,{scope,allowed:true,legacy_refs:inputs.filter(input=>input.kind==='file'||input.kind==='memory'||!!account&&input.account_scope===account).map(input=>input.id)});await this.#retireDeletedTimelineMessages();if(this.#opened&&hostEpoch===this.#timelineEpoch&&briefEpoch===this.timeline.epoch&&scope===this.#timelineScope())this.#timelineFresh={host:hostEpoch,brief:briefEpoch,scope,at:Date.now()};if(acceptanceEnabled())appendAcceptanceCounts('timeline_refresh',{inputs:inputs.length,skipped:0,duration_ms:Math.round(performance.now()-started)});return}}catch(error){this.#timelineInvalidated();this.timeline.unavailable();throw error}})();
         this.#timelineRefresh=run.finally(()=>{this.#timelineRefresh=undefined});return this.#timelineRefresh;
     }
     async timelineAuthorized(id:string,version:string,consumer:string|undefined):Promise<boolean>{
         if(!consumer)return false;
-        await this.refreshTimeline();
+        await this.#ensureTimeline();
         try{this.timeline.discussion(id,version)}catch{return false}
         for(const ref of this.timeline.basis(id)){
             if(ref.id.startsWith('source:')){if(!this.#sources?.canReadContext?.(ref.id,ref.version,consumer))return false}
@@ -2131,7 +2151,7 @@ export class PersonalAgentHost {
         if(!this.#sourceProgressTimer){this.#sourceProgressTimer=setTimeout(()=>{this.#sourceProgressTimer=undefined;if(this.#opened){this.#sourceProgressAt=Date.now();this.#notify()}},2000-(now-this.#sourceProgressAt));this.#sourceProgressTimer.unref()}
     }
     sourceChanged(change?:SourceChange):Promise<void>{
-        this.#timelineRevision++;this.timeline.suspend();if(this.workbenchContext instanceof DailyWorkbench)this.workbenchContext.suspend();
+        this.#timelineRevision++;this.#timelineInvalidated();this.timeline.suspend();if(this.workbenchContext instanceof DailyWorkbench)this.workbenchContext.suspend();
         const timelineRefreshed=this.refreshTimeline().catch(()=>undefined);
         // Withdrawn source files leave the card inputs now, even if the memory refresh below fails.
         if(this.#opened)this.#updateContext(this.#sources?.contextEntries?.()??[]);
@@ -2469,7 +2489,7 @@ export class PersonalAgentHost {
             const q=z.object({id:z.string().min(1).max(512),expected_version:versionSchema}).strict().parse(p);
             if(!m?.purgeEntry)throw Error('unsupported');
             this.#invalidateOverview();this.#overviewCache=undefined;
-            await this.timeline.clear();
+            this.#timelineInvalidated();await this.timeline.clear();
             await this.#timelineCache.clear();
             await this.workbenchContext.clear();
             await this.profileWarmup.clear();
