@@ -896,6 +896,7 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
  * assistant turn. One semantic dot per state; the details body is a border-only
  * card so it never competes with the message itself. */
 .chat-tool-trace{margin-top:8px;border:1px solid var(--line);border-radius:var(--radius-lg);background:var(--surface-raised)}
+.chat-tool-trace-static{display:flex;align-items:center;gap:7px;padding:6px 9px}
 .chat-tool-trace-summary{display:flex;align-items:center;gap:7px;margin:0;padding:6px 9px;list-style:none;cursor:pointer;font:500 11px/1.5 var(--mono);color:var(--ink-dim)}
 .chat-tool-trace-summary::-webkit-details-marker{display:none}
 .chat-tool-trace-summary::before{content:'\25B8';flex:none;color:var(--ink-faint);transition:transform .12s}

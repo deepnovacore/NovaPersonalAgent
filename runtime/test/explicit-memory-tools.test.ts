@@ -52,12 +52,12 @@ test('model tool saves through the real ledger and a fresh conversation reads it
  }finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })
 
-test('production composition delivers explicit tool receipts across two service sessions', {timeout:30000}, async()=>{
+test('production composition delivers value-free traces and explicit tool receipts across service sessions', {timeout:30000}, async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-explicit-service-'))
  const gateway={async *stream(){await Promise.reject(Error('no model'))},complete(){throw Error('no model')}}
  const createResource=()=>new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'ledger.sqlite')),userId:'test',model:'fixture',gateway,inputConsent:true,conversationProviders:['chat']})
  let resource=createResource()
- const outputs:HostContextItem[]=[]
+ const outputs:HostContextItem[]=[],traces:{name:string;state:string;summary:string}[]=[]
  let sessionId=0
  const session=()=>{
   const provider:RealtimeProvider={
@@ -68,7 +68,7 @@ test('production composition delivers explicit tool receipts across two service 
    async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))},
   }
   const core=buildAssembly({settings:settingsSchema.parse({executors:[]}),gateway,clock:new VirtualClock(),blackboard:{path:join(root,'board-'+(++sessionId)+'.sqlite'),ownerId:'fixture'},capabilities:parseCapabilityRegistry({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}})})
-  return buildRealtimeAssembly({core,provider,createPersonalMemory:()=>resource,memoryConsumerFingerprint:'chat',memoryReadMode:'text',onDiagnostic:()=>undefined})
+  return buildRealtimeAssembly({core,provider,onTool:event=>traces.push(event),createPersonalMemory:()=>resource,memoryConsumerFingerprint:'chat',memoryReadMode:'text',onDiagnostic:()=>undefined})
  }
  const call=async(graph:ReturnType<typeof session>,id:string,text:string,name:string,args:ToolCallReady['arguments'])=>{
   await graph.service.handleEvent({kind:'user_speech_started',session_epoch:1,speech_id:id,provider_item_id:id})
@@ -87,9 +87,17 @@ test('production composition delivers explicit tool receipts across two service 
   await resource.open({deferBackground:true});graph=session();await graph.start()
   const saved=JSON.parse(await call(graph,'save','请记住叫我 kant','memory__remember',{action:'set',kind:'preference',slot:'preferred_name',text:'kant',quote:'叫我 kant'})) as ExplicitMemoryReceipt
   assert.equal(saved.state,'committed');assert.equal(saved.current?.text,'kant')
+  assert(traces.some(event=>event.name==='memory__remember'&&event.summary==='已保存 · 称呼'))
+  assert(!JSON.stringify(traces).includes('kant'))
   await graph.stop();resource=createResource();await resource.open({deferBackground:true});graph=session();await graph.start()
   const found=JSON.parse(await call(graph,'lookup','记得我叫什么吗','memory__lookup',{slot:'preferred_name'})) as ExplicitMemoryPage
   assert.equal(found.entries[0]?.text,'kant')
+  assert(traces.some(event=>event.name==='memory__lookup'&&event.summary==='1 条'))
+  await graph.stop();resource=createResource();await resource.open({deferBackground:true});graph=session();await graph.start()
+  const forgotten=JSON.parse(await call(graph,'forget','忘记我的称呼','memory__remember',{action:'forget',slot:'preferred_name',quote:'忘记我的称呼'})) as ExplicitMemoryReceipt
+  assert.equal(forgotten.state,'committed')
+  assert(traces.some(event=>event.name==='memory__remember'&&event.summary==='已忘记 · 称呼'))
+  assert(!JSON.stringify(traces).includes('kant'))
  }finally{await graph?.stop();await resource.close();await rm(root,{recursive:true,force:true})}
 })
 

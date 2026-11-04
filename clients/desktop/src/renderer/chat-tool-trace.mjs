@@ -74,8 +74,8 @@ export function aggregateToolTraceState(items){
 }
 
 /**
- * Builds the collapsed `<details class="chat-tool-trace">` for one assistant
- * turn. Returns null when there is nothing to show, so callers can append it
+ * Builds a compact trace for one assistant turn, expandable only when there
+ * is additional content. Returns null when empty, so callers can append it
  * unconditionally. `el` is the renderer's `(tag,text,className)` factory; a
  * plain object/`children` DOM stub is enough to test it.
  */
@@ -84,6 +84,16 @@ export function createToolTraceNode(value,{el,open=false,live=false}={}){
  const items=normalizeToolTrace(value)
  if(!items.length)return null
  const state=aggregateToolTraceState(items)
+ if(items.length===1&&!items[0].summary){
+  const row=el('div',undefined,'chat-tool-trace chat-tool-trace-static')
+  row.dataset.state=state
+  row.dataset.live=String(live===true)
+  const dot=el('span',undefined,'chat-tool-trace-dot')
+  dot.dataset.state=state
+  dot.setAttribute('aria-hidden','true')
+  row.append(dot,el('span',toolTraceLabel(items[0].name),'chat-tool-trace-label'),el('span',toolTraceStateLabel(state),'visually-hidden'))
+  return row
+ }
  const details=el('details',undefined,'chat-tool-trace')
  details.open=open===true
  details.dataset.state=state
@@ -97,6 +107,7 @@ export function createToolTraceNode(value,{el,open=false,live=false}={}){
  const labelNode=el('span',label,'chat-tool-trace-label')
  const stateNode=el('span',toolTraceStateLabel(state),'visually-hidden')
  summary.append(headerDot,labelNode,stateNode)
+ if(items.length===1)summary.append(el('span',t(items[0].summary),'chat-tool-trace-note'))
  summary.title=`${label} · ${toolTraceStateLabel(state)}`
  const list=el('ol',undefined,'chat-tool-trace-items')
  for(const item of items){
@@ -106,7 +117,7 @@ export function createToolTraceNode(value,{el,open=false,live=false}={}){
   dot.dataset.state=item.state
   dot.setAttribute('aria-hidden','true')
   row.append(dot,el('span',toolTraceLabel(item.name),'chat-tool-trace-label'))
-  if(item.summary)row.append(el('span',item.summary,'chat-tool-trace-note'))
+  if(item.summary)row.append(el('span',t(item.summary),'chat-tool-trace-note'))
   row.append(el('span',toolTraceStateLabel(item.state),'visually-hidden'))
   list.append(row)
  }

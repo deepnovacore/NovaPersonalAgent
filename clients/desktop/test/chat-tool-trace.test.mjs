@@ -96,6 +96,7 @@ test('one tool builds a collapsed details card with a dot, label, note, and stat
  assert.equal(summary.children[2].className,'visually-hidden')
  assert.equal(summary.children[2].textContent,'完成')
  assert.equal(summary.title,'检索记忆 · 完成')
+ assert.equal(summary.children[3].textContent,'找到 2 条','the collapsed line also shows the short note')
  const list=card.children[1]
  assert.equal(list.tag,'ol')
  assert.equal(list.className,'chat-tool-trace-items')
@@ -108,6 +109,40 @@ test('one tool builds a collapsed details card with a dot, label, note, and stat
  assert.equal(row.children[2].className,'chat-tool-trace-note')
  assert.equal(row.children[2].textContent,'找到 2 条')
  assert.equal(row.children[3].textContent,'完成')
+})
+
+test('a lone tool without a summary is a static accessible row in every state',()=>{
+ for(const state of ['running','ok','error']){
+  const card=createToolTraceNode([{name:'memory__remember',state,args:{text:'private value'},result:'private result'}],{el,open:true,live:true})
+  assert.equal(card.tag,'div')
+  assert.equal(card.className,'chat-tool-trace chat-tool-trace-static')
+  assert.equal(card.dataset.state,state)
+  assert.equal(card.dataset.live,'true')
+  assert.ok(all(card).every(node=>!['details','summary'].includes(node.tag)))
+  assert.equal(card.children[0].attributes['aria-hidden'],'true')
+  assert.equal(card.children[1].textContent,'更新记忆')
+  assert.equal(card.children[2].className,'visually-hidden')
+  assert.equal(card.children[2].textContent,toolTraceStateLabel(state))
+  assert.equal(all(card).filter(node=>node.textContent==='更新记忆').length,1)
+  assert.doesNotMatch(all(card).map(node=>node.textContent).join(' '),/private value|private result/)
+ }
+})
+
+test('fixed receipt summaries localize while dynamic notes fall back unchanged',()=>{
+ setLanguage('en')
+ try{
+  for(const [summary,expected] of [
+   ['已保存','Saved'],['已忘记','Forgotten'],['未保存','Not saved'],
+   ['已保存 · 称呼','Saved · preferred name'],['已忘记 · 称呼','Forgotten · preferred name'],
+   ['已保存 · 回答风格','Saved · reply style'],['已忘记 · 回答风格','Forgotten · reply style'],
+   ['3 条','3 条'],['custom error {0}','custom error {0}'],
+  ]){
+   const card=createToolTraceNode([{name:'memory__remember',state:'ok',summary}],{el})
+   assert.equal(card.tag,'details')
+   assert.equal(card.children[0].children.at(-1).textContent,expected)
+   assert.equal(card.children[1].children[0].children[2].textContent,expected)
+  }
+ }finally{setLanguage('zh-CN')}
 })
 
 test('several tools stay compact, the worst state wins, and an empty trace renders nothing',()=>{

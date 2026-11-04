@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import {conversationToolBridge} from '../src/personal-agent/conversation-tool-bridge.js'
+import {conversationToolBridge,memoryRememberSummary} from '../src/personal-agent/conversation-tool-bridge.js'
 
 function fixture() {
   const schemas = [
@@ -62,4 +62,36 @@ test('conversation tool bridge binds write authority to the same typed-user snap
   assert.deepEqual(bridge.readonlyNames, [], 'memory host writes must not enter concurrent query batches')
   const result = await bridge.invoke(text, {id: 'save', name: 'memory__remember', arguments: {}}, new AbortController().signal) as {code: string}
   assert.equal(result.code, 'committed')
+})
+
+test('remember traces use only fixed action and slot labels for raw and wrapped receipts',async()=>{
+ const receipt={state:'committed',current:{text:'PRIVATE_NAME',slot:'PRIVATE_SLOT'},text:'PRIVATE_TEXT'}
+ for(const action of ['set','forget'])for(const slot of [undefined,'preferred_name','reply_style','PRIVATE_SLOT']){
+  const args={action,...(slot?{slot}:{}),text:'PRIVATE_NAME',quote:'PRIVATE_QUOTE'}
+  const expected=(action==='forget'?'已忘记':'已保存')+(slot==='preferred_name'?' · 称呼':slot==='reply_style'?' · 回答风格':'')
+  for(const result of [receipt,{accepted:true,code:'committed',result:receipt}]){
+   assert.equal(memoryRememberSummary(args,result,true),expected)
+   const events:unknown[]=[]
+   const core={tools:{schemas:[{function:{name:'memory__remember',parameters:{type:'object'}}}],bindings:new Map([['memory__remember',{kind:'host'}]]),hidden:new Set()},runtime:{executors:new Map(),observe:()=>()=>undefined}}
+   const graph={bridge:{acceptUserTranscript:async()=> 'origin'},service:{session:{sessionEpoch:1},invokeConversationTool:async()=>({accepted:true,host_item:{content:JSON.stringify(result)}})}}
+   const bridge=conversationToolBridge(core as never,graph as never,{chat:true,onTool:event=>events.push(event)})
+   await bridge.invoke('PRIVATE_QUOTE',{id:'call',name:'memory__remember',arguments:args},new AbortController().signal)
+   assert.deepEqual(events,[{name:'memory__remember',state:'running',summary:''},{name:'memory__remember',state:'ok',summary:expected}])
+  }
+  for(const result of [null,{state:'refused'},receipt,{accepted:false,result:receipt}]){
+   assert.equal(memoryRememberSummary(args,result,false),'未保存')
+  }
+  assert.equal(memoryRememberSummary(args,{accepted:false,result:receipt},true),'未保存')
+  assert.equal(memoryRememberSummary(args,{state:'refused',text:'PRIVATE_TEXT'},true),'未保存')
+ }
+})
+
+test('lookup traces count entries in raw and wrapped results without exposing entry text',async()=>{
+ for(const result of [{entries:[{text:'PRIVATE_NAME'}]},{accepted:true,result:{entries:[{text:'PRIVATE_NAME'}]}}]){
+  const events:unknown[]=[]
+  const core={tools:{schemas:[{function:{name:'memory__lookup',parameters:{type:'object'}}}],bindings:new Map([['memory__lookup',{kind:'host'}]]),hidden:new Set()},runtime:{executors:new Map(),observe:()=>()=>undefined}}
+  const graph={bridge:{acceptUserTranscript:async()=> 'origin'},service:{session:{sessionEpoch:1},invokeConversationTool:async()=>({accepted:true,host_item:{content:JSON.stringify(result)}})}}
+  await conversationToolBridge(core as never,graph as never,{chat:true,onTool:event=>events.push(event)}).invoke('lookup',{id:'lookup',name:'memory__lookup',arguments:{}},new AbortController().signal)
+  assert.deepEqual(events,[{name:'memory__lookup',state:'running',summary:''},{name:'memory__lookup',state:'ok',summary:'1 条'}])
+ }
 })

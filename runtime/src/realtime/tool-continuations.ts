@@ -1,3 +1,4 @@
+import {memoryRememberSummary} from '../personal-agent/conversation-tool-bridge.js'
 import type {SpaceMobilePort} from '../space-host/mobile-tools.js'
 import {scheduledToolResult} from '../personal-agent/scheduled-tool-runtime.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
@@ -51,8 +52,13 @@ import {RealtimeDeliveryError, type RealtimeSession} from './session.js'
 import type {RealtimeTelemetry} from './telemetry.js'
 import type {UserOriginBindingLedger} from './user-origin-binding.js'
 const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
-function acceptanceSummary(acceptance: ToolAcceptance): string {
+function acceptanceSummary(acceptance: ToolAcceptance,event:ToolCallReady): string {
   const content = acceptance.host_item?.content
+  if(event.name==='memory__remember'){
+    let result:unknown=null
+    try{result=JSON.parse(content)}catch{ /* Missing receipts are not committed writes. */ }
+    return memoryRememberSummary(event.arguments,result,acceptance.accepted)
+  }
   if (typeof content !== 'string') return ''
   try {
     const value = JSON.parse(content) as {items?:unknown;results?:unknown;entries?:unknown;snippets?:unknown;hit_count?:unknown;result?:{items?:unknown;results?:unknown;entries?:unknown;snippets?:unknown;hit_count?:unknown}}
@@ -1001,7 +1007,7 @@ export class ToolContinuations {
       }
     }
 
-    this.#ports.onTool?.({name:event.name,state:acceptance.accepted?'ok':'error',summary:acceptanceSummary(acceptance)})
+    this.#ports.onTool?.({name:event.name,state:acceptance.accepted?'ok':'error',summary:acceptanceSummary(acceptance,event)})
     this.#recordToolAdmission({
       callId: event.call_id,
       logicalName: binding?.logical_name ?? null,
@@ -1137,7 +1143,7 @@ export class ToolContinuations {
         ? 'fulfilled'
         : 'rejected'
     input.state.sync = 'none'
-    this.#ports.onTool?.({name:input.event.name,state:input.state.acceptance.accepted?'ok':'error',summary:acceptanceSummary(input.state.acceptance)})
+    this.#ports.onTool?.({name:input.event.name,state:input.state.acceptance.accepted?'ok':'error',summary:acceptanceSummary(input.state.acceptance,input.event)})
     this.#recordToolAdmission({
       callId: input.event.call_id,
       logicalName: input.state.logical_name,

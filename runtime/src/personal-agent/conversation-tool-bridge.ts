@@ -22,7 +22,17 @@ interface ConversationToolBridgeOptions {
   readonly onTool?: (event: ConversationToolEvent) => void
 }
 
-function summarizeToolResult(result: JsonValue): string {
+export function memoryRememberSummary(args:Record<string,JsonValue>,result:unknown,accepted:boolean):string {
+  const record=result&&typeof result==='object'?result as Record<string,unknown>:null
+  const receipt=record?.result&&typeof record.result==='object'?record.result as Record<string,unknown>:record
+  if(!accepted||record?.accepted===false||receipt?.state!=='committed')return '未保存'
+  const action=args.action==='forget'?'已忘记':'已保存'
+  const slot=args.slot==='preferred_name'?' · 称呼':args.slot==='reply_style'?' · 回答风格':''
+  return action+slot
+}
+
+function summarizeToolResult(name:string,args:Record<string,JsonValue>,result: JsonValue,accepted:boolean): string {
+  if(name==='memory__remember')return memoryRememberSummary(args,result,accepted)
   if (result === null || typeof result !== 'object' || Array.isArray(result)) return ''
   const record = result as Record<string, JsonValue>
   const inner = record.result
@@ -30,7 +40,9 @@ function summarizeToolResult(result: JsonValue): string {
     const value = inner as Record<string, JsonValue>
     if (Array.isArray(value.items)) return `${value.items.length} 条`
     if (Array.isArray(value.results)) return `${value.results.length} 条`
+    if (Array.isArray(value.entries)) return `${value.entries.length} 条`
   }
+  if (Array.isArray(record.entries)) return `${record.entries.length} 条`
   if (typeof record.code === 'string' && /^[a-z_]{1,64}$/u.test(record.code)) return record.code
   return ''
 }
@@ -63,10 +75,10 @@ export function conversationToolBridge(core:Assembly,graph:RealtimeAssembly,opti
     })
    }
    let result:JsonValue;try{result=JSON.parse(acceptance.host_item.content) as JsonValue}catch{result={message:acceptance.host_item.content}}
-   options.onTool?.({name:call.name,state:'ok',summary:summarizeToolResult(result)})
+   options.onTool?.({name:call.name,state:'ok',summary:summarizeToolResult(call.name,call.arguments,result,acceptance.accepted)})
    return {accepted:acceptance.accepted,code:acceptance.code,delegate_id:acceptance.delegate_id,result}
   }catch(error){
-   options.onTool?.({name:call.name,state:'error',summary:error instanceof Error?error.message.slice(0,80):''})
+   options.onTool?.({name:call.name,state:'error',summary:call.name==='memory__remember'?'未保存':error instanceof Error?error.message.slice(0,80):''})
    throw error
   }finally{unsubscribe()}
  }
