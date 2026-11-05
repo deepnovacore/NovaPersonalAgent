@@ -8,21 +8,21 @@ export const SETTINGS_CATEGORIES = Object.freeze([
     'language-section', 'startup-view-section', 'wake-word-section', 'notifications-section',
     'intent-section', 'proactivity-section', 'display-section',
   ])}),
-  Object.freeze({id: 'diary', label: t('日记与简报'), sections: Object.freeze(['diary-section'])}),
+  Object.freeze({id: 'diary', label: t('简报'), sections: Object.freeze(['diary-section'])}),
   Object.freeze({id: 'themes', label: t("主题"), sections: Object.freeze(['visor-section','orb-skin-section'])}),
   Object.freeze({id: 'usage', label: t("用量"), sections: Object.freeze(['frontend-usage-section'])}),
+  Object.freeze({id: 'secrets', label: t("API 密钥"), sections: Object.freeze(['chatgpt-settings','secrets'])}),
   Object.freeze({id: 'models', label: t("模型"), sections: Object.freeze(['models-section','pipeline'])}),
   Object.freeze({id: 'skills', label: t('技能'), sections: Object.freeze(['skills-section'])}),
-  Object.freeze({id: 'capabilities', label: t("执行器与 MCP"), sections: Object.freeze(['capabilities-section'])}),
+  // 执行器 owns the vision and coding sub-tabs; the coding page keeps the executor
+  // configuration and workspace cards, so both sections belong to this category.
+  Object.freeze({id: 'capabilities', label: t("执行器"), sections: Object.freeze(['capabilities-section','codex-projects'])}),
+  Object.freeze({id: 'mcp', label: t("MCP"), sections: Object.freeze(['mcp-section'])}),
   Object.freeze({id: 'connectors', label: t("连接器"), sections: Object.freeze(['im-section','connections-section'])}),
-  Object.freeze({id: 'space', label: t("Space 与手机"), sections: Object.freeze([])}),
+  Object.freeze({id: 'space', label: t("设备"), sections: Object.freeze([])}),
   Object.freeze({id: 'permissions', label: t("权限"), sections: Object.freeze(['desktop-permissions-section','codex-approval-section'])}),
   Object.freeze({id: 'privacy', label: t("隐私与数据"), sections: Object.freeze(['privacy-section'])}),
   Object.freeze({id: 'knowledge', label: t("知识库"), sections: Object.freeze(['knowledge-section'])}),
-  Object.freeze({id: 'secrets', label: t("API 密钥"), sections: Object.freeze(['chatgpt-settings','secrets'])}),
-  Object.freeze({id: 'codex', label: t("编程"), sections: Object.freeze([
-    'codex-projects',
-  ])}),
 ])
 
 /** Old deep links keep working after the settings categories were split. */
@@ -32,6 +32,7 @@ const CATEGORY_ALIASES = Object.freeze({
   phone: 'space',
   connections: 'connectors',
   pipeline: 'models',
+  codex: 'capabilities',
 })
 
 export function categoryIds() {

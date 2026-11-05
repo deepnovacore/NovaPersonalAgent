@@ -210,3 +210,39 @@ test('memory expired-history control is unavailable unless the backend supports 
   await p.close()
  }
 })
+
+test('a scheduled or deadline brief is filed on its saved report day, never after today',async()=>{
+ const day=(offset:number)=>new Date(Date.now()+offset*86400000).toLocaleDateString('en-CA'),today=day(0)
+ const cards=[
+  {id:'future-deadline',title:'Future deadline brief',version:1,kind:'deadline',facts:[],actions:[],sources:[],time:{kind:'deadline',anchor_date:day(19),anchor_basis:'deadline',due_on:day(19),last_reported_on:day(-9),as_of:today}},
+  {id:'unreported-deadline',title:'Unreported deadline brief',version:1,kind:'deadline',facts:[],actions:[],sources:[],time:{kind:'deadline',anchor_date:day(30),anchor_basis:'deadline',due_on:day(30),as_of:today}},
+  {id:'today-report',title:'Today report brief',version:1,kind:'progress',facts:[],actions:[],sources:[],time:{kind:'progress',anchor_date:today,anchor_basis:'reported',as_of:today}},
+ ]
+ const p=await mount('timeline',{life,timeline:{status:'ready',generation_id:'g1',available:true,cards}})
+ try{
+  const dates=[...p.host.querySelectorAll('.timeline-date-group')].map(node=>node.getAttribute('data-date'))
+  assert.ok(dates.length>0,'date groups render')
+  assert.ok(dates.every((date:any)=>date<=today),`no group is dated after today: ${dates}`)
+  assert.ok(dates.includes(day(-9)),'a reported deadline keeps its saved report day')
+  assert.ok(dates.includes(today),'an unreported future deadline still surfaces on the day it was written')
+  assert.match(p.host.textContent??'',/距截止 19 天/u)
+  assert.match(p.host.querySelector('[data-object-id=unreported-deadline]')?.textContent??'',/整理于/u,'an undated source uses a synthesis label, not a fabricated deadline')
+  assert.match(p.host.textContent??'',/最近记录/u)
+ }finally{await p.close()}
+})
+
+test('generated ideas stay reachable from the history block and can be kept or hidden',async()=>{
+ const history=[{id:'h1',tab:'ideas',title:'用「意图理解」案例反推产品设计语言',body:'整理一段演示',why:null,next:null,refs:[{entry_id:'m1',version:'1',label:'原话'}],sources:[],generated_at:'2026-10-18T11:07:45.359Z',imported:false,source_changed:true}]
+ const p=await mount('ideas',{life:{...life,ideas:[]},workbench_context:{daily:true,status:'ready',automatic_available:false,empty_reasons:{ideas:null,goals:null},cards:[],idea_history:history}})
+ try{
+  assert.match(p.host.textContent??'',/历史想法 · 1/u)
+  assert.match(p.host.textContent??'',/来源已变化/u)
+  await p.click('存为我的想法')
+  const saved=p.calls.find(([method])=>method==='context.adopt')
+  assert.deepEqual(saved[1],{id:'h1'})
+  await p.click('不看了')
+  assert.ok(p.calls.some(([method,params])=>method==='context.dismiss'&&params.id==='h1'))
+  await p.click('聊聊这个')
+  assert.ok(p.calls.some(([method])=>method==='discuss'))
+ }finally{await p.close()}
+})

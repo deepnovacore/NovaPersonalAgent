@@ -60,13 +60,13 @@ test('future mail schedules and deadlines use report placement without changing 
  }
 })
 
-test('past and today deadlines and schedules keep their activity anchor; undated reports cannot clamp',()=>{
+test('past dates keep their activity anchor; future undated plans use synthesis placement without changing the deadline',()=>{
  for(const kind of ['deadline','scheduled'] as const)for(const planned of ['2026-11-01','2026-11-02','2026-11-24']){
   for(const sourceKind of ['mail','file']){
    const source={id:'source',kind:sourceKind,observed_at:'2026-10-28T01:00:00Z',text:planned+' 活动'}
    const time=resolveTimelineTime({kind,dates:[{role:kind,date:planned,ref:source.id,quote:source.text}]},[source],{local_date:'2026-11-02',timezone:'Asia/Shanghai'})!
-   const clamp=sourceKind==='mail'&&planned>'2026-11-02'
-   assert.equal(time.anchor_basis,clamp?'reported':kind);assert.equal(time.anchor_date,clamp?'2026-10-28':planned)
+   const clamp=planned>'2026-11-02'
+   assert.equal(time.anchor_basis,clamp?'reported':kind);assert.equal(time.anchor_date,clamp?(sourceKind==='mail'?'2026-10-28':'2026-11-02'):planned)
    if(sourceKind==='file')assert.equal(time.last_reported_on,null)
   }
  }
@@ -77,6 +77,6 @@ test('effectiveTimelineAnchor clamps legacy cards using saved as_of, not the wal
  assert.deepEqual(effectiveTimelineAnchor(time),{anchor_date:'2026-10-28',anchor_basis:'reported'})
  assert.deepEqual(effectiveTimelineAnchor({...time,anchor_basis:'deadline',due_on:'2026-11-24'}),{anchor_date:'2026-10-28',anchor_basis:'reported'})
  assert.deepEqual(effectiveTimelineAnchor({...time,as_of:'2026-12-11'}),{anchor_date:'2026-12-11',anchor_basis:'scheduled'})
- assert.deepEqual(effectiveTimelineAnchor({...time,last_reported_on:null}),{anchor_date:'2026-12-11',anchor_basis:'scheduled'})
+ assert.deepEqual(effectiveTimelineAnchor({...time,last_reported_on:null}),{anchor_date:'2026-11-02',anchor_basis:'reported'})
  assert.equal(time.anchor_date,'2026-12-11','the saved object remains untouched')
 })

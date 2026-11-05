@@ -1,7 +1,7 @@
 import {SpaceHostPanel} from './settings/space-host';
 import React, { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@radix-ui/themes';
-import { Settings, Save, RefreshCw } from 'lucide-react';
+import { Settings, Save, RefreshCw, Camera, Code2 } from 'lucide-react';
 import { t, currentLanguage } from '../locale.mjs';
 import { createSettingsController, settingsButtonState } from '../settings-controller.mjs';
 import { SETTINGS_CATEGORIES, categoryTabForKey, isValidCategory, resolveCategory } from '../settings-categories.mjs';
@@ -27,7 +27,7 @@ const NOTICE: any = { restarting: '已保存，后台正在重启并重新连接
 const GUIDANCE: any = { opencode: ['OpenCode', '配置文件', '安装 opencode-ai，并用 OpenCode 自己的登录或配置文件设置模型与凭据。'], codebuddy: ['CodeBuddy', '', '安装 @tencent-ai/codebuddy-code，并在 CodeBuddy 命令行中完成登录或密钥配置。'], pi: ['Pi', '配置目录', '安装 Pi 与 pi-acp，并在 Pi 自己的配置中设置模型与登录。Pi 不支持逐项审批，询问模式下任务会被拒绝。'], deepseek: ['DeepSeek Harness', '配置目录', '安装 @deepseek-ai/dsh，并在其配置中设置凭据；也可以使用服务配置里的 DeepSeek API Key。'] };
 const toOptions = (values: any[]) => values.map(v => typeof v === 'string' ? { value: v, label: v } : v);
 export default function SettingsApp({ bridge = (window as any).novaPersonalAgentDesktop, api = bridge?.settings }: any) {
-    const [snapshot, setSnapshot] = useState<any>({ view: {}, drafts: {}, dirty: false, busy: false }), [category, setCategory] = useState('general'), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [workspaceNote, setWorkspaceNote] = useState(''), [maintenance, setMaintenance] = useState(false), [secretDirty, setSecretDirty] = useState<Set<string>>(new Set()), [notes, setNotes] = useState<any>({}), [cameraDevices, setCameraDevices] = useState<any[]>([]), [custom, setCustom] = useState<any>({}), [nativeVoices, setNativeVoices] = useState<any>({}), [idleText, setIdleText] = useState<string | null>(null), [modelPane, setModelPane] = useState('routes'), [newsLocal,setNewsLocal] = useState<any>({}), [briefingDraft,setBriefingDraft] = useState<any>(null);
+    const [snapshot, setSnapshot] = useState<any>({ view: {}, drafts: {}, dirty: false, busy: false }), [category, setCategory] = useState('general'), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [workspaceNote, setWorkspaceNote] = useState(''), [maintenance, setMaintenance] = useState(false), [secretDirty, setSecretDirty] = useState<Set<string>>(new Set()), [notes, setNotes] = useState<any>({}), [cameraDevices, setCameraDevices] = useState<any[]>([]), [custom, setCustom] = useState<any>({}), [nativeVoices, setNativeVoices] = useState<any>({}), [idleText, setIdleText] = useState<string | null>(null), [modelPane, setModelPane] = useState('routes'), [executorPane, setExecutorPane] = useState('vision'), [newsLocal,setNewsLocal] = useState<any>({}), [briefingDraft,setBriefingDraft] = useState<any>(null);
     const mounted = useRef(true), secretInputs = useRef<Record<string, HTMLInputElement | null>>({}), secretRevisions = useRef<Record<string, number>>({}), secretWrites = useRef<any>(null), writeOutcome = useRef<any>(null), categoryButtons = useRef<Record<string, HTMLButtonElement | null>>({}), maintenanceLock = useRef(false), currentView = useRef<any>({});
     currentView.current = snapshot.view;
     const controller = useMemo(() => createSettingsController({ api: { set: async (patch: any) => { const { capabilitiesDocument, capabilitiesBaseRevision, ...settingsPatch } = patch; if (secretWrites.current && Object.keys(secretWrites.current).length)
@@ -35,10 +35,10 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             setSnapshot({ view, drafts, ...state }); }, status: (s: string) => { if (mounted.current)
             setStatus(s); }, notice: (s?: string) => { if (mounted.current)
             setNotice(s ?? ''); } } as any), [api]);
-    useEffect(() => { mounted.current = true; const off = api?.onChanged?.((view: any) => { if (isValidCategory(view?.focusCategory))
-        setCategory(resolveCategory(view.focusCategory)); controller.syncView(view); }); void api?.get?.().then((view: any) => { if (!mounted.current)
-        return; if (isValidCategory(view?.focusCategory))
-        setCategory(resolveCategory(view.focusCategory)); controller.setView(view); }).catch(() => { if (mounted.current)
+    const applyFocus = (focus: any) => { if (!isValidCategory(focus)) return; if (focus === 'codex') setExecutorPane('coding'); if (isValidCategory(focus))
+        setCategory(resolveCategory(focus)); };
+    useEffect(() => { mounted.current = true; const off = api?.onChanged?.((view: any) => { applyFocus(view?.focusCategory); controller.syncView(view); }); void api?.get?.().then((view: any) => { if (!mounted.current)
+        return; applyFocus(view?.focusCategory); controller.setView(view); }).catch(() => { if (mounted.current)
         setStatus(t('读取设置失败')); }); const activity = () => bridge?.wakeWord?.activity?.(); document.addEventListener('pointerdown', activity); document.addEventListener('keydown', activity); return () => { mounted.current = false; off?.(); document.removeEventListener('pointerdown', activity); document.removeEventListener('keydown', activity); for (const input of Object.values(secretInputs.current))
         if (input)
             input.value = ''; secretWrites.current = null; }; }, [api, controller, bridge]);
@@ -149,8 +149,8 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                 <ConnectorsPage api={api}/>
             </section>;
         }
-        // Space 与手机 has its own left-rail category and renders from a standalone section.
-        if (id === 'capabilities-problems') { const problems=view.capabilities?.problems??[]; return <p key={key} id={id} className="warning" hidden={!problems.length} role="alert">{problems.map((problem:string)=>t(problem)).join(' · ')}</p>; }
+        // 设备 has its own left-rail category and renders from a standalone section.
+        if (id === 'capabilities-problems') { const problems=view.capabilities?.problems??[]; return <p key={key} id={id} className="warning" hidden={!problems.length||!['capabilities','mcp'].includes(category)} role="alert">{problems.map((problem:string)=>t(problem)).join(' · ')}</p>; }
         if (id === 'model-routes') return <ModelRoutesPanel key={key} view={view} stage={stage} api={api} onSaved={(next: any) => controller.syncView(next, {trackRestart: false})} hidden={modelPane !== 'routes'}/>;
         if (id === 'visor-section')
             return category === 'themes' ? <VisorPanel key={key} api={bridge?.visor}/> : null;
@@ -162,11 +162,11 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             const contentNode = children.find((node: any) => typeof node !== 'string' && node.props?.class === 'codex-content');
             const content: any[] = contentNode && typeof contentNode !== 'string' ? contentNode.children : [];
             const workspaceNode = (node: any) => typeof node !== 'string' && (node.props?.class === 'workspace-actions' || node.props?.id === 'workspace-action-status');
-            return <section className="setting-section codex-page" id={id} key={key} hidden={category !== 'codex'}>
+            return <section className="setting-section codex-page" id={id} key={key} hidden={category !== 'capabilities' || executorPane !== 'coding'}>
                 <h2>{t('编程')}</h2>
                 <p className="hint">{t('管理编程执行器和工作区；更换执行器后对新会话生效。')}</p>
                 <div className="codex-card">
-                    <h3>{t('执行器')}</h3>
+                    <h3>{t('编程执行器')}</h3>
                     {content.filter((node: any) => !workspaceNode(node)).map((node: any, i: number) => renderNode(node, i))}
                 </div>
                 <div className="codex-card codex-workspace-card">
@@ -184,8 +184,32 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             return null;
         if (id === 'proactivity-panel' || id === 'diary-panel')
             return category === (id === 'diary-panel' ? 'diary' : 'general') ? <React.Fragment key={key}><ProactivityPanel api={api} diary={id === 'diary-panel'} briefingDraft={briefingDraft} onBriefingDraftChange={id==='diary-panel'?setBriefingDraft:undefined} keyMissing={!view.secretsPresent?.openrouterApiKey} memory={view.capabilities?.runtime?.modules?.memory}/>{id==='diary-panel'&&<NewsPreferencesPanel api={api} local={newsLocal} setLocal={setNewsLocal}/>}</React.Fragment> : null;
+        if (id === 'capabilities-section')
+            return <div id={id} key={key} hidden={category !== 'capabilities'}>{children.filter((child: any) => typeof child === 'string' || child.tag !== 'h2').map(renderNode)}</div>;
+        if (id === 'executors-section') {
+            const cards = children.filter((node: any) => typeof node !== 'string' && node.props?.class === 'executor-card');
+            const paneOf = (card: any) => (card.children ?? []).some((child: any) => typeof child !== 'string' && String(child.props?.id ?? '').startsWith('camera')) ? 'vision' : 'coding';
+            const panes: any[] = [['vision', Camera, t('视觉监控'), t('配置摄像头与视觉监控模型。')], ['coding', Code2, t('编程'), t('配置编程工具、执行器与工作区。')]];
+            return <section className="setting-section executor-page" id={id} key={key} hidden={category !== 'capabilities'}>
+                <h2>{t('执行器')}</h2>
+                <p className="hint">{t('按需启用和配置视觉监控或编程能力。')}</p>
+                <div className="executor-subnav" role="tablist" aria-label={t('执行器类别')}>{panes.map(([pane, Icon, label]) => <button key={pane} type="button" id={'executor-tab-' + pane} className="executor-tab" role="tab" aria-selected={executorPane === pane} tabIndex={executorPane === pane ? 0 : -1} onClick={() => setExecutorPane(pane)} onKeyDown={(event: any) => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
+                return;
+            event.preventDefault();
+            const next = event.key === 'Home' ? 'vision' : event.key === 'End' ? 'coding' : pane === 'vision' ? 'coding' : 'vision';
+            setExecutorPane(next);
+            document.getElementById('executor-tab-' + next)?.focus(); }}><Icon size={16} aria-hidden="true"/><span>{label}</span></button>)}</div>
+                {panes.map(([pane, , label, caption]) => <div key={pane} className="executor-pane" data-executor-pane={pane} role="tabpanel" aria-label={label} hidden={executorPane !== pane}><p className="executor-pane-caption">{caption}</p>{cards.filter((card: any) => paneOf(card) === pane).map((card: any, index: number) => renderNode(card, index))}</div>)}
+            </section>;
+        }
+        if (id === 'mcp-section')
+            return <section className="setting-section mcp-page" id={id} key={key} hidden={category !== 'mcp'}>
+                <h2>{t('MCP')}</h2>
+                <p className="hint">{t('连接外部 MCP 服务，并逐个工具授权；每个工具的调用范围与超时都在这里配置。保存并重启后生效。')}</p>
+                <CapabilitiesPanel key="capabilities-panel" view={view} stage={stage} api={api}/>
+            </section>;
         if (id === 'capabilities-editor')
-            return category === 'capabilities' ? <CapabilitiesPanel key={key} view={view} stage={stage} api={api}/> : null;
+            return null;
         if (id === 'camera-executor-toggle' || id === 'coding-executor-toggle')
             return <ModuleToggle key={key} name={id.startsWith('camera') ? 'camera' : 'coding'} label={id.startsWith('camera') ? '视觉监控' : '编程'} view={view} stage={stage}/>;
         if (id === 'knowledge-panel')
@@ -355,7 +379,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                 return createElement('select', p, <option value="" disabled>{t(rows.length ? '选择监控模型' : '请先配置视觉模型 API Key')}</option>, ...rows.map(r => <option key={r.value} value={r.value}>{r.label}</option>), view.watchModel && !rows.some(r => r.value === view.watchModel) ? <option disabled value={view.watchModel}>{t('{0}（当前不可选）', view.watchModel)}</option> : null);
             }
         }
-        const actions: any = { 'coding-executor-configure': () => setCategory('codex'), 'wake-word-retry': () => bridge?.wakeWord?.retry?.(), 'codex-rescan': () => maintain(() => api.rescanCodex(), 'rescan'), 'projects-repair': async () => { const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root))); setStatus(t(results.every(r => r?.status === 'ok') ? 'Projects 目录权限已修复' : '部分 Projects 目录无法修复，请检查路径是否存在')); }, 'workspace-open-current': () => maintain(() => api.openCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-current': () => maintain(() => api.clearCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-all': () => maintain(() => api.clearAllManagedWorkspaces(), 'workspace'), 'workspace-retry-recovery': () => maintain(async () => { const v = await api.retryBackend(); return { view: v, status: v?.managedWorkspaces?.recoveryStatus === 'idle' ? 'recovered' : 'recovery_failed' }; }, 'workspace'), 'camera-refresh': async () => { try {
+        const actions: any = { 'coding-executor-configure': () => { setCategory('capabilities'); setExecutorPane('coding'); }, 'wake-word-retry': () => bridge?.wakeWord?.retry?.(), 'codex-rescan': () => maintain(() => api.rescanCodex(), 'rescan'), 'projects-repair': async () => { const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root))); setStatus(t(results.every(r => r?.status === 'ok') ? 'Projects 目录权限已修复' : '部分 Projects 目录无法修复，请检查路径是否存在')); }, 'workspace-open-current': () => maintain(() => api.openCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-current': () => maintain(() => api.clearCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-all': () => maintain(() => api.clearAllManagedWorkspaces(), 'workspace'), 'workspace-retry-recovery': () => maintain(async () => { const v = await api.retryBackend(); return { view: v, status: v?.managedWorkspaces?.recoveryStatus === 'idle' ? 'recovered' : 'recovery_failed' }; }, 'workspace'), 'camera-refresh': async () => { try {
                 const devices = await bridge.camera.listDevices();
                 setCameraDevices(devices);
                 setNote('camera-devices-status', devices.length ? '' : t('未检测到摄像头；授权并连接设备后重试'));
@@ -396,7 +420,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             return createElement(tag, p, text[id]);
         if (tag === 'main' && category === 'space') {
             const spaceSection = <section className="setting-section space-host-section" id="space-host-section" key="space-host-section">
-                <h2>{t('Space 与手机')}</h2>
+                <h2>{t('设备')}</h2>
                 <p className="hint">{t('用一次性配对码把手机连接到当前 Host Space。')}</p>
                 <SpaceHostPanel api={api}/>
             </section>;

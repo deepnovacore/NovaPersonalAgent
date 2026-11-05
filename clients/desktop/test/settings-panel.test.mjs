@@ -1253,10 +1253,10 @@ test('sidebar and icon-button glyphs come from the shared sprite, injected at bo
 test('sidebar navigation cycles vertically and passes other keys through', () => {
   const {categoryTabForKey} = settingsCategories
   assert.equal(categoryTabForKey('general', 'ArrowDown'), 'diary')
-  assert.equal(categoryTabForKey('general', 'ArrowUp'), 'codex', 'wraps backwards')
-  assert.equal(categoryTabForKey('codex', 'ArrowDown'), 'general', 'wraps forwards')
+  assert.equal(categoryTabForKey('general', 'ArrowUp'), 'knowledge', 'wraps backwards')
+  assert.equal(categoryTabForKey('knowledge', 'ArrowDown'), 'general', 'wraps forwards')
   assert.equal(categoryTabForKey('secrets', 'Home'), 'general')
-  assert.equal(categoryTabForKey('secrets', 'End'), 'codex')
+  assert.equal(categoryTabForKey('secrets', 'End'), 'knowledge')
   assert.equal(categoryTabForKey('general', 'Tab'), null)
   assert.equal(categoryTabForKey('general', 'Enter'), null)
   assert.equal(categoryTabForKey('unknown-category', 'ArrowDown'), null)

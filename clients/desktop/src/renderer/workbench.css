@@ -1015,6 +1015,13 @@ body[data-presentation-mode="orb"] #shell:has(.personal-orb-task:not([hidden])) 
 .workbench .voice-failure{flex:1 0 100%;order:-1;margin:0 0 4px;font-size:12px;color:var(--warn)}
 .workbench .composer-actions:has(.voice-failure){flex-wrap:wrap}
 
+.workbench .idea-history{margin-top:8px;padding-top:10px;border-top:1px solid var(--line)}
+.workbench .idea-history>summary{cursor:pointer;color:var(--ink-dim);font-size:12.5px;font-weight:560}
+.workbench .idea-history>summary:hover{color:var(--ink)}
+.workbench .idea-history>p.hint{margin:6px 0 10px}
+.workbench .idea-history .idea-history-card{margin:0 0 10px}
+.workbench .idea-history .idea-history-card:last-child{margin-bottom:0}
+.workbench .idea-history-flag{margin:2px 0 8px;padding:2px 8px;border-radius:999px;background:var(--surface-raised);color:var(--ink-dim);font-size:11px;display:inline-block}
 .workbench .dismissible-card,.workbench .nova-suggestion{position:relative}
 .workbench .nova-suggestion>h3,.workbench .dismissible-card>h3{padding-right:28px}
 .workbench .card-close{position:absolute;top:10px;right:10px;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:50%;background:transparent;color:var(--ink-dim);cursor:pointer}

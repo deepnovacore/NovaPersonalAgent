@@ -1,5 +1,5 @@
 import {selectTimelineInputs} from './timeline-inputs.js'
-import {temporalSchema,resolvedTimeSchema,resolveTimelineTime} from './timeline-time.js'
+import {temporalSchema,resolvedTimeSchema,resolveTimelineTime,effectiveTimelineAnchor} from './timeline-time.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
@@ -165,7 +165,10 @@ export class TimelineBrief {
  #current(state=this.#state){return this.#visibleCards(state).length>0||state.perspective_revision===1&&!this.#pendingValidation&&state.key===this.#key()}
  snapshot(persisted=false){
   const state=persisted?this.#persisted:this.#state,counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort()
-  const cards=structuredClone(this.#visibleCards(state).map(card=>({...card,sources_available:this.#sourcesAvailable(card,state,!this.#checking()),sources_checking:this.#checking(),historical:card.policy_revision!==1||!this.#sourcesAvailable(card,state,!this.#checking())})))
+  // Persisted cards predate the effective-anchor rule; re-derive placement here so cached
+  // deadline/scheduled cards are not grouped after today without a regeneration.
+  const placed=<T extends {time?:z.infer<typeof resolvedTimeSchema>}>(card:T):T=>card.time?{...card,time:{...card.time,...effectiveTimelineAnchor(card.time)}}:card
+  const cards=structuredClone(this.#visibleCards(state).map(raw=>placed(raw)).map(card=>({...card,sources_available:this.#sourcesAvailable(card,state,!this.#checking()),sources_checking:this.#checking(),historical:card.policy_revision!==1||!this.#sourcesAvailable(card,state,!this.#checking())})))
   const activeCount=cards.filter(card=>card.sources_available).length
   return {generation_id:this.#current(state)?state.key:null,diagnostics:this.#current(state)?structuredClone(state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current(state)?state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards,
    /** Active cards still have their original evidence; archived cards are retained history whose sources moved or were withdrawn. */

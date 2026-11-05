@@ -7,7 +7,7 @@ const folderName=path=>String(path??'').split(/[\\/]+/).filter(Boolean).at(-1)??
 /** Why a Build is paused, in words the user can act on. Unknown codes stay hidden rather than leaking a raw identifier. */
 export const BUILD_STATUS_LABELS=Object.freeze({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})
 export const BUILD_REASONS=Object.freeze({
- model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',model_output_limit:'模型回复达到输出长度上限，已自动续写',model_output_limit_tool_arguments:'工具调用达到输出长度上限，未执行',round_limit:'已达到本次工具调用上限',
+ context_authorization_changed:'引用资料或授权已变化，任务已暂停；请核对资料与权限后继续。',model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',model_output_limit:'模型回复达到输出长度上限，已自动续写',model_output_limit_tool_arguments:'工具调用达到输出长度上限，未执行',round_limit:'已达到本次工具调用上限',
  restart_requires_resume:'已暂停，点击继续恢复任务',approval_denied:'你拒绝了一次操作，补充新的要求后继续',
  cleanup_unknown:'上一步的清理结果不确定，请核实后继续',outcome_unknown:'上一步的结果不确定，请核实后继续',new_user_input_received:'收到新消息，已暂停当前步骤',
 })

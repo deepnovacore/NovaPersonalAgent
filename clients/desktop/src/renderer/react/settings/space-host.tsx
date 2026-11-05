@@ -3,15 +3,27 @@ import {Button} from '@radix-ui/themes'
 import {Action, Field, useCommand} from './controls'
 import {currentLanguage} from '../../locale.mjs'
 
+/** Main's relay failures arrive as stable codes; these mean the relay itself is out of reach. */
+const RELAY_CODES=new Set(['relay_unreachable','relay_unavailable','relay_response_invalid','relay_tls_error','network_unavailable'])
+
 // Rendered inside the standalone #space-host-section page (the left-nav heading
 // already names the category), so this panel must not wrap itself in a card.
 
 export function SpaceHostPanel({api}: any) {
  const {state, busy, error, command}=useCommand(api,'personalCommand','space.status')
  const [pending,setPending]=useState<any[]>([]),[pairingError,setPairingError]=useState(''),[fingerprints,setFingerprints]=useState<Record<string,string>>({}),[invitation,setInvitation]=useState<any>(null),[revoke,setRevoke]=useState<string|null>(null)
- const [detailsOpen,setDetailsOpen]=useState(false)
+ const [detailsOpen,setDetailsOpen]=useState(false),[invitationFailed,setInvitationFailed]=useState(false)
+ const createInvitation=async()=>{setInvitationFailed(false);try{setInvitation(await command('space.invitation'))}catch(error){setInvitationFailed(true);throw error}}
  const label=(zh:string,en:string)=>currentLanguage()==='en'?en:zh
- const pairingMessage=(reason:string)=>reason==='pairing_request_expired'?label('配对请求已过期，请重新生成配对码并扫码。','The pairing request expired. Generate a new code and scan it again.'):reason==='pairing_fingerprint_mismatch'?label('手机指纹不匹配，请核对手机上显示的完整指纹。','The phone fingerprint does not match. Check the full fingerprint displayed on your phone.'):/^[a-z_]+$/.test(reason)?label('连接未完成，请刷新后重试。','Connection was not completed. Refresh and try again.'):reason
+ const relayMessage=label('无法连接中继服务。请检查网络、Tailscale 与中继地址后重试。','Cannot reach the relay service. Check your network, Tailscale and the relay address, then retry.')
+ // Transport failures (raw `fetch failed`, or a code main assigns to an unreachable relay) never show verbatim.
+ const pairingMessage=(reason:string)=>{
+  if(RELAY_CODES.has(reason)||/fetch failed|ECONNREFUSED|ETIMEDOUT/iu.test(reason))return relayMessage
+  if(reason==='pairing_request_expired')return label('配对请求已过期，请重新生成配对码并扫码。','The pairing request expired. Generate a new code and scan it again.')
+  if(reason==='pairing_fingerprint_mismatch')return label('手机指纹不匹配，请核对手机上显示的完整指纹。','The phone fingerprint does not match. Check the full fingerprint displayed on your phone.')
+  if(/^[a-z_]+$/u.test(reason))return label('连接未完成，请刷新后重试。','Connection was not completed. Refresh and try again.')
+  return label('操作未完成，请重新尝试；若持续失败，请检查后台连接。','The operation did not complete. Try again; if it persists, check the backend connection.')
+ }
  useEffect(()=>{
   let active=true;setPending([]);setPairingError('')
   if(state?.mode==='host')void api.personalCommand('space.pairings',{}).then((result:any)=>{if(result?.error)throw Error(result.error);if(active)setPending(Array.isArray(result)?result:[])}).catch((e:any)=>{if(active)setPairingError(e?.message??'unavailable')})
@@ -21,11 +33,11 @@ export function SpaceHostPanel({api}: any) {
  return <div className="space-host-panel" aria-busy={busy}>
   <h3>{label('连接手机','Connect your phone')}</h3>
   <p className="personal-hint">{label('扫码后，在电脑确认手机指纹。','Scan the code, then confirm your phone’s fingerprint on this computer.')}</p>
-  {(error||pairingError)&&<p role="alert">{pairingMessage(error||pairingError)}</p>}
+  {(error||pairingError)&&<div className="space-host-actions" role="alert"><p>{pairingMessage(error||pairingError)}</p><Action disabled={busy} action={invitationFailed?createInvitation:()=>command()}>{invitationFailed?label('重试生成配对码','Retry pairing code'):error&&state?label('刷新连接状态','Refresh connection status'):label('重试','Retry')}</Action></div>}
   {state?.mode==='host'?<>
    <div className="space-host-actions">
     <Action disabled={busy} action={()=>command()}>{label('刷新设备','Refresh devices')}</Action>
-    <Action disabled={busy} action={async()=>setInvitation(await command('space.invitation'))}>{label('生成一次性配对码','Create one-time pairing code')}</Action>
+    <Action disabled={busy} action={createInvitation}>{label('生成一次性配对码','Create one-time pairing code')}</Action>
    </div>
    {invitation&&<div className="space-host-invitation">
     {typeof qr_image==='string'&&qr_image.startsWith('data:image/png;base64,')&&<img src={qr_image} width={240} height={240} alt={label('使用手机扫码绑定','Scan with your phone to pair')}/>}
@@ -34,7 +46,7 @@ export function SpaceHostPanel({api}: any) {
     {pending.map(request=>{const expired=typeof request.expiresAt==='number'&&request.expiresAt<=Date.now();return <article key={request.id} className="space-host-pairing">
      <p className="space-host-pairing-device"><strong>{label('待连接的手机','Phone waiting to connect')}</strong></p><p className="space-host-pairing-fingerprint">{request.fingerprint}</p>
      <Field label={label('输入手机显示的完整指纹','Enter the full fingerprint shown on the phone')} value={fingerprints[request.id]??''} disabled={busy} onChange={(value:string)=>setFingerprints(previous=>({...previous,[request.id]:value}))}/>
-     {expired&&<><p role="status">{pairingMessage('pairing_request_expired')}</p><Action disabled={busy} action={async()=>{setInvitation(await command('space.invitation'))}}>{label('重新生成配对码','Generate a new pairing code')}</Action></>}
+     {expired&&<><p role="status">{pairingMessage('pairing_request_expired')}</p><Action disabled={busy} action={createInvitation}>{label('重新生成配对码','Generate a new pairing code')}</Action></>}
      <Action disabled={busy||expired} action={async()=>{
       const fingerprint=(fingerprints[request.id]??'').trim()
       if(fingerprint!==request.fingerprint)throw Error(label('指纹不匹配，未绑定','Fingerprint mismatch; device not paired'))
@@ -47,15 +59,16 @@ export function SpaceHostPanel({api}: any) {
    </div>}
    <details open={detailsOpen} onToggle={event=>setDetailsOpen(event.currentTarget.open)}>
     <summary>{label('连接详情','Connection details')}</summary>
-    {detailsOpen&&<>
+    <>
      <p className="space-host-space">{state.space}</p>
+     {typeof state.relay_url==='string'&&<p className="space-host-relay">{label('中继地址','Relay')} · {state.relay_url}</p>}
      <p>{label('数据保存在这台电脑，请定期备份。电脑数据丢失后无法恢复连接历史。断开手机不会删除其已下载的内容。','Your data stays on this computer. Back it up regularly; lost data cannot be recovered. Disconnecting a phone does not erase content it has already downloaded.')}</p>
      {invitation&&<Field label={label('配对内容','Pairing payload')} type="textarea" readOnly value={JSON.stringify(wire)} onChange={()=>{}}/>}
      {pending.map(request=><p key={request.id}>{request.device}</p>)}
      {(state.clients??[]).length>0&&<div className="space-host-devices">
       {(state.clients??[]).map((device:string)=><Action key={device} disabled={busy} action={()=>setRevoke(device)}>{label('撤销 '+device,'Revoke '+device)}</Action>)}
      </div>}
-    </>}
+    </>
    </details>
    {revoke&&<div className="space-host-confirm" role="group" aria-label={label('确认撤销设备','Confirm device revocation')}>
     <p>{label('断开后，这部手机将无法读取新消息，已下载的内容仍会保留。','After disconnecting, this phone cannot read new messages. Downloaded content remains on it.')}</p>

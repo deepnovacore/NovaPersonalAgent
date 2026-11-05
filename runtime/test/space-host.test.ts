@@ -175,3 +175,10 @@ test('Host rejects stale Client chat targeting a conversation now in plan mode',
   assert.equal(host.spaceChatMessages().length,0);
  }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });
+
+test('a relay transport failure reaches the client as a closed code, not raw fetch text',async()=>{
+ const {SpaceHostController}=await import('../src/space-host/config.js');const dir=await mkdtemp(join(await realpath(tmpdir()),'space-relay-down-'));const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const identity={device:'host',signingPublicKey:{x:'host-sign'},signingPrivateKey:{d:'host'},encryptionPublicKey:{x:'host-enc'},encryptionPrivateKey:{d:'enc'}},offline=new TypeError('fetch failed'),sdk={crypto:{deviceFingerprint:()=>'local-fingerprint'},RelayClient:class { pendingPairings(){return Promise.reject(offline);} createInvitation(){return Promise.reject(offline);} }}
+ const config={v:1 as const,mode:'host' as const,space:'s',personal_path:host.path,relay_url:'https://relay.example',epoch:1,identity,content_key:'x'.repeat(43),members:[]},controller=new SpaceHostController(join(dir,'config.json'),config,host,sdk as unknown as SpaceHostModules)
+ try{await assert.rejects(controller.pairings(),/^Error: relay_unreachable$/u);await assert.rejects(controller.invitation(),/^Error: relay_unreachable$/u)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
+});

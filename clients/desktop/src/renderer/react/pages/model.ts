@@ -57,3 +57,15 @@ export function sourceStatus(sources:any[]=[],status?:string){
  if(sources.some((source:any)=>source.scan_pending))return {kind:'indexing',text:'资料索引仍在更新'}
  return null
 }
+
+/**
+ * Legacy cards keep their saved reference day for placement, and a planned day that
+ * is still ahead never files the card after today: the card sits on the day it was
+ * written (as-of) and keeps the scheduled/deadline cue.
+ */
+export function effectiveTimelineAnchor(time:any):{anchor_date:string|null;anchor_basis:string}{
+ const anchor_date=time?.anchor_date??null,anchor_basis=time?.anchor_basis??'unknown',as_of=typeof time?.as_of==='string'?time.as_of:null
+ const planned=anchor_basis==='deadline'?(time?.due_on??anchor_date):anchor_basis==='scheduled'?(time?.scheduled_on??anchor_date):null
+ if(planned&&as_of&&planned>as_of)return {anchor_date:time?.last_reported_on??as_of,anchor_basis:'reported'}
+ return {anchor_date,anchor_basis}
+}

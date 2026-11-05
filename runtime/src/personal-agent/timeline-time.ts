@@ -7,7 +7,7 @@ type TimelineAnchorTime=Pick<z.infer<typeof resolvedTimeSchema>,'anchor_date'|'a
 /** Use the saved as-of day so persisted cards keep stable placement. */
 export function effectiveTimelineAnchor(time:TimelineAnchorTime):Pick<TimelineAnchorTime,'anchor_date'|'anchor_basis'>{
  const planned=time.anchor_basis==='deadline'?time.due_on:time.anchor_basis==='scheduled'?time.scheduled_on:null
- if(planned&&planned>time.as_of&&time.last_reported_on)return {anchor_date:time.last_reported_on,anchor_basis:'reported'}
+ if(planned&&planned>time.as_of)return {anchor_date:time.last_reported_on??time.as_of,anchor_basis:'reported'}
  return {anchor_date:time.anchor_date,anchor_basis:time.anchor_basis}
 }
 

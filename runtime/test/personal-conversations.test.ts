@@ -695,3 +695,33 @@ test('isolated dispatch retains work ownership and closes with the pool without 
  }finally{await pool.close()}
  assert.equal(dispatchClosed,1);assert.equal(chatClosed,1)
 })
+
+test('a Build paused by an authorization change is a paused task, not a failed reply',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-build-paused-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
+ const item=createConversation('build','写一个俄罗斯方块游戏',null,'build:paused');item.build={project:dir,source_conversation_id:'chat:main',status:'paused',reason:'stopped',log_revision:0,approval:null} as unknown as NonNullable<(typeof item)['build']>;state.conversations.items.push(item);state.conversations.selected_id=item.id;await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}),frames:Record<string,unknown>[]=[]
+ try{
+  await host.open();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.reject(Error('context_authorization_changed')),close:()=>Promise.resolve()}),frame=>{frames.push(frame)})
+  await host.command({type:'personal.command',request_id:'workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'})
+  await host.submitConversationText('build:paused','打开我电脑的飞书',undefined,undefined,{local_desktop:true})
+  await host.waitConversation('build:paused')
+  const message=(await store.read()).conversations.items.find(row=>row.id==='build:paused')!.messages.find(row=>row.role==='user')!
+  assert.equal(message.generation_status,'completed','a paused Build must not read as a failed reply')
+  assert.equal(message.failure_reason,undefined)
+  assert.equal(frames.some(frame=>frame.type==='conversation.error'),false,'no reply-failed frame is emitted for a pause')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('startup keeps a context-authorization pause from rewriting a Build reply as failed',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-build-paused-restart-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
+ const item=createConversation('build','打开我电脑的飞书',null,'build:restart');item.build={project:dir,source_conversation_id:'chat:main',status:'paused',reason:'context_authorization_changed',log_revision:0,approval:null} as unknown as NonNullable<(typeof item)['build']>
+ item.messages.push({id:'u',conversation_id:item.id,role:'user',text:'打开我电脑的飞书',created_at:new Date().toISOString(),generation_status:'failed',failure_reason:'unknown'});state.conversations.items.push(item);await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  await host.open();await host.close()
+  const message=(await store.read()).conversations.items.find(row=>row.id==='build:restart')!.messages[0]!
+  assert.equal(message.generation_status,'completed','stored failed status is repaired on startup')
+  assert.equal(message.failure_reason,undefined)
+  assert.equal((await store.read()).conversations.items.find(row=>row.id==='build:restart')!.build!.reason,'context_authorization_changed')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})

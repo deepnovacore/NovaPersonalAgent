@@ -9,7 +9,7 @@ export function createSpaceHostPanel({document,api}) {
  const button=(text,action,parent=root)=>{const node=el('button',text);node.type='button';node.addEventListener('click',async()=>{if(busy)return;busy=true;node.disabled=true;error.textContent='';try{await action()}catch(e){error.textContent=e?.message??label('暂时不可用','Temporarily unavailable')}finally{busy=false;node.disabled=false}});parent.append(node);return node};
  async function refresh(){status=await command('space.status');pending=status?.mode==='host'?await command('space.pairings'):[];render()}
  function render(){
-  if(!root)return;root.replaceChildren(el('h3',label('Space 与手机','Space and phones')));
+  if(!root)return;root.replaceChildren(el('h3',label('设备','Devices')));
   root.append(el('p',label('Host 保存全部数据。Host 损坏后此 Space 无法恢复；撤销设备会轮换密钥，但无法收回已下载历史。','The Host keeps all data. Losing the Host loses this Space. Revocation rotates keys but cannot erase previously downloaded history.')));
   if(status?.mode!=='host'){
    root.append(el('p',label('尚未配置 Host Space。先使用 nova-space-host init 创建独立空间，再以该配置启动桌面端。','No Host Space configured. Create an independent Space with nova-space-host init, then launch the desktop with its configuration.')));

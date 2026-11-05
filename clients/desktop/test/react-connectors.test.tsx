@@ -394,3 +394,34 @@ test('Space 与手机面板不再包裹卡片，保留原有配对操作', async
   assert.ok(v.getByRole('button', { name: '撤销 phone' }))
   assert.ok(calls.some(([method]) => method === 'space.pairings'))
 })
+
+test('a relay transport failure reads as a stable, actionable message instead of raw fetch text', async () => {
+ for (const failure of ['fetch failed', 'Error invoking remote method \'nova:settings:personal\': Error: fetch failed', 'relay_unreachable']) {
+  const api = {personalCommand: async (method: string) => method === 'space.status' ? {mode: 'host', space: 'safe-space', clients: []} : Promise.reject(Error(failure))}
+  const v = render(<SpaceHostPanel api={api}/>)
+  try {
+   await waitFor(() => assert.ok(v.getByText(/无法连接中继服务/u), failure))
+   assert.equal(v.container.textContent?.includes('fetch failed'), false)
+   assert.ok(v.getByRole('button', {name: '重试'}))
+  } finally { v.unmount() }
+ }
+})
+
+test('retrying a pairing-code failure actually retries its request; unknown backend errors are not called network outages',async()=>{
+ let invitations=0
+ const api={personalCommand:async(method:string)=>{
+  if(method==='space.status')return {mode:'host',space:'test',clients:[]}
+  if(method==='space.pairings')return []
+  if(method==='space.invitation'){if(++invitations===1)throw Error('relay_unreachable');return {id:'invite'}}
+ }}
+ const v=render(<SpaceHostPanel api={api}/>)
+ try{
+  await waitFor(()=>assert.ok(v.getByRole('button',{name:'生成一次性配对码'})))
+  fireEvent.click(v.getByRole('button',{name:'生成一次性配对码'}))
+  await waitFor(()=>assert.ok(v.getByRole('button',{name:'重试生成配对码'})))
+  fireEvent.click(v.getByRole('button',{name:'重试生成配对码'}))
+  await waitFor(()=>assert.equal(invitations,2))
+ }finally{v.unmount()}
+ const bad=render(<SpaceHostPanel api={{personalCommand:async()=>{throw Error('connections request rejected')}}}/>)
+ try{await waitFor(()=>assert.ok(bad.getByText(/操作未完成/u)));assert.equal(bad.container.textContent?.includes('无法连接中继'),false)}finally{bad.unmount()}
+})

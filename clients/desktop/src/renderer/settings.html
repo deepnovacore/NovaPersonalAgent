@@ -22,18 +22,18 @@
     </header>
     <nav class="settings-nav" id="settings-nav" aria-label="设置分类">
       <button type="button" class="nav-item" id="category-general" data-category="general" aria-current="true">通用</button>
-      <button type="button" class="nav-item" id="category-diary" data-category="diary" aria-current="false" tabindex="-1">日记与简报</button>
+      <button type="button" class="nav-item" id="category-diary" data-category="diary" aria-current="false" tabindex="-1">简报</button>
       <button type="button" class="nav-item" id="category-themes" data-category="themes" aria-current="false" tabindex="-1">主题</button>
       <button type="button" class="nav-item" id="category-usage" data-category="usage" aria-current="false" tabindex="-1">用量</button>
+      <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
       <button type="button" class="nav-item" id="category-models" data-category="models" aria-current="false" tabindex="-1">模型</button>
       <button type="button" class="nav-item" id="category-skills" data-category="skills" aria-current="false" tabindex="-1">技能</button>
-      <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器与 MCP</button>
+      <button type="button" class="nav-item" id="category-capabilities" data-category="capabilities" aria-current="false" tabindex="-1">执行器</button>
+      <button type="button" class="nav-item" id="category-mcp" data-category="mcp" aria-current="false" tabindex="-1">MCP</button>
       <button type="button" class="nav-item" id="category-connectors" data-category="connectors" aria-current="false" tabindex="-1">连接器</button>
       <button type="button" class="nav-item" id="category-permissions" data-category="permissions" aria-current="false" tabindex="-1">权限</button>
       <button type="button" class="nav-item" id="category-privacy" data-category="privacy" aria-current="false" tabindex="-1">隐私与数据</button>
       <button type="button" class="nav-item" id="category-knowledge" data-category="knowledge" aria-current="false" tabindex="-1">知识库</button>
-      <button type="button" class="nav-item" id="category-secrets" data-category="secrets" aria-current="false" tabindex="-1">API 密钥</button>
-      <button type="button" class="nav-item" id="category-codex" data-category="codex" aria-current="false" tabindex="-1">编程</button>
     </nav>
     <main>
       <section class="setting-section" id="desktop-permissions-section"><h2>电脑操作与系统权限</h2><div id="desktop-permissions-panel"></div><details class="computer-configuration"><summary>高级配置</summary><p>Build 的电脑操作默认使用主屏幕和当前对话模型，无需另配 GUI 模型或密钥。当前对话模型需支持视觉，系统权限和操作审批仍然有效。</p><p>整屏模式目前仅支持一个显示器。仅在需要指定屏幕或调整执行限制时覆盖启动配置；修改后重启 Nova。</p></details></section>
@@ -109,10 +109,10 @@
             <p class="hint">保存后用于新会话，进行中的任务不受影响。</p>
           </div>
         </div>
-        <div class="capability-group" id="mcp-section">
-          <h3>MCP</h3>
-          <div id="capabilities-editor"></div>
-        </div>
+      </section>
+      <section class="setting-section" id="mcp-section">
+        <h2>MCP</h2>
+        <div id="capabilities-editor"></div>
       </section>
       <section class="setting-section" id="im-section" hidden><h2>IM 渠道</h2><p class="hint">连接聊天工具，选择同步范围与提醒方式。</p><div id="im-connection"></div><p id="im-error" role="status" aria-live="polite"></p></section>
       <section class="setting-section" id="connections-section" hidden><h2>应用与资料</h2><p class="hint">只读取你授权的内容，不会代你修改或发送；内容会交给你选择的模型服务处理。</p><div id="connections-panel"></div><div id="space-host-panel"></div><p id="connections-error" role="status" aria-live="polite"></p></section>
@@ -126,7 +126,7 @@
         <h2>知识库配置</h2>
         <label class="toggle-row">文字回答前查找相关记忆<input id="memory-prerecall-enabled" type="checkbox" role="switch" aria-describedby="memory-prerecall-hint"></label>
         <p class="hint" id="memory-prerecall-hint">默认关闭，需要时仍可回忆。保存并重启后生效。</p>
-        <p class="hint">先在「执行器与 MCP」中启用知识库。文档保存在本机，检索与回答会使用所选模型服务。</p>
+        <p class="hint">先在「MCP」中启用知识库。文档保存在本机，检索与回答会使用所选模型服务。</p>
         <div class="field"><label for="embeddingProvider">向量服务</label><select id="embeddingProvider"><option value="dashscope">DashScope</option></select></div>
         <div class="field field-stacked"><label for="embeddingModel">向量模型</label><input id="embeddingModel" type="text"></div>
         <div class="field field-stacked"><label for="knowledgePath">存储位置</label><input id="knowledgePath" type="text" placeholder="留空使用默认位置"></div>
@@ -297,7 +297,7 @@
         </label>
       </section>
       <section class="setting-section" id="diary-section">
-        <h2>日记与简报</h2>
+        <h2>简报</h2>
         <div id="diary-panel"></div>
         <p id="diary-error" role="status" aria-live="polite"></p>
       </section>

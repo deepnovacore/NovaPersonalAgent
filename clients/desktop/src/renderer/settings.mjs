@@ -220,7 +220,7 @@ const categoryButtons = SETTINGS_CATEGORIES.map(category => document.querySelect
 // text-only (readable without JS) while the sprite owns all icon geometry.
 const NAV_GLYPHS = Object.freeze({
   general: 'gear', diary: 'calendar', themes: 'theme', usage: 'chart',
-  models: 'cube', skills: 'folder', capabilities: 'plus', connectors: 'chat',
+  models: 'cube', skills: 'folder', capabilities: 'plus', mcp: 'plus', connectors: 'chat',
   permissions: 'lock', privacy: 'shield', knowledge: 'book', secrets: 'key',
   hub: 'monitor', phone: 'phone', codex: 'code',
 })
@@ -669,7 +669,7 @@ function renderModelRoutes(view) {
     row.append(controls); root.append(row)
   }
   const account = document.createElement('p'); account.className = 'hint'
-  account.textContent = t('编程执行器与 ChatGPT 账号分别在「编程」「API 密钥」中配置。')
+  account.textContent = t('编程执行器与 ChatGPT 账号分别在「执行器 → 编程」「API 密钥」中配置。')
   root.append(account)
 }
 
