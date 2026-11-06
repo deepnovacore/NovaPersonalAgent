@@ -140,3 +140,14 @@ establish App Store policy compliance.
 
 The ReportLab default-font `sitecustomize` hook is code, not a new font asset;
 the approved font bytes, character subset, weight and SHA-256 above are unchanged.
+
+## Approved Eclipse mobile launcher icon (2026-11-06)
+
+The project owner supplied and reviewed the silver-white Eclipse artwork and authorized its inclusion in the public `v1.0.0dev` source. Android uses the same bytes as the iOS default appearance. This approval covers the exact launcher assets below.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
+| `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-dark.png` | `986850bb2f3a892349fbcce6711b05c461a27d0fad30e3e911b0eccd5d4a4e97` |
+| `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-tinted.png` | `fd33021cb8e7ab29162b784fbff3b055463575d60db5a46ba77fb0d787d1d8d2` |
+| `clients/flutter/android/app/src/main/res/mipmap-nodpi/ic_launcher.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
