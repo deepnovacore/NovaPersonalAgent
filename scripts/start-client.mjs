@@ -128,7 +128,7 @@ export function planClientLaunch({
     throw new Error('this launcher does not accept arguments other than --workbench')
   }
   if (!SUPPORTED_PLATFORMS.has(platform)) {
-    throw new Error('the Nova Personal Agent Desktop client requires macOS, Linux, or Windows')
+    throw new Error('the Nova Personal Agent client requires macOS, Linux, or Windows')
   }
   const pathApi = platform === 'win32' ? win32 : posix
   if (typeof npmCli !== 'string' || !pathApi.isAbsolute(npmCli)) {

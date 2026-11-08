@@ -22,3 +22,35 @@ for(const count of [0,2,512])test(`stored proactive history upgrades without los
   await store.write(result);assert.deepEqual(await store.read(),result)
  }finally{await rm(root,{recursive:true,force:true})}
 })
+
+test('legacy opaque persona metadata survives reading, schedule backup and writing with conversation history',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-persona-upgrade-')),path=join(root,'personal.json'),state=initialState()
+ const main=state.conversations.items[0]!,topic=createConversation('topic','Saved topic',null,'topic:saved'),at=new Date().toISOString()
+ main.persona='neutral-a';topic.persona='neutral-b'
+ main.messages=[{id:'kept-user',conversation_id:main.id,role:'user',text:'Retained question',created_at:at}]
+ topic.messages=[{id:'kept-answer',conversation_id:topic.id,role:'assistant',text:'Retained answer',created_at:at}]
+ state.conversations.items.push(topic);state.conversations.selected_id=topic.id
+ const original=JSON.stringify(state);await writeFile(path,original,{mode:0o600});await writeFile(path+'.before-schedules.json',original,{mode:0o600})
+ const store=new PersonalStore(path)
+ try{
+  const loaded=await store.read()
+  assert.deepEqual(loaded,state)
+  assert.equal(await readFile(path,'utf8'),original,'reading must not rewrite the old profile')
+  await store.ensureScheduleBackup();assert.equal(await readFile(path+'.before-schedules.json','utf8'),original)
+  await store.write(loaded)
+  assert.deepEqual(await store.read(),state)
+  assert.deepEqual(JSON.parse(await readFile(path,'utf8')).conversations,state.conversations)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
+
+test('persona compatibility stays bounded and does not admit unrelated unknown conversation fields',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-persona-strict-')),path=join(root,'personal.json')
+ try{
+  for(const extra of [{persona:''},{persona:'a'.repeat(129)},{persona:42},{persona:{}},{future_metadata:true}]){
+   const state=initialState();Object.assign(state.conversations.items[0]!,extra)
+   const original=JSON.stringify(state);await writeFile(path,original,{mode:0o600})
+   await assert.rejects(new PersonalStore(path).read(),{code:'state_corrupt'})
+   assert.equal(await readFile(path,'utf8'),original)
+  }
+ }finally{await rm(root,{recursive:true,force:true})}
+})

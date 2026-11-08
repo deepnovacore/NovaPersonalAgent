@@ -152,9 +152,9 @@ The project owner supplied and reviewed the silver-white Eclipse artwork and aut
 | `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-tinted.png` | `fd33021cb8e7ab29162b784fbff3b055463575d60db5a46ba77fb0d787d1d8d2` |
 | `clients/flutter/android/app/src/main/res/mipmap-nodpi/ic_launcher.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
 
-## NovaCore desktop Eclipse launcher icon (2026-11-08)
+## Nova Personal Agent desktop Eclipse launcher icon (2026-11-08)
 
-The owner authorized rebranding the public clients as NovaCore and packaging all three platforms with the existing approved white Eclipse logo. Desktop icon sizes below are mechanical resizes of the approved mobile default PNG (`eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152`), without new character artwork. Application/storage identifiers remain unchanged.
+The owner confirmed the desktop display name as Nova Personal Agent (NPA), the mobile display name as NovaCore, and the existing approved white Eclipse logo on all three platforms. Desktop icon sizes below are mechanical resizes of the approved mobile default PNG (`eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152`), without new character artwork. Application/storage identifiers remain unchanged.
 
 | File | SHA-256 |
 | --- | --- |
