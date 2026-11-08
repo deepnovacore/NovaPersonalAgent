@@ -1087,7 +1087,7 @@ const systemNotifier = createSystemNotifier({
 
 function createTray() {
   const next = new Tray(trayImage())
-  next.setToolTip('NovaCore')
+  next.setToolTip(DESKTOP_PRODUCT_NAME)
   next.setContextMenu(Menu.buildFromTemplate([
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
@@ -2526,7 +2526,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     // neither that nor 'starting' is a real exit, so neither raises the banner.
     } else if (backendStatus.state !== 'starting' && backendStatus.state !== 'stopped') sendToOrb('nova:backend-exit')
   }).catch(() => {
-    console.error('NovaCore renderer failed to load')
+    console.error(`${DESKTOP_PRODUCT_NAME} renderer failed to load`)
     app.quit()
   })
   tray = createTray()

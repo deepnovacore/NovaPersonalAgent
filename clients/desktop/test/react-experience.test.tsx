@@ -11,7 +11,7 @@ let view:any
 let off=0
 afterEach(async()=>{if(view)await act(async()=>view.dispose());view=null;document.body.innerHTML='<div id="personal-root"></div><div id="personal-orb-host"></div>'})
 test('ordinary pages render persona profile, readable sources and editable todo without a real runtime',async()=>{
- const snapshot:any=personalState();snapshot.experience={persona_id:'sample',name:'Sample'};snapshot.tasks=[];snapshot.feed=[];snapshot.soul={assistant_name:'NovaCore',available:false,role:'',reply_style:'',contact:{}}
+ const snapshot:any=personalState();snapshot.experience={persona_id:'sample',name:'Sample'};snapshot.tasks=[];snapshot.feed=[];snapshot.soul={assistant_name:'Nova',available:false,role:'',reply_style:'',contact:{}}
  snapshot.profile_preparation={status:'ready',draft:{about:null,work:[{title:'Sample profile',text:'Synthetic profile body',refs:[{entry_id:'sample-source',version:1}]}],interests:[]},sources:[{id:'sample-source',label:'Readable synthetic evidence'}]}
  snapshot.life.profile={version:0,about:''};snapshot.life.todos=[{id:'sample-todo',kind:'todo',title:'Sample todo',note:'Local action',status:'open',version:1,importance:'normal',sources:[]}]
  snapshot.timeline={status:'ready',available:true,cards:[]}

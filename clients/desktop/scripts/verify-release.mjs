@@ -14,8 +14,9 @@ import {expectedNativeResources} from './native-resource-contract.mjs'
 import {candidateScratchParent, prepareWindowsSmokeHomeOwnership} from './windows-smoke-home.mjs'
 import {normalizeSettings, saveSettings} from '../src/main/settings-store.mjs'
 import {SensitiveContentPolicy} from '@nova-personal-agent/runtime/desktop'
+import {DESKTOP_PRODUCT_NAME} from '../src/main/desktop-identity.mjs'
 
-const product = 'Nova Personal Agent Desktop'
+const product = DESKTOP_PRODUCT_NAME
 const native = /\.(node|dylib|dll|so(?:\.\d+)*)$/u
 const timeoutMs = 30_000
 

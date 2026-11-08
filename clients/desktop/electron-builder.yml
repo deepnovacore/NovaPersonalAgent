@@ -1,7 +1,7 @@
 appId: ai.deepnovacore.nova-audio-agent.orb
-productName: NovaCore
+productName: Nova Personal Agent
 electronVersion: 43.2.0
-artifactName: "NovaCore-${version}-${arch}.${ext}"
+artifactName: "Nova-Personal-Agent-${version}-${arch}.${ext}"
 asar: true
 asarUnpack:
   - '**/node_modules/@nova-personal-agent/runtime/scripts/autoglm-bridge.py'
@@ -122,7 +122,7 @@ nsis:
 linux:
   desktop:
     entry:
-      Name: Nova Personal Agent Desktop
+      Name: Nova Personal Agent
   target:
     - AppImage
     - deb
@@ -130,7 +130,7 @@ linux:
   icon: build/icons
   executableName: nova-personal-agent-desktop
   synopsis: "Nova ambient voice orb"
-  artifactName: "NovaCore-${version}-${arch}.${ext}"
+  artifactName: "Nova-Personal-Agent-${version}-${arch}.${ext}"
   extraResources:
     - from: build/native/codex-sandbox-probe
       to: native/codex-sandbox-probe

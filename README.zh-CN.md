@@ -4,7 +4,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
-  <img src="assets/brand/npa-header-light.svg" alt="NovaCore — Understands you. Interacts in real time." width="100%">
+  <img src="assets/brand/npa-header-light.svg" alt="Nova Personal Agent — Understands you. Interacts in real time." width="100%">
 </picture>
 
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
@@ -17,6 +17,8 @@
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
 **开源个人 Agent：私有记忆、智能主动性与实时交互。**
+
+桌面应用名为 **Nova Personal Agent（NPA）**；Android 和 iOS 应用名为 **NovaCore**。
 
 Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如何、何时澄清意图、征求批准，再推进工作。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果，始终掌握主动权。
 

@@ -72,7 +72,7 @@ test('Windows workbench enables an opaque native frame and shadow while the orb 
     assert.equal(window.options.frame, false)
     assert.equal(window.options.skipTaskbar, true)
     assert.equal(window.options.show, false)
-    assert.equal(window.options.title, 'NovaCore')
+    assert.equal(window.options.title, 'Nova Personal Agent')
     assert.equal(window.options.webPreferences, undefined, 'shells must not create extra renderers')
   }
   assert.equal(views.length, 1)

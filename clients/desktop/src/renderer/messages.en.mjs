@@ -1,7 +1,7 @@
 export const ENGLISH_MESSAGES = Object.freeze({
-  '设置 · NovaCore': 'Settings · NovaCore',
-  '开始使用 · NovaCore': 'Get started · NovaCore',
-  '记忆 · NovaCore': 'Memory · NovaCore',
+  '设置 · Nova Personal Agent': 'Settings · Nova Personal Agent',
+  '开始使用 · Nova Personal Agent': 'Get started · Nova Personal Agent',
+  '记忆 · Nova Personal Agent': 'Memory · Nova Personal Agent',
   '关键词': 'Keywords',
   '聊点什么': 'Something to talk about',
   "体验对话未完成，请在空间设置中检查体验码、额度与网络后重试。": "The experience conversation did not finish. Check your experience code, quota and connection in Space settings, then retry.",

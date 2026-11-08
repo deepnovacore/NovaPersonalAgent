@@ -1,7 +1,7 @@
 {
   "name": "@nova-personal-agent/desktop",
   "version": "1.0.0",
-  "description": "NovaCore personal agent desktop client",
+  "description": "Nova Personal Agent (NPA) desktop client",
   "homepage": "https://github.com/deepnovacore/NovaPersonalAgent",
   "author": {
     "name": "DeepNova Core",
@@ -29,7 +29,7 @@
     "package:mac:candidate": "npm run build && CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --config electron-builder.yml --config.mac.identity=- --config.mac.notarize=false --config.mac.hardenedRuntime=false --mac dmg --publish never",
     "package:mac:release": "npm run build && electron-builder --config electron-builder.yml --mac dmg --publish never",
     "package:win": "npm run build && electron-builder --config electron-builder.yml --win nsis --publish never",
-    "package:linux": "npm run build && electron-builder --config electron-builder.yml --config.productName=NovaCore --linux AppImage deb --publish never",
+    "package:linux": "npm run build && electron-builder --config electron-builder.yml --linux AppImage deb --publish never",
     "smoke:wake-word": "node scripts/wake-word-smoke.mjs",
     "verify:release": "node scripts/verify-release.mjs",
     "build:renderer": "node scripts/build-renderer.mjs",
@@ -64,5 +64,5 @@
     "@testing-library/user-event": "14.6.8",
     "@playwright/test": "1.64.1"
   },
-  "productName": "Nova Personal Agent Desktop"
+  "productName": "Nova Personal Agent"
 }
