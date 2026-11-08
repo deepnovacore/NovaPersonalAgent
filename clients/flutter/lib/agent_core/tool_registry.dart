@@ -173,6 +173,8 @@ class ToolRegistry {
                 _schema(
                   {
                     'offset': {'type': 'integer', 'minimum': 0},
+                    if (allowedNames?.contains('source.read') == true)
+                      'query': {'type': 'string', 'maxLength': 200},
                   },
                   ['offset'],
                 ),

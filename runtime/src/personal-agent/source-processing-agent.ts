@@ -188,13 +188,16 @@ export class SourceProcessingAgent{
    }
    // Read-only continuity: the current card's prose (already pruned to live evidence) shapes voice only, never facts.
    // Archived prose is a fallback only when every cited source is still available, so a deleted version cannot be resurrected.
-   const continuityOf=(prior:ProfileDraft|null,generatedAt:string|null):ProfileContinuity|undefined=>prior&&(prior.about||prior.work.length||prior.interests.length)?{generated_at:generatedAt,about:prior.about?.text??null,work:prior.work.map(item=>({title:item.title,text:item.text})),interests:prior.interests.map(item=>item.text)}:undefined
+   // Continuity stays off unless the previous prose looks healthy (several paragraphs and interests), so a thin paraphrase-style version cannot lock itself in.
+   const healthy=(prior:ProfileDraft)=>prior.interests.length>0&&(prior.about?.text.split(/\n{2,}/u).filter(part=>part.trim()).length??0)>=2
+   const continuityOf=(prior:ProfileDraft|null,generatedAt:string|null):ProfileContinuity|undefined=>prior&&healthy(prior)?{generated_at:generatedAt,about:prior.about?.text??null,work:prior.work.map(item=>({title:item.title,text:item.text})),interests:prior.interests.map(item=>item.text)}:undefined
    let continuity=continuityOf(previous.draft,previousProducts.generated_at)
    if(!continuity&&!deferProfile&&!unchangedProfile)try{
     const account=this.#account(),history=await this.operation({action:'profile.history',limit:3,...(typeof account==='string'?{account_scope:account}: {})}) as {items:ProfileHistoryItem[]}
     const archived=history.items.find(item=>item.unavailable_sources===0)
     continuity=archived?continuityOf(archived.draft,archived.generated_at):undefined
    }catch{/* An unreadable archive only removes continuity; generation continues from current evidence. */}
+   // Reuse still commits product/revision updates; publish deduplicates archived prose by draft hash.
    const draft=deferProfile||unchangedProfile?(previous.draft??{about:null,work:[],interests:[]}):await generate(profileEntries,signal,authorizeWithProjects,modelCall,observations,continuity)
 
    await authorizeWithProjects()

@@ -1,7 +1,7 @@
 import {join} from 'node:path'
 import {existsSync} from 'node:fs'
 
-export const DESKTOP_PRODUCT_NAME = 'Nova Personal Agent Desktop'
+export const DESKTOP_PRODUCT_NAME = 'NovaCore'
 // Storage ABI only: Electron derives OS encryption identities before app readiness.
 // Keep existing encrypted settings readable without copying or re-encrypting secrets.
 export const LEGACY_STORAGE_NAME = 'Nova Audio Agent Ambient Orb'

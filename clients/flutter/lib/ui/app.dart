@@ -1,4 +1,10 @@
 import '../space/space_root.dart';
+import '../experience/persona.dart';
+import '../experience/persona_sources.dart';
+import '../experience/experience_session.dart';
+import '../experience/author_model_dialog.dart';
+import '../generic/shared_ideas.dart';
+import 'shared_idea_suggestions.dart';
 import '../space/space_storage.dart';
 import 'dart:convert';
 import 'dart:io';
@@ -132,12 +138,15 @@ class NovaApp extends StatelessWidget {
   /// Android phone control; tests substitute a fake. Null uses the platform
   /// bridge on Android and nothing elsewhere.
   final PhoneChannel? phoneChannel;
+  static final _sharedIdeas = SharedIdeas();
   @override
   Widget build(BuildContext context) => MaterialApp(
     debugShowCheckedModeBanner: false,
     theme: novaTheme(),
-    builder: (context, child) =>
-        DecoratedBox(decoration: novaBackground, child: child),
+    builder: (context, child) => SharedIdeasScope(
+      notifier: _sharedIdeas,
+      child: DecoratedBox(decoration: novaBackground, child: child),
+    ),
     home:
         (audio != null ||
             requestMicrophone != null ||
@@ -188,6 +197,15 @@ class _WorkbenchShell extends StatefulWidget {
 }
 
 class _WorkbenchShellState extends State<_WorkbenchShell> {
+  bool get _experience => widget.space?.personaId != null;
+  final _experienceSession = ExperienceSession();
+  bool get _canUseAuthorModel =>
+      widget.space?.mode == SpaceMode.standalone && !_experience;
+  String? _authorTesterId;
+  ExperiencePersonaSources? _personaSources;
+  PersonaSnapshotPersistence? _personaSnapshotFile;
+  bool _personaRefreshing = false;
+  String _personaContext = '';
   late final AudioPort audio;
   late final Future<bool> Function() requestMicrophone;
   final emptyStore = PersonalStore(send: (_) => false);
@@ -272,7 +290,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         ? 'zh'
         : 'en';
     unawaited(_openAgentCore());
-    unawaited((feishu ??= FeishuHost()).open().catchError((Object _) {}));
+    if (!_experience) {
+      unawaited((feishu ??= FeishuHost()).open().catchError((Object _) {}));
+    }
     if (defaultTargetPlatform == TargetPlatform.iOS ||
         defaultTargetPlatform == TargetPlatform.android) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -293,6 +313,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       });
     }
     await saved.retireRuntimeConnection();
+    if (_canUseAuthorModel) {
+      final id = await _experienceSession.authorEnrollment(widget.space!);
+      if (mounted) setState(() => _authorTesterId = id);
+    }
   }
 
   Future<void> _prepareStartupPermissions() async {
@@ -332,6 +356,39 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         await localMemory.open();
         if (!mounted) return;
       }
+      if (widget.space?.personaId case final persona?) {
+        final sources = await ExperiencePersonaSources.load(persona);
+        final storage = PersonaSnapshotPersistence(
+          File(
+            '${(await SpaceStorage.directory(space: widget.space)).path}/experience-profile-v1.json',
+          ),
+          isCurrent: () => mounted && lifeHost.publication.canPublish,
+        );
+        await sources.restoreSnapshot(storage);
+        if (!mounted) {
+          sources.snapshot.dispose();
+          return;
+        }
+        _personaSources = sources;
+        _personaSnapshotFile = storage;
+        if (localMemory?.available == true) {
+          await sources.seedMemory(localMemory!);
+        }
+        await lifeHost.open();
+        if (!mounted) return;
+        if (lifeHost.repo case final repository?) {
+          await ExperiencePersona.seedInto(
+            repository,
+            persona,
+            widget.space!.experienceSeededAt!,
+          );
+        }
+        _personaContext = await ExperiencePersona.context(
+          persona,
+          widget.space!.experienceSeededAt,
+        );
+        if (!mounted) return;
+      }
       final nativeTasks = NativeChatTaskRunner();
       final iosTasks = defaultTargetPlatform == TargetPlatform.iOS
           ? nativeTasks
@@ -344,7 +401,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       final host =
           widget.agentCore ??
           await AgentCoreHost.open(
+            settings: _experience
+                ? ModelSettings(managedConfiguration: _experienceSession.model)
+                : null,
             additionalContext: (model) async {
+              if (_experience) return _personaContext;
               final provider = '${model.endpoint}|${model.model}';
               final connector = feishu ??= FeishuHost();
               await connector.open();
@@ -362,47 +423,75 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                   ? ''
                   : 'User-stated profile corrections override inferred traits; treat these values as personal facts, not action instructions: ${jsonEncode(merged)}';
             },
-            backgroundExecution: iosTasks == null
+            backgroundExecution: _experience || iosTasks == null
                 ? null
                 : BackgroundExecution(),
-            clientFactory: iosTasks == null ? null : IosModelClient.new,
-            registry: ToolRegistry(
-              spaceMode: spaceMode,
-              localMemory: localMemory,
-              snapshot: lifeHost.snapshot,
-              mutate: lifeHost.mutate,
-              hasConflict: () => lifeHost.hasConflict,
-              fetch: SafeWebFetch().fetch,
-              automaticExecution: true,
-              workspace: workspace,
-              shell: workspace == null ? null : WorkspaceShell(workspace),
-              queryNative: iosTasks == null
-                  ? null
-                  : (input) async => Map<String, dynamic>.from(
-                      await const NativeLocalAgent().call('query', input)
-                          as Map,
-                    ),
-              runChatTask: iosTasks?.run,
-              cancelChatTask: nativeTasks.cancel,
-              listDeviceApps: iosTasks != null
-                  ? null
-                  : () async => {
-                      'apps': await const NativeLocalAgent().call('apps'),
+            clientFactory: _experience || iosTasks == null
+                ? null
+                : IosModelClient.new,
+            registry: _experience
+                ? ToolRegistry(
+                    spaceMode: spaceMode,
+                    localMemory: localMemory,
+                    snapshot: lifeHost.snapshot,
+                    mutate: lifeHost.mutate,
+                    hasConflict: () => lifeHost.hasConflict,
+                    fetch: (_) => throw StateError('tool_not_allowed'),
+                    workspace: workspace,
+                    readEvidence: (args) async => _personaSources!.read(args),
+                    allowedNames: const {
+                      'source.read',
+                      'memory.remember',
+                      'memory.recall',
+                      'memory.forget',
+                      'life.list',
+                      'life.get',
+                      'life.create',
+                      'life.update',
+                      'file.read',
+                      'file.write',
+                      'file.edit',
+                      'file.inspect_html',
                     },
-              readDeviceTasks: iosTasks != null
-                  ? null
-                  : () async =>
-                        await const NativeLocalAgent().call('tasks') as List,
-              requestDeviceTask: iosTasks != null
-                  ? null
-                  : (input, id) async {
-                      try {
-                        return await nativeTasks.run(input, id);
-                      } finally {
-                        phoneRun?.markEnded(id);
-                      }
-                    },
-            ),
+                  )
+                : ToolRegistry(
+                    spaceMode: spaceMode,
+                    localMemory: localMemory,
+                    snapshot: lifeHost.snapshot,
+                    mutate: lifeHost.mutate,
+                    hasConflict: () => lifeHost.hasConflict,
+                    fetch: SafeWebFetch().fetch,
+                    automaticExecution: true,
+                    workspace: workspace,
+                    shell: workspace == null ? null : WorkspaceShell(workspace),
+                    queryNative: iosTasks == null
+                        ? null
+                        : (input) async => Map<String, dynamic>.from(
+                            await const NativeLocalAgent().call('query', input)
+                                as Map,
+                          ),
+                    runChatTask: iosTasks?.run,
+                    cancelChatTask: nativeTasks.cancel,
+                    listDeviceApps: iosTasks != null
+                        ? null
+                        : () async => {
+                            'apps': await const NativeLocalAgent().call('apps'),
+                          },
+                    readDeviceTasks: iosTasks != null
+                        ? null
+                        : () async =>
+                              await const NativeLocalAgent().call('tasks')
+                                  as List,
+                    requestDeviceTask: iosTasks != null
+                        ? null
+                        : (input, id) async {
+                            try {
+                              return await nativeTasks.run(input, id);
+                            } finally {
+                              phoneRun?.markEnded(id);
+                            }
+                          },
+                  ),
           );
       await host.store.ensureMain();
       if (!mounted) {
@@ -433,6 +522,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               _phoneVoiceExpanded;
         };
       });
+      if (_experience) return;
       unawaited(_openLocalSchedules(host));
       unawaited(_openProfileGeneration().catchError((Object _) {}));
       // Open a separate durable context for the voice worker. Failure leaves
@@ -473,6 +563,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   /// A failed start stays retryable instead of caching its error forever.
   Future<void> _openProfileGeneration() async {
+    if (_experience) return;
     final opening = _profileOpening;
     if (opening != null) return opening;
     final result = _startProfileGeneration();
@@ -767,6 +858,39 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     );
   }
 
+  Widget _personaProfile() => ExperiencePersonaProfile(
+    personaId: widget.space!.personaId!,
+    sources: _personaSources,
+    onRefresh: _personaSnapshotFile == null ? null : _refreshPersona,
+    refreshing: _personaRefreshing,
+  );
+
+  Future<void> _refreshPersona() async {
+    final sources = _personaSources, storage = _personaSnapshotFile;
+    if (sources == null || storage == null || _personaRefreshing) return;
+    bool current() =>
+        mounted &&
+        identical(sources, _personaSources) &&
+        lifeHost.publication.canPublish;
+    if (!current()) return;
+    setState(() => _personaRefreshing = true);
+    try {
+      final result = await _experienceSession.refreshPersona(
+        sources.id,
+        sources.version,
+      );
+      await sources.replaceSnapshot(result, storage, current);
+    } catch (_) {
+      if (mounted && current()) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('无法重新提取。请确认已兑换体验码；已保存的资料仍可查看。')),
+        );
+      }
+    } finally {
+      if (current()) setState(() => _personaRefreshing = false);
+    }
+  }
+
   Widget _myPage() {
     final connector = feishu;
     final hint = _profileHint();
@@ -779,7 +903,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           {},
       language: language,
       onOpen: _workspace,
-      generatedProfile: connector == null
+      generatedProfile: _experience
+          ? _personaProfile()
+          : connector == null
           ? null
           : LocalProfileResults(
               host: connector,
@@ -799,6 +925,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   }
 
   void _openVoice() {
+    if (_experience) {
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('体验 Space 当前支持文字对话。')));
+      return;
+    }
     if (phoneVoice?.active == true || phoneVoice?.connecting == true) {
       _expandPhoneVoice();
       return;
@@ -845,6 +977,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   }
 
   Future<void> _startPhoneVoice() async {
+    if (_experience) return;
     final call = phoneVoice, id = chatId;
     if (call == null ||
         id == null ||
@@ -893,6 +1026,37 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
+  bool _sendingSharedIdea = false;
+
+  Future<void> _sendIdeaFromPage(String text, BuildContext pageContext) async {
+    final host = agentCore;
+    if (_sendingSharedIdea || host == null) return;
+    _sendingSharedIdea = true;
+    Navigator.of(pageContext).pop();
+    setState(() => _tab = 0);
+    try {
+      await WidgetsBinding.instance.endOfFrame;
+      if (!mounted || !identical(host, agentCore)) return;
+      final panel = localConversation.currentState;
+      if (panel != null && panel.canSendSharedIdea) {
+        await panel.sendSharedIdea(text);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                '主对话暂时无法发送，请稍后重试。',
+                'Main chat is unavailable. Try again shortly.',
+              ),
+            ),
+          ),
+        );
+      }
+    } finally {
+      _sendingSharedIdea = false;
+    }
+  }
+
   Future<void> _workspace(int page) async {
     await Navigator.of(context).push<void>(
       CupertinoPageRoute(
@@ -922,7 +1086,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                             page: page,
                             language: language,
                             showHeading: false,
-                            localProfile: page != 5 || connector == null
+                            localProfile: _experience && page == 5
+                                ? (_) => _personaProfile()
+                                : page != 5 || connector == null
                                 ? null
                                 : (excludeAbout) => LocalProfileResults(
                                     host: connector,
@@ -940,6 +1106,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                   ),
                             onSettings: _settings,
                             onDelegate: _delegate,
+                            onSharedIdea: (text) =>
+                                unawaited(_sendIdeaFromPage(text, context)),
                             onOpenConversation: () {
                               Navigator.pop(context);
                               setState(() => _tab = 0);
@@ -1062,27 +1230,57 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       builder: (context) => ListView(
         padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
         children: [
-          _settingGroup(context, _t('对话', 'Conversation'), [
-            ...conversationSettingsRows(language),
-            ('credentials', _t('配置密钥', 'Configure keys'), CupertinoIcons.lock),
-          ]),
+          if (!_experience)
+            _settingGroup(
+              context,
+              _t('对话', 'Conversation'),
+              [
+                ...conversationSettingsRows(language),
+                (
+                  'credentials',
+                  _t('配置密钥', 'Configure keys'),
+                  CupertinoIcons.lock,
+                ),
+                if (_canUseAuthorModel)
+                  (
+                    'author_model',
+                    _t('兑换体验码', 'Redeem experience code'),
+                    CupertinoIcons.ticket,
+                  ),
+              ],
+              subtitles: {
+                if (_canUseAuthorModel)
+                  'author_model': _authorTesterId == null
+                      ? _t(
+                          '兑换后即可使用作者提供的对话模型。',
+                          'Redeem a code to use the author-provided chat model.',
+                        )
+                      : _t(
+                          '正在使用作者提供的对话模型',
+                          'Author-provided chat model enabled',
+                        ),
+              },
+            ),
           _settingGroup(context, _t('更多', 'More'), [
-            ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
+            if (!_experience)
+              ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
             (
               'message_display',
               _t('消息显示', 'Message display'),
               CupertinoIcons.text_bubble,
             ),
             ('language', _t('语言', 'Language'), CupertinoIcons.globe),
-            ...phoneControlSettingsRows(
-              language,
-              available: phoneChannel != null,
-            ),
-            (
-              'local_schedules',
-              _t('手机定时任务', 'Phone schedules'),
-              CupertinoIcons.calendar,
-            ),
+            if (!_experience)
+              ...phoneControlSettingsRows(
+                language,
+                available: phoneChannel != null,
+              ),
+            if (!_experience)
+              (
+                'local_schedules',
+                _t('手机定时任务', 'Phone schedules'),
+                CupertinoIcons.calendar,
+              ),
             ('tasks', _t('执行记录', 'Activity'), CupertinoIcons.clock),
             (
               'sync',
@@ -1115,6 +1313,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           language: language,
           onChanged: settings.refreshApiKeyProjection,
         );
+      case 'author_model':
+        await _authorModelSettings();
       case 'model_services':
         await _modelServices();
       case 'devices':
@@ -1152,6 +1352,38 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             ),
           ),
         );
+    }
+  }
+
+  Future<void> _authorModelSettings() async {
+    if (!_canUseAuthorModel || agentCore?.busy == true) return;
+    final result = await showAuthorModelDialog(
+      context,
+      session: _experienceSession,
+      space: widget.space!,
+      language: language,
+      selected: _authorTesterId,
+    );
+    if (mounted && result != null) {
+      setState(() => _authorTesterId = result.testerId);
+    }
+  }
+
+  Future<void> _chooseConversationModel() async {
+    final settings = agentCore!.settings;
+    try {
+      await showLocalModelSettings(context, settings, language: language);
+      if (mounted) profileGeneration?.wake();
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t('无法读取模型设置，请重试。', 'Could not read model settings. Try again.'),
+            ),
+          ),
+        );
+      }
     }
   }
 
@@ -1380,11 +1612,15 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     subtitles: subtitles,
     selected: selected,
     onSelected: onSelected,
-    disabled: {if (agentCore?.busy == true) 'chat_model'},
+    disabled: {
+      if (agentCore?.busy == true) ...{'chat_model', 'author_model'},
+    },
   );
 
   @override
   void dispose() {
+    _experienceSession.dispose();
+    _personaSources?.snapshot.dispose();
     // Before the tracker and the avatar store it uses.
     _taskPet?.dispose();
     phoneRun?.dispose();
@@ -1449,8 +1685,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       SnackBar(
         content: Text(
           _t(
-            '允许 Nova 显示在其他应用上层后，切到别的 App 时也能看到任务进度。',
-            'Allow Nova to display over other apps to see task progress while you use other apps.',
+            '允许 NovaCore 显示在其他应用上层后，切到别的 App 时也能看到任务进度。',
+            'Allow NovaCore to display over other apps to see task progress while you use other apps.',
           ),
         ),
         action: SnackBarAction(
@@ -1470,7 +1706,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     centerTitle: true,
     leadingWidth: 64,
     automaticallyImplyLeading: false,
-    title: PetAvatarTitle(store: petAvatarStore, language: language),
+    title: PetAvatarTitle(
+      store: petAvatarStore,
+      language: language,
+      title: 'NovaCore',
+    ),
     actions: [
       if (widget.space == null) _settingsButton(),
       const SizedBox(width: 10),
@@ -1563,7 +1803,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           (
                             CupertinoIcons.chat_bubble,
                             CupertinoIcons.chat_bubble_fill,
-                            'Nova',
+                            'NovaCore',
                             0,
                           ),
                           (
@@ -1666,12 +1906,23 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 if (hasChat)
                                   LocalChatPanel(
                                     key: localConversation,
-                                    onVoice: _openVoice,
+                                    onChooseModel: _experience
+                                        ? null
+                                        : _chooseConversationModel,
+                                    authorModel: _authorTesterId == null
+                                        ? null
+                                        : () => _experienceSession.model(
+                                            _authorTesterId!,
+                                          ),
+                                    onAuthorModelSettings: _canUseAuthorModel
+                                        ? _authorModelSettings
+                                        : null,
+                                    onVoice: _experience ? null : _openVoice,
                                     voiceBusy:
                                         phoneVoice?.active == true ||
                                         phoneVoice?.connecting == true,
                                     audioOwner: audioOwner,
-                                    dictationAudio: audio,
+                                    dictationAudio: _experience ? null : audio,
                                     requestMicrophone: requestMicrophone,
                                     voiceSettings: voiceSettings,
                                     externalTaskBusy:
@@ -1711,7 +1962,14 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 TimelinePage(
                                   store: lifeHost.store ?? emptyStore,
                                   language: language,
-                                  sourceTimeline: connector == null
+                                  sourceTimeline: _experience
+                                      ? ExperiencePersonaTimeline(
+                                          personaId: widget.space!.personaId!,
+                                          anchor:
+                                              widget.space!.experienceSeededAt,
+                                          sources: _personaSources,
+                                        )
+                                      : connector == null
                                       ? null
                                       : LocalProfileResults(
                                           host: connector,

@@ -111,7 +111,8 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    close:()=>{/* the deployment owns the shared telemetry sink */},
   }:undefined
   addDependencies(options.host.conversationContextDependencies({...conversation,messages:mode==='voice'||conversation.kind==='build'||conversation.mode==='plan'?conversation.messages:conversation.messages.filter(message=>!message.schedule_ref?.run_id),prepared:null}))
-  const planReference=conversation.kind==='build'&&conversation.build?.plan_id&&conversation.build.plan_version?{id:conversation.build.plan_id,version:conversation.build.plan_version}:conversation.mode==='plan'||mode==='voice'?conversation.plan:undefined
+  const localBuildText=conversation.kind==='build'&&mode==='text'&&!execution
+  const planReference=localBuildText?undefined:conversation.kind==='build'&&conversation.build?.plan_id&&conversation.build.plan_version?{id:conversation.build.plan_id,version:conversation.build.plan_version}:conversation.mode==='plan'||mode==='voice'?conversation.plan:undefined
   if(planReference){
    const plan=await abortable(options.host.workbench.plan(planReference.id,planReference.version),startupSignal)
    addDependencies(await abortable(options.host.planContextDependencies(plan),startupSignal))
@@ -123,10 +124,11 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    const workbenchMode=conversation.kind==='build'?'build':'plan'
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
    const factory=configuredTextLlm({settings:options.settings,clock:options.clock??new RealClock(),idFactory:randomUUID,instructions:workbenchInstructions(workbenchMode,options.settings.language,!!conversation.build?.plan_id),transport:workbenchMode==='build'?BUILD_LLM_TRANSPORT:PLAN_LLM_TRANSPORT,...(reporter?{onUsage:reporter}:{})})
-   const scopedEmit=(frame:Record<string,unknown>)=>emit({...frame,...(frame.role==='assistant'?{context_dependencies:mergeContextDependencies(contextDependencies,frame.context_dependencies===undefined?undefined:contextDependenciesSchema.parse(frame.context_dependencies))}:{}),...(workbenchMode==='build'?{local_build:true}:{})})
+   const scopedEmit=(frame:Record<string,unknown>)=>emit({...frame,...(!localBuildText&&frame.role==='assistant'?{context_dependencies:mergeContextDependencies(contextDependencies,frame.context_dependencies===undefined?undefined:contextDependenciesSchema.parse(frame.context_dependencies))}:{}),...(workbenchMode==='build'?{local_build:true}:{})})
    const workbench=await createWorkbenchRuntime({...(telemetry?{telemetry}:{}),conversation,host:options.host,contextConsumer:configuredMemoryConsumer(options.settings,'text')??null,factory,emit:scopedEmit,lifetime,language:options.settings.language,reasoning:options.settings.build_reasoning===true,approval:()=>options.host.localToolApproval??options.settings.local_tool_approval,...(options.onDiagnostic?{onDiagnostic:options.onDiagnostic}:{}),
     createBridge:()=>conversationRuntimeFactory(options)({...conversation,kind:'chat',mode:'chat'},scopedEmit,'text',lifetime,recovery,undefined,{chat:false}),
    })
+   if(localBuildText)return workbench
    return {...workbench,runTurn:async(text,signal,context)=>{addDependencies(options.host.referenceContextDependencies(context?.references??[]));await authorizeContext(true);const result=await workbench.runTurn(text,signal,context);return {...result,context_dependencies:mergeContextDependencies(contextDependencies,result.context_dependencies)}}}
   }
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')

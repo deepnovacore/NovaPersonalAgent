@@ -177,3 +177,62 @@ test('a realtime voice failure in the orb is shown on the orb, not only in the h
  await waitFor(()=>assert.ok(document.querySelector('#personal-orb-host .personal-orb-error')))
  assert.match(document.querySelector('#personal-orb-host .personal-orb-error')!.textContent!,/密钥/)
 })
+
+test('shared ideas use the same sample in Ideas and the greeting-only composer',async()=>{
+ const sample=[{id:'tea',text:'怎么泡一杯好茶？'}]
+ const {view,sent}=await mount({api:{personal:{sharedIdeas:async(language:string)=>{assert.equal(language,'zh');return sample}}}})
+ const state=personalState(2)
+ state.conversations.messages=[{id:'welcome',conversation_id:'chat:main',role:'assistant',origin:'proactive',text:'你好，我是 Nova。',created_at:fixedNow} as any]
+ await act(async()=>view.receive(state))
+ const composer=()=>document.querySelector<HTMLButtonElement>('.shared-ideas-opening button')
+ assert.equal(composer()?.textContent,sample[0].text)
+ assert.match(document.querySelector('#chat-pane')!.textContent!,/你好，我是 Nova/)
+ const draft=document.querySelector<HTMLTextAreaElement>('[aria-label="消息草稿"]')!
+ await act(async()=>fireEvent.change(draft,{target:{value:'保留我的草稿'}}))
+ assert.equal(composer(),null)
+ await act(async()=>view.controller.select('topic:review'))
+ await act(async()=>fireEvent.click(document.querySelector('[data-page="ideas"]')!))
+ const card=document.querySelector<HTMLButtonElement>('.shared-ideas-list button')!
+ assert.equal(card.textContent,sample[0].text)
+ await act(async()=>{fireEvent.click(card);fireEvent.click(card)})
+ assert.equal(view.controller.selectedId,'chat:main')
+ assert.equal(draft.value,'保留我的草稿')
+ const inputs=sent.filter(frame=>frame.type==='input.text')
+ assert.equal(inputs.length,1)
+ assert.equal(inputs[0].conversation_id,'chat:main')
+ assert.equal(inputs[0].text,sample[0].text)
+})
+
+test('one composer topic click submits independently of the draft and suppresses rapid repeats',async()=>{
+ const sample=[{id:'tea',text:'怎么泡茶？'}]
+ const {view,sent}=await mount({api:{personal:{sharedIdeas:async(language:string)=>{assert.equal(language,'zh');return sample}}}})
+ const state=personalState(2)
+ state.conversations.messages=[]
+ await act(async()=>view.receive(state))
+ const button=document.querySelector<HTMLButtonElement>('.shared-ideas-opening button')!
+ await act(async()=>{fireEvent.click(button);fireEvent.click(button)})
+ const inputs=sent.filter(frame=>frame.type==='input.text')
+ assert.equal(inputs.length,1)
+ assert.equal(inputs[0].text,sample[0].text)
+ assert.equal(view.controller.draft,'')
+})
+
+test('changing App language switches the opening to its own pool',async()=>{
+ const {setLanguage}=await import('../src/renderer/locale.mjs')
+ const topics={zh:[{id:'tea',text:'怎么泡茶？'}],en:[{id:'stars',text:'Why do stars twinkle?'}]}
+ const requests:string[]=[]
+ const {view}=await mount({api:{personal:{sharedIdeas:async(language:'zh'|'en')=>{
+  requests.push(language)
+  return topics[language]
+ }}}})
+ const state=personalState(2)
+ state.conversations.messages=[]
+ await act(async()=>view.receive(state))
+ const opening=()=>document.querySelector('.shared-ideas-opening button')?.textContent
+ assert.equal(opening(),topics.zh[0].text)
+ try{
+  await act(async()=>{setLanguage('en');view.refresh()})
+  assert.equal(opening(),topics.en[0].text)
+  assert.deepEqual(requests,['zh','en'])
+ }finally{setLanguage('zh-CN')}
+})

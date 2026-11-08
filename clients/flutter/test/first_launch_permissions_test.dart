@@ -93,7 +93,7 @@ void main() {
         expect(microphoneRequests, 0);
         await tester.tap(find.text('Tasks').last);
         await tester.pumpAndSettle();
-        await tester.tap(find.text('Nova').last);
+        await tester.tap(find.text('NovaCore').last);
         await tester.pumpAndSettle();
         await tester.tap(find.text('Tasks').last);
         await tester.pumpAndSettle();

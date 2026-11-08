@@ -9,6 +9,10 @@ export function homeTranscript(conversations){
  const rows=[...(conversations?.messages??[]).filter(message=>message.conversation_id==='chat:main'),...(conversations?.home_messages??[])];
  return [...new Map(rows.map(message=>[message.id,message])).values()].sort((a,b)=>(a.created_at??'').localeCompare(b.created_at??''))
 }
+export function emptyIdeaOpening(messages){
+ const first=messages[0]
+ return !first||(messages.length===1&&first.role==='assistant'&&first.origin==='proactive')
+}
 /**
  * Live captions are not persisted, so they carry the local time they were first seen. They belong right after the
  * last persisted message that existed then; appending them last would pin a stale caption below newer messages.

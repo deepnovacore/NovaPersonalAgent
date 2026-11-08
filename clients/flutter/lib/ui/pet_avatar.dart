@@ -411,7 +411,7 @@ class PetAvatarTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = language == 'zh' ? 'Nova · 宠物头像' : 'Nova · Pet avatar';
+    final label = language == 'zh' ? '$title · 宠物头像' : '$title · Pet avatar';
     return Semantics(
       button: true,
       label: label,

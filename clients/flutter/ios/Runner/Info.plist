@@ -8,23 +8,23 @@
 	<key>UIBackgroundModes</key>
 	<array><string>fetch</string><string>audio</string></array>
 	<key>NSCalendarsFullAccessUsageDescription</key>
-	<string>Nova reads and updates your calendar for requests you make in the conversation.</string>
+	<string>NovaCore reads and updates your calendar for requests you make in the conversation.</string>
 	<key>NSCalendarsUsageDescription</key>
-	<string>Nova reads and changes calendar events for tasks you explicitly approve.</string>
+	<string>NovaCore reads and changes calendar events for tasks you explicitly approve.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Nova reads and updates your reminders for requests you make in the conversation.</string>
+	<string>NovaCore reads and updates your reminders for requests you make in the conversation.</string>
 	<key>NSRemindersUsageDescription</key>
-	<string>Nova reads and changes reminders for tasks you explicitly approve.</string>
+	<string>NovaCore reads and changes reminders for tasks you explicitly approve.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Nova uses your microphone after you start voice or dictation.</string>
+	<string>NovaCore uses your microphone after you start voice or dictation.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Nova uses the photo you choose as your pet avatar. The image stays on this device.</string>
+	<string>NovaCore uses the photo you choose as your pet avatar. The image stays on this device.</string>
 	<key>CADisableMinimumFrameDurationOnPhone</key>
 	<true/>
 	<key>CFBundleDevelopmentRegion</key>
 	<string>$(DEVELOPMENT_LANGUAGE)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Nova Mobile</string>
+	<string>NovaCore</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -32,7 +32,7 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>nova_mobile</string>
+	<string>NovaCore</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

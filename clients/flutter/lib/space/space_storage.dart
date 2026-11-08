@@ -88,16 +88,31 @@ class SpaceRecord {
     this.relay,
     this.device,
     this.paired = false,
+    this.personaId,
+    this.experienceSeededAt,
   });
   final String id, name;
   final SpaceMode mode;
   final String? remoteSpace, hostDevice, relay, device;
   final Map<String, dynamic>? hostSigningKey;
   final bool paired;
+  final String? personaId;
+  final DateTime? experienceSeededAt;
   factory SpaceRecord.fromJson(Map<String, dynamic> value) {
     final id = value['id'] as String;
     if (!RegExp(r'^[a-zA-Z0-9_-]{1,200}$').hasMatch(id)) {
       throw const FormatException('invalid_space_id');
+    }
+    final persona = value['persona_id'];
+    final anchor = DateTime.tryParse(
+      value['experience_seeded_at'] as String? ?? '',
+    );
+    if (persona != null &&
+        (persona is! String ||
+            !RegExp(r'^[a-z0-9][a-z0-9_-]{0,63}$').hasMatch(persona) ||
+            value['mode'] != 'standalone' ||
+            anchor == null)) {
+      throw const FormatException('invalid_experience_space');
     }
     return SpaceRecord(
       id: id,
@@ -110,6 +125,8 @@ class SpaceRecord {
       relay: value['relay'] as String?,
       device: value['device'] as String?,
       paired: value['paired'] == true,
+      personaId: persona as String?,
+      experienceSeededAt: anchor,
     );
   }
   Map<String, dynamic> toJson() => {
@@ -122,6 +139,9 @@ class SpaceRecord {
     'relay': relay,
     'device': device,
     'paired': paired,
+    if (personaId != null) 'persona_id': personaId,
+    if (experienceSeededAt != null)
+      'experience_seeded_at': experienceSeededAt!.toIso8601String(),
   };
 }
 

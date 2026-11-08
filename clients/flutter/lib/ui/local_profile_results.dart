@@ -2,7 +2,6 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-import 'theme.dart';
 import 'timeline_page.dart';
 import 'timeline_briefs.dart';
 import 'profile_generation_status.dart';
@@ -110,16 +109,19 @@ class LocalProfileResults extends StatelessWidget
             if (rows.isEmpty)
               Text(
                 t('还没有个人介绍', 'No introduction yet'),
-                style: const TextStyle(fontSize: 14, color: Nova.secondary),
+                style: TextStyle(
+                  fontSize: 14,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
             if (rows.isEmpty && emptyHint != null)
               Padding(
                 padding: const EdgeInsets.only(top: 6),
                 child: Text(
                   emptyHint!,
-                  style: const TextStyle(
+                  style: TextStyle(
                     fontSize: 12,
-                    color: Nova.secondary,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
                     height: 1.5,
                   ),
                 ),
@@ -145,10 +147,10 @@ class LocalProfileResults extends StatelessWidget
                                 'work': 'Work',
                                 'interests': 'Interests',
                               }[key]!,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.w600,
-                          color: novaTimelineAccent,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ),
                       const SizedBox(height: 6),
@@ -167,7 +169,10 @@ class LocalProfileResults extends StatelessWidget
                   'Nova 整理 · 来源与修正见完整资料',
                   'Organized by Nova · Sources and corrections in Profile',
                 ),
-                style: const TextStyle(fontSize: 11, color: Nova.secondary),
+                style: TextStyle(
+                  fontSize: 11,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
+                ),
               ),
           ],
         );
@@ -175,9 +180,9 @@ class LocalProfileResults extends StatelessWidget
       if (value == null) {
         // A failed local read is its own state; generation status must not hide
         // it, because retrying the read is the only useful action.
-        if (failed) return _readFailure(retry);
-        if (!host.restored) return _loadingState();
-        if (profile.hasStoredResult) return _blockedNote();
+        if (failed) return _readFailure(context, retry);
+        if (!host.restored) return _loadingState(context);
+        if (profile.hasStoredResult) return _blockedNote(context);
         if (generation != null) {
           return ProfileGenerationStatus(
             generation: generation!,
@@ -192,13 +197,14 @@ class LocalProfileResults extends StatelessWidget
         }
         if (kind == 'timeline') {
           return _timelineState(
+            context,
             loading: loading,
             failed: failed,
             retry: retry,
             emptyHint: emptyHint,
           );
         }
-        return _emptyHintState();
+        return _emptyHintState(context);
       }
       final entries = (value['entries'] as List)
           .cast<Map>()
@@ -223,6 +229,7 @@ class LocalProfileResults extends StatelessWidget
         }
         return kind == 'timeline'
             ? _timelineState(
+                context,
                 loading: false,
                 failed: false,
                 retry: retry,
@@ -246,18 +253,27 @@ class LocalProfileResults extends StatelessWidget
                           'Updated · ${sourceTime(value['generated_at'])}',
                         )
                       : t('此前成功整理的内容', 'Saved results'),
-                  style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                  style: TextStyle(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    fontSize: 12,
+                  ),
                 ),
                 if (value['historical'] == true)
                   Text(
                     t('历史结果', 'Saved'),
-                    style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
                   ),
                 if (value['partial'] == true ||
                     (value['incomplete_batches'] as int? ?? 0) > 0)
                   Text(
                     t('部分内容', 'Partial'),
-                    style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                      fontSize: 12,
+                    ),
                   ),
               ],
             ),
@@ -314,20 +330,23 @@ class LocalProfileResults extends StatelessWidget
                   _entry(context, profile, entry, section, value),
               ],
             ],
-          _coverage(value),
+          _coverage(context, value),
         ],
       );
     },
   );
 
-  Widget _readFailure(VoidCallback retry) => Padding(
+  Widget _readFailure(BuildContext context, VoidCallback retry) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Text(
           t('无法读取此前生成的资料', 'Could not read your saved results'),
-          style: const TextStyle(color: Nova.secondary, height: 1.5),
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
+            height: 1.5,
+          ),
         ),
         TextButton(
           style: TextButton.styleFrom(padding: EdgeInsets.zero),
@@ -340,27 +359,33 @@ class LocalProfileResults extends StatelessWidget
 
   // Deliberately static: some screens are built before the host is opened, and
   // an indeterminate indicator would animate forever if it never is.
-  Widget _loadingState() => Padding(
+  Widget _loadingState(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
     child: Text(
       t('正在读取本机资料…', 'Opening local data…'),
-      style: const TextStyle(color: Nova.secondary, height: 1.5),
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        height: 1.5,
+      ),
     ),
   );
 
   /// Stored data exists but was produced for another Space, device or identity.
-  Widget _blockedNote() => Padding(
+  Widget _blockedNote(BuildContext context) => Padding(
     padding: const EdgeInsets.only(bottom: 24),
     child: Text(
       t(
         '此设备此前生成的资料无法显示。它们属于其他账号或设备；重新连接或切回原 Space 后可能恢复。',
         'Saved results on this device cannot be shown here. They belong to another account or device; reconnect or switch back to the original Space to restore them.',
       ),
-      style: const TextStyle(color: Nova.secondary, height: 1.5),
+      style: TextStyle(
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        height: 1.5,
+      ),
     ),
   );
 
-  Widget _emptyHintState() {
+  Widget _emptyHintState(BuildContext context) {
     if (emptyHint == null) return const SizedBox.shrink();
     return Padding(
       padding: const EdgeInsets.only(bottom: 24),
@@ -369,7 +394,10 @@ class LocalProfileResults extends StatelessWidget
         children: [
           Text(
             emptyHint!,
-            style: const TextStyle(color: Nova.secondary, height: 1.5),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.5,
+            ),
           ),
           if (onOpenConnectors != null)
             TextButton(
@@ -382,7 +410,7 @@ class LocalProfileResults extends StatelessWidget
     );
   }
 
-  Widget _coverage(Map<String, dynamic> value) {
+  Widget _coverage(BuildContext context, Map<String, dynamic> value) {
     final coverage = value['coverage'];
     final notes = <String>[
       if (value['historical'] == true)
@@ -413,7 +441,10 @@ class LocalProfileResults extends StatelessWidget
       expandedCrossAxisAlignment: CrossAxisAlignment.start,
       title: Text(
         t('整理范围', 'Review coverage'),
-        style: const TextStyle(fontSize: 13, color: Nova.secondary),
+        style: TextStyle(
+          fontSize: 13,
+          color: Theme.of(context).colorScheme.onSurfaceVariant,
+        ),
       ),
       children: [
         for (final note in notes)
@@ -421,8 +452,8 @@ class LocalProfileResults extends StatelessWidget
             padding: const EdgeInsets.only(bottom: 8),
             child: Text(
               note,
-              style: const TextStyle(
-                color: Nova.secondary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 13,
                 height: 1.5,
               ),
@@ -432,7 +463,8 @@ class LocalProfileResults extends StatelessWidget
     );
   }
 
-  Widget _timelineState({
+  Widget _timelineState(
+    BuildContext context, {
     required bool loading,
     required bool failed,
     required VoidCallback retry,
@@ -452,14 +484,19 @@ class LocalProfileResults extends StatelessWidget
           const SizedBox(height: 12),
           Text(
             t('正在加载近况…', 'Loading updates…'),
-            style: const TextStyle(color: Nova.secondary),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+            ),
           ),
         ] else ...[
           Text(
             failed
                 ? t('暂时无法加载近况', 'Could not load updates')
                 : t('还没有近况', 'No updates yet'),
-            style: const TextStyle(color: Nova.secondary, height: 1.5),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              height: 1.5,
+            ),
           ),
           if (failed)
             TextButton(onPressed: retry, child: Text(t('重试', 'Retry')))
@@ -470,8 +507,8 @@ class LocalProfileResults extends StatelessWidget
                 '消息同步并授权后，会自动整理到这里。',
                 'Updates appear automatically after messages sync and access is allowed.',
               ),
-              style: const TextStyle(
-                color: Nova.secondary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 13,
                 height: 1.5,
               ),
@@ -480,8 +517,8 @@ class LocalProfileResults extends StatelessWidget
               const SizedBox(height: 6),
               Text(
                 emptyHint,
-                style: const TextStyle(
-                  color: Nova.secondary,
+                style: TextStyle(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                   fontSize: 13,
                   height: 1.5,
                 ),
@@ -542,8 +579,8 @@ class LocalProfileResults extends StatelessWidget
                         '更新依据 · ${sourceTime(entry['observed_at'])}',
                         'Based on messages · ${sourceTime(entry['observed_at'])}',
                       ),
-                      style: const TextStyle(
-                        color: Nova.secondary,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 13,
                       ),
                     ),
@@ -552,8 +589,8 @@ class LocalProfileResults extends StatelessWidget
                         '查看 ${(entry['evidence_ids'] as List).length} 条原文 ›',
                         'View ${(entry['evidence_ids'] as List).length} source messages ›',
                       ),
-                      style: const TextStyle(
-                        color: novaTimelineAccent,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 12,
                       ),
                     ),

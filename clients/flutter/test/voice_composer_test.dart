@@ -1,4 +1,7 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:nova_mobile/agent_core/model_client.dart';
+import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
@@ -11,7 +14,72 @@ import 'package:nova_mobile/voice/voice_delegate.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'phone_voice_session_test.dart' show VoiceAudio;
 
+class TopicHost extends AgentCoreHost {
+  TopicHost(ConversationStore store)
+    : super(store: store, settings: ModelSettings());
+  final release = Completer<void>();
+  final delivered = <String>[];
+  Future<ModelConfiguration> Function()? selectedAuthorModel;
+  @override
+  Future<void> send(
+    String conversationId,
+    String text, {
+    ToolApproval? approve,
+    String? language,
+    bool userAuthored = true,
+    Future<ModelConfiguration> Function()? authorModel,
+  }) async {
+    busy = true;
+    delivered.add(text);
+    selectedAuthorModel = authorModel;
+    await release.future;
+    busy = false;
+  }
+}
+
 void main() {
+  testWidgets(
+    'shared idea retains author routing, draft and attachments without double sending',
+    (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      await store.ensureMain();
+      final host = TopicHost(store);
+      final key = GlobalKey<LocalChatPanelState>();
+      Future<ModelConfiguration> authorModel() async => ModelConfiguration(
+        endpoint: 'https://example.test/v1',
+        model: 'author',
+        key: 'token',
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              key: key,
+              host: host,
+              conversationId: ConversationStore.mainId,
+              authorModel: authorModel,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      final panel = key.currentState!;
+      panel.input.text = 'my unsent draft';
+      panel.attachments.add({'path': 'draft.pdf'});
+      final sending = panel.sendSharedIdea('How do I brew tea?');
+      await panel.sendSharedIdea('How do I brew tea?');
+      expect(host.delivered, ['How do I brew tea?']);
+      expect(host.selectedAuthorModel, same(authorModel));
+      host.release.complete();
+      await sending;
+      expect(panel.input.text, 'my unsent draft');
+      expect(panel.attachments.single['path'], 'draft.pdf');
+      await tester.pumpWidget(const SizedBox.shrink());
+      host.dispose();
+    },
+  );
+
   testWidgets(
     'ordinary composer stops external task with an empty draft; failed voice send preserves text visibly',
     (tester) async {

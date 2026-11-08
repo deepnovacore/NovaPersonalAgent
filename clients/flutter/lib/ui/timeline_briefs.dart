@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/cupertino.dart';
-import 'theme.dart';
 import 'components.dart';
 import 'timeline_page.dart';
 import '../context/timeline_time.dart';
@@ -153,7 +152,7 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                 child: Container(
                   key: const ValueKey('brief-timeline-line'),
                   width: 1,
-                  color: Nova.separator,
+                  color: Theme.of(context).colorScheme.outlineVariant,
                 ),
               ),
               Column(
@@ -168,7 +167,7 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                           child: Container(
                             width: 21,
                             height: 1,
-                            color: Nova.separator,
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
                         ),
                         Positioned(
@@ -183,12 +182,14 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
                               color: day.key == today
-                                  ? novaTimelineAccent
-                                  : Colors.white,
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.surface,
                               border: Border.all(
                                 color: day.key == today
-                                    ? novaTimelineAccent
-                                    : Nova.separator,
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Theme.of(
+                                        context,
+                                      ).colorScheme.outlineVariant,
                                 width: 2,
                               ),
                             ),
@@ -210,16 +211,21 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                                           vertical: 5,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Colors.white,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.surface,
                                           borderRadius: BorderRadius.circular(
                                             999,
                                           ),
                                           border: Border.all(
                                             color: day.key == today
-                                                ? novaTimelineAccent.withValues(
-                                                    alpha: .4,
-                                                  )
-                                                : Nova.separator,
+                                                ? Theme.of(context)
+                                                      .colorScheme
+                                                      .primary
+                                                      .withValues(alpha: .4)
+                                                : Theme.of(
+                                                    context,
+                                                  ).colorScheme.outlineVariant,
                                           ),
                                         ),
                                         child: Text(
@@ -230,8 +236,12 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                                           ),
                                           style: TextStyle(
                                             color: day.key == today
-                                                ? novaTimelineAccent
-                                                : Nova.text,
+                                                ? Theme.of(
+                                                    context,
+                                                  ).colorScheme.primary
+                                                : Theme.of(
+                                                    context,
+                                                  ).colorScheme.onSurface,
                                             fontSize: 15,
                                             fontWeight: FontWeight.w600,
                                             height: 1.35,
@@ -249,7 +259,9 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                                     key: ValueKey(
                                       'timeline-card-${entry['key']}',
                                     ),
-                                    color: Colors.white,
+                                    color: Theme.of(
+                                      context,
+                                    ).colorScheme.surface,
                                     elevation: 1,
                                     shadowColor: const Color(0x18203248),
                                     borderRadius: BorderRadius.circular(16),
@@ -363,9 +375,12 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
               crossAxisAlignment: WrapCrossAlignment.center,
               children: [
                 if (status.isNotEmpty)
-                  const Text(
+                  Text(
                     '◇',
-                    style: TextStyle(color: novaTimelineAccent, fontSize: 20),
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.primary,
+                      fontSize: 20,
+                    ),
                   ),
                 if (status.isNotEmpty)
                   Container(
@@ -374,16 +389,20 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                       vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: novaTimelineAccent.withValues(alpha: .05),
+                      color: Theme.of(
+                        context,
+                      ).colorScheme.primary.withValues(alpha: .05),
                       border: Border.all(
-                        color: novaTimelineAccent.withValues(alpha: .15),
+                        color: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: .15),
                       ),
                       borderRadius: BorderRadius.circular(5),
                     ),
                     child: Text(
                       status,
-                      style: const TextStyle(
-                        color: novaTimelineAccent,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -396,14 +415,16 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                       vertical: 3,
                     ),
                     decoration: BoxDecoration(
-                      color: Colors.white,
+                      color: Theme.of(context).colorScheme.surface,
                       borderRadius: BorderRadius.circular(999),
-                      border: Border.all(color: Nova.separator),
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
                     ),
                     child: Text(
                       clock,
-                      style: const TextStyle(
-                        color: Nova.secondary,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
                       ),
@@ -430,7 +451,10 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                 for (final label in timeLabels)
                   Text(
                     label,
-                    style: const TextStyle(fontSize: 11, color: Nova.secondary),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
               ],
             ),
@@ -441,10 +465,10 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
               padding: const EdgeInsets.only(bottom: 8),
               child: Text(
                 fact['text'] as String,
-                style: const TextStyle(
+                style: TextStyle(
                   fontSize: 13,
                   height: 1.6,
-                  color: Nova.secondary,
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ),
             ),
@@ -453,7 +477,9 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
             Container(
               padding: const EdgeInsets.all(12),
               decoration: BoxDecoration(
-                color: novaTimelineAccent.withValues(alpha: .07),
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: .07),
                 borderRadius: BorderRadius.circular(10),
               ),
               child: Column(
@@ -461,9 +487,9 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                 children: [
                   Text(
                     t('判断', 'Assessment'),
-                    style: const TextStyle(
+                    style: TextStyle(
                       fontSize: 11,
-                      color: novaTimelineAccent,
+                      color: Theme.of(context).colorScheme.primary,
                       fontWeight: FontWeight.w600,
                     ),
                   ),
@@ -480,14 +506,17 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
             const SizedBox(height: 16),
             Text(
               t('下一步', 'Next steps'),
-              style: const TextStyle(fontSize: 11, color: Nova.secondary),
+              style: TextStyle(
+                fontSize: 11,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
+              ),
             ),
             for (final (index, step) in steps.indexed)
               Container(
                 margin: const EdgeInsets.only(top: 8),
                 padding: const EdgeInsets.all(12),
                 decoration: BoxDecoration(
-                  color: const Color(0xfff2f5f9),
+                  color: Theme.of(context).colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
@@ -495,10 +524,10 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                   children: [
                     Text(
                       (index + 1).toString().padLeft(2, '0'),
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontSize: 11,
                         height: 1.8,
-                        color: novaTimelineAccent,
+                        color: Theme.of(context).colorScheme.primary,
                         fontWeight: FontWeight.w600,
                       ),
                     ),
@@ -518,10 +547,12 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
                           const SizedBox(height: 4),
                           Text(
                             step['detail'] as String,
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
                               height: 1.6,
-                              color: Nova.secondary,
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
                             ),
                           ),
                         ],
@@ -552,10 +583,10 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
             const SizedBox(height: 12),
             Text(
               uncertainty,
-              style: const TextStyle(
+              style: TextStyle(
                 fontSize: 12,
                 height: 1.5,
-                color: Nova.secondary,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ],
@@ -563,8 +594,8 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
           if (onOpenSources == null)
             Text(
               t('原文请在电脑上查看', 'View source messages on your computer'),
-              style: const TextStyle(
-                color: Nova.secondary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 11,
                 height: 1.5,
               ),
@@ -574,8 +605,8 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
               '更新依据 · ${sourceTime(entry['observed_at'])}',
               'Based on messages · ${sourceTime(entry['observed_at'])}',
             ),
-            style: const TextStyle(
-              color: Nova.secondary,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 11,
               height: 1.6,
             ),
@@ -586,8 +617,12 @@ class _TimelineBriefsState extends State<TimelineBriefs> {
               alignment: Alignment.centerLeft,
               child: TextButton(
                 style: TextButton.styleFrom(
-                  foregroundColor: novaTimelineAccent,
-                  backgroundColor: novaTimelineWash,
+                  foregroundColor: Theme.of(
+                    context,
+                  ).colorScheme.onPrimaryContainer,
+                  backgroundColor: Theme.of(
+                    context,
+                  ).colorScheme.primaryContainer,
                   padding: const EdgeInsets.symmetric(
                     horizontal: 12,
                     vertical: 8,
@@ -641,7 +676,10 @@ class TimelineSourceEntry extends StatelessWidget {
             language == 'zh'
                 ? '原文请在电脑上查看'
                 : 'View source messages on your computer',
-            style: const TextStyle(color: Nova.secondary, fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           ),
         Text(
           '${entry['text'] ?? ''}',
@@ -659,14 +697,20 @@ class TimelineSourceEntry extends StatelessWidget {
             language == 'zh'
                 ? '更新依据 · ${timelineSourceTime(entry['observed_at'] as String, language)}'
                 : 'Based on messages · ${timelineSourceTime(entry['observed_at'] as String, language)}',
-            style: const TextStyle(color: Nova.secondary, fontSize: 13),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 13,
+            ),
           ),
           if (onOpenSources != null)
             Text(
               language == 'zh'
                   ? '查看 ${(entry['evidence_ids'] as List).length} 条原文 ›'
                   : 'View ${(entry['evidence_ids'] as List).length} source messages ›',
-              style: const TextStyle(color: novaTimelineAccent, fontSize: 12),
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.primary,
+                fontSize: 12,
+              ),
             ),
         ],
       ),

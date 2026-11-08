@@ -11,6 +11,37 @@ void main() {
   final messenger =
       TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
   tearDown(() => messenger.setMockMethodCallHandler(channel, null));
+  testWidgets(
+    'experience gateway ephemeral token never enters native transfer',
+    (tester) async {
+      var nativeCalls = 0;
+      messenger.setMockMethodCallHandler(channel, (_) async {
+        nativeCalls++;
+        return null;
+      });
+      final client = IosModelClient();
+      final config = ModelConfiguration(
+        endpoint: 'https://api.deepnovacore.com/novacore/beta/v1',
+        model: 'deepseek-flash',
+        key: 'temporary-token',
+      );
+      expect(config.isExperienceGateway, isTrue);
+      // Flutter's test HTTP client rejects with 400 without reaching any server.
+      await expectLater(
+        client.stream(config, []).toList(),
+        throwsA(
+          isA<ModelRequestFailure>().having(
+            (e) => e.status,
+            'mock HTTP status',
+            400,
+          ),
+        ),
+      );
+      client.cancel();
+      expect(nativeCalls, 0);
+    },
+  );
+
   void handleTransfers(Future<Object?> Function(MethodCall) handler) {
     messenger.setMockMethodCallHandler(channel, (call) async {
       if (call.method == 'reserve') {

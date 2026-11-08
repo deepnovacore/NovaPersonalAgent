@@ -38,7 +38,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
  const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
  if(build&&(!conversation.build||!['darwin','win32'].includes(process.platform)))throw Error('local_build_unavailable')
  const state=await store.checkpoint(conversation.id,conversation.generation)
- const confirmedPlan=build&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build.plan_id,conversation.build.plan_version):undefined
+ const confirmedPlan=build&&!state.confirmed_plan_omitted&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build.plan_id,conversation.build.plan_version):undefined
  const suppliedDependencies=mergeContextDependencies(host.conversationContextDependencies(conversation),confirmedPlan?await host.planContextDependencies(confirmedPlan):undefined)
  let previousDependencies=state.context_dependencies
  if(previousDependencies===undefined&&(state.model!==null||state.inputs.length)){
@@ -52,6 +52,8 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
  state.context_dependencies=mergeContextDependencies(previousDependencies??emptyContextDependencies(),suppliedDependencies)
  const emit=(frame:Record<string,unknown>)=>options.emit({...frame,...(frame.role==='assistant'?{context_dependencies:state.context_dependencies}:{})})
  const authorizeContext=async(parent:AbortSignal)=>{
+  parent.throwIfAborted()
+  if(state.context_dependencies?.state==='tracked'&&!state.context_dependencies.items.length)return
   const signal=AbortSignal.any([parent,AbortSignal.timeout(5000)])
   for(let attempt=0;attempt<2;attempt++){
    signal.throwIfAborted()
@@ -64,7 +66,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
   throw Error('context_authorization_changed')
  }
  state.inputs=withoutPendingMemory(state.inputs)
- const workspaceContext=build?JSON.stringify({...(confirmedPlan?{confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content}}:{}),project:conversation.build!.project}):null
+ const workspaceContext=()=>build?JSON.stringify({...(confirmedPlan&&!state.confirmed_plan_omitted?{confirmed_plan:{id:confirmedPlan.id,version:confirmedPlan.version,title:confirmedPlan.title,content:confirmedPlan.content}}:{}),project:conversation.build!.project}):null
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
  let computer:Pick<ComputerSession,'observe'|'action'|'close'>|undefined
@@ -124,7 +126,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
     state.inputs=withoutPendingMemory(state.inputs)
     const toolBridge=await bridge()
     if(!state.model&&!state.inputs.length){
-     if(build)state.inputs.push({kind:'host_context',content:workspaceContext!})
+     if(build)state.inputs.push({kind:'host_context',content:workspaceContext()!})
      else for(const message of conversation.messages.filter(message=>message.generation_status!=='pending'&&message.input_mode!=='voice').slice(-32))state.inputs.push({kind:'host_context',content:JSON.stringify({previous_message:{role:message.role,text:message.text}})})
     }
     const voiceMessages=conversation.messages.filter(message=>message.input_mode==='voice')
@@ -155,10 +157,10 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
     const authorizedTools=[...baseTools,...(build?computerTools(true):[])]
     const allowed=new Set(authorizedTools.map(tool=>tool.name));if(allowed.size!==authorizedTools.length||authorizedTools.length>128)throw Error('workbench_tool_configuration')
     let toolRounds=0,finishedReply:string|undefined
-    // One user turn can span several model responses (tool rounds). Its identity and accumulated
-    // text are turn-scoped so a later round extends the same answer instead of replacing it.
+    // Keep one turn identity across model rounds. Build commits tool-bound text before
+    // the tool batch, while Plan keeps the accumulated answer.
     const turn=randomUUID();let turnText='',outputLimitContinues=0,toolTruncationRetried=false
-    const compactCaption=(text:string):string=>{const points=[...text];return points.length>4000?points.slice(0,4000).join('')+'…':text}
+    const compactCaption=(text:string,limit=4000):string=>{const points=[...text];return points.length>limit?points.slice(0,limit).join('')+'…':text}
     const emitTurnCaption=(roundText:string):void=>{
      const visible=compactCaption(mergeTurnText(turnText,roundText))
      emit({type:'caption',role:'assistant',text:visible,full_text:visible,turn_id:turn,final:false})
@@ -323,7 +325,25 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
      }
      if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
-     await authorizeContext(signal)
+     try{await authorizeContext(signal)}catch(error){
+      signal.throwIfAborted()
+      if(!build||!(error instanceof Error)||(error.message!=='context_authorization_changed'&&error.name!=='TimeoutError'))throw error
+      // Keep local receipts, but start a fresh model session without withdrawn inputs or tool output.
+      await session?.close();session=undefined
+      state.model=null
+      state.context_dependencies=emptyContextDependencies()
+      if(confirmedPlan)state.confirmed_plan_omitted=true
+      const completed=state.calls.filter(call=>call.state==='completed'&&allowed.has(call.name)).slice(-32).map(call=>call.name)
+      state.inputs=[
+       {kind:'user_text',text:state.last_user},
+       {kind:'host_context',content:JSON.stringify({purpose:'resume_without_previous_context',completed_tools:completed,instruction:'Some prior reference material is unavailable. Continue the authorized work with current inputs. Inspect actual project state before acting and do not repeat completed operations. If the goal depended on unavailable material, complete independent work and explain what is missing.'})},
+      ]
+      turnText=options.language==='en'?'Some reference material is unavailable. Continuing with the available context.':'部分引用资料已不可用，继续使用现有资料执行。'
+      state.assistant=turnText
+      await save()
+      emitTurnCaption('')
+     }
+     const workspace=workspaceContext()
      const llm=model(),before=state.model,inputs=structuredClone(state.inputs),calls:WorkbenchCall[]=[];let assistant='',preview='',captionSent=false,completed=false
      // Only this attempt may consume the freshly authorized context, including on output-limit retries.
      state.inputs=withoutPendingMemory(state.inputs)
@@ -347,7 +367,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
       state.thoughts=thoughts.slice(-MAX_WORKBENCH_THOUGHTS)
      }
      try{
-      for await(const event of llm.stream({language:options.language,previewText:true,reasoning:reasoningMode,inputs,tools,workspaceContext:enabled.enabled?[workspaceContext,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspaceContext,signal})){
+      for await(const event of llm.stream({language:options.language,previewText:true,reasoning:reasoningMode,inputs,tools,workspaceContext:enabled.enabled?[workspace,computerUseSkill(enabled.direct)].filter(Boolean).join('\n'):workspace,signal})){
        if(event.kind==='reasoning_delta'){addThinking(event.text);signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale');continue}
        signal.throwIfAborted();if(version!==runVersion)throw Error('build_stale')
        if(event.kind==='text_preview'||event.kind==='text_delta'){
@@ -375,11 +395,15 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
       recordThinking()
       if(!llm.checkpoint)throw Error('model_checkpoint_unsupported')
       state.model=llm.checkpoint();state.inputs=[];delete state.model_failure
-      turnText=mergeTurnText(turnText,assistant)
+      const roundText=mergeTurnText(turnText,assistant)
+      const narratedCall=build&&roundText.trim()?calls.find(call=>!state.calls.some(previous=>previous.id===call.id)):undefined
+      if(narratedCall)narratedCall.narration=compactCaption(roundText,16000)
+      turnText=narratedCall?'':roundText
       if(turnText.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,turnText)
       state.assistant=turnText.slice(0,16000)
       for(const call of calls){const prior=state.calls.find(item=>item.id===call.id);if(prior){if(prior.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');state.pending_calls.push(prior)}else {state.calls.push(call);state.pending_calls.push(call)}}
       await save()
+      if(narratedCall)emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true})
      }catch(error){
       recordThinking()
       const reason=error instanceof Error?error.message:''

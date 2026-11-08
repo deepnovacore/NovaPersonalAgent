@@ -4,7 +4,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
-  <img src="assets/brand/npa-header-light.svg" alt="NovaPersonalAgent — Understands you. Interacts in real time." width="100%">
+  <img src="assets/brand/npa-header-light.svg" alt="NovaCore — Understands you. Interacts in real time." width="100%">
 </picture>
 
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>

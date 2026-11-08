@@ -52,7 +52,7 @@ void main() {
     await tester.tap(find.text('Me'));
     await tester.pumpAndSettle();
     expect(find.text('Profile'), findsOneWidget);
-    await tester.tap(find.text('Nova').last);
+    await tester.tap(find.text('NovaCore').last);
     await tester.pumpAndSettle();
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
@@ -100,7 +100,7 @@ void main() {
       expect(find.text('新对话'), findsNothing);
       expect(find.text('我的'), findsOneWidget);
       expect(find.byType(LocalChatPanel), findsOneWidget);
-      expect(find.text('Nova'), findsNWidgets(2));
+      expect(find.text('NovaCore'), findsNWidgets(2));
       expect(find.text('时间线'), findsOneWidget);
       expect(find.text('任务'), findsOneWidget);
       expect(find.text('资讯'), findsNothing);

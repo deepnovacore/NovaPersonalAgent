@@ -209,7 +209,7 @@ void main() {
   ) async {
     var switched = 0;
     await pumpClient(tester, seededState(), onSwitchSpace: () => switched++);
-    for (final label in ['Nova', '任务', '时间线', '我的']) {
+    for (final label in ['NovaCore', '任务', '时间线', '我的']) {
       await tester.tap(
         find.descendant(
           of: find.byType(BottomAppBarTabs),
@@ -229,7 +229,7 @@ void main() {
     await pumpClient(tester, seededState());
     expect(find.byType(NavigationBar), findsNothing);
     final tabs = tester.widget<BottomAppBarTabs>(find.byType(BottomAppBarTabs));
-    expect(tabs.items.map((i) => i.$3), ['Nova', '任务', '时间线', '我的']);
+    expect(tabs.items.map((i) => i.$3), ['NovaCore', '任务', '时间线', '我的']);
     expect(tabs.items.map((i) => i.$1), [
       CupertinoIcons.chat_bubble,
       CupertinoIcons.square_stack,
@@ -245,7 +245,7 @@ void main() {
       ('任务', '任务'),
       ('时间线', '时间线'),
       ('我的', '我的'),
-      ('Nova', 'Nova'),
+      ('NovaCore', 'NovaCore'),
     ]) {
       await tester.tap(
         find.descendant(

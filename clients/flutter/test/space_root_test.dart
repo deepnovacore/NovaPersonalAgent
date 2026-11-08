@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:io';
 import 'package:mobile_scanner/mobile_scanner.dart';
 import 'dart:async';
@@ -12,6 +13,8 @@ import 'package:nova_mobile/space/space_root.dart';
 import 'package:nova_mobile/space/space_storage.dart';
 import 'package:nova_mobile/space/space_crypto.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
+import 'experience_test.dart' show fixture;
+import 'package:nova_mobile/experience/persona.dart';
 
 class SlowCatalog extends SpaceCatalog {
   SlowCatalog() : super(persistence: MemorySpacePersistence());
@@ -45,6 +48,7 @@ class PairingCatalog extends SpaceCatalog {
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() {
+    SharedPreferences.setMockInitialValues({'language': 'zh'});
     SpaceNativeScope.resetForTesting();
     FlutterSecureStorage.setMockInitialValues({});
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
@@ -56,6 +60,115 @@ void main() {
         );
   });
   tearDown(() => SpaceStorage.active = null);
+  testWidgets('Space chooser and creation use the selected language only', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({'language': 'en'});
+    final catalog = SpaceCatalog(persistence: MemorySpacePersistence());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SpaceRoot(
+          catalog: catalog,
+          standaloneBuilder: (_) => const Text('Local runtime'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('New Space'), findsOneWidget);
+    expect(find.text('新建 Space'), findsNothing);
+    await tester.tap(find.text('New Space'));
+    await tester.pumpAndSettle();
+    expect(find.text('Create a Space'), findsOneWidget);
+    expect(find.text('Name'), findsOneWidget);
+    expect(
+      find.text('新建 Space 不会带入旧 Space 的数据。要更换运行方式，请新建 Space。'),
+      findsNothing,
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+  for (final failure in [
+    'malformed manifest',
+    'missing asset',
+    'hash mismatch',
+  ]) {
+    for (final selectedExperience in [false, true]) {
+      testWidgets(
+        '$failure only disables experience, selected experience: $selectedExperience',
+        (tester) async {
+          final bundle = fixture();
+          await ExperiencePersona.loadManifest(bundle: bundle);
+          if (failure == 'malformed manifest') {
+            bundle.files['assets/experience/manifest.json'] =
+                Uint8List.fromList(utf8.encode('{broken'));
+          } else if (failure == 'missing asset') {
+            bundle.files.remove('assets/experience/sample.png');
+          } else {
+            bundle.files['assets/experience/sample.png'] = Uint8List.fromList([
+              9,
+            ]);
+          }
+          rootBundle.clear();
+          final messenger =
+              TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+          messenger.setMockMessageHandler('flutter/assets', (message) async {
+            final key = utf8.decode(message!.buffer.asUint8List());
+            final bytes = bundle.files[key];
+            return bytes == null ? null : ByteData.sublistView(bytes);
+          });
+          addTearDown(() {
+            messenger.setMockMessageHandler('flutter/assets', null);
+            rootBundle.clear();
+            ExperiencePersona.choices = const [];
+          });
+          const normal = SpaceRecord(
+            id: 'normal',
+            name: 'My Space',
+            mode: SpaceMode.standalone,
+          );
+          final experience = SpaceRecord(
+            id: 'sample-space',
+            name: 'Sample Space',
+            mode: SpaceMode.standalone,
+            personaId: 'sample',
+            experienceSeededAt: DateTime.utc(2026),
+          );
+          final disk = MemorySpacePersistence()
+            ..value = jsonEncode({
+              'selected': selectedExperience ? experience.id : normal.id,
+              'spaces': [normal.toJson(), experience.toJson()],
+            });
+          final catalog = SpaceCatalog(persistence: disk);
+          var experienceStarts = 0;
+          await tester.pumpWidget(
+            MaterialApp(
+              home: SpaceRoot(
+                catalog: catalog,
+                standaloneBuilder: (space) {
+                  if (space.personaId != null) experienceStarts++;
+                  return Text('Opened ${space.id}');
+                },
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          if (!selectedExperience) {
+            expect(find.text('Opened normal'), findsOneWidget);
+            expect(catalog.selectedId, normal.id);
+            await catalog.select(null);
+            await tester.pumpAndSettle();
+          }
+          expect(experienceStarts, 0);
+          expect(ExperiencePersona.choices, isEmpty);
+          expect(find.text('体验 Space 暂不可用'), findsOneWidget);
+          expect(find.text('选择示例人物或兑换体验码'), findsNothing);
+          expect(find.text('My Space'), findsOneWidget);
+          expect(catalog.spaces, hasLength(2));
+          await tester.pumpWidget(const SizedBox.shrink());
+          catalog.dispose();
+        },
+      );
+    }
+  }
   testWidgets(
     'Space creation ignores a second tap while persistence is pending',
     (tester) async {

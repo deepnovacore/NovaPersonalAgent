@@ -1054,7 +1054,7 @@ test('direct Build instructions skip planning but retain approval and completion
  assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
 
-test('Plan and Build previews grow, keep pre-tool narration and persist the merged turn', async () => {
+test('Workbench previews grow and Build records narration before tools', async () => {
  for(const mode of ['plan','build'] as const){
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
@@ -1068,11 +1068,15 @@ test('Plan and Build previews grow, keep pre-tool narration and persist the merg
    if(mode==='build')id=await f.build()
    else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
    await f.host.waitConversation(id)
-   const captions=f.frames.filter(x=>x.type==='caption'),merged='discard me\n\nfinal answer'
-   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['discard me\n\nfinal ',false],['discard me\n\nfinal answer',false],['discard me\n\nfinal answer',false]])
+   const captions=f.frames.filter(x=>x.type==='caption'),merged=mode==='build'?'final answer':'discard me\n\nfinal answer'
+   if(mode==='build'){
+    const checkpoint=await f.host.workbench.checkpoint(id,0)
+    assert.equal(checkpoint.calls[0]?.narration,'discard me')
+    assert.equal(checkpoint.thoughts?.length,0)
+    assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['',true],['final ',false],['final answer',false],['final answer',false]])
+   }else assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['discard me\n\nfinal ',false],['discard me\n\nfinal answer',false],['discard me\n\nfinal answer',false]])
    // The turn identity survives the tool round; every caption belongs to the same reply.
    assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
-   assert.equal(captions.some(x=>x.final===true&&x.text===''),false)
    const message=f.host.conversationSnapshot().messages.at(-1)!
    assert.equal(message.text,merged);assert.equal(message.turn_id,captions.at(-1)!.turn_id)
   }finally{await f.close()}
@@ -1092,8 +1096,12 @@ test('Plan and Build keep authoritative narration before a tool call', async () 
    if(mode==='build')id=await f.build()
    else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
    await f.host.waitConversation(id)
-   const captions=f.frames.filter(x=>x.type==='caption'),merged='narration before the tool\n\nfinal answer'
-   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],[merged,false]])
+   const captions=f.frames.filter(x=>x.type==='caption'),merged=mode==='build'?'final answer':'narration before the tool\n\nfinal answer'
+   if(mode==='build'){
+    const page=await f.command('build.details',{id,view:'steps'}) as {items:{narration?:string}[]}
+    assert.equal(page.items[0]?.narration,'narration before the tool')
+    assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],['',true],[merged,false]])
+   }else assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],[merged,false]])
    assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
    assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
    assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,merged)
@@ -1763,6 +1771,53 @@ for(const receiver of ['build-a','build-b'])test(`confirmed source-backed plan u
   if(receiver==='build-a')assert.ok(script.requests[0]!.workspaceContext?.includes(plan.content))
   else assert.equal((await host.workbench.checkpoint(id,0)).reason,'context_authorization_changed')
  }finally{await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('a direct Build with no references never reads global context authorization',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'work.txt',content:'done'}}}:{text:'Verified'},'never')
+ try{
+  let checks=0
+  f.host.contextAuthorizationRevision=()=>{checks++;return Promise.resolve(String(checks))}
+  await f.command('build.begin',{text:'Write work.txt',project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(checks,0)
+  assert.equal(buildView(f.host,id).status,'completed')
+  assert.equal(await readFile(join(f.root,'work.txt'),'utf8'),'done')
+ }finally{await f.close()}
+})
+
+test('a running Build drops invalidated plan context and continues with durable tool receipts',{skip:!supported},async()=>{
+ const secret='Synthetic revoked plan content L-918'
+ const f=await fixture(async(request,step)=>{
+  if(step===0&&request.workspaceContext?.includes(secret)){
+   await revoke()
+   return {call:{name:'file_write',arguments:{path:'work.txt',content:'done'},id:'write-once'}}
+  }
+  return {text:'Continued with available context'}
+ },'never')
+ let revoke:()=>Promise<unknown>
+ try{
+  const row=await f.host.life.mutate({op:'create',kind:'todo',title:secret},'create')
+  revoke=()=>f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed context'},'change')
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const plan=await f.host.publishPlan('chat:main',0,'Context-bound plan',secret,undefined,{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,2)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]),/L-918|work\.txt/)
+  assert.equal(f.script.restores.length,0)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal(checkpoint.status,'completed')
+  assert.deepEqual(checkpoint.calls.map(call=>call.id),['write-once'])
+  assert.equal(await readFile(join(f.root,'work.txt'),'utf8'),'done')
+  await f.host.close();await f.host.open();f.runtime()
+  await f.command('build.resume',{id});await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,3)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[2]),/L-918/)
+  assert.deepEqual((await f.host.workbench.checkpoint(id,0)).calls.map(call=>call.id),['write-once'])
+ }finally{await f.close()}
 })
 
 test('excluded non-product report does not taint an independent Plan publication, fresh Build or delegation',{skip:!supported},async()=>{

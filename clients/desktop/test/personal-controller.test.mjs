@@ -427,3 +427,23 @@ test('failed text submissions translate the host code and never print raw valida
  assert.match(json,/不符合要求/)
  assert.doesNotMatch(json,/origin|invalid_format|[{}[\]]/)
 })
+
+test('a failed independent topic preserves a draft that contains only a reference',()=>{
+ for(const reject of ['transport','host']){
+  const h=harness();h.snapshot('chat:main')
+  const state=h.c.state(),ref={kind:'todo',id:'draft-ref',version:1}
+  state.references=[ref]
+  if(reject==='transport'){
+   h.c.send=()=>false
+   assert.equal(h.c.submitText('A topic','chat:main'),false)
+  }else{
+   assert.equal(h.c.submitText('A topic','chat:main'),true)
+   const request=h.sent.at(-1)
+   h.c.receive({type:'input.text_result',request_id:request.request_id,conversation_id:'chat:main',ok:false,error:'busy'})
+   assert.equal(state.failed_card?.text,'A topic')
+  }
+  assert.equal(state.draft,'')
+  assert.deepEqual(state.references,[ref])
+  h.c.disconnect()
+ }
+})

@@ -264,7 +264,7 @@ test('a draft written by an older pipeline stays visible, is regenerated at once
  try{
   await service.open();service.update([fileA,fileB]);await service.refresh();assert.equal(service.snapshot().draft?.work.length,1);await service.close()
   const disk=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;assert.equal(disk.generation_version,PROFILE_GENERATION_VERSION)
-  await writeFile(path,JSON.stringify({...disk,generation_version:'understanding-v8'}))
+  await writeFile(path,JSON.stringify({...disk,generation_version:'understanding-v9'}))
   phase=2;let release:(()=>void)|undefined
   service=new ProfileWarmup(path,async()=>{await new Promise<void>(resolve=>{release=resolve});return reply()},()=>{/* snapshot observer */})
   await service.open();service.update([fileA,fileB])

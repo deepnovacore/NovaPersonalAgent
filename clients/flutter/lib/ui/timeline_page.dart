@@ -125,16 +125,21 @@ class TimelinePage extends StatelessWidget {
           ? (sourceTimeline! as TimelineBriefSummary).todayBriefCount(current)
           : 0;
       return DecoratedBox(
-        decoration: novaTimelineBackground,
+        decoration: Theme.of(context).brightness == Brightness.light
+            ? novaTimelineBackground
+            : BoxDecoration(
+                color: Theme.of(context).colorScheme.surfaceContainerLowest,
+              ),
         child: ListView(
           padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
           children: [
-            _todayHeader(current, life, briefs),
+            _todayHeader(context, current, life, briefs),
             if (sourceTimeline != null) ...[
               _sectionLabel(
+                context,
                 t('晨间简报', 'Morning brief'),
                 labelKey: const ValueKey('timeline-morning-brief-label'),
-                color: novaTimelineAccent,
+                color: Theme.of(context).colorScheme.primary,
               ),
               Padding(
                 padding: const EdgeInsets.only(bottom: 26),
@@ -142,6 +147,7 @@ class TimelinePage extends StatelessWidget {
               ),
             ],
             _sectionLabel(
+              context,
               t('我的安排', 'My plans'),
               labelKey: const ValueKey('timeline-plans-label'),
             ),
@@ -188,6 +194,7 @@ class TimelinePage extends StatelessWidget {
   }
 
   Widget _todayHeader(
+    BuildContext context,
     DateTime current,
     Map<String, dynamic> life,
     int briefs,
@@ -199,8 +206,8 @@ class TimelinePage extends StatelessWidget {
       children: [
         Text(
           t('今天', 'Today'),
-          style: const TextStyle(
-            color: Nova.mint,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.primary,
             fontSize: 12,
             fontWeight: FontWeight.w700,
             letterSpacing: .4,
@@ -210,8 +217,8 @@ class TimelinePage extends StatelessWidget {
         Text(
           _todayDateLabel(current),
           key: const ValueKey('timeline-today-date'),
-          style: const TextStyle(
-            color: Nova.text,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurface,
             fontSize: 26,
             height: 1.25,
             fontWeight: FontWeight.w600,
@@ -222,8 +229,8 @@ class TimelinePage extends StatelessWidget {
         Text(
           _todaySummary(life, current, briefs),
           key: const ValueKey('timeline-today-summary'),
-          style: const TextStyle(
-            color: Nova.secondary,
+          style: TextStyle(
+            color: Theme.of(context).colorScheme.onSurfaceVariant,
             fontSize: 13,
             height: 1.45,
           ),
@@ -234,9 +241,10 @@ class TimelinePage extends StatelessWidget {
 
   /// Small section heading shared by the generated brief and the local plans.
   Widget _sectionLabel(
+    BuildContext context,
     String label, {
     required Key labelKey,
-    Color color = Nova.secondary,
+    Color? color,
   }) => Padding(
     padding: const EdgeInsets.only(bottom: 10),
     child: Row(
@@ -245,7 +253,7 @@ class TimelinePage extends StatelessWidget {
           width: 3,
           height: 12,
           decoration: BoxDecoration(
-            color: color,
+            color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
             borderRadius: BorderRadius.circular(2),
           ),
         ),
@@ -254,8 +262,8 @@ class TimelinePage extends StatelessWidget {
           child: Text(
             label,
             key: labelKey,
-            style: const TextStyle(
-              color: Nova.secondary,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 13,
               fontWeight: FontWeight.w600,
               letterSpacing: .2,
@@ -274,7 +282,7 @@ class TimelinePage extends StatelessWidget {
       EmptyNote(t('还没有安排', 'No plans yet'), icon: CupertinoIcons.clock)
     else
       for (final group in groups) ...[
-        _groupHeading(group),
+        _groupHeading(context, group),
         Padding(
           padding: const EdgeInsets.only(bottom: 14),
           child: _group(context, group),
@@ -282,13 +290,13 @@ class TimelinePage extends StatelessWidget {
       ],
   ];
 
-  Widget _groupHeading(Map<String, dynamic> group) {
+  Widget _groupHeading(BuildContext context, Map<String, dynamic> group) {
     final id = group['id'] as String;
     final color = id == 'current'
-        ? Nova.mint
+        ? Theme.of(context).colorScheme.primary
         : id == 'overdue'
-        ? Nova.amber
-        : Nova.tertiary;
+        ? Theme.of(context).colorScheme.tertiary
+        : Theme.of(context).colorScheme.onSurfaceVariant;
     return Padding(
       padding: const EdgeInsets.only(top: 10, bottom: 10),
       child: Row(
@@ -310,8 +318,8 @@ class TimelinePage extends StatelessWidget {
                 'completed' => t('已完成', 'Completed'),
                 _ => t('未定日期', 'Unscheduled'),
               },
-              style: const TextStyle(
-                color: Nova.secondary,
+              style: TextStyle(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
                 fontSize: 13,
                 fontWeight: FontWeight.w600,
               ),
@@ -331,10 +339,10 @@ class TimelinePage extends StatelessWidget {
     }
     final id = group['id'] as String;
     final color = id == 'current'
-        ? Nova.mint
+        ? Theme.of(context).colorScheme.primary
         : id == 'overdue'
-        ? Nova.amber
-        : Nova.tertiary;
+        ? Theme.of(context).colorScheme.tertiary
+        : Theme.of(context).colorScheme.onSurfaceVariant;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -349,7 +357,7 @@ class TimelinePage extends StatelessWidget {
                 child: Container(
                   key: ValueKey('timeline-line-$id'),
                   width: 1,
-                  color: Nova.separator,
+                  color: Theme.of(context).colorScheme.outlineVariant,
                 ),
               ),
               Column(
@@ -364,7 +372,7 @@ class TimelinePage extends StatelessWidget {
                           child: Container(
                             width: 21,
                             height: 1,
-                            color: Nova.separator,
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
                         ),
                         Positioned(
@@ -376,7 +384,9 @@ class TimelinePage extends StatelessWidget {
                             height: 9,
                             decoration: BoxDecoration(
                               shape: BoxShape.circle,
-                              color: id == 'current' ? Nova.mint : Nova.ink,
+                              color: id == 'current'
+                                  ? Theme.of(context).colorScheme.primary
+                                  : Theme.of(context).colorScheme.surface,
                               border: Border.all(color: color, width: 2),
                             ),
                           ),
@@ -397,12 +407,16 @@ class TimelinePage extends StatelessWidget {
                                           vertical: 4,
                                         ),
                                         decoration: BoxDecoration(
-                                          color: Nova.ink,
+                                          color: Theme.of(
+                                            context,
+                                          ).colorScheme.surface,
                                           borderRadius: BorderRadius.circular(
                                             999,
                                           ),
                                           border: Border.all(
-                                            color: Nova.separator,
+                                            color: Theme.of(
+                                              context,
+                                            ).colorScheme.outlineVariant,
                                           ),
                                         ),
                                         child: Text(
@@ -467,8 +481,8 @@ class TimelinePage extends StatelessWidget {
             note,
             maxLines: 2,
             overflow: TextOverflow.ellipsis,
-            style: const TextStyle(
-              color: Nova.secondary,
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
               fontSize: 12.5,
               height: 1.4,
             ),
@@ -477,10 +491,13 @@ class TimelinePage extends StatelessWidget {
         ? null
         : Text(
             due,
-            style: const TextStyle(color: Nova.secondary, fontSize: 12),
+            style: TextStyle(
+              color: Theme.of(context).colorScheme.onSurfaceVariant,
+              fontSize: 12,
+            ),
           );
     return Material(
-      color: Nova.ink,
+      color: Theme.of(context).colorScheme.surface,
       elevation: 1,
       shadowColor: const Color(0x18203248),
       borderRadius: BorderRadius.circular(18),
@@ -490,7 +507,9 @@ class TimelinePage extends StatelessWidget {
         minVerticalPadding: 8,
         leading: Icon(
           done ? CupertinoIcons.checkmark_circle_fill : CupertinoIcons.circle,
-          color: done ? Nova.mint : Nova.tertiary,
+          color: done
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.onSurfaceVariant,
           size: 20,
         ),
         title: Text(
@@ -508,9 +527,9 @@ class TimelinePage extends StatelessWidget {
             ? IconButton(
                 tooltip: t('处理此事', 'Work on this'),
                 onPressed: () => onStartTask!(row),
-                icon: const Icon(
+                icon: Icon(
                   CupertinoIcons.arrow_up_right_square,
-                  color: Nova.mint,
+                  color: Theme.of(context).colorScheme.primary,
                 ),
               )
             : null,

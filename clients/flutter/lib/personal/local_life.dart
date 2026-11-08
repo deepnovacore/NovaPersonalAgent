@@ -142,6 +142,11 @@ final class LocalLife extends ChangeNotifier {
   int revision = 0;
   Map<String, dynamic> get life =>
       projectLife(Map<String, dynamic>.from(_data['state']));
+  Map<String, dynamic>? operationReceipt(String id) {
+    final result = (_data['receipts'][id] as Map?)?['result'] as Map?;
+    return result == null ? null : Map<String, dynamic>.from(result);
+  }
+
   Future<T> _serial<T>(Future<T> Function() work) {
     final result = _tail.then((_) {
       if (_disposed) throw StateError('local_store_disposed');

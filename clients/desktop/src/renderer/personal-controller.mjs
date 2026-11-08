@@ -1,11 +1,16 @@
 import {refusalText} from './host-refusals.mjs'
 
+export function hasDraftContent(state){
+  return Boolean(state.draft||state.references?.length||state.source_todo)
+}
+
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 const DICTATION_FAILURES={
   no_audio:'没有录到声音，请检查麦克风后再试 · 原有草稿已保留',
   no_speech:'没有听清，请再说一次 · 原有草稿已保留',
 }
 const MODEL_FAILURES={
+  experience_unavailable:'体验对话未完成，请在空间设置中检查体验码、额度与网络后重试。',
   model_protocol_tool_arguments_json:'模型返回的工具参数不是有效 JSON，请重试。',
   model_protocol_tool_identity:'模型返回了重复或无效的工具调用标识，请重试。',
   model_protocol_tool_call_limit:'单次回复的工具调用数量超出限制，请重试。',
@@ -103,7 +108,7 @@ export class PersonalController {
     }
     return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id,...(value.source_todo?{source_todo:value.source_todo}:{})})}
   restoreSubmission(state,request){
-    if(request.independent&&state.draft.trim())state.failed_card={...request}
+    if(request.independent&&hasDraftContent(state))state.failed_card={...request}
     else{state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.source_todo=request.source_todo??null;state.references=request.references??[];request.restored_into_draft=true}
     request.restored=true
   }
@@ -334,7 +339,7 @@ export class PersonalController {
   /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
   /** Sends text to conversation `id` without touching its draft; text that cannot be sent is left in that draft instead. */
   submitText(text,id=this.selectedId,references=[]){
-    const state=this.state(id),keep=()=>{if(!state.draft){state.draft=text;state.references=references;}this.changed();return false}
+    const state=this.state(id),keep=()=>{if(!hasDraftContent(state)){state.draft=text;state.references=references;}this.changed();return false}
     if(!id||!text.trim()||text.length>4000)return false
     if(!this.presentationReady||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
     const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,created_at:new Date().toISOString(),...(references.length?{references:structuredClone(references)}:{})}

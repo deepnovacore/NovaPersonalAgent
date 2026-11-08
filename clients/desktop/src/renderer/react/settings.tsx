@@ -422,7 +422,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             const spaceSection = <section className="setting-section space-host-section" id="space-host-section" key="space-host-section">
                 <h2>{t('设备')}</h2>
                 <p className="hint">{t('用一次性配对码把手机连接到当前 Host Space。')}</p>
-                <SpaceHostPanel api={api}/>
+                <SpaceHostPanel api={{...api,experience:bridge?.experience}}/>
             </section>;
             return createElement(tag, p, spaceSection, ...children.map(renderNode));
         }

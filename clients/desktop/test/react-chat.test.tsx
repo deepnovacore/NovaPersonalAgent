@@ -11,7 +11,7 @@ async function mount(overrides:any={},props:any={}){
  dom.window.HTMLMediaElement.prototype.play=()=>Promise.resolve()
  const {createRoot}=await import('react-dom/client')
  const states:any={'chat:main':{draft:'',references:[]}},calls:any[]=[]
- const c:any={selectedId:'chat:main',connected:true,presentationReady:true,inputInstance:'input',capabilities:['text_input','dictation'],mode:'text',snapshot:{conversations:{items:[{id:'chat:main',kind:'chat',mode:'chat'}],messages:[]}},state(id='chat:main'){return states[id]??=( {draft:'',references:[]})},get selectedConversation(){return this.snapshot.conversations.items.find((i:any)=>i.id===this.selectedId)},get draft(){return this.state(this.selectedId).draft},set draft(v){this.state(this.selectedId).draft=v},isBuildFinished:()=>false,command:async(m:any,p:any)=>{calls.push([m,p]);return{}},openFeed:async(id:any,label:any)=>{calls.push(['openFeed',id,label])},submit:async()=>{calls.push(['submit',c.draft]);return true},dictate:async()=>{calls.push(['dictate'])},finish:async()=>{calls.push(['finish'])},voice:async()=>{calls.push(['voice'])},stopVoice:async()=>{calls.push(['stopVoice'])},home:async()=>{},changed:()=>{},...overrides}
+ const c:any={ordinarySpace:true,selectedId:'chat:main',connected:true,presentationReady:true,inputInstance:'input',capabilities:['text_input','dictation'],mode:'text',snapshot:{conversations:{items:[{id:'chat:main',kind:'chat',mode:'chat'}],messages:[]}},state(id='chat:main'){return states[id]??=( {draft:'',references:[]})},get selectedConversation(){return this.snapshot.conversations.items.find((i:any)=>i.id===this.selectedId)},get draft(){return this.state(this.selectedId).draft},set draft(v){this.state(this.selectedId).draft=v},isBuildFinished:()=>false,command:async(m:any,p:any)=>{calls.push([m,p]);return{}},openFeed:async(id:any,label:any)=>{calls.push(['openFeed',id,label])},submit:async()=>{calls.push(['submit',c.draft]);return true},dictate:async()=>{calls.push(['dictate'])},finish:async()=>{calls.push(['finish'])},voice:async()=>{calls.push(['voice'])},stopVoice:async()=>{calls.push(['stopVoice'])},home:async()=>{},changed:()=>{},...overrides}
  const root=createRoot(document.getElementById('root')!),ref=createRef<any>();const render=()=>root.render(<ChatPane ref={ref} c={c} run={(f:any)=>Promise.resolve().then(f).catch(()=>{})} api={{}} onHome={async()=>{}} openTask={()=>{}} openSchedule={()=>{}} onPreviewPlan={()=>{}} {...props} />)
  c.changed=()=>render();await act(async()=>{render()});
  return {c,calls,ref,dom,replace:async(node:any)=>act(async()=>root.render(node)),render:async()=>act(async()=>{render()}),close:async()=>{await act(async()=>root.unmount());dom.window.close()},click:async(node:any)=>act(async()=>{node.click()}),key:async(node:any,init:any)=>act(async()=>node.dispatchEvent(new dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}))),byLabel:(label:string)=>document.querySelector(`[aria-label="${label}"]`) as any}
@@ -78,6 +78,51 @@ test('plan conflict retains edits after refreshing to a newer version',async()=>
 })
 test('Build steps page thoughts and tool calls and load screenshots on demand',async()=>{
  const h=await mount();try{h.c.snapshot.conversations.items[0]={id:'chat:main',generation:1,kind:'build',build:{status:'paused',log_revision:1,computer_use:{enabled:false}}};h.c.snapshot.conversations.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Run'}];h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(p.view==='image')return{media_type:'image/png',data_base64:'aW1hZ2U='};if(p.view==='steps'&&p.offset===0)return{generation:1,total:2,first_id:'call',thoughts_first_id:'thought',items:[{kind:'thinking',id:'thought',message_id:'user',text:'Considering next step',created_at:new Date().toISOString()}],next_offset:1};if(p.view==='steps'&&p.offset===1)return{generation:1,total:2,first_id:'call',thoughts_first_id:'thought',items:[{kind:'tool',id:'call',message_id:'user',name:'computer_click',input:'{"x":4,"y":8}',output:'ok',state:'completed',status:'completed',image_ref:'shot',started_at:'2026-10-28T00:00:00Z',finished_at:'2026-10-28T00:00:01Z'}],next_offset:null};return{}};await h.render();assert.equal(document.querySelectorAll('.build-step').length,2);assert.deepEqual(h.calls.filter(([,p]:any)=>p.view==='steps').map(([,p]:any)=>p.offset),[0,1]);assert.equal(h.calls.some(([,p]:any)=>p.view==='image'),false);const details=document.querySelector('.build-tool-call') as HTMLDetailsElement;await act(async()=>{details.open=true;details.dispatchEvent(new h.dom.window.Event('toggle',{bubbles:false}))});assert.equal(document.querySelector('.computer-shot')!.getAttribute('src'),'data:image/png;base64,aW1hZ2U=');assert.ok(document.querySelector('.build-tool-target')!.textContent!.includes('点击 · 4, 8'))}finally{await h.close()}
+})
+test('Build displays ordinary model text between collapsible tool groups',async()=>{
+ const h=await mount()
+ try{
+  h.c.snapshot.conversations.items[0]={id:'chat:main',generation:0,kind:'build',build:{status:'completed',log_revision:1}}
+  h.c.snapshot.conversations.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Run'},{id:'reply',conversation_id:'chat:main',role:'assistant',text:'Verified'}]
+  const tool={kind:'tool',message_id:'user',state:'completed',status:'completed',input:'{}'}
+  h.c.command=async(_method:any,p:any)=>p.view==='steps'?{generation:0,total:2,items:[{...tool,id:'read',name:'file_read'},{...tool,id:'write',name:'file_write',narration:'I read the file. **Writing the change.**'}],next_offset:null}:{}
+  await h.render()
+  const text=document.querySelector('.build-narration')!
+  assert.equal(text.querySelector('strong')?.textContent,'Writing the change.')
+  assert.equal(text.previousElementSibling?.querySelector('.build-tool-call code')?.textContent,'file_read')
+  assert.equal(text.nextElementSibling?.querySelector('.build-tool-call code')?.textContent,'file_write')
+  assert.equal(text.closest('[hidden]'),null)
+  assert.equal(document.querySelectorAll('.build-narration').length,1)
+ }finally{await h.close()}
+})
+test('Build puts the avatar on the first reply and summarizes real file activity',async()=>{
+ const h=await mount()
+ try{
+  await act(async()=>h.ref.current.identity({profile:{assistantName:'Nova',avatar:'avatar.png'}}))
+  const item={id:'chat:main',generation:0,kind:'build',build:{status:'running',log_revision:1}}
+  h.c.snapshot.conversations.items[0]=item
+  h.c.snapshot.conversations.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Run'},{id:'reply',conversation_id:'chat:main',role:'assistant',text:'Done'}]
+  const tool={kind:'tool',message_id:'user',state:'completed',status:'completed',input:'{}'}
+  const calls=[
+   {...tool,id:'read',name:'file_read',file_key:'a',narration:'Reading first.'},
+   {...tool,id:'read-page',name:'file_read',file_key:'a'},
+   {...tool,id:'list',name:'file_read',file_key:null},
+   {...tool,id:'write',name:'file_write',file_key:'b'},
+   {...tool,id:'edit',name:'file_edit',file_key:'b'},
+   {...tool,id:'shell',name:'shell_execute',state:'running',status:'running'},
+   {...tool,id:'latest',name:'file_read',state:'running',status:'running'},
+  ]
+  h.c.command=async(_method:any,p:any)=>p.view==='steps'?{generation:0,total:calls.length,items:calls.slice(p.offset),next_offset:null}:{}
+  await h.render()
+  assert.equal(document.querySelector('.build-narration .message-avatar img')?.getAttribute('src'),'avatar.png')
+  assert.equal(document.querySelector('[data-message-id="reply"] .message-avatar'),null)
+  assert.match(document.querySelector('.build-steps-label')?.textContent??'',/7 次工具调用 · 读取 1 个文件 · 写入或编辑 1 个文件/)
+  assert.equal(document.querySelector('.build-steps-live')?.textContent,'正在读取文件…')
+  assert.equal(document.querySelectorAll('.build-steps-live').length,1)
+  item.build={status:'completed',log_revision:2}
+  await h.render()
+  assert.equal(document.querySelector('.build-steps-live'),null)
+ }finally{await h.close()}
 })
 test('a host without the steps view falls back to paged tool calls',async()=>{
  const h=await mount();try{h.c.snapshot.conversations.items[0]={id:'chat:main',generation:0,kind:'build',build:{status:'paused',log_revision:1,computer_use:{enabled:false}}};h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(p.view==='steps')throw Object.assign(Error('unsupported_view'),{refusal_code:'unsupported_view'});return{generation:0,total:1,items:[{id:'call',name:'shell',input:'ls',output:'done',state:'completed',status:'completed'}],next_offset:null}};await h.render();assert.equal(document.querySelectorAll('.build-step-tool').length,1);assert.deepEqual(h.calls.filter(([m]:any)=>m==='build.details').map(([,p]:any)=>p.view),['steps','calls'])}finally{await h.close()}

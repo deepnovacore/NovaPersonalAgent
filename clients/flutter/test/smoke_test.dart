@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/main.dart' as app;
@@ -8,6 +9,7 @@ void main() {
     tester,
   ) async {
     FlutterSecureStorage.setMockInitialValues({});
+    SharedPreferences.setMockInitialValues({'language': 'en'});
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
       const MethodChannel('nova/space_scope'),
       (_) async => null,
@@ -18,8 +20,13 @@ void main() {
     );
     app.main();
     await tester.pumpAndSettle();
-    expect(find.text('新建 Space'), findsOneWidget);
-    expect(find.text('每个 Space 的数据与密钥相互独立。'), findsOneWidget);
+    expect(find.text('New Space'), findsOneWidget);
+    expect(
+      find.text(
+        'Each Space keeps its own data and model settings. Run it on this device or connect to a computer.',
+      ),
+      findsOneWidget,
+    );
     expect(find.byTooltip('Settings'), findsNothing);
   });
 }

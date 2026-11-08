@@ -8,7 +8,7 @@ export function createWindowsPresentationWindows({BaseWindow, WebContentsView, o
   if (platform !== 'win32') return null
 
   const {webPreferences, ...shellOptions} = options
-  shellOptions.title ??= 'Nova Personal Agent Desktop'
+  shellOptions.title ??= 'NovaCore'
   const view = new WebContentsView({webPreferences})
   view.setBackgroundColor('#00000000')
 

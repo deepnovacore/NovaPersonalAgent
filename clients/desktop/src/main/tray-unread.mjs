@@ -1,6 +1,6 @@
 export function updateTrayUnread(tray, count, platform = process.platform) {
   if (platform === 'darwin') tray?.setTitle(count ? String(count) : '')
-  tray?.setToolTip(count ? `Nova · ${count} 条未读提醒` : 'Nova Personal Agent Desktop')
+  tray?.setToolTip(count ? `NovaCore · ${count} 条未读提醒` : 'NovaCore')
 }
 // A badge on the tray means something wants the user, so the click must lead
 // there; only an empty tray keeps the show/hide toggle.

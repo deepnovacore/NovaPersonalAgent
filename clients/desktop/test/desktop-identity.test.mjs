@@ -37,6 +37,7 @@ test('desktop rename preserves encryption identity before ready and displays the
   assert.equal(paths.userData, join('/profile', LEGACY_STORAGE_NAME))
   ready()
   await configured
+  assert.equal(DESKTOP_PRODUCT_NAME, 'NovaCore')
   assert.equal(name, DESKTOP_PRODUCT_NAME)
 })
 

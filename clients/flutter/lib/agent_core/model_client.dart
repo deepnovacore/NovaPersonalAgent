@@ -94,6 +94,11 @@ class ModelConfiguration {
         'https://api.deepseek.com/chat/completions',
         'https://api.deepseek.com/v1/chat/completions',
       ].contains(requestUri.toString());
+  bool get isExperienceGateway =>
+      protocol == ModelProtocol.chatCompletions &&
+      model == 'deepseek-flash' &&
+      requestUri.toString() ==
+          'https://api.deepnovacore.com/novacore/beta/v1/chat/completions';
   bool get supportsJsonObject =>
       isOfficialDeepSeekFlash ||
       protocol == ModelProtocol.chatCompletions &&

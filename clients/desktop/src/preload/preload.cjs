@@ -23,7 +23,15 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     permission:kind=>ipcRenderer.invoke('nova:welcome:permission',kind),
     onChanged:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('nova:welcome:changed',listener);return()=>ipcRenderer.removeListener('nova:welcome:changed',listener)},
   }),
+  experience: Object.freeze({
+    list:()=>ipcRenderer.invoke('nova:experience:list'),
+    select:id=>ipcRenderer.invoke('nova:experience:select',id),
+    redeem:code=>ipcRenderer.invoke('nova:experience:redeem',code),
+    send:request=>ipcRenderer.invoke('nova:experience:send',request),
+    onChanged:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('nova:experience:changed',listener);return()=>ipcRenderer.removeListener('nova:experience:changed',listener)},
+  }),
   personal: Object.freeze({
+    sharedIdeas:language=>ipcRenderer.invoke('nova:personal:shared-ideas',language),
     openArticle: url => ipcRenderer.invoke('nova:personal:article', url),
     chooseBuildDirectory: () => ipcRenderer.invoke('nova:personal:build-directory'),
     defaultWorkspace: () => ipcRenderer.invoke('nova:personal:default-workspace'),

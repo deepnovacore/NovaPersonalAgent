@@ -12,6 +12,7 @@ class IosModelClient extends ModelClient {
   bool _cancelled = false;
   @override
   void cancel() {
+    super.cancel();
     _cancelled = true;
     _cancelGeneration++;
     final id = _request;
@@ -31,6 +32,9 @@ class IosModelClient extends ModelClient {
     List<Map<String, dynamic>> messages, {
     List<Map<String, dynamic>> tools = const [],
   }) {
+    if (configuration.isExperienceGateway) {
+      return super.stream(configuration, messages, tools: tools);
+    }
     final id = requestId();
     final controller = StreamController<Map<String, dynamic>>();
     String? reservation;
