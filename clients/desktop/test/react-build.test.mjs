@@ -13,6 +13,8 @@ test('renderer builds at the desktop startup default without an output override'
   await mkdir(join(directory,'scripts'))
   await cp(new URL('../scripts/build-renderer.mjs',import.meta.url),join(directory,'scripts/build-renderer.mjs'))
   await cp(new URL('../src/renderer',import.meta.url),join(directory,'src/renderer'),{recursive:true})
+  await mkdir(join(directory,'src/main'))
+  await cp(new URL('../src/main/desktop-identity.mjs',import.meta.url),join(directory,'src/main/desktop-identity.mjs'))
   await symlink(fileURLToPath(new URL('../../../node_modules',import.meta.url)),join(directory,'node_modules'),process.platform==='win32'?'junction':'dir')
   const env={...process.env}
   delete env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT
@@ -53,6 +55,8 @@ test('complete built renderer graph includes the bundled capture worklet and onl
   const capture=await readFile(join(directory,'capture-worklet.mjs'),'utf8')
   assert.ok(!/from ['"]\.\/audio\.mjs/.test(capture),'audio worklet must be self contained')
   const html=await readFile(join(directory,'index.html'),'utf8')
+  assert.match(html,/<title>NovaCore<\/title>/)
+  for(const name of Object.keys(rendererEntries))assert.match(await readFile(join(directory,`${name}.html`),'utf8'),/<title>[^<]*NovaCore[^<]*<\/title>/)
   assert.match(html,/href=".\/design-tokens\.css"/);assert.match(await readFile(join(directory,'design-tokens.css'),'utf8'),/--[a-z-]+\s*:/);assert.match(html,/script-src 'self'/);assert.doesNotMatch(html,/unsafe-eval|unsafe-inline|https:\/\//)
   assert.match(await readFile(join(directory,'settings.html'),'utf8'),/nova-window-settings/)
   assert.match(await readFile(join(directory,'computer-bar.html'),'utf8'),/computer-bar-page/)

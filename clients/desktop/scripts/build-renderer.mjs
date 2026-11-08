@@ -3,6 +3,7 @@ import {build} from 'esbuild'
 import {cp, mkdir, readFile, readdir, writeFile} from 'node:fs/promises'
 import {resolve, relative, sep} from 'node:path'
 import {pathToFileURL} from 'node:url'
+import {DESKTOP_PRODUCT_NAME} from '../src/main/desktop-identity.mjs'
 
 const desktopRoot=resolve(import.meta.dirname,'..')
 const sourceRoot=resolve(desktopRoot,'src/renderer')
@@ -12,7 +13,7 @@ export const rendererEntries=Object.freeze({
  'computer-bar':'entries/computer-bar.tsx','computer-edge':'entries/computer-edge.tsx',
  'memory-board':'entries/memory-board.tsx','release-camera':'entries/release-camera.tsx',
 })
-const titles={index:'Nova Personal Agent Desktop',settings:'设置 · Nova',setup:'开始使用 · Nova','memory-board':'记忆 · Nova',visor:'Nova Visor'}
+const titles={index:DESKTOP_PRODUCT_NAME,settings:`设置 · ${DESKTOP_PRODUCT_NAME}`,setup:`开始使用 · ${DESKTOP_PRODUCT_NAME}`,'memory-board':`记忆 · ${DESKTOP_PRODUCT_NAME}`,visor:`${DESKTOP_PRODUCT_NAME} Visor`,'visor-controls':`${DESKTOP_PRODUCT_NAME} Visor controls`,'computer-bar':`${DESKTOP_PRODUCT_NAME} Computer Use`,'computer-edge':`${DESKTOP_PRODUCT_NAME} Computer Use`,'release-camera':`Camera capability · ${DESKTOP_PRODUCT_NAME}`}
 const css={index:['design-tokens.css','controls.css','index.css','task-banner.css','workbench.css','welcome.css'],settings:['controls.css','settings.css','skills.css'],setup:['controls.css','setup.css'],visor:['visor.css'],'visor-controls':['controls.css','visor-controls.css'],'computer-bar':['computer-overlay.css'],'computer-edge':['computer-overlay.css'],'memory-board':['controls.css','memory-board.css'],'release-camera':[]}
 export async function buildRenderer({outputRoot=process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(desktopRoot,'build/renderer'), sourcemap=false}={}){
  assert.ok(outputRoot,'Renderer output directory must not be empty')
@@ -37,7 +38,7 @@ export async function buildRenderer({outputRoot=process.env.NOVA_DESKTOP_RENDERE
  for(const [name] of Object.entries(rendererEntries)){
   const styleLinks=[`react/${name}.css`,...(css[name]??[])].map(file=>`<link rel="stylesheet" href="./${file}">`).join('\n')+(name==='index'?'\n<link rel="prefetch" href="./assets/nova-idle.mp4">':'')
   const policy="default-src 'self'; script-src 'self'; style-src 'self'; connect-src ws://127.0.0.1:*; img-src 'self' data: blob:; media-src 'self' blob:; object-src 'none'; base-uri 'none'; form-action 'none'"
-  const html=`<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${policy}"><title>${titles[name]??'Nova'}</title>${styleLinks}\n<link rel="stylesheet" href="./theme.css"></head><body class="nova-window-${name}${name==='computer-bar'?' computer-bar-page':name==='computer-edge'?' computer-edge-page':''}"><div id="root"></div><script type="module" src="./react/${name}.mjs"></script></body></html>\n`
+  const html=`<!doctype html>\n<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta http-equiv="Content-Security-Policy" content="${policy}"><title>${titles[name]??DESKTOP_PRODUCT_NAME}</title>${styleLinks}\n<link rel="stylesheet" href="./theme.css"></head><body class="nova-window-${name}${name==='computer-bar'?' computer-bar-page':name==='computer-edge'?' computer-edge-page':''}"><div id="root"></div><script type="module" src="./react/${name}.mjs"></script></body></html>\n`
   await writeFile(resolve(out,`${name}.html`),html)
  }
  await cp(resolve(sourceRoot,'react/theme.css'),resolve(out,'theme.css'))

@@ -21,7 +21,7 @@ import {codingBackendStatus} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode, createConfigurationAttempt, runConfigurationStage, configurationTimeout} from './desktop-startup.mjs'
 import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
-import {configureDesktopIdentity} from './desktop-identity.mjs'
+import {configureDesktopIdentity, DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
 import {createSpaceCreateHandler} from './space-create.mjs'
@@ -1661,7 +1661,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   }
   ipcMain.handle('nova:personal:presentation-error', (event, message) => {
     if(event.sender !== mainWindow.webContents || typeof message !== 'string' || message.length > 2000) throw new Error('presentation error rejected')
-    return dialog.showMessageBox({type:'error',title:'Nova',message})
+    return dialog.showMessageBox({type:'error',title:DESKTOP_PRODUCT_NAME,message})
   })
   ipcMain.handle('nova:personal:presentation', async (event, mode, activate=true) => {
     if(event.sender !== mainWindow.webContents || !['background','workbench','orb'].includes(mode) || typeof activate!=='boolean') throw new Error('presentation request rejected')
