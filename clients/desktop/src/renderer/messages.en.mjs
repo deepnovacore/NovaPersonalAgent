@@ -815,6 +815,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "工作区不存在或不是目录。请在设置中选择有效工作区。": "The workspace is missing or is not a directory. Choose a valid workspace in Settings.",
   "无法写入状态目录。请检查目录权限后在设置中重试。": "The state directory is not writable. Check directory permissions, then retry in Settings.",
   "状态文件无法读取或超过大小上限。请备份后运行 novapersonal reset-state。": "The state file cannot be read or exceeds its size limit. Back it up, then run novapersonal reset-state.",
+  "保存的数据格式与当前应用不兼容。原文件未改动，请使用兼容版本后重试。": "The saved data format is incompatible with this app. The original file is unchanged. Use a compatible version and retry.",
   "状态文件由更新版本的 Nova 写入。请升级 Nova，或备份后运行 novapersonal reset-state。": "The state file was written by a newer Nova version. Upgrade Nova, or back it up and run novapersonal reset-state.",
   "状态文件无法读取（{0}），已从空状态启动。原文件：{1}；已保留备份：{2}。": "The state file could not be read ({0}); Nova started from empty state. Original: {1}; preserved backup: {2}.",
   "Nova 已在另一个窗口运行。请关闭它后重试。": "Nova is already running in another window. Close it and try again.",

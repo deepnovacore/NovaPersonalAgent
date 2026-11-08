@@ -278,7 +278,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
 const RUNTIME_CODES = new Set([
   'configuration_required', 'authentication_failed', 'backend_unavailable', 'assembly_failed',
   'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid',
-  'personal_store_capacity', 'state_corrupt', 'state_version_unsupported',
+  'personal_store_capacity', 'state_corrupt', 'state_version_unsupported', 'state_schema_incompatible',
 ])
 const CODEX_DIAGNOSTIC_CODES = new Set([
   'codex_login_status_nonzero',
@@ -324,7 +324,7 @@ export function startupErrors(chunk) {
 }
 
 export function classifyBackendFailure(code) {
-  if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity', 'state_corrupt', 'state_version_unsupported'].includes(code)) return Object.freeze({kind: 'unavailable', code})
+  if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity', 'state_corrupt', 'state_version_unsupported', 'state_schema_incompatible'].includes(code)) return Object.freeze({kind: 'unavailable', code})
   if (code === 'backend_start_timeout') {
     return Object.freeze({kind: 'recoverable', code})
   }
