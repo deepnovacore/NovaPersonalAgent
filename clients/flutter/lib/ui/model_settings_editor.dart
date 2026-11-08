@@ -15,6 +15,7 @@ Future<void> showModelSettingsEditor(
   String language = 'zh',
   String? title,
   String? description,
+  Future<void> Function()? onClearSelection,
   Future<void> Function(BuildContext)? onManageCredentials,
   Future<bool> Function(BuildContext)? onChatGpt,
 }) async {
@@ -482,6 +483,32 @@ Future<void> showModelSettingsEditor(
               ),
             ),
             actions: [
+              if (onClearSelection != null)
+                TextButton(
+                  onPressed: saving
+                      ? null
+                      : () async {
+                          setState(() {
+                            saving = true;
+                            error = null;
+                          });
+                          try {
+                            await onClearSelection();
+                            if (context.mounted) Navigator.pop(context);
+                          } catch (_) {
+                            if (context.mounted) {
+                              setState(() {
+                                saving = false;
+                                error = t(
+                                  '无法移除模型，请重试。',
+                                  'Could not remove the model. Try again.',
+                                );
+                              });
+                            }
+                          }
+                        },
+                  child: Text(t('移除自配模型', 'Remove custom model')),
+                ),
               TextButton(
                 onPressed: saving ? null : () => Navigator.pop(context),
                 child: Text(t('取消', 'Cancel')),

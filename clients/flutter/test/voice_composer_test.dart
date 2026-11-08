@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
-import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
@@ -19,7 +18,6 @@ class TopicHost extends AgentCoreHost {
     : super(store: store, settings: ModelSettings());
   final release = Completer<void>();
   final delivered = <String>[];
-  Future<ModelConfiguration> Function()? selectedAuthorModel;
   @override
   Future<void> send(
     String conversationId,
@@ -27,11 +25,9 @@ class TopicHost extends AgentCoreHost {
     ToolApproval? approve,
     String? language,
     bool userAuthored = true,
-    Future<ModelConfiguration> Function()? authorModel,
   }) async {
     busy = true;
     delivered.add(text);
-    selectedAuthorModel = authorModel;
     await release.future;
     busy = false;
   }
@@ -39,18 +35,13 @@ class TopicHost extends AgentCoreHost {
 
 void main() {
   testWidgets(
-    'shared idea retains author routing, draft and attachments without double sending',
+    'shared idea retains draft and attachments without double sending',
     (tester) async {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
       await store.ensureMain();
       final host = TopicHost(store);
       final key = GlobalKey<LocalChatPanelState>();
-      Future<ModelConfiguration> authorModel() async => ModelConfiguration(
-        endpoint: 'https://example.test/v1',
-        model: 'author',
-        key: 'token',
-      );
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -58,7 +49,6 @@ void main() {
               key: key,
               host: host,
               conversationId: ConversationStore.mainId,
-              authorModel: authorModel,
             ),
           ),
         ),
@@ -70,7 +60,6 @@ void main() {
       final sending = panel.sendSharedIdea('How do I brew tea?');
       await panel.sendSharedIdea('How do I brew tea?');
       expect(host.delivered, ['How do I brew tea?']);
-      expect(host.selectedAuthorModel, same(authorModel));
       host.release.complete();
       await sending;
       expect(panel.input.text, 'my unsent draft');

@@ -9,7 +9,6 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../agent_core/model_client.dart';
 import '../protocol/wire.dart';
-import '../space/space_storage.dart';
 
 typedef ExperienceRequest =
     Future<Uint8List> Function(
@@ -37,8 +36,6 @@ final class ExperienceSession {
     ),
   );
   static const _installationKey = 'novacore.experience.installation.v1';
-  static const _authorConversationKey =
-      'novacore.experience.author-conversation.v1';
   static const _testerKey = 'novacore.experience.tester.v1';
   static final _credential = RegExp(r'^[A-Za-z0-9_-]{43}$');
   static final _tester = RegExp(r'^[A-Za-z0-9_-]{8,64}$');
@@ -75,6 +72,7 @@ final class ExperienceSession {
         await response.drain<void>();
         throw ExperienceFailure(switch (response.statusCode) {
           400 => 'invalid_request',
+          401 when uri.path.endsWith('/redeem') => 'invalid_invite',
           401 || 403 => 'enrollment_inactive',
           409 => 'installation_enrolled',
           410 => 'invite_expired',
@@ -204,6 +202,7 @@ final class ExperienceSession {
   Future<String?> resumeInvite({String scope = 'text'}) async {
     final testerId = await _storage.read(key: _testerKey);
     if (testerId == null || !_tester.hasMatch(testerId)) return null;
+    _tokens.remove((testerId, scope));
     try {
       await token(testerId, scope);
       return testerId;
@@ -213,31 +212,6 @@ final class ExperienceSession {
         return null;
       }
       rethrow;
-    }
-  }
-
-  String _authorKey(SpaceRecord space) {
-    if (space.mode != SpaceMode.standalone || space.personaId != null) {
-      throw StateError('author_model_requires_local_space');
-    }
-    return SpaceStorage.runScoped(
-      space,
-      () => SpaceStorage.secureKey(_authorConversationKey),
-    );
-  }
-
-  Future<String?> authorEnrollment(SpaceRecord space) async {
-    final id = await _storage.read(key: _authorKey(space));
-    return id != null && _tester.hasMatch(id) ? id : null;
-  }
-
-  Future<void> setAuthorEnrollment(SpaceRecord space, String? testerId) async {
-    final key = _authorKey(space);
-    if (testerId == null) {
-      await _storage.delete(key: key);
-    } else {
-      await token(testerId, 'text');
-      await _storage.write(key: key, value: testerId);
     }
   }
 
@@ -259,12 +233,12 @@ final class ExperienceSession {
     );
   }
 
-  Future<ModelConfiguration> model([String? testerId]) async {
+  Future<ModelConfiguration> model() async {
     try {
       return ModelConfiguration(
         endpoint: origin.replace(path: '/novacore/beta/v1').toString(),
         model: 'deepseek-flash',
-        key: await token(testerId ?? await enrolledTester(), 'text'),
+        key: await token(await enrolledTester(), 'text'),
       );
     } on ExperienceFailure catch (error) {
       throw AgentFailure('experience_${error.code}');

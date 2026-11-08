@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
@@ -14,35 +15,31 @@ import 'agent_core_test.dart' show MemoryPersistence;
 import 'scheduled_agent_runner_test.dart' show FixtureSettings;
 
 void main() {
-  for (final welcome in [true, false]) {
-    testWidgets(
-      'persona selection only offers redemption on first welcome: $welcome',
-      (tester) async {
-        final catalog = SpaceCatalog(persistence: MemorySpacePersistence());
-        await tester.pumpWidget(
-          MaterialApp(
-            home: ExperienceChooser(
-              catalog: catalog,
-              language: 'en',
-              allowInvite: welcome,
-            ),
-          ),
-        );
-        expect(find.byType(TextField), welcome ? findsOneWidget : findsNothing);
-        expect(
-          find.text('Redeem experience code'),
-          welcome ? findsOneWidget : findsNothing,
-        );
-        if (!welcome) {
-          expect(
-            find.text('Choose a sample persona and browse the sample data.'),
-            findsOneWidget,
-          );
-        }
-        await tester.pumpWidget(const SizedBox.shrink());
-      },
-    );
-  }
+  testWidgets(
+    'persona selection allows optional redemption with existing Spaces',
+    (tester) async {
+      final catalog = SpaceCatalog(persistence: MemorySpacePersistence());
+      await catalog.add(
+        const SpaceRecord(
+          id: 'existing',
+          name: 'Existing',
+          mode: SpaceMode.standalone,
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: ExperienceChooser(catalog: catalog, language: 'en'),
+        ),
+      );
+      expect(
+        find.text('Choose a sample persona and browse the sample data.'),
+        findsOneWidget,
+      );
+      expect(find.text('Experience code'), findsOneWidget);
+      expect(find.byType(TextField), findsNothing);
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
 
   testWidgets('missing model error offers the explicit model chooser', (
     tester,
@@ -71,61 +68,62 @@ void main() {
     host.dispose();
   });
 
-  for (final managed in [false, true]) {
+  for (final persona in [false, true]) {
     testWidgets(
-      'chat model and voice controls respect managed mode: $managed',
+      'experience setup and custom models are available in either Space: $persona',
       (tester) async {
         final store = ConversationStore(MemoryPersistence());
         await store.open();
         await store.ensureMain();
-        final settings = managed
-            ? ModelSettings(
-                managedConfiguration: () async =>
-                    throw const AgentFailure('experience_enrollment_required'),
-              )
-            : FixtureSettings();
-        final host = AgentCoreHost(store: store, settings: settings);
-        if (managed) host.error = 'experience_enrollment_required';
-        var picked = 0;
-        var voiced = 0;
+        FlutterSecureStorage.setMockInitialValues({});
+        final host = AgentCoreHost(
+          store: store,
+          settings: ModelSettings(headless: true),
+          experienceModel: () async =>
+              throw const AgentFailure('experience_enrollment_required'),
+          experiencePersona: persona,
+        );
+        var picked = 0, redeemed = 0, voiced = 0;
+        final key = GlobalKey<LocalChatPanelState>();
         await tester.pumpWidget(
           MaterialApp(
             home: Scaffold(
               body: LocalChatPanel(
+                key: key,
                 host: host,
                 conversationId: ConversationStore.mainId,
                 onModelSettings: () => picked++,
-                onChooseModel: managed ? null : () => picked++,
-                onVoice: managed ? null : () => voiced++,
+                onChooseModel: () => picked++,
+                onExperienceCode: () => redeemed++,
+                onVoice: persona ? null : () => voiced++,
               ),
             ),
           ),
         );
         await tester.pumpAndSettle();
-        final menu = tester.widget<PopupMenuButton<String>>(
-          find.byType(PopupMenuButton<String>),
+        expect(find.text('体验服务'), findsOneWidget);
+        key.currentState!.prefill('保留这条草稿');
+        await tester.pumpAndSettle();
+        await tester.tap(find.byTooltip('发送'));
+        await tester.pumpAndSettle();
+        expect(key.currentState!.input.text, '保留这条草稿');
+        expect(
+          store.conversation(ConversationStore.mainId)['messages'],
+          isEmpty,
         );
-        expect(menu.enabled, !managed);
-        if (managed) {
-          expect(find.text('体验模式'), findsOneWidget);
-          expect(find.text('选择模型'), findsNothing);
+        await tester.tap(find.text('兑换体验码'));
+        await tester.tap(find.text('配置自己的模型'));
+        expect(redeemed, 1);
+        expect(picked, 1);
+        await tester.tap(find.text('体验服务'));
+        await tester.pumpAndSettle();
+        await tester.tap(find.text('模型设置'));
+        expect(picked, 2);
+        await tester.pumpAndSettle();
+        if (persona) {
           expect(find.byTooltip('实时语音'), findsNothing);
-          expect(
-            find.text('作者 API 尚未配置或已失效，请在普通 Space 的设置中使用体验码配置。'),
-            findsOneWidget,
-          );
-          await tester.tap(find.text('体验模式'));
-          await tester.pumpAndSettle();
-          expect(find.text('模型设置'), findsNothing);
-          expect(picked, 0);
         } else {
-          await tester.tap(find.text('fixture'));
-          await tester.pumpAndSettle();
-          await tester.tap(find.text('模型设置'));
-          await tester.pumpAndSettle();
-          expect(picked, 1);
           await tester.tap(find.byTooltip('实时语音'));
-          await tester.pumpAndSettle();
           expect(voiced, 1);
         }
         await tester.pumpWidget(const SizedBox.shrink());

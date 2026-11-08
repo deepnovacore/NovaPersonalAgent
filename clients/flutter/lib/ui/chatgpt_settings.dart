@@ -16,8 +16,9 @@ enum _AccountNotice {
 /// Account metadata is displayed here; credentials never enter widget state.
 Future<void> showChatGptSettings(
   BuildContext context,
-  ModelSettings settings,
-) async {
+  ModelSettings settings, {
+  Future<void> Function()? onClearSelection,
+}) async {
   final accounts = settings.chatGpt;
   var data = await accounts.metadata();
   var catalog = <Map<String, String>>[];
@@ -274,6 +275,16 @@ Future<void> showChatGptSettings(
             ),
           ),
           actions: [
+            if (onClearSelection != null)
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => run(() async {
+                        await onClearSelection();
+                        if (context.mounted) Navigator.pop(context);
+                      }),
+                child: const Text('移除自配模型'),
+              ),
             TextButton(
               onPressed: busy ? null : () => Navigator.pop(context),
               child: const Text('完成'),

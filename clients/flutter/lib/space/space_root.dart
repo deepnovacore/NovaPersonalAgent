@@ -400,11 +400,8 @@ class _SpaceChooserState extends State<_SpaceChooser>
             subtitle: Text(t('选择示例人物', 'Choose a sample persona')),
             onTap: () => Navigator.of(context).push(
               MaterialPageRoute<void>(
-                builder: (_) => ExperienceChooser(
-                  catalog: catalog,
-                  language: language,
-                  allowInvite: catalog.spaces.isEmpty,
-                ),
+                builder: (_) =>
+                    ExperienceChooser(catalog: catalog, language: language),
               ),
             ),
           ),

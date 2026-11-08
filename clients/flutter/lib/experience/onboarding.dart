@@ -2,59 +2,42 @@ import 'package:flutter/material.dart';
 import '../space/space_storage.dart';
 import 'persona.dart';
 import 'experience_session.dart';
+import 'experience_code_dialog.dart';
 
 class ExperienceChooser extends StatefulWidget {
   const ExperienceChooser({
     super.key,
     required this.catalog,
     this.language = 'zh',
-    this.allowInvite = true,
   });
   final SpaceCatalog catalog;
   final String language;
-  final bool allowInvite;
   @override
   State<ExperienceChooser> createState() => _ExperienceChooserState();
 }
 
 class _ExperienceChooserState extends State<ExperienceChooser> {
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
-  final code = TextEditingController();
   final session = ExperienceSession();
   bool busy = false;
   String? notice;
   @override
   void dispose() {
-    code.dispose();
     session.dispose();
     super.dispose();
   }
 
   Future<void> redeem() async {
-    if (!widget.allowInvite || busy || code.text.trim().isEmpty) return;
-    setState(() {
-      busy = true;
-      notice = null;
-    });
-    try {
-      await session.redeem(code.text);
-      if (mounted) {
-        setState(() {
-          notice = t('作者提供的 API Key 已配置', 'Author-provided API Key configured');
-          code.clear();
-        });
-      }
-    } catch (_) {
-      if (mounted) {
-        setState(
-          () => notice = t(
-            '无法兑换，请检查体验码或稍后重试。',
-            'Could not redeem. Check your code or try again later.',
-          ),
-        );
-      }
-    } finally {
-      if (mounted) setState(() => busy = false);
+    final redeemed = await showExperienceCodeDialog(
+      context,
+      session: session,
+      language: widget.language,
+    );
+    if (mounted && redeemed) {
+      setState(
+        () =>
+            notice = t('已兑换，可以开始对话。', 'Code redeemed. You can start chatting.'),
+      );
     }
   }
 
@@ -103,32 +86,19 @@ class _ExperienceChooserState extends State<ExperienceChooser> {
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [
-        if (widget.allowInvite) ...[
-          Text(
-            t(
-              '示例资料可以直接浏览。体验码用于一键配置作者提供的 API Key。',
-              'Browse the sample data directly. Use an experience code to configure the author-provided API Key in one step.',
-            ),
+        Text(
+          t(
+            '选择示例人物，浏览示例资料。',
+            'Choose a sample persona and browse the sample data.',
           ),
-          const SizedBox(height: 16),
-          TextField(
-            controller: code,
-            enabled: !busy,
-            autocorrect: false,
-            decoration: InputDecoration(labelText: t('体验码', 'Experience code')),
-            onSubmitted: (_) => redeem(),
-          ),
-          FilledButton(
+        ),
+        Align(
+          alignment: AlignmentDirectional.centerStart,
+          child: TextButton(
             onPressed: busy ? null : redeem,
-            child: Text(t('兑换体验码', 'Redeem experience code')),
+            child: Text(t('体验码', 'Experience code')),
           ),
-        ] else
-          Text(
-            t(
-              '选择示例人物，浏览示例资料。',
-              'Choose a sample persona and browse the sample data.',
-            ),
-          ),
+        ),
         if (notice != null) Text(notice!),
         if (busy) const LinearProgressIndicator(),
         const SizedBox(height: 16),

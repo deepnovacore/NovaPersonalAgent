@@ -305,24 +305,37 @@ class ConversationStore {
     }
   });
 
-  Future<void> append(String id, Map<String, dynamic> message) =>
-      _write((data) {
-        if (!['user', 'assistant', 'tool'].contains(message['role']) ||
-            message['content'] is! String) {
-          throw ArgumentError('invalid_message');
-        }
-        final item = (data['conversations'] as List).firstWhere(
-          (e) => e['id'] == id,
-        );
-        if (message['role'] == 'assistant' && item['active_turn'] != null) {
-          item['active_turn'] = {
-            'draft': '',
-            'time': DateTime.now().toUtc().toIso8601String(),
-          };
-        }
-        (item['messages'] as List).add({
-          ...Map<String, dynamic>.from(jsonDecode(jsonEncode(message)) as Map),
-          'time': DateTime.now().toUtc().toIso8601String(),
-        });
-      });
+  Future<void> append(
+    String id,
+    Map<String, dynamic> message, {
+    String? experienceReplyTo,
+  }) => _write((data) {
+    if (!['user', 'assistant', 'tool'].contains(message['role']) ||
+        message['content'] is! String) {
+      throw ArgumentError('invalid_message');
+    }
+    final item = (data['conversations'] as List).firstWhere(
+      (e) => e['id'] == id,
+    );
+    if (message['role'] == 'assistant' && item['active_turn'] != null) {
+      item['active_turn'] = {
+        'draft': '',
+        'time': DateTime.now().toUtc().toIso8601String(),
+      };
+    }
+    final messages = item['messages'] as List;
+    if (experienceReplyTo != null && message['role'] == 'assistant') {
+      final sent = messages.lastWhere(
+        (row) =>
+            row['role'] == 'user' &&
+            row['experience_pending'] == experienceReplyTo,
+      );
+      sent.remove('experience_pending');
+      sent['experience_text'] = true;
+    }
+    messages.add({
+      ...Map<String, dynamic>.from(jsonDecode(jsonEncode(message)) as Map),
+      'time': DateTime.now().toUtc().toIso8601String(),
+    });
+  });
 }

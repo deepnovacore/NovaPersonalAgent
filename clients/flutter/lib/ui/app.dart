@@ -2,7 +2,7 @@ import '../space/space_root.dart';
 import '../experience/persona.dart';
 import '../experience/persona_sources.dart';
 import '../experience/experience_session.dart';
-import '../experience/author_model_dialog.dart';
+import '../experience/experience_code_dialog.dart';
 import '../generic/shared_ideas.dart';
 import 'shared_idea_suggestions.dart';
 import '../space/space_storage.dart';
@@ -199,9 +199,7 @@ class _WorkbenchShell extends StatefulWidget {
 class _WorkbenchShellState extends State<_WorkbenchShell> {
   bool get _experience => widget.space?.personaId != null;
   final _experienceSession = ExperienceSession();
-  bool get _canUseAuthorModel =>
-      widget.space?.mode == SpaceMode.standalone && !_experience;
-  String? _authorTesterId;
+  bool get _canUseExperience => widget.space?.mode == SpaceMode.standalone;
   ExperiencePersonaSources? _personaSources;
   PersonaSnapshotPersistence? _personaSnapshotFile;
   bool _personaRefreshing = false;
@@ -313,10 +311,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       });
     }
     await saved.retireRuntimeConnection();
-    if (_canUseAuthorModel) {
-      final id = await _experienceSession.authorEnrollment(widget.space!);
-      if (mounted) setState(() => _authorTesterId = id);
-    }
   }
 
   Future<void> _prepareStartupPermissions() async {
@@ -401,9 +395,10 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       final host =
           widget.agentCore ??
           await AgentCoreHost.open(
-            settings: _experience
-                ? ModelSettings(managedConfiguration: _experienceSession.model)
+            experienceModel: _canUseExperience
+                ? _experienceSession.model
                 : null,
+            experiencePersona: _experience,
             additionalContext: (model) async {
               if (_experience) return _personaContext;
               final provider = '${model.endpoint}|${model.model}';
@@ -883,9 +878,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     } catch (_) {
       if (mounted && current()) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('无法重新提取。请检查作者 API 配置、额度或网络；已保存的资料仍可查看。'),
-          ),
+          const SnackBar(content: Text('无法重新提取。请检查体验码、额度或网络，已保存的资料仍可查看。')),
         );
       }
     } finally {
@@ -1232,37 +1225,37 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       builder: (context) => ListView(
         padding: const EdgeInsets.fromLTRB(4, 20, 4, 28),
         children: [
-          if (!_experience)
-            _settingGroup(
-              context,
-              _t('对话', 'Conversation'),
-              [
-                ...conversationSettingsRows(language),
+          _settingGroup(
+            context,
+            _t('对话', 'Conversation'),
+            [
+              if (_canUseExperience)
                 (
-                  'credentials',
-                  _t('配置密钥', 'Configure keys'),
-                  CupertinoIcons.lock,
+                  'experience_code',
+                  _t('体验码', 'Experience code'),
+                  CupertinoIcons.ticket,
                 ),
-                if (_canUseAuthorModel)
-                  (
-                    'author_model',
-                    _t('兑换体验码', 'Redeem experience code'),
-                    CupertinoIcons.ticket,
-                  ),
-              ],
-              subtitles: {
-                if (_canUseAuthorModel)
-                  'author_model': _authorTesterId == null
-                      ? _t(
-                          '体验码用于一键配置作者提供的 API Key。',
-                          'Use an experience code to configure the author-provided API Key in one step.',
-                        )
-                      : _t(
-                          '已配置作者提供的 API Key',
-                          'Author-provided API Key configured',
-                        ),
-              },
-            ),
+              if (_canUseExperience)
+                (
+                  'chat_model',
+                  _t('对话模型', 'Conversation model'),
+                  CupertinoIcons.sparkles,
+                ),
+              (
+                'credentials',
+                _t('配置密钥', 'Configure keys'),
+                CupertinoIcons.lock,
+              ),
+              if (!_experience) ...conversationSettingsRows(language),
+            ],
+            subtitles: {
+              if (_canUseExperience)
+                'experience_code': _t(
+                  '同一台设备上的 Space 共用',
+                  'Shared by Spaces on this device',
+                ),
+            },
+          ),
           _settingGroup(context, _t('更多', 'More'), [
             if (!_experience)
               ('connectors', _t('连接器', 'Connectors'), CupertinoIcons.link),
@@ -1315,8 +1308,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           language: language,
           onChanged: settings.refreshApiKeyProjection,
         );
-      case 'author_model':
-        await _authorModelSettings();
+        if (mounted) setState(() => _modelRevision++);
+      case 'experience_code':
+        await _openExperienceCode();
+      case 'chat_model':
+        await _chooseConversationModel();
       case 'model_services':
         await _modelServices();
       case 'devices':
@@ -1357,25 +1353,46 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     }
   }
 
-  Future<void> _authorModelSettings() async {
-    if (!_canUseAuthorModel || agentCore?.busy == true) return;
-    final result = await showAuthorModelDialog(
+  Future<void> _openExperienceCode() async {
+    if (!_canUseExperience || agentCore?.busy == true) return;
+    final redeemed = await showExperienceCodeDialog(
       context,
       session: _experienceSession,
-      space: widget.space!,
       language: language,
-      selected: _authorTesterId,
     );
-    if (mounted && result != null) {
-      setState(() => _authorTesterId = result.testerId);
+    if (mounted && redeemed) {
+      setState(() {
+        if (agentCore?.error?.startsWith('experience_') == true) {
+          agentCore?.error = null;
+        }
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            _t(
+              '已兑换，这台设备上的 Space 都可以使用。',
+              'Code redeemed for all Spaces on this device.',
+            ),
+          ),
+        ),
+      );
     }
   }
 
-  Future<void> _chooseConversationModel() async {
-    final settings = agentCore!.settings;
+  Future<void> _chooseConversationModel([BuildContext? pageContext]) async {
+    final host = agentCore;
+    if (host == null || host.busy) return;
     try {
-      await showLocalModelSettings(context, settings, language: language);
-      if (mounted) profileGeneration?.wake();
+      await showLocalModelSettings(
+        pageContext ?? context,
+        host.settings,
+        language: language,
+        experienceDefault: _canUseExperience,
+      );
+      if (mounted) {
+        setState(() => _modelRevision++);
+        profileGeneration?.wake();
+      }
     } catch (_) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
@@ -1435,12 +1452,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                       try {
                         switch (choice) {
                           case 'chat_model':
+                            await _chooseConversationModel(context);
                           case 'support_model':
                             await showLocalModelSettings(
                               context,
                               settings,
                               language: language,
-                              support: choice == 'support_model',
+                              support: true,
                             );
                             if (mounted) setState(() => _modelRevision++);
                             profileGeneration?.wake();
@@ -1615,7 +1633,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     selected: selected,
     onSelected: onSelected,
     disabled: {
-      if (agentCore?.busy == true) ...{'chat_model', 'author_model'},
+      if (agentCore?.busy == true) ...{
+        'chat_model',
+        'experience_code',
+        'credentials',
+      },
     },
   );
 
@@ -1908,16 +1930,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 if (hasChat)
                                   LocalChatPanel(
                                     key: localConversation,
-                                    onChooseModel: _experience
-                                        ? null
-                                        : _chooseConversationModel,
-                                    authorModel: _authorTesterId == null
-                                        ? null
-                                        : () => _experienceSession.model(
-                                            _authorTesterId!,
-                                          ),
-                                    onAuthorModelSettings: _canUseAuthorModel
-                                        ? _authorModelSettings
+                                    onChooseModel: _chooseConversationModel,
+                                    onExperienceCode: _canUseExperience
+                                        ? _openExperienceCode
                                         : null,
                                     onVoice: _experience ? null : _openVoice,
                                     voiceBusy:
@@ -1957,7 +1972,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     language: language,
                                     showProcess: showProcess,
                                     modelRevision: _modelRevision,
-                                    onModelSettings: _settings,
+                                    onModelSettings: _canUseExperience
+                                        ? _chooseConversationModel
+                                        : _settings,
                                   )
                                 else
                                   const SizedBox(),

@@ -513,66 +513,57 @@ void main() {
     expect(await dir.list().toList(), isEmpty);
   });
 
-  test(
-    'experience model requires enrollment and all model purposes use gateway',
-    () async {
-      FlutterSecureStorage.setMockInitialValues({
-        ModelSettings.supportStorageKey: jsonEncode({
-          'protocol': 'chatCompletions',
-          'endpoint': 'https://personal.example/v1',
-          'model': 'personal-model',
-          'credentialId': 'personal',
-        }),
-      });
-      final calls = <(Uri, Map<String, Object>?, String?)>[];
-      final session = ExperienceSession(
-        request: (uri, body, bearer) async {
-          calls.add((uri, body, bearer));
-          return Uint8List.fromList(
-            utf8.encode(
-              jsonEncode({
-                'tester_id': 'tester_sample',
-                'token': 'a' * 43,
-                'expires_at': DateTime.now().millisecondsSinceEpoch + 300000,
-              }),
-            ),
-          );
-        },
-      );
-      addTearDown(session.dispose);
-      final settings = ModelSettings(managedConfiguration: session.model);
-      await expectLater(
-        settings.read(),
-        throwsA(
-          isA<AgentFailure>().having(
-            (e) => e.code,
-            'code',
-            'experience_enrollment_required',
+  test('device enrollment grants text and persona profile access', () async {
+    FlutterSecureStorage.setMockInitialValues({
+      ModelSettings.supportStorageKey: jsonEncode({
+        'protocol': 'chatCompletions',
+        'endpoint': 'https://personal.example/v1',
+        'model': 'personal-model',
+        'credentialId': 'personal',
+      }),
+    });
+    final calls = <(Uri, Map<String, Object>?, String?)>[];
+    final session = ExperienceSession(
+      request: (uri, body, bearer) async {
+        calls.add((uri, body, bearer));
+        return Uint8List.fromList(
+          utf8.encode(
+            jsonEncode({
+              'tester_id': 'tester_sample',
+              'token': 'a' * 43,
+              'expires_at': DateTime.now().millisecondsSinceEpoch + 300000,
+            }),
           ),
+        );
+      },
+    );
+    addTearDown(session.dispose);
+    await expectLater(
+      session.model(),
+      throwsA(
+        isA<AgentFailure>().having(
+          (e) => e.code,
+          'code',
+          'experience_enrollment_required',
         ),
-      );
-      expect(calls, isEmpty);
-      await session.redeem('sample-code');
-      final secret = calls.single.$2!['installation_secret'] as String;
-      expect(secret, matches(RegExp(r'^[A-Za-z0-9_-]{43}$')));
-      for (final purpose in ModelPurpose.values) {
-        final model = (await settings.readForPurpose(purpose))!;
-        expect(model.endpoint, 'https://api.deepnovacore.com/novacore/beta/v1');
-        expect(model.model, 'deepseek-flash');
-      }
-      expect(calls.where((c) => c.$1.path.endsWith('/token')), hasLength(1));
-      expect(calls.last.$2!['scope'], 'text');
-      expect(calls.last.$2!['installation_secret'], secret);
-      await session.refreshPersona('sample', 'b' * 64);
-      expect(calls.last.$1.path, '/novacore/beta/persona-profile');
-      expect(calls[calls.length - 2].$2!['scope'], 'profile');
-      expect(calls.last.$3, 'a' * 43);
-      expect(calls.last.$2, {
-        'persona_id': 'sample',
-        'source_version': 'b' * 64,
-      });
-    },
-  );
+      ),
+    );
+    expect(calls, isEmpty);
+    await session.redeem('sample-code');
+    final secret = calls.single.$2!['installation_secret'] as String;
+    expect(secret, matches(RegExp(r'^[A-Za-z0-9_-]{43}$')));
+    final model = await session.model();
+    expect(model.endpoint, 'https://api.deepnovacore.com/novacore/beta/v1');
+    expect(model.model, 'deepseek-flash');
+    expect(calls.where((c) => c.$1.path.endsWith('/token')), hasLength(1));
+    expect(calls.last.$2!['scope'], 'text');
+    expect(calls.last.$2!['installation_secret'], secret);
+    await session.refreshPersona('sample', 'b' * 64);
+    expect(calls.last.$1.path, '/novacore/beta/persona-profile');
+    expect(calls[calls.length - 2].$2!['scope'], 'profile');
+    expect(calls.last.$3, 'a' * 43);
+    expect(calls.last.$2, {'persona_id': 'sample', 'source_version': 'b' * 64});
+  });
 
   for (final revokeAfterTool in [false, true]) {
     test(
@@ -615,7 +606,9 @@ void main() {
         final model = _ShortGrantToolModel();
         final host = AgentCoreHost(
           store: store,
-          settings: ModelSettings(managedConfiguration: session.model),
+          settings: ModelSettings(headless: true),
+          experienceModel: session.model,
+          experiencePersona: true,
           clientFactory: () => model,
           tools: ToolRunner(
             journal: journal,

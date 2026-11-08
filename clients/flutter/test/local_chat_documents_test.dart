@@ -2,19 +2,19 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
-import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/agent_workspace.dart';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:nova_mobile/conversation/local_chat_panel.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
+import 'agent_host_capabilities_test.dart'
+    show PromptModel, SelectableSettings, authorConfiguration;
 import 'scheduled_agent_runner_test.dart' show FixtureSettings;
 
 class DocumentHost extends AgentCoreHost {
   DocumentHost(ConversationStore store, ToolRunner runner)
     : super(store: store, settings: FixtureSettings(), tools: runner);
   bool reject = false;
-  bool authorProvided = false;
   @override
   Future<void> send(
     String conversationId,
@@ -22,9 +22,7 @@ class DocumentHost extends AgentCoreHost {
     ToolApproval? approve,
     String? language,
     bool userAuthored = true,
-    Future<ModelConfiguration> Function()? authorModel,
   }) async {
-    authorProvided = authorModel != null;
     if (reject) {
       error = 'model_settings_required';
       return;
@@ -40,9 +38,13 @@ void main() {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
       final id = await store.create();
-      final host = DocumentHost(
-        store,
-        ToolRunner(
+      final model = PromptModel();
+      final host = AgentCoreHost(
+        store: store,
+        settings: SelectableSettings(),
+        experienceModel: authorConfiguration,
+        clientFactory: () => model,
+        tools: ToolRunner(
           registry: ToolRegistry(
             snapshot: () => {},
             mutate: (_, {required operationId}) async => {},
@@ -62,11 +64,6 @@ void main() {
               host: host,
               conversationId: id,
               language: 'en',
-              authorModel: () async => ModelConfiguration(
-                endpoint: 'https://example.test',
-                model: 'author',
-                key: 'temporary',
-              ),
             ),
           ),
         ),
@@ -81,7 +78,7 @@ void main() {
       expect(store.conversation(id)['messages'], isEmpty);
       expect(
         find.text(
-          'Remove the attachments or switch back under Redeem experience code.',
+          'Experience chat is text only. Remove attachments or set up your own model.',
         ),
         findsOneWidget,
       );
@@ -91,9 +88,9 @@ void main() {
       await tester.pump();
       await tester.tap(find.byTooltip('Send'));
       await tester.pump();
-      expect(host.authorProvided, isTrue);
+      expect(model.model, 'author');
       expect(
-        (store.conversation(id)['messages'] as List).single['content'],
+        (store.conversation(id)['messages'] as List).first['content'],
         'Hello',
       );
       await tester.pumpWidget(const SizedBox.shrink());

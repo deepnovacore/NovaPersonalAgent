@@ -19,7 +19,7 @@ import 'experience_test.dart' show fixture;
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-  for (final mode in ['ordinary', 'author', 'persona']) {
+  for (final mode in ['ordinary', 'legacy-author', 'persona']) {
     testWidgets(
       'iOS $mode Space keeps keyboard input through insets and task switching',
       (tester) async {
@@ -53,7 +53,7 @@ void main() {
             'selected': space.id,
             'spaces': [space.toJson()],
           }),
-          if (mode == 'author')
+          if (mode == 'legacy-author')
             'novacore.experience.author-conversation.v1.space.${space.id}':
                 'tester_sample',
         });
@@ -186,7 +186,19 @@ void main() {
         );
         expect(panel.widget.conversationId, ConversationStore.mainId);
         expect(panel.dictation == null, mode == 'persona');
-        expect(panel.widget.authorModel != null, mode == 'author');
+        expect(panel.widget.host.experienceModel, isNotNull);
+        expect(panel.widget.host.experiencePersona, mode == 'persona');
+        await tester.tap(find.byTooltip('Settings'));
+        await tester.pumpAndSettle();
+        expect(find.text('Experience code'), findsOneWidget);
+        expect(find.text('Configure keys'), findsOneWidget);
+        expect(find.text('Conversation model'), findsOneWidget);
+        await tester.tap(find.text('Experience code'));
+        await tester.pumpAndSettle();
+        expect(find.text('Enter experience code'), findsOneWidget);
+        expect(find.text('Enable'), findsNothing);
+        await tester.tap(find.text('Cancel'));
+        await tester.pumpAndSettle();
         await typeThroughKeyboard('Main draft');
         await hideKeyboard();
         await tester.tap(find.text('Tasks'));

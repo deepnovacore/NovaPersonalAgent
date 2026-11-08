@@ -22,7 +22,6 @@ import 'package:flutter/material.dart';
 import '../ui/local_dialog.dart';
 import '../agent_core/agent_core_host.dart';
 import '../agent_core/model_settings.dart';
-import '../agent_core/model_client.dart' show ModelConfiguration;
 import '../ui/chatgpt_settings.dart';
 import '../ui/provider_credentials_sheet.dart';
 import '../ui/model_settings_editor.dart';
@@ -36,9 +35,20 @@ Future<void> showLocalModelSettings(
   ModelSettings settings, {
   String language = 'zh',
   bool support = false,
+  bool experienceDefault = false,
 }) async {
+  final clearSelection =
+      !support && experienceDefault && await settings.hasConversationSelection()
+      ? settings.clearConversationSelection
+      : null;
   if (!support && await settings.chatGpt.active() != null) {
-    if (context.mounted) await showChatGptSettings(context, settings);
+    if (context.mounted) {
+      await showChatGptSettings(
+        context,
+        settings,
+        onClearSelection: clearSelection,
+      );
+    }
     return;
   }
   if (!context.mounted) return;
@@ -46,6 +56,7 @@ Future<void> showLocalModelSettings(
     context,
     LocalModelSettingsBackend(settings, support: support),
     language: language,
+    onClearSelection: clearSelection,
     onManageCredentials: (context) async {
       await showProviderCredentials(
         context,
@@ -76,8 +87,7 @@ class LocalChatPanel extends StatefulWidget {
     this.active = true,
     this.onModelSettings,
     this.onChooseModel,
-    this.authorModel,
-    this.onAuthorModelSettings,
+    this.onExperienceCode,
     this.modelRevision = 0,
     this.audioOwner,
     this.dictationAudio,
@@ -100,8 +110,7 @@ class LocalChatPanel extends StatefulWidget {
   final Widget? floating;
   final Widget? header;
   final AgentCoreHost host;
-  final Future<ModelConfiguration> Function()? authorModel;
-  final VoidCallback? onAuthorModelSettings;
+  final VoidCallback? onExperienceCode;
   final AudioOwner? audioOwner;
   final AudioPort? dictationAudio;
   final Future<bool> Function()? requestMicrophone;
@@ -127,6 +136,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   List<Map<String, dynamic>> get attachments =>
       attachmentDrafts.putIfAbsent(widget.conversationId, () => []);
   String? model;
+  bool? hasCustomModel;
+  bool get _experienceDefault =>
+      widget.host.experienceModel != null && hasCustomModel == false;
   PhoneDictation? dictation;
   String _dictationBase = '';
   bool _showDictationHint = false;
@@ -195,11 +207,27 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   }
 
   Future<void> _readModel() async {
+    final host = widget.host;
+    String? name;
+    bool? selected;
     try {
-      final value = await widget.host.settings.read();
-      if (mounted) setState(() => model = value?.model);
+      final value = await host.settings.read();
+      name = value?.model;
+      selected = value != null;
     } catch (_) {
-      /* The settings screen exposes configuration errors. */
+      if (host.experienceModel != null) {
+        try {
+          selected = await host.settings.hasConversationSelection();
+        } catch (_) {
+          // An unreadable selection must not be shown as the default route.
+        }
+      }
+    }
+    if (mounted && identical(widget.host, host)) {
+      setState(() {
+        model = name;
+        hasCustomModel = selected;
+      });
     }
   }
 
@@ -229,7 +257,10 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       atBottom = true;
       _changed();
     }
-    if (oldWidget.modelRevision != widget.modelRevision) _readModel();
+    if (oldWidget.host != widget.host ||
+        oldWidget.modelRevision != widget.modelRevision) {
+      _readModel();
+    }
   }
 
   @override
@@ -278,6 +309,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         context,
         widget.host.settings,
         language: widget.language,
+        experienceDefault: widget.host.experienceModel != null,
       );
       await _readModel();
     } catch (_) {
@@ -341,12 +373,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   Future<void> sendSharedIdea(String text) async {
     if (!canSendSharedIdea) return;
     atBottom = true;
-    await widget.host.send(
-      ConversationStore.mainId,
-      text,
-      approve: _approve,
-      authorModel: widget.authorModel,
-    );
+    await widget.host.send(ConversationStore.mainId, text, approve: _approve);
   }
 
   Future<void> _send() async {
@@ -407,19 +434,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     final draft = input.text.trim();
     final files = List<Map<String, dynamic>>.of(attachments);
     if (draft.isEmpty && files.isEmpty) return;
-    if (widget.authorModel != null && files.isNotEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t(
-              '请移除附件，或在「兑换体验码」中切回原模型。',
-              'Remove the attachments or switch back under Redeem experience code.',
-            ),
-          ),
-        ),
-      );
-      return;
-    }
     final text = [
       if (draft.isNotEmpty) draft,
       if (files.isNotEmpty)
@@ -428,12 +442,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     atBottom = true;
     final before = (host.store.conversation(origin)['messages'] as List).length;
     input.clear();
-    await host.send(
-      origin,
-      text,
-      approve: _approve,
-      authorModel: widget.authorModel,
-    );
+    await host.send(origin, text, approve: _approve);
     // Preserve a message that could not reach the conversation store.
     final messages = host.store.conversation(origin)['messages'] as List;
     final stored = messages
@@ -451,40 +460,62 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
   }
 
+  bool _experienceCodeError(String code) => const {
+    'experience_enrollment_required',
+    'experience_enrollment_inactive',
+    'experience_invalid_token',
+  }.contains(code);
+
+  bool _modelSetupError(String code) =>
+      _experienceCodeError(code) ||
+      const {
+        'model_settings_required',
+        'provider_credential_missing',
+        'invalid_model_settings',
+        'model_http_401',
+        'model_http_403',
+        'experience_attachments_unsupported',
+        'experience_quota_exceeded',
+      }.contains(code);
+
   String _error(String code) => switch (code) {
-    'experience_enrollment_required' || 'experience_enrollment_inactive' => t(
-      widget.authorModel == null
-          ? '作者 API 尚未配置或已失效，请在普通 Space 的设置中使用体验码配置。'
-          : '作者 API 配置已失效，请在「兑换体验码」中重新配置。',
-      widget.authorModel == null
-          ? 'The author API is not configured or is no longer valid. Configure it with an experience code in a regular Space’s settings.'
-          : 'The author API configuration is no longer valid. Configure it again under Redeem experience code.',
+    'experience_enrollment_required' => t(
+      '兑换体验码或配置自己的模型，即可开始对话。',
+      'Redeem an experience code or set up your own model to start chatting.',
     ),
-    'experience_invalid_token' => t(
-      '作者 API 配置已失效，请重新配置。',
-      'The author API configuration is no longer valid. Configure it again.',
+    'experience_enrollment_inactive' || 'experience_invalid_token' => t(
+      '体验资格已失效，可以重新兑换或配置自己的模型。',
+      'Experience access has expired. Redeem a code or set up your own model.',
+    ),
+    'experience_attachments_unsupported' => t(
+      '体验服务仅支持文字。请移除附件，或配置自己的模型。',
+      'Experience chat is text only. Remove attachments or set up your own model.',
     ),
     'experience_quota_exceeded' => t(
-      '作者 API 额度已用完。',
-      'The author API quota has been exhausted.',
+      '体验额度已用完。',
+      'The experience quota has been exhausted.',
     ),
     'experience_request_too_large' => t(
       '文字太长，请缩短后重试。',
       'Shorten the message and try again.',
     ),
     'experience_text_busy' => t(
-      '作者 API 正在处理另一条消息，请稍后重试。',
-      'The author API is processing another message. Try again shortly.',
+      '体验服务正在处理另一条消息，请稍后重试。',
+      'The experience service is processing another message. Try again shortly.',
     ),
     'experience_text_upstream_unavailable' ||
     'experience_gateway_unavailable' ||
     'experience_unavailable' => t(
-      '作者 API 服务暂时不可用，请稍后重试。',
-      'The author API service is unavailable. Try again shortly.',
+      '体验服务暂时不可用，请稍后重试。',
+      'The experience service is temporarily unavailable. Try again shortly.',
     ),
     'experience_rate_limited' => t(
-      '作者 API 暂时受限，请稍后重试。',
-      'The author API is temporarily rate-limited. Try again later.',
+      '体验服务暂时受限，请稍后重试。',
+      'The experience service is temporarily rate limited. Try again shortly.',
+    ),
+    'provider_credential_missing' || 'invalid_model_settings' => t(
+      '自配模型缺少有效密钥，请检查模型设置。',
+      'Your model needs a valid key. Check the model settings.',
     ),
     'model_settings_required' => t(
       '先选择一个模型，就可以开始对话。',
@@ -955,9 +986,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                     Flexible(
                       child: PopupMenuButton<String>(
                         tooltip: t('对话方式', 'Conversation mode'),
-                        enabled:
-                            !host.busy &&
-                            host.settings.managedConfiguration == null,
+                        enabled: !host.busy,
                         onSelected: (_) => _modelSettings(),
                         itemBuilder: (_) => [
                           PopupMenuItem(
@@ -972,11 +1001,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                             children: [
                               Flexible(
                                 child: Text(
-                                  host.settings.managedConfiguration != null
-                                      ? t('体验模式', 'Experience mode')
-                                      : widget.authorModel != null
-                                      ? t('作者提供的模型', 'Author-provided model')
-                                      : model ?? t('选择模型', 'Choose model'),
+                                  _experienceDefault
+                                      ? t('体验服务', 'Experience service')
+                                      : model ??
+                                            (hasCustomModel == true
+                                                ? t('自配模型', 'Your model')
+                                                : t('选择模型', 'Choose model')),
                                   maxLines: 1,
                                   overflow: TextOverflow.ellipsis,
                                   style: const TextStyle(
@@ -985,15 +1015,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                   ),
                                 ),
                               ),
-                              if (host.settings.managedConfiguration ==
-                                  null) ...[
-                                const SizedBox(width: 5),
-                                const Icon(
-                                  CupertinoIcons.chevron_down,
-                                  size: 10,
-                                  color: Nova.secondary,
-                                ),
-                              ],
+                              const SizedBox(width: 5),
+                              const Icon(
+                                CupertinoIcons.chevron_down,
+                                size: 10,
+                                color: Nova.secondary,
+                              ),
                             ],
                           ),
                         ),
@@ -1180,20 +1207,21 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                           _error(host.error!),
                           style: const TextStyle(color: Nova.red, fontSize: 13),
                         ),
-                        if (host.error!.startsWith('experience_') &&
-                            widget.authorModel != null &&
-                            widget.onAuthorModelSettings != null)
+                        if (_experienceCodeError(host.error!) &&
+                            widget.onExperienceCode != null)
                           TextButton(
-                            onPressed: widget.onAuthorModelSettings,
-                            child: Text(
-                              t('管理 API 配置', 'Manage API configuration'),
-                            ),
+                            onPressed: widget.onExperienceCode,
+                            child: Text(t('兑换体验码', 'Redeem experience code')),
                           ),
-                        if (host.error == 'model_settings_required' &&
-                            widget.onChooseModel != null)
+                        if (widget.onChooseModel != null &&
+                            _modelSetupError(host.error!))
                           TextButton(
                             onPressed: widget.onChooseModel,
-                            child: Text(t('选择模型', 'Choose model')),
+                            child: Text(
+                              host.experienceModel != null
+                                  ? t('配置自己的模型', 'Set up your own model')
+                                  : t('选择模型', 'Choose model'),
+                            ),
                           ),
                       ],
                     ),
@@ -1335,7 +1363,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
-                          if (widget.authorModel == null &&
+                          if ((!_experienceDefault || host.experiencePersona) &&
                               widget.onVoiceText == null &&
                               host.tools?.registry.workspace != null)
                             IconButton(
