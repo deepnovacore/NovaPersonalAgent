@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'shared_idea_suggestions.dart';
 import 'scheduled_tasks_page.dart';
 import 'news_interests.dart';
 import 'package:flutter/cupertino.dart';
@@ -58,6 +59,7 @@ class WorkbenchPage extends StatefulWidget {
     required this.onSettings,
     this.onOpenConversation,
     this.onDelegate,
+    this.onSharedIdea,
     this.showHeading = true,
     this.language = 'en',
     this.localProfile,
@@ -73,7 +75,7 @@ class WorkbenchPage extends StatefulWidget {
   final VoidCallback? onOpenConversation;
 
   /// Hands a prepared request to the Nova conversation.
-  final ValueChanged<String>? onDelegate;
+  final ValueChanged<String>? onDelegate, onSharedIdea;
   @override
   State<WorkbenchPage> createState() => _WorkbenchPageState();
 }
@@ -1478,6 +1480,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                   if (rows.isNotEmpty)
                     NovaSection(children: rows.map(_item).toList()),
                   ..._suggestions('ideas', rows.isNotEmpty),
+                  if (widget.onSharedIdea case final onSend?)
+                    SharedIdeaSuggestions(
+                      language: widget.language,
+                      onSend: onSend,
+                    ),
                 ],
                 if (widget.page == 4) ...[
                   if (rows.isNotEmpty)

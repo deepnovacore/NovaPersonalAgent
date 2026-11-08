@@ -1,6 +1,5 @@
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
-import 'theme.dart';
 
 class MyOverview extends StatelessWidget {
   const MyOverview({
@@ -39,13 +38,15 @@ class MyOverview extends StatelessWidget {
           );
     final goals = rows('goals'), ideas = rows('ideas');
     return DecoratedBox(
-      decoration: const BoxDecoration(color: Color(0xfff5f6f8)),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerLow,
+      ),
       child: ListView(
         padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
         children: [
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(16),
             ),
             padding: const EdgeInsets.fromLTRB(20, 8, 20, 12),
@@ -54,13 +55,19 @@ class MyOverview extends StatelessWidget {
               children: [
                 Row(
                   children: [
-                    Container(width: 3, height: 17, color: novaTimelineAccent),
+                    Container(
+                      width: 3,
+                      height: 17,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
                     const SizedBox(width: 8),
                     Expanded(
                       child: TextButton(
                         style: TextButton.styleFrom(
                           alignment: Alignment.centerLeft,
-                          foregroundColor: Nova.text,
+                          foregroundColor: Theme.of(
+                            context,
+                          ).colorScheme.onSurface,
                           padding: EdgeInsets.zero,
                         ),
                         onPressed: () => onOpen(5),
@@ -89,14 +96,20 @@ class MyOverview extends StatelessWidget {
                     confirmed.isNotEmpty
                         ? t('由你填写', 'Written by you')
                         : t('Nova 整理 · 待确认', 'Drafted by Nova · For review'),
-                    style: const TextStyle(fontSize: 11, color: Nova.secondary),
+                    style: TextStyle(
+                      fontSize: 11,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ] else if (!edited && generatedProfile != null)
                   generatedProfile!
                 else
                   Text(
                     t('还没有个人介绍', 'No introduction yet'),
-                    style: const TextStyle(fontSize: 14, color: Nova.secondary),
+                    style: TextStyle(
+                      fontSize: 14,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 const SizedBox(height: 12),
                 InkWell(
@@ -108,16 +121,16 @@ class MyOverview extends StatelessWidget {
                         Expanded(
                           child: Text(
                             t('查看与编辑', 'View and edit'),
-                            style: const TextStyle(
+                            style: TextStyle(
                               fontSize: 12,
-                              color: novaTimelineAccent,
+                              color: Theme.of(context).colorScheme.primary,
                             ),
                           ),
                         ),
-                        const Icon(
+                        Icon(
                           CupertinoIcons.arrow_right,
                           size: 15,
-                          color: novaTimelineAccent,
+                          color: Theme.of(context).colorScheme.primary,
                         ),
                       ],
                     ),
@@ -129,46 +142,50 @@ class MyOverview extends StatelessWidget {
           const SizedBox(height: 16),
           Container(
             decoration: BoxDecoration(
-              color: Colors.white,
+              color: Theme.of(context).colorScheme.surface,
               borderRadius: BorderRadius.circular(16),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
             child: Column(
               children: [
                 _section(
+                  context,
                   t('目标', 'Goals'),
                   t('暂无进行中的目标', 'No active goals'),
                   4,
                   goals,
                   CupertinoIcons.flag,
-                  novaTimelineAccent,
+                  Theme.of(context).colorScheme.primary,
                 ),
                 const Divider(height: 1),
                 _section(
+                  context,
                   t('想法', 'Ideas'),
                   t('暂无记录', 'Nothing saved yet'),
                   3,
                   ideas,
                   CupertinoIcons.lightbulb,
-                  Nova.amber,
+                  Theme.of(context).colorScheme.tertiary,
                 ),
                 const Divider(height: 1),
                 _section(
+                  context,
                   t('资讯', 'Feeds'),
                   t('简报与推荐', 'Briefs and recommendations'),
                   1,
                   const [],
                   CupertinoIcons.news,
-                  Nova.mint,
+                  Theme.of(context).colorScheme.primary,
                 ),
                 const Divider(height: 1),
                 _section(
+                  context,
                   t('全部待办', 'To-dos'),
                   t('查看全部', 'View all'),
                   2,
                   const [],
                   CupertinoIcons.check_mark_circled,
-                  Nova.secondary,
+                  Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
               ],
             ),
@@ -179,6 +196,7 @@ class MyOverview extends StatelessWidget {
   }
 
   Widget _section(
+    BuildContext context,
     String label,
     String empty,
     int destination,
@@ -210,14 +228,17 @@ class MyOverview extends StatelessWidget {
                       ? empty
                       : t('${rows.length} 项', '${rows.length} items'),
                   textAlign: TextAlign.right,
-                  style: const TextStyle(fontSize: 12, color: Nova.secondary),
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
                 ),
               ),
               const SizedBox(width: 8),
-              const Icon(
+              Icon(
                 CupertinoIcons.chevron_right,
                 size: 12,
-                color: Nova.tertiary,
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ],
           ),
@@ -243,7 +264,10 @@ class MyOverview extends StatelessWidget {
                     '${row['note']}',
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 12, color: Nova.secondary),
+                    style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
                   ),
                 ],
               ],

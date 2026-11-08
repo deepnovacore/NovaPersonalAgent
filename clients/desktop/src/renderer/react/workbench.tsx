@@ -2,7 +2,7 @@ import React,{useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState,useS
 import {createPortal} from 'react-dom'
 import {Button,Tooltip} from '@radix-ui/themes'
 import {Settings,Minimize2,X,Minus,Square,Clock3,Lightbulb,Target,Newspaper,Zap,User,Bot,ArrowLeft} from 'lucide-react'
-import {t} from '../locale.mjs'
+import {currentLanguage,t} from '../locale.mjs'
 import {attentionTarget} from '../attention-target.mjs'
 import {createProactiveNotifyDetector} from '../proactive-notify.mjs'
 import {OrbDragGesture} from '../drag-gesture.mjs'
@@ -31,12 +31,31 @@ function ScrollPanel({pageKey,children,...props}:{pageKey:string;children:React.
  useLayoutEffect(()=>{const node=panel.current;if(!node)return;node.scrollTop=positions.current.get(pageKey)??0;return()=>{positions.current.set(pageKey,node.scrollTop)}},[pageKey])
  return <div ref={panel} className="workbench-page" {...props}>{children}</div>
 }
+type SharedIdea={id:string,text:string}
+function SharedIdeas({ideas,compact=false,disabled,onSend}:{ideas:SharedIdea[],compact?:boolean,disabled:boolean,onSend:(text:string)=>void}){
+ if(!ideas.length)return null
+ return <section className={compact?'shared-ideas-opening':'shared-ideas-list'} aria-label={t('聊点什么')}>
+  {!compact&&<h3>{t('聊点什么')}</h3>}
+  {ideas.map(idea=><button type="button" key={idea.id} disabled={disabled} title={idea.text} onClick={()=>onSend(idea.text)}>{idea.text}</button>)}
+ </section>
+}
 export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
  const revision=useSyncExternalStore(runtime.subscribe,runtime.snapshot,runtime.snapshot)
- const assistantName=(runtime.identityValue?.profile?.assistantName??runtime.controller.snapshot?.soul?.assistant_name??'nova').trim()||'nova'
+ const assistantName=((runtime.controller.ordinarySpace?runtime.identityValue?.profile?.assistantName:undefined)??runtime.controller.snapshot?.soul?.assistant_name??'nova').trim()||'nova'
  const pageLabel=(id:string,label:string)=>id==='assistant'?assistantName:t(label)
  const c=runtime.controller,{api,tasks,speakingLevel}=runtime.options,run=runtime.run
  const [selected,setSelected]=useState('timeline'),[taskTab,setTaskTab]=useState('tasks'),[taskId,setTaskId]=useState<string|null>(null),[approvalFocus,setApprovalFocus]=useState(false),[scheduleId,setScheduleId]=useState<string|null>(null),[previewPlan,setPreviewPlan]=useState(false),[planPending,setPlanPending]=useState(false),[maximized,setMaximized]=useState(false),[clock,setClock]=useState(0)
+ const language=currentLanguage()==='en'?'en':'zh'
+ const [ideaSample,setIdeaSample]=useState<{language:string,topics:SharedIdea[]}>()
+ const ideas=ideaSample?.language===language?ideaSample.topics:[]
+ const ideaSending=useRef(false),ideasVisible=selected==='ideas'
+ useEffect(()=>{
+  let current=true
+  void api.personal?.sharedIdeas?.(language).then((topics:SharedIdea[])=>{if(current)setIdeaSample({language,topics})}).catch(()=>{})
+  return()=>{current=false}
+ },[api,ideasVisible,c.presentationMode,language])
+ const pageApi=useMemo(()=>c.ordinarySpace?api:{personal:{openArticle:api.personal?.openArticle}},[api,c.ordinarySpace])
+ useLayoutEffect(()=>{runtime.chat.current?.identity(c.ordinarySpace?runtime.identityValue:null)},[runtime,c.ordinarySpace,runtime.identityValue,c.experience?.id])
  const lastWorkspacePage=useRef('timeline');if(selected!=='tasks')lastWorkspacePage.current=selected
  const originFocus=useRef<HTMLElement|null>(null),taskHistories=useRef(new Map<string,any>()),viewedCursors=useRef(new Map<string,number>()),opening=useRef(0),initialHome=useRef(false),orbVoiceTried=useRef(false),lastPlan=useRef(''),tabRefs=useRef(new Map<string,HTMLButtonElement>())
  useLayoutEffect(()=>{const reveal=()=>tabRefs.current.get(selected)?.scrollIntoView?.({block:'nearest',inline:'nearest'});reveal();window.addEventListener('resize',reveal);return()=>window.removeEventListener('resize',reveal)},[selected,assistantName])
@@ -57,11 +76,30 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
   runtime.chat.current?.reveal()
   if(homeError)throw homeError
  }
+ const canSendIdea=()=>{
+  const main=c.snapshot?.conversations?.items?.find((item:any)=>item.id==='chat:main')
+  return Boolean(main&&main.mode!=='plan'&&c.presentationReady&&c.connected&&c.inputInstance&&c.capabilities.includes('text_input')&&
+   !c.state('chat:main').submission&&main.generation_status!=='pending'&&c.voiceId!=='chat:main'&&
+   c.dictationConversationId!=='chat:main'&&!(c.selectedId==='chat:main'&&c.isVoiceConversation))
+ }
+ const sendIdea=(text:string)=>{
+  if(ideaSending.current||!canSendIdea())return
+  ideaSending.current=true
+  void run(async()=>{
+   try{
+    await showHome()
+    if(c.selectedId!=='chat:main'||!canSendIdea()||!c.submitText(text,'chat:main')){
+     throw Error(t('主对话暂时无法发送，原有草稿已保留，请稍后重试。'))
+    }
+   }finally{ideaSending.current=false}
+  })
+ }
  const startConversation=async(request:any)=>{await c.startConversationWithReference(request);runtime.chat.current?.reveal()}
  const openSchedule=(id:string)=>{setSelected('tasks');setPreviewPlan(false);setTaskId(null);setTaskTab('schedules');setScheduleId(id)}
  const openPlan=()=>{setSelected('tasks');setTaskId(null);setPreviewPlan(true);setPlanPending(false)}
  const selectPage=(id:string)=>{setSelected(id);setTaskId(null);setPreviewPlan(false);if(id==='tasks'&&planPending)openPlan()}
- const active=activeCount(c,tasks?.()),startupFailed=runtime.startupValue?.stage==='failed',pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
+ const active=activeCount(c,c.ordinarySpace?tasks?.():[]),startupFailed=c.ordinarySpace&&runtime.startupValue?.stage==='failed',pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
+ useEffect(()=>{setTaskId(null);setPreviewPlan(false);taskHistories.current.clear();viewedCursors.current.clear();opening.current++},[c.experience?.id])
  useEffect(()=>{document.body.dataset.presentationMode=c.presentationMode;document.body.dataset.personalCollapsed=String(c.collapsed)},[c.presentationMode,c.collapsed])
  useEffect(()=>{document.body.dataset.maximized=maximized?'1':'0'},[maximized])
  useEffect(()=>{
@@ -102,25 +140,26 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
  return <><main id="personal-workspace" className="workbench personal-workspace" data-task-detail={String(Boolean(taskId))} data-clock={clock} style={c.collapsed?{display:'none'}:undefined}>
   <section className="nova-column" aria-label={t('Nova · 主对话')}>
    <header className="page-head"><WindowGrip api={api}/><span className="workbench-status" role="status" data-state={startupFailed?'disconnected':c.connected?'connected':c.everConnected?'disconnected':'connecting'}>{status}</span><select aria-label={t('显示模式')} value={c.presentationMode} disabled={c.presentationPending} onChange={event=>void run(()=>c.setPresentation(event.target.value))}>{[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([value,label])=><option key={value} value={value}>{t(label)}</option>)}</select><Tooltip content={t('打开设置')}><button type="button" className="workspace-utility" aria-label={`${t('设置')} · ${t('打开设置')}`} onClick={()=>openSettings()}><Settings/><span className="utility-label">{t('设置')}</span></button></Tooltip><Tooltip content={t('收起为悬浮球')}><button type="button" className="workspace-utility" aria-label={`${t('收起')} · ${t('收起为悬浮球')}`} onClick={()=>void run(()=>c.setPresentation('orb'))}><Minimize2/><span className="utility-label">{t('收起')}</span></button></Tooltip></header>
-   {startupMessage(runtime.startupValue)&&<p id="startup-notice" className={startupFailed?'page-error':'page-notice'} role={startupFailed?'alert':'status'}>{startupMessage(runtime.startupValue)}{startupFailed&&<Button variant="soft" onClick={()=>openSettings()}>{t('打开设置')}</Button>}</p>}
+   {c.ordinarySpace&&startupMessage(runtime.startupValue)&&<p id="startup-notice" className={startupFailed?'page-error':'page-notice'} role={startupFailed?'alert':'status'}>{startupMessage(runtime.startupValue)}{startupFailed&&<Button variant="soft" onClick={()=>openSettings()}>{t('打开设置')}</Button>}</p>}
+   {c.experience&&<Button variant="soft" onClick={()=>openSettings('space')}>{c.snapshot?.experience?.name} · Space</Button>}
    {stateNotice&&<p className="page-notice" role="status">{t('状态文件无法读取（{0}），已从空状态启动。原文件：{1}；已保留备份：{2}。',stateNotice.code,stateNotice.original_path,stateNotice.backup_path)}</p>}
    {c.error&&<p className="page-error" role="alert">{t(c.error)}</p>}{c.taskNotice&&<p className="chat-notice" role="status" aria-live="polite">{t(c.taskNotice)}</p>}
-   <ChatPane ref={runtime.chat} c={c} run={run} api={api} onHome={showHome} openTask={(id:string)=>void run(()=>openTask(id))} openSchedule={openSchedule} onPreviewPlan={openPlan} speakingLevel={speakingLevel} revision={revision} companionForm={runtime.companionForm}/>
+   <ChatPane key={c.experience?.id??'personal'} ref={runtime.chat} c={c} run={run} api={pageApi} onHome={showHome} openTask={(id:string)=>void run(()=>openTask(id))} openSchedule={openSchedule} onPreviewPlan={openPlan} speakingLevel={speakingLevel} revision={revision} companionForm={runtime.companionForm} openingIdeas={canSendIdea()&&<SharedIdeas ideas={ideas.slice(0,3)} compact disabled={false} onSend={sendIdea}/>}/>
   </section>
   <section className="workspace" aria-label={t('工作区')}>
    <nav className="workspace-topbar" aria-label={t('工作区')}><div className="workspace-tabs" role="tablist" aria-label={t('工作区')} aria-orientation="horizontal">{PAGES.map(({id,label,Icon})=><button key={id} ref={node=>{if(node)tabRefs.current.set(id,node);else tabRefs.current.delete(id)}} type="button" className="workspace-tab" id={`workspace-tab-${id}`} role="tab" data-page={id} aria-selected={selected===id} aria-controls="workbench-panel" tabIndex={selected===id?0:-1} title={pageLabel(id,label)} onClick={()=>selectPage(id)} onKeyDown={event=>{const index=PAGES.findIndex(page=>page.id===id),next=event.key==='Home'?0:event.key==='End'?PAGES.length-1:event.key==='ArrowLeft'?(index+PAGES.length-1)%PAGES.length:event.key==='ArrowRight'?(index+1)%PAGES.length:null;if(next===null)return;event.preventDefault();selectPage(PAGES[next].id);tabRefs.current.get(PAGES[next].id)?.focus()}}><Icon aria-hidden="true"/><span className="workspace-tab-label">{pageLabel(id,label)}</span>{id==='tasks'&&active>0&&<span className="workspace-tab-badge">{active}</span>}{id==='tasks'&&planPending&&<span className="workspace-tab-plan-badge" aria-hidden="true"/>}</button>)}</div></nav>
    {taskId&&<h2 className="page-title">{t('任务详情')}</h2>}
    <div className="presentation-waiting">{pending.map((item:any)=><Button key={item.id??item.request_id??item.summary} variant="soft" disabled={!c.connected} onClick={()=>void run(()=>openDecision(item))}>{t('处理审批：{0}',item.summary)}</Button>)}</div>
    <ScrollPanel pageKey={taskId?`detail:${taskId}`:selected==='tasks'?`${selected}:${previewPlan?'plan':taskTab}`:selected} id="workbench-panel" role="tabpanel" tabIndex={0} aria-labelledby={`workspace-tab-${selected}`}>
-    {taskId?<TaskDetail ref={runtime.detail} id={taskId} c={c} run={run} onClose={closeTask} history={taskHistories.current.get(taskId)} after={viewedCursors.current.get(taskId)??0} focusApproval={approvalFocus} visible={c.presentationMode==='workbench'} onViewed={(id:string,cursor:number,phase:string)=>{if(c.presentationMode!=='workbench')return;viewedCursors.current.set(id,cursor);if(phase==='completed')setViewedResults(prior=>prior.has(id)?prior:new Set([...prior,id]))}}/>:previewPlan?<section className="workbench-plan-preview" tabIndex={-1} aria-label={t('计划预览')}><header className="workbench-plan-preview-head"><h2>{t('计划预览')}</h2><Button variant="ghost" disabled={!c.connected} onClick={()=>{setPreviewPlan(false);setTaskTab('tasks')}}><ArrowLeft size={15}/>{t('返回任务列表')}</Button></header><PlanPreview c={c} run={run} api={api}/></section>:selected==='tasks'?<>
+    {taskId?<TaskDetail ref={runtime.detail} id={taskId} c={c} run={run} onClose={closeTask} history={taskHistories.current.get(taskId)} after={viewedCursors.current.get(taskId)??0} focusApproval={approvalFocus} visible={c.presentationMode==='workbench'} onViewed={(id:string,cursor:number,phase:string)=>{if(c.presentationMode!=='workbench')return;viewedCursors.current.set(id,cursor);if(phase==='completed')setViewedResults(prior=>prior.has(id)?prior:new Set([...prior,id]))}}/>:previewPlan?<section className="workbench-plan-preview" tabIndex={-1} aria-label={t('计划预览')}><header className="workbench-plan-preview-head"><h2>{t('计划预览')}</h2><Button variant="ghost" disabled={!c.connected} onClick={()=>{setPreviewPlan(false);setTaskTab('tasks')}}><ArrowLeft size={15}/>{t('返回任务列表')}</Button></header><PlanPreview c={c} run={run} api={pageApi}/></section>:selected==='tasks'?<>
      {c.snapshot?.capabilities?.schedules&&<div className="schedule-tabs" role="tablist" aria-label={t('任务类型')}>{[['tasks','任务'],['schedules','定时任务']].map(([id,label])=><button type="button" key={id} role="tab" aria-selected={taskTab===id} onClick={()=>setTaskTab(id)}>{t(label)}</button>)}</div>}
-     {c.snapshot?.capabilities?.schedules&&taskTab==='schedules'?<ScheduledTasksPage c={c} run={run} api={{...api,revealChat:()=>runtime.chat.current?.reveal()}} openTask={openTask} selectedId={scheduleId??undefined}/>:<TasksPage c={c} run={run} openTask={openTask} api={api}/>}
+     {c.snapshot?.capabilities?.schedules&&taskTab==='schedules'?<ScheduledTasksPage c={c} run={run} api={{...pageApi,revealChat:()=>runtime.chat.current?.reveal()}} openTask={openTask} selectedId={scheduleId??undefined}/>:<TasksPage c={c} run={run} openTask={openTask} api={pageApi}/>}
     </>:null}
-    <div className="workspace-page-host" hidden={Boolean(taskId)||previewPlan||selected==='tasks'}><WorkspacePage identity={runtime.identityValue} page={lastWorkspacePage.current} c={c} run={run} api={api} discuss={discuss} startConversation={startConversation} openTask={openTask} openSettings={openSettings} delegate={(text:string)=>runtime.chat.current?.focusDraft(text)} continueChat={(text:string)=>runtime.chat.current?.focusDraft(`关于「${text}」：`)}/></div>
+    <div className="workspace-page-host" hidden={Boolean(taskId)||previewPlan||selected==='tasks'}><WorkspacePage key={c.experience?.id??'personal'} identity={c.ordinarySpace?runtime.identityValue:undefined} page={lastWorkspacePage.current} c={c} run={run} api={pageApi} discuss={discuss} startConversation={startConversation} openTask={openTask} openSettings={c.ordinarySpace?openSettings:undefined} delegate={(text:string)=>runtime.chat.current?.focusDraft(text)} continueChat={(text:string)=>runtime.chat.current?.focusDraft(`关于「${text}」：`)}/>{ideasVisible&&<SharedIdeas ideas={ideas} disabled={!canSendIdea()} onSend={sendIdea}/>}</div>
    </ScrollPanel>
   </section>
   <div className="window-controls" role="group" aria-label={t('窗口控制')}>{[{action:'close',label:'关闭窗口',title:'关闭（转入后台）',className:'window-close',Icon:X},{action:'minimize',label:'最小化',title:'最小化',className:'window-minimize',Icon:Minus},{action:'toggleMaximize',label:'最大化或还原',title:'最大化或还原',className:'window-maximize',Icon:Square}].map(({action,label,title,className,Icon})=><button key={action} type="button" className={`window-control ${className}`} aria-label={t(label)} title={t(title)} onClick={()=>api.windowControls?.[action]?.()}><Icon size={12}/></button>)}</div>
-  <ExecutorFloat ref={runtime.executorFloat} frame={runtime.executorFrame} openTask={openTask} taskFor={(work:string)=>c.snapshot?.tasks?.find((task:any)=>task.id===work||task.work_ids?.includes(work))?.id??null}/>
+  <ExecutorFloat ref={runtime.executorFloat} frame={c.ordinarySpace?runtime.executorFrame:null} openTask={openTask} taskFor={(work:string)=>c.snapshot?.tasks?.find((task:any)=>task.id===work||task.work_ids?.includes(work))?.id??null}/>
   <BuildSwitchDialog runtime={runtime}/>
  </main>{orbHost&&createPortal(<><div className="personal-orb-extras">{(orbTaskId||untaskedDecision)&&<button type="button" className="personal-orb-task" disabled={!c.connected} onClick={()=>void run(()=>orbTaskId?openTask(orbTaskId):openDecision(untaskedDecision))}>{!orbTaskId&&untaskedDecision?t('处理审批：{0}',untaskedDecision.summary||t('需要你处理')):t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',activeTasks.length,Math.max(orbTasks.filter((task:any)=>task.phase==='waiting').length,decision?1:0),completedTasks.length)}</button>}{c.taskNotice&&<p role="status" aria-live="polite">{t(c.taskNotice)}</p>}</div>{c.error&&c.presentationMode==='orb'&&<p className="personal-orb-error" role="alert">{t(c.error)}</p>}</>,orbHost)}</>
 }

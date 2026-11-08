@@ -1,4 +1,10 @@
 export const ENGLISH_MESSAGES = Object.freeze({
+  '关键词': 'Keywords',
+  '聊点什么': 'Something to talk about',
+  "体验对话未完成，请在空间设置中检查体验码、额度与网络后重试。": "The experience conversation did not finish. Check your experience code, quota and connection in Space settings, then retry.",
+  "体验空间目前支持文字对话。": "Experience Spaces currently support text conversations.",
+  "体验操作未完成，请检查体验码、额度与网络后重试。": "The experience action did not finish. Check your experience code, quota and connection, then retry.",
+  "我的待办": "My to-dos",
   "关注方向": "Interests",
   "添加关注词": "Add interest",
   "移除关注：{0}": "Remove interest: {0}",
@@ -2327,4 +2333,8 @@ export const ENGLISH_MESSAGES = Object.freeze({
   "尚未确认系统是否允许通知；第一条提醒到达时会自动检测。你正在使用工作台时不会弹出。": "Not yet confirmed whether the system allows notifications; this is checked when the first reminder arrives. Nothing pops up while you are using the workbench.",
   "Nova · {0} 条新提醒": "Nova · {0} new reminders",
   "联网搜索等能力可以稍后在设置中开启。": "Web search and other extras can be enabled later in Settings.",
+  "讨论这件事": "Discuss this",
+  "起草内容": "Draft content",
+  "空间状态尚未确认，请重新打开空间设置。": "The Space is not ready. Reopen Space settings.",
+  "无法确认当前空间，请重新打开空间设置后选择空间。": "Could not restore the Space. Reopen Space settings and choose a Space.",
 })

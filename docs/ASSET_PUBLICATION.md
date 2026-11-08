@@ -151,3 +151,21 @@ The project owner supplied and reviewed the silver-white Eclipse artwork and aut
 | `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-dark.png` | `986850bb2f3a892349fbcce6711b05c461a27d0fad30e3e911b0eccd5d4a4e97` |
 | `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-tinted.png` | `fd33021cb8e7ab29162b784fbff3b055463575d60db5a46ba77fb0d787d1d8d2` |
 | `clients/flutter/android/app/src/main/res/mipmap-nodpi/ic_launcher.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
+
+## NovaCore desktop Eclipse launcher icon (2026-11-08)
+
+The owner authorized rebranding the public clients as NovaCore and packaging all three platforms with the existing approved white Eclipse logo. Desktop icon sizes below are mechanical resizes of the approved mobile default PNG (`eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152`), without new character artwork. Application/storage identifiers remain unchanged.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/desktop/resources/icon-source/1024x1024.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
+| `clients/desktop/resources/icon-source/128x128.png` | `a5eec4ef43bd53590b4302afb6b33eb6fe4e480ec67f58bafe87cdfcec0eefb4` |
+| `clients/desktop/resources/icon-source/16x16.png` | `070260a06a4ca6bb9fc4d6434867cafcb8b6672967b1baa1b8e45efe91e76b31` |
+| `clients/desktop/resources/icon-source/22x22.png` | `5e7b3f30bb651a97f56bdf48b50e4d66511ba8c0c0934ca256a78d9f8353755e` |
+| `clients/desktop/resources/icon-source/24x24.png` | `efac9cdf8215f289e90a52ad0544890b87a807087878399d9500a5f36006c9b9` |
+| `clients/desktop/resources/icon-source/256x256.png` | `247f378b51691c92d0c954be05ea5b9be874ecef6ffcc67d611b664c75d351b5` |
+| `clients/desktop/resources/icon-source/32x32.png` | `7f7191f25c333ba99960947febf23e472ebdffed2abc7fab55033a730675fc6d` |
+| `clients/desktop/resources/icon-source/44x44.png` | `9db6c945971f84b28c2def6c2de980502f9445aae3f163b60481b13a52510d96` |
+| `clients/desktop/resources/icon-source/48x48.png` | `f31b4cc0dd5f94b843c998d86c1ace0e5b65d33412ae899cc39c3f576e52cb67` |
+| `clients/desktop/resources/icon-source/512x512.png` | `9f193cf98e4c9381eada1e49d71f3282be8e240a1647a1539756e260adc0051d` |
+| `clients/desktop/resources/icon-source/64x64.png` | `9a5da61f89f89a68a39ba7196d0a68438ea3c832ac5ee12532303a95492fcd6e` |

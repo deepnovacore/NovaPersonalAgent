@@ -4,7 +4,7 @@
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
-  <img src="assets/brand/npa-header-light.svg" alt="NovaPersonalAgent — Understands you. Interacts in real time." width="100%">
+  <img src="assets/brand/npa-header-light.svg" alt="NovaCore — Understands you. Interacts in real time." width="100%">
 </picture>
 
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
@@ -16,9 +16,9 @@
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Demo-FF0000.svg)](https://youtu.be/t1c-2O-QsxE)
 
-**An open-source personal agent with private memory, smart proactivity and realtime interaction.**
+**NovaCore is an open-source personal agent with private memory, smart proactivity and realtime interaction.**
 
-Nova draws on your context and private memory to understand what matters to you. It knows how and when to clarify, ask for approval, and move work forward. Its dual brains keep the conversation responsive while background agents handle longer tasks. Refine your goals as work progresses, revisit the results, and stay in control.
+NovaCore draws on your context and private memory to understand what matters to you. It knows how and when to clarify, ask for approval, and move work forward. Its dual brains keep the conversation responsive while background agents handle longer tasks. Refine your goals as work progresses, revisit the results, and stay in control.
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://deepnovacore.github.io/NovaPersonalAgent/#film)**
 

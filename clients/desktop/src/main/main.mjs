@@ -1,3 +1,5 @@
+import {createSharedIdeas} from './shared-ideas.mjs'
+import {installExperienceIpc} from './experience-ipc.mjs'
 import {probeNativeVoice} from './native-voice-service.mjs'
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
@@ -307,6 +309,7 @@ let codexStatus = Object.freeze({
   source: null, version: null,
 })
 const secretCodec = createSafeStorageCodec(safeStorage)
+const sharedIdeas = createSharedIdeas()
 const requestBoardSnapshot = createDebugBoardRequester()
 let microphoneStatus = 'checking'
 let microphoneSystemStatus = 'unknown'
@@ -1084,7 +1087,7 @@ const systemNotifier = createSystemNotifier({
 
 function createTray() {
   const next = new Tray(trayImage())
-  next.setToolTip('Nova Personal Agent Desktop')
+  next.setToolTip('NovaCore')
   next.setContextMenu(Menu.buildFromTemplate([
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
@@ -1725,6 +1728,10 @@ async function startSelectedCamera(camera, smokeChannel) {
     if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('authorization request rejected')
     await shell.openExternal(connectorAuthorizationUrl(value))
   })
+  ipcMain.handle('nova:personal:shared-ideas', (event, language) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('shared ideas request rejected')
+    return sharedIdeas(language)
+  })
   ipcMain.handle('nova:personal:article', async (event, value) => {
     if (event.sender !== mainWindow.webContents) throw new Error('article request rejected')
     await shell.openExternal(newsArticleUrl(value))
@@ -2343,6 +2350,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     return applyDesktopSettings(payload, restart)
   })
   installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,screen,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
+  installExperienceIpc({ipcMain,app,windows:()=>[mainWindow,settingsWindow],codec:secretCodec,loadRuntime:loadSpaceHostRuntime,fetcher:(...args)=>net.fetch(...args)})
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push
     // sent before then has nobody to reach. Riding the verdict on the very payload the
@@ -2518,7 +2526,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     // neither that nor 'starting' is a real exit, so neither raises the banner.
     } else if (backendStatus.state !== 'starting' && backendStatus.state !== 'stopped') sendToOrb('nova:backend-exit')
   }).catch(() => {
-    console.error('Nova Personal Agent Desktop renderer failed to load')
+    console.error('NovaCore renderer failed to load')
     app.quit()
   })
   tray = createTray()

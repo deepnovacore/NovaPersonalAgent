@@ -6,6 +6,8 @@ import {canonicalJson} from '../text/canonical-json.js'
 import {sha256} from './source-state.js'
 import {effectiveEvidence,processingStamp,type EvidenceRecord} from './store.js'
 import {type ProfileDraft,profileDraftSchema,PROFILE_GENERATION_VERSION} from '../personal-agent/profile-warmup.js'
+/** Keywords are optional: an empty list is stored as an absent key so older drafts and their hashes stay unchanged. */
+const keywordsField=<T>(items:readonly T[])=>items.length?{keywords:[...items]}:{}
 
 const id=z.string().min(1).max(512)
 const cursorSchema=z.object({seq:z.number().int().nonnegative(),offset:z.number().int().nonnegative()}).strict()
@@ -96,17 +98,19 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  CREATE TRIGGER processing_erase_derived AFTER DELETE ON memory_evidence BEGIN
  INSERT INTO processing_decisions(prefix,kind,id,value)
  SELECT prefix,'policy','cleanup','pending' FROM processing_profiles p WHERE EXISTS(
- SELECT 1 FROM json_each(p.payload_json,'$.draft.interests') interest,json_each(interest.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)
+ SELECT 1 FROM json_each(p.payload_json,'$.draft.interests') interest,json_each(interest.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id
+ UNION ALL SELECT 1 FROM json_each(p.payload_json,'$.draft.keywords') keyword,json_each(keyword.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)
  ON CONFLICT(prefix,kind,id) DO UPDATE SET value='pending';
  DELETE FROM processing_identities WHERE evidence_id=OLD.id;
  DELETE FROM processing_observations WHERE EXISTS(SELECT 1 FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
  INSERT INTO processing_events(prefix,evidence_id) SELECT substr(source_id,1,9+instr(substr(source_id,10),':')),id FROM memory_evidence WHERE id IN (${affected}) AND id<>OLD.id;
  DELETE FROM processing_receipts WHERE evidence_id=OLD.id OR evidence_id IN (${affected});
  DELETE FROM processing_topics WHERE EXISTS(SELECT 1 FROM json_each(processing_topics.payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
- UPDATE processing_profiles SET revision=revision+1,payload_json=json_set(payload_json,'$.draft',json_object(
+ UPDATE processing_profiles SET revision=revision+1,payload_json=json_set(payload_json,'$.draft',json_patch(json_object(
  'about',CASE WHEN EXISTS(SELECT 1 FROM json_each(payload_json,'$.draft.about.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id) THEN NULL ELSE json_extract(payload_json,'$.draft.about') END,
  'work',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.work') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
- 'interests',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.interests') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)))),
+ 'interests',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.interests') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)))
+ ),json_object('keywords',CASE WHEN json_type(payload_json,'$.draft.keywords') IS NULL THEN NULL ELSE json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.keywords') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))) END)),
  '$.refs',json((SELECT json_group_array(json(r.value)) FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')<>OLD.id)),
  '$.about_parts',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.about_parts') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
  '$.products.projects',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.products.projects') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
@@ -146,7 +150,10 @@ function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payl
  const content=parsed.data;if(content.profile_pending||!content.draft.about&&!content.draft.work.length&&!content.draft.interests.length)return
  const key=content.publication_key??sha256(payload)
  if(db.prepare('SELECT 1 FROM processing_publications WHERE prefix=? AND provider=? AND publication_key=?').get(prefix,provider,key))return
- const refs=[...(content.draft.about?.refs??[]),...content.draft.work.flatMap(f=>f.refs),...content.draft.interests.flatMap(f=>f.refs),...(content.products?.projects.flatMap(f=>f.refs)??[]),...(content.products?.suggestions.flatMap(f=>f.refs)??[])],accounts=new Set<string>(),sources=[]
+ // Initialization also imports the cache; it must not undo publish's prose deduplication.
+ const latest=db.prepare('SELECT payload_json FROM processing_publications WHERE prefix=? AND provider=? ORDER BY rowid DESC LIMIT 1').get(prefix,provider)
+ if(latest&&sha256(canonicalJson((JSON.parse(String(latest.payload_json)) as {draft:unknown}).draft))===sha256(canonicalJson(content.draft)))return
+ const refs=[...(content.draft.about?.refs??[]),...content.draft.work.flatMap(f=>f.refs),...content.draft.interests.flatMap(f=>f.refs),...(content.draft.keywords??[]).flatMap(f=>f.refs),...(content.products?.projects.flatMap(f=>f.refs)??[]),...(content.products?.suggestions.flatMap(f=>f.refs)??[])],accounts=new Set<string>(),sources=[]
  for(const ref of [...new Map(refs.map(ref=>[ref.entry_id,ref])).values()]){
   if(!ref.entry_id.startsWith(prefix))return
   const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(ref.entry_id);if(!row)return
@@ -226,7 +233,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
  const q=processingRequestSchema.parse(request)
  const correctionProvider=typeof fields.correction_provider==='string'?fields.correction_provider:''
  const explicitCorrections=correctionProvider?Object.fromEntries(db.prepare('SELECT key,value FROM space_source_corrections WHERE prefix=? AND provider=?').all(prefix,correctionProvider).map(row=>[String(row.key),JSON.parse(String(row.value)) as {value:string;event_id:string;sender:string;provider:string}])):{}
- const suppressCorrected=(draft:ProfileDraft):ProfileDraft=>({...draft,about:explicitCorrections.about?null:draft.about,work:explicitCorrections.work?[]:draft.work,interests:explicitCorrections.interests?[]:draft.interests})
+ const suppressCorrected=(draft:ProfileDraft):ProfileDraft=>{const {keywords,...rest}=draft;return {...rest,about:explicitCorrections.about?null:draft.about,work:explicitCorrections.work?[]:draft.work,interests:explicitCorrections.interests?[]:draft.interests,...keywordsField(explicitCorrections.interests?[]:keywords??[])}}
  const decision=(kind:string,key:string,value:string)=>db.prepare('INSERT INTO processing_decisions VALUES(?,?,?,?) ON CONFLICT(prefix,kind,id) DO UPDATE SET value=excluded.value').run(prefix,kind,key,value)
  const priorRecipe=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='active_recipe'").get(prefix)
  if(priorRecipe?priorRecipe.value!==provider:!!db.prepare('SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? LIMIT 1').get(prefix,provider))decision('policy','cleanup','pending')
@@ -340,7 +347,8 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
    if(db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='invalid_interests'").get(prefix)?.value!==invalidKey){decision('policy','cleanup','pending');decision('policy','invalid_interests',invalidKey)}
   }
   if(q.action==='profile'&&q.batch_id)track(q.batch_id,content.refs.filter(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)!==null))
-  const draft=suppressCorrected({...content.draft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)})
+  const {keywords:cachedKeywords,...cachedDraft}=content.draft
+  const draft=suppressCorrected({...cachedDraft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid),...keywordsField((cachedKeywords??[]).filter(valid))})
   const result={revision:Number(saved?.revision??0),draft:draft.about||draft.work.length||draft.interests.length?draft:null,...(Object.keys(explicitCorrections).length?{explicit_corrections:explicitCorrections}:{})}
   if(q.action==='profile')return result
   const decisions=db.prepare('SELECT kind,id,value FROM processing_decisions WHERE prefix=?').all(prefix)
@@ -349,7 +357,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const projects=(content.products?.projects??[]).filter(valid).map(project=>({...project,...(corrections[project.id]==='reference'?{relation:'reference' as const}:corrections[project.id]==='historical'?{status:'historical' as const}:corrections[project.id]==='participating'?{relation:'participating' as const,status:'current' as const}:{})}))
   const changedProjects=(content.products?.projects??[]).filter(p=>corrections[p.id]&&corrections[p.id]!=='automatic'&&canonicalJson(projects.find(current=>current.id===p.id))!==canonicalJson(p)),changedIds=new Set(changedProjects.flatMap(p=>p.refs.map(r=>r.entry_id)))
   const unchanged=(fact:{refs:{entry_id:string}[]})=>!fact.refs.some(r=>changedIds.has(r.entry_id))
-  if(result.draft){result.draft={...result.draft,about:result.draft.about&&unchanged(result.draft.about)?result.draft.about:null,work:result.draft.work.filter(unchanged),interests:result.draft.interests.filter(unchanged)}}
+  if(result.draft){const {keywords,...priorDraft}=result.draft;result.draft={...priorDraft,about:result.draft.about&&unchanged(result.draft.about)?result.draft.about:null,work:result.draft.work.filter(unchanged),interests:result.draft.interests.filter(unchanged),...keywordsField((keywords??[]).filter(unchanged))}}
   const suggestions=(content.products?.suggestions??[]).filter(item=>valid(item)&&(q.include_dismissed===true||!dismissed.has(item.id))&&(!item.project_id||projects.some(project=>project.id===item.project_id&&project.relation==='participating'&&project.status==='current')))
   const originals=content.refs.flatMap(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)?.items??[])
   const profile_needs_update=!result.draft&&!!db.prepare("SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? AND (json_type(payload_json,'$.draft.about')='object' OR json_array_length(payload_json,'$.draft.work')>0 OR json_array_length(payload_json,'$.draft.interests')>0) LIMIT 1").get(prefix,provider)
@@ -366,23 +374,42 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   return result
  }
 const profileContext=()=>{
-  const rows=db.prepare(`WITH ranked AS (
-   SELECT payload_json,row_number() OVER(PARTITION BY json_extract(payload_json,'$.kind') ORDER BY rowid) n,
-   count(*) OVER(PARTITION BY json_extract(payload_json,'$.kind')) total FROM processing_observations WHERE prefix=? AND provider=?
-  ) SELECT payload_json FROM ranked WHERE n=1 OR n=total OR (n-1)%max(1,CAST((total+127)/128 AS INTEGER))=0`).all(prefix,provider)
-  const available=rows.flatMap(row=>{const observation=processingObservationSchema.parse(JSON.parse(String(row.payload_json))),originals=readRefs(db,prefix,consumer,observation.refs,recipe,participants);return originals?[{observation,originals,at:originals.items.map(i=>i.observed_at).sort()[0]??''}]:[]}).sort((a,b)=>a.at.localeCompare(b.at)||canonicalJson(a.observation).localeCompare(canonicalJson(b.observation)))
+  // Unreadable observations are dropped before any sampling, and repeats of the same observation merge their refs: recurrence across batches is itself the evidence.
+  type Readable=NonNullable<ReturnType<typeof readRefs>>
+  const merged=new Map<string,{observation:ProcessingObservation;originals:Readable;at:string}>(),refKey=(ref:ProcessingRef)=>canonicalJson({evidence_id:ref.evidence_id,stamp:ref.stamp,start:ref.start,end:ref.end})
+  for(const row of db.prepare('SELECT payload_json FROM processing_observations WHERE prefix=? AND provider=? ORDER BY rowid').all(prefix,provider)){
+   const observation=processingObservationSchema.parse(JSON.parse(String(row.payload_json))),originals=readRefs(db,prefix,consumer,observation.refs,recipe,participants);if(!originals)continue
+   const at=originals.items.map(i=>i.observed_at).sort()[0]??'',textKey=observation.kind+':'+observation.text.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu,''),existing=merged.get(textKey)
+   if(!existing){merged.set(textKey,{observation,originals,at});continue}
+   const seenRefs=new Set(existing.observation.refs.map(refKey))
+   for(const [index,ref] of observation.refs.entries())if(!seenRefs.has(refKey(ref))){seenRefs.add(refKey(ref));existing.observation.refs.push(ref);existing.originals.items.push(originals.items[index]!)}
+   if(at&&(!existing.at||at<existing.at))existing.at=at
+  }
+  // A heavily repeated observation keeps an evenly spread sample of its history plus its newest ref, so a newer repeat changes the selection (and the synthesis key).
+  for(const entry of merged.values()){
+   if(entry.observation.refs.length<=24)continue
+   const order=entry.originals.items.map((item,index)=>({index,at:item.observed_at})).sort((a,b)=>a.at.localeCompare(b.at)||a.index-b.index).map(item=>item.index)
+   const picked=new Set<number>([order[order.length-1]!])
+   for(let slot=0;picked.size<24&&slot<23;slot++)picked.add(order[Math.floor(slot*(order.length-1)/22)]!)
+   for(let i=order.length-1;picked.size<24&&i>=0;i--)picked.add(order[i]!)
+   const keep=[...picked].sort((a,b)=>a-b)
+   entry.observation={...entry.observation,refs:keep.map(i=>entry.observation.refs[i]!)};entry.originals={...entry.originals,items:keep.map(i=>entry.originals.items[i]!)}
+  }
+  const available=[...merged.values()].sort((a,b)=>a.at.localeCompare(b.at)||canonicalJson(a.observation).localeCompare(canonicalJson(b.observation)))
   // Every prefix samples the entire history, with separate lanes for relationships,
   // recurring work and working style. A high-volume recent topic cannot take all slots.
   const lanes=(['people','style','work'] as const).map(kind=>profileLaneOrder(available.filter(item=>item.observation.kind===kind)))
-  const refs:ProcessingRef[]=[],observations:ProcessingObservation[]=[],items:NonNullable<ReturnType<typeof readRefs>>['items']=[],chosen=new Set<string>(),texts=new Set<string>();let chars=0
+  const refs:ProcessingRef[]=[],observations:ProcessingObservation[]=[],items:Readable['items']=[],chosen=new Set<string>();let chars=0
   for(let round=0;round<Math.max(0,...lanes.map(lane=>lane.length));round++)for(const lane of lanes){
    const item=lane[round];if(!item)continue
-   const textKey=item.observation.kind+':'+item.observation.text.normalize('NFKC').replace(/\s+/gu,' ')
-   if(texts.has(textKey))continue
-   const additions=item.originals.items.filter(i=>!chosen.has(canonicalJson({evidence_id:i.evidence_id,stamp:i.stamp,start:i.start,end:i.end})))
-   if(refs.length+additions.length>120||chars+additions.reduce((n,i)=>n+i.text.length,0)>48000)continue
-   for(const original of additions){const ref={evidence_id:original.evidence_id,stamp:original.stamp,start:original.start,end:original.end};refs.push(ref);items.push(original);chosen.add(canonicalJson(ref));chars+=original.text.length}
-   observations.push(item.observation);texts.add(textKey)
+   // Newest slices first: take as many as fit the budgets instead of skipping the whole observation.
+   const additions=item.originals.items.filter(i=>!chosen.has(refKey(i))).sort((a,b)=>b.observed_at.localeCompare(a.observed_at))
+   for(const original of additions){
+    if(refs.length>=120||chars+original.text.length>48000)continue
+    const ref={evidence_id:original.evidence_id,stamp:original.stamp,start:original.start,end:original.end};refs.push(ref);items.push(original);chosen.add(refKey(ref));chars+=original.text.length
+   }
+   const included=item.observation.refs.filter(ref=>chosen.has(refKey(ref)))
+   if(included.length)observations.push({...item.observation,refs:included})
   }
   const key=sha256(canonicalJson({provider,generation_version:PROFILE_GENERATION_VERSION,corrections:correctionVersion(),observations,refs}))
   const current=new Set(batch.items.map(ref=>canonicalJson(ref)))
@@ -441,7 +468,7 @@ const profileContext=()=>{
   if(q.product_refs?.some(ref=>!q.refs.some(value=>canonicalJson(value)===canonicalJson(ref))))throw Error('STORE_INVALID_OPERATION')
   const originals=readRefs(db,prefix,consumer,q.refs,recipe,participants);if(!originals)return {applied:false,revision}
   if(q.refs.some(ref=>!db.prepare('SELECT 1 FROM processing_reads WHERE batch_id=? AND ref_key=?').get(batch.id,sha256(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
-  const cited=[...(q.products?.projects.flatMap(item=>item.refs)??[]),...(q.products?.suggestions.flatMap(item=>item.refs)??[]),...(q.defer_profile?[]:[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs)])]
+  const cited=[...(q.products?.projects.flatMap(item=>item.refs)??[]),...(q.products?.suggestions.flatMap(item=>item.refs)??[]),...(q.defer_profile?[]:[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs),...(q.draft.keywords??[]).flatMap(item=>item.refs)])]
   // Shared explicit corrections may remove every inferred clause; originals remain authorized above.
   if(cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
   // A bounded batch revises only its evidence scope. Keep other currently authorized facts.
@@ -450,16 +477,21 @@ const profileContext=()=>{
   const retain=(fact:{refs:{entry_id:string;version:unknown}[]})=>!(old?.fact_scopes?.[factKey(fact)]??(old?.refs??[]).filter((r:ProcessingRef)=>fact.refs.some(ref=>ref.entry_id===r.evidence_id))).some((prior:ProcessingRef)=>(q.product_refs??q.refs).some(next=>next.evidence_id===prior.evidence_id&&next.start<prior.end&&prior.start<next.end))&&authorizedFact(fact)
   const merge=<T>(fresh:T[],prior:T[],key:(item:T)=>string,limit:number)=>[...new Map([...fresh,...prior].map(item=>[key(item),item] as const).reverse()).values()].reverse().slice(0,limit)
   const aboutParts=q.defer_profile?(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(authorizedFact):q.profile_context_key?(q.draft.about?[q.draft.about]:[]):[...(q.draft.about?[q.draft.about]:[]),...(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(retain)].slice(0,6)
-  const draft=suppressCorrected(profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact)}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8)}))
+  const draft=suppressCorrected(profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact),...keywordsField((old?.draft.keywords??[]).filter(authorizedFact))}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8),...keywordsField(merge(q.draft.keywords??[],(old?.draft.keywords??[]).filter(retain),(item)=>item.text.toLowerCase(),6))}))
   const products=q.products?understandingProductsSchema.parse({projects:merge(q.products.projects,(old?.products?.projects??[]).filter(retain),(item)=>item.id,24),suggestions:merge(q.products.suggestions,(old?.products?.suggestions??[]).filter(retain),(item)=>item.id,24)}):batch.profile_only&&old?.products?{projects:old.products.projects.filter(authorizedFact),suggestions:old.products.suggestions.filter(authorizedFact)}:undefined
-  const facts=[...(draft.about?[draft.about]:[]),...draft.work,...draft.interests,...(products?.projects??[]),...(products?.suggestions??[])],ids=new Set(facts.flatMap(f=>f.refs.map(r=>r.entry_id)))
+  const facts=[...(draft.about?[draft.about]:[]),...draft.work,...draft.interests,...(draft.keywords??[]),...(products?.projects??[]),...(products?.suggestions??[])],ids=new Set(facts.flatMap(f=>f.refs.map(r=>r.entry_id)))
   const refs=[...new Map([...q.refs,...(old?.refs??[])].filter((r:ProcessingRef)=>ids.has(r.evidence_id)&&readRefs(db,prefix,consumer,[r],recipe,participants)!==null).map((r:ProcessingRef)=>[canonicalJson(r),r])).values()]
   const fact_scopes=Object.fromEntries(facts.map(fact=>[factKey(fact),old?.fact_scopes?.[factKey(fact)]??q.refs.filter(ref=>fact.refs.some(r=>r.entry_id===ref.evidence_id))]));for(const part of aboutParts)fact_scopes[factKey(part)]=old?.fact_scopes?.[factKey(part)]??q.refs.filter(ref=>part.refs.some((r:{entry_id:string})=>r.entry_id===ref.evidence_id))
-  const payload=canonicalJson({draft,refs,about_parts:aboutParts,fact_scopes,publication_key:publicationKey,profile_pending:q.defer_profile===true,...(q.profile_context_key&&!q.defer_profile?{synthesis_key:q.profile_context_key,generation_version:PROFILE_GENERATION_VERSION}:{}),...(products?{products,generated_at:batch.profile_only?old?.generated_at:batch.created_at}:{})})
+  // Publication identity is prose, not the optimistic cache revision or batch timestamp.
+  // This also covers unchangedProfile/deferred synthesis without trusting a caller flag.
+  const latest=db.prepare('SELECT payload_json FROM processing_publications WHERE prefix=? AND provider=? ORDER BY rowid DESC LIMIT 1').get(prefix,provider)
+  const archived=latest?JSON.parse(String(latest.payload_json)) as {draft:unknown;generated_at?:string}:null
+  const reused=!!archived&&sha256(canonicalJson(archived.draft))===sha256(canonicalJson(draft))
+  const payload=canonicalJson({draft,refs,about_parts:aboutParts,fact_scopes,publication_key:publicationKey,profile_pending:q.defer_profile===true,...(q.profile_context_key&&!q.defer_profile?{synthesis_key:q.profile_context_key,generation_version:PROFILE_GENERATION_VERSION}:{}),...(products?{products,generated_at:reused?archived?.generated_at??old?.generated_at:batch.profile_only?old?.generated_at:batch.created_at}:{})})
   for(const item of products?.suggestions??[]){const original=readRefs(db,prefix,consumer,refs.filter((ref:ProcessingRef)=>item.refs.some(r=>r.entry_id===ref.evidence_id)),recipe,participants)?.items[0];if(!original)continue;const identity={id:item.id,kind:item.kind,title:item.title,project_id:item.project_id,source_key:original.source_key};db.prepare('INSERT INTO processing_identities VALUES(?,?,?,?,?) ON CONFLICT(prefix,id) DO UPDATE SET evidence_id=excluded.evidence_id,source_key=excluded.source_key,payload_json=excluded.payload_json').run(prefix,item.id,original.evidence_id,original.source_key,canonicalJson(identity))}
   db.prepare('DELETE FROM processing_identities WHERE prefix=? AND rowid NOT IN (SELECT rowid FROM processing_identities WHERE prefix=? ORDER BY rowid DESC LIMIT 1000)').run(prefix,prefix)
   db.prepare('INSERT INTO processing_profiles VALUES(?,?,?,?) ON CONFLICT(prefix,provider) DO UPDATE SET revision=excluded.revision,payload_json=excluded.payload_json').run(prefix,provider,revision+1,payload)
-  archivePublication(db,prefix,provider,payload)
+  if(!reused)archivePublication(db,prefix,provider,payload)
   decision('published',batch.id,'done')
   if(batch.profile_only&&q.profile_context_key&&!q.defer_profile)decision('observed',batch.id,'done')
   return {applied:true,revision:revision+1}

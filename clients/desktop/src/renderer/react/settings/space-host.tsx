@@ -1,3 +1,4 @@
+import {ExperienceSpacesPanel} from './experience-spaces'
 import React, {useEffect, useRef, useState} from 'react'
 import {Button} from '@radix-ui/themes'
 import {Action, Field, useCommand} from './controls'
@@ -10,6 +11,7 @@ const RELAY_CODES=new Set(['relay_unreachable','relay_unavailable','relay_respon
 // already names the category), so this panel must not wrap itself in a card.
 
 export function SpaceHostPanel({api}: any) {
+ const [experienceActive,setExperienceActive]=useState(false)
  const {state, busy, error, command}=useCommand(api,'personalCommand','space.status')
  const [pending,setPending]=useState<any[]>([]),[pairingError,setPairingError]=useState(''),[fingerprints,setFingerprints]=useState<Record<string,string>>({}),[invitation,setInvitation]=useState<any>(null),[revoke,setRevoke]=useState<string|null>(null)
  const [detailsOpen,setDetailsOpen]=useState(false),[invitationFailed,setInvitationFailed]=useState(false)
@@ -30,7 +32,7 @@ export function SpaceHostPanel({api}: any) {
   return ()=>{active=false}
  },[api,state])
  const {qr_image,...wire}=invitation??{}
- return <div className="space-host-panel" aria-busy={busy}>
+ return <><ExperienceSpacesPanel api={api} onActiveChange={setExperienceActive}/><div className="space-host-panel" aria-busy={busy} hidden={experienceActive}>
   <h3>{label('连接手机','Connect your phone')}</h3>
   <p className="personal-hint">{label('扫码后，在电脑确认手机指纹。','Scan the code, then confirm your phone’s fingerprint on this computer.')}</p>
   {(error||pairingError)&&<div className="space-host-actions" role="alert"><p>{pairingMessage(error||pairingError)}</p><Action disabled={busy} action={invitationFailed?createInvitation:()=>command()}>{invitationFailed?label('重试生成配对码','Retry pairing code'):error&&state?label('刷新连接状态','Refresh connection status'):label('重试','Retry')}</Action></div>}
@@ -78,7 +80,7 @@ export function SpaceHostPanel({api}: any) {
     </div>
    </div>}
   </>:state?<SpaceCreateForm api={api} label={label} onReady={async()=>{await command();setInvitation(await command('space.invitation'))}}/>:null}
- </div>
+ </div></>
 }
 
 const LOOPBACK=new Set(['127.0.0.1','localhost','[::1]'])

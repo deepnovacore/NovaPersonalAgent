@@ -256,6 +256,27 @@ final class LocalMemoryStore {
     _entries = next;
   }
 
+  /// Seeds only the reserved persona IDs. Previously forgotten IDs still count as imported.
+  Future<void> seedPersona(Iterable<LocalMemoryEntry> entries) =>
+      _serial(() async {
+        if (!available) throw const LocalMemoryFailure('memory_unavailable');
+        final seen = _entries.map((entry) => entry.id).toSet();
+        final next = [..._entries];
+        for (final entry in entries) {
+          if (!entry.id.startsWith('persona:') || entry.forgottenAt != null) {
+            throw const LocalMemoryFailure('invalid_memory');
+          }
+          if (seen.add(entry.id)) {
+            next.add(LocalMemoryEntry.fromJson(entry.toJson()));
+          }
+        }
+        if (next.length == _entries.length) return;
+        if (next.where((entry) => entry.forgottenAt == null).length > 200) {
+          throw const LocalMemoryFailure('memory_full');
+        }
+        await _commit(next);
+      });
+
   Future<LocalMemoryEntry> save({
     required String kind,
     required String text,

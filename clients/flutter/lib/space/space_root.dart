@@ -1,4 +1,10 @@
 import 'push_invitation_dialog.dart';
+import '../experience/persona.dart';
+import '../generic/shared_ideas.dart';
+import '../ui/shared_idea_suggestions.dart';
+import '../services/preferences.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../experience/onboarding.dart';
 import 'dart:async';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
@@ -54,6 +60,7 @@ class SpaceRoot extends StatefulWidget {
 class _SpaceRootState extends State<SpaceRoot> {
   late final catalog = widget.catalog ?? SpaceCatalog();
   String? error;
+  bool experienceUnavailable = false;
   Future<void> nativeScope = Future.value();
   StreamSubscription<dynamic>? pushEvents;
   Future<void> tokenRefresh = Future.value();
@@ -65,6 +72,15 @@ class _SpaceRootState extends State<SpaceRoot> {
       catalog.open().catchError((Object e) {
         if (mounted) setState(() => error = '$e');
       }),
+    );
+    unawaited(
+      ExperiencePersona.loadManifest()
+          .then((_) {
+            if (mounted) setState(() {});
+          })
+          .catchError((Object _) {
+            if (mounted) setState(() => experienceUnavailable = true);
+          }),
     );
   }
 
@@ -111,9 +127,18 @@ class _SpaceRootState extends State<SpaceRoot> {
     if (!catalog.ready) {
       return const Scaffold(body: Center(child: CircularProgressIndicator()));
     }
-    final selected = catalog.selected;
+    final active = catalog.selected;
+    final selected =
+        active?.personaId != null &&
+            !ExperiencePersona.choices.any((p) => p.id == active!.personaId)
+        ? null
+        : active;
     if (selected == null) {
-      return _SpaceChooser(catalog: catalog, probe: widget.connectionProbe);
+      return _SpaceChooser(
+        catalog: catalog,
+        probe: widget.connectionProbe,
+        experienceUnavailable: experienceUnavailable,
+      );
     }
     return Column(
       children: [
@@ -164,7 +189,12 @@ class _SpaceRootState extends State<SpaceRoot> {
 }
 
 class _SpaceChooser extends StatefulWidget {
-  const _SpaceChooser({required this.catalog, required this.probe});
+  const _SpaceChooser({
+    required this.catalog,
+    required this.probe,
+    this.experienceUnavailable = false,
+  });
+  final bool experienceUnavailable;
   final SpaceCatalog catalog;
   final SpaceConnectionProbe probe;
   @override
@@ -174,6 +204,9 @@ class _SpaceChooser extends StatefulWidget {
 class _SpaceChooserState extends State<_SpaceChooser>
     with WidgetsBindingObserver {
   SpaceCatalog get catalog => widget.catalog;
+  String language =
+      WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+  String t(String zh, String en) => language == 'zh' ? zh : en;
   final statuses = <String, SpaceConnectionStatus>{};
   Timer? timer;
   bool refreshing = false;
@@ -182,8 +215,14 @@ class _SpaceChooserState extends State<_SpaceChooser>
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
+    unawaited(_loadLanguage());
     WidgetsBinding.instance.addPostFrameCallback((_) => refresh());
     timer = Timer.periodic(const Duration(seconds: 15), (_) => refresh());
+  }
+
+  Future<void> _loadLanguage() async {
+    final saved = Preferences(await SharedPreferences.getInstance());
+    if (mounted) setState(() => language = saved.language(language));
   }
 
   Future<void> refresh() async {
@@ -230,27 +269,27 @@ class _SpaceChooserState extends State<_SpaceChooser>
         SpaceConnectionStatus.online => (
           CupertinoIcons.checkmark_circle_fill,
           Nova.mint,
-          '电脑在线',
+          t('电脑在线', 'Computer online'),
         ),
         SpaceConnectionStatus.offline => (
           CupertinoIcons.desktopcomputer,
           Nova.secondary,
-          '电脑离线',
+          t('电脑离线', 'Computer offline'),
         ),
         SpaceConnectionStatus.unreachable => (
           CupertinoIcons.wifi_exclamationmark,
           Nova.amber,
-          '暂时无法连接',
+          t('暂时无法连接', 'Could not connect'),
         ),
         SpaceConnectionStatus.awaitingApproval => (
           CupertinoIcons.lock,
           Nova.amber,
-          '等待电脑批准',
+          t('等待电脑批准', 'Waiting for computer approval'),
         ),
         SpaceConnectionStatus.checking => (
           CupertinoIcons.desktopcomputer,
           Nova.secondary,
-          '正在检查连接',
+          t('正在检查连接', 'Checking connection'),
         ),
       };
   Future<void> manageBindings(BuildContext context, SpaceRecord space) async {
@@ -262,7 +301,7 @@ class _SpaceChooserState extends State<_SpaceChooser>
       barrierDismissible: false,
       builder: (context) => StatefulBuilder(
         builder: (context, update) => AlertDialog(
-          title: const Text('清理旧绑定'),
+          title: Text(t('清理旧绑定', 'Clean up old connections')),
           content: SingleChildScrollView(
             child: Column(
               mainAxisSize: MainAxisSize.min,
@@ -290,7 +329,7 @@ class _SpaceChooserState extends State<_SpaceChooser>
           actions: [
             TextButton(
               onPressed: busy ? null : () => Navigator.pop(context),
-              child: const Text('取消'),
+              child: Text(t('取消', 'Cancel')),
             ),
             FilledButton(
               onPressed: busy
@@ -328,53 +367,63 @@ class _SpaceChooserState extends State<_SpaceChooser>
     body: ListView(
       padding: const EdgeInsets.fromLTRB(0, 8, 0, 32),
       children: [
-        const Padding(
-          padding: EdgeInsets.fromLTRB(20, 4, 20, 16),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '每个 Space 的数据与密钥相互独立。',
-                style: TextStyle(
-                  color: Nova.text,
-                  fontSize: 17,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
-              SizedBox(height: 6),
-              Text(
-                '创建时选择独立运行，或连接电脑上的 Host。更换模式需要新建 Space。',
-                style: TextStyle(
-                  color: Nova.secondary,
-                  fontSize: 14,
-                  height: 1.4,
-                ),
-              ),
-              SizedBox(height: 6),
-              Text(
-                '新建 Space 从空白开始，旧 Space 的历史资料不会迁移到这里。\n'
-                'New Spaces start empty; saved data from older Spaces is not migrated.',
-                style: TextStyle(
-                  color: Nova.secondary,
-                  fontSize: 13,
-                  height: 1.4,
-                ),
-              ),
-            ],
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 4, 20, 16),
+          child: Text(
+            t(
+              '每个 Space 独立保存数据和模型配置。可以在本机运行，也可以连接电脑。',
+              'Each Space keeps its own data and model settings. Run it on this device or connect to a computer.',
+            ),
+            style: const TextStyle(
+              color: Nova.secondary,
+              fontSize: 14,
+              height: 1.4,
+            ),
           ),
         ),
+        if (widget.experienceUnavailable)
+          ListTile(
+            enabled: false,
+            leading: Icon(Icons.auto_awesome_outlined),
+            title: Text(t('体验 Space 暂不可用', 'Experience Spaces unavailable')),
+            subtitle: Text(
+              t(
+                '示例资料不完整或已损坏，请更新应用后重试。普通 Space 不受影响。',
+                'Sample data is incomplete or damaged. Update the app and retry. Other Spaces are unaffected.',
+              ),
+            ),
+          )
+        else if (ExperiencePersona.choices.isNotEmpty)
+          ListTile(
+            leading: const Icon(Icons.auto_awesome_outlined),
+            title: Text(t('体验 Space', 'Experience Spaces')),
+            subtitle: Text(t('选择示例人物', 'Choose a sample persona')),
+            onTap: () => Navigator.of(context).push(
+              MaterialPageRoute<void>(
+                builder: (_) => ExperienceChooser(
+                  catalog: catalog,
+                  language: language,
+                  allowInvite: catalog.spaces.isEmpty,
+                ),
+              ),
+            ),
+          ),
         if (catalog.spaces.isNotEmpty)
           NovaSection(
             surface: Nova.sheetCell,
             children: [
-              for (final space in catalog.visibleSpaces)
+              for (final space in catalog.visibleSpaces.where(
+                (s) =>
+                    s.personaId == null ||
+                    ExperiencePersona.choices.any((p) => p.id == s.personaId),
+              ))
                 NovaTile(
                   surface: Nova.sheetCell,
                   title: space.name,
                   subtitle: Text(
                     space.mode == SpaceMode.client
                         ? connection(space).$3
-                        : '在此设备独立运行',
+                        : t('在此设备独立运行', 'Runs on this device'),
                   ),
                   leading: NovaIconTile(
                     space.mode == SpaceMode.client
@@ -386,7 +435,7 @@ class _SpaceChooserState extends State<_SpaceChooser>
                   ),
                   trailing: catalog.bindings(space).length > 1
                       ? IconButton(
-                          tooltip: '清理旧绑定',
+                          tooltip: t('清理旧绑定', 'Clean up old connections'),
                           icon: const Icon(CupertinoIcons.ellipsis_circle),
                           onPressed: () => manageBindings(context, space),
                         )
@@ -401,13 +450,14 @@ class _SpaceChooserState extends State<_SpaceChooser>
             onPressed: () async {
               await Navigator.of(context).push(
                 MaterialPageRoute<void>(
-                  builder: (_) => _CreateSpace(catalog: catalog),
+                  builder: (_) =>
+                      _CreateSpace(catalog: catalog, language: language),
                 ),
               );
               await refresh();
             },
             icon: const Icon(CupertinoIcons.add, size: 20),
-            label: const Text('新建 Space'),
+            label: Text(t('新建 Space', 'New Space')),
           ),
         ),
       ],
@@ -416,13 +466,15 @@ class _SpaceChooserState extends State<_SpaceChooser>
 }
 
 class _CreateSpace extends StatefulWidget {
-  const _CreateSpace({required this.catalog});
+  const _CreateSpace({required this.catalog, required this.language});
   final SpaceCatalog catalog;
+  final String language;
   @override
   State<_CreateSpace> createState() => _CreateSpaceState();
 }
 
 class _CreateSpaceState extends State<_CreateSpace> {
+  String t(String zh, String en) => widget.language == 'zh' ? zh : en;
   final name = TextEditingController(), code = TextEditingController();
   SpaceMode mode = SpaceMode.standalone;
   bool scanning = false, busy = false;
@@ -451,35 +503,53 @@ class _CreateSpaceState extends State<_CreateSpace> {
     } catch (e) {
       setState(
         () => error = e is FormatException && e.message == 'pairing_expired'
-            ? '邀请码已过期，请在电脑上重新生成。'
-            : '无法读取邀请码，请重新扫描或粘贴完整内容。',
+            ? t(
+                '邀请码已过期，请在电脑上重新生成。',
+                'This pairing code has expired. Generate a new one on the computer.',
+              )
+            : t(
+                '无法读取邀请码，请重新扫描或粘贴完整内容。',
+                'Could not read the pairing code. Scan it again or paste the full code.',
+              ),
       );
     }
   }
 
   Future<bool> confirmConnection() async {
-    if (name.text.trim().isEmpty) name.text = '我的电脑';
+    if (name.text.trim().isEmpty) name.text = t('我的电脑', 'My computer');
     return await showSpaceDialog<bool>(
           context: context,
           builder: (context) => StatefulBuilder(
             builder: (context, update) => AlertDialog(
-              title: const Text('连接电脑'),
+              title: Text(t('连接电脑', 'Connect to computer')),
               content: SingleChildScrollView(
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text('请核对电脑上的 Host 指纹'),
+                    Text(
+                      t(
+                        '请核对电脑上的 Host 指纹',
+                        'Check the host fingerprint on your computer.',
+                      ),
+                    ),
                     const SizedBox(height: 8),
                     SelectableText(invitation!.hostFingerprint),
                     const SizedBox(height: 12),
-                    const Text('确认后请在电脑上核对此设备指纹，并批准连接。'),
+                    Text(
+                      t(
+                        '确认后请在电脑上核对此设备指纹，并批准连接。',
+                        'Then check this device’s fingerprint and approve the connection on your computer.',
+                      ),
+                    ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: name,
                       autofocus: true,
                       onChanged: (_) => update(() {}),
-                      decoration: const InputDecoration(labelText: 'Space 名称'),
+                      decoration: InputDecoration(
+                        labelText: t('Space 名称', 'Space name'),
+                      ),
                     ),
                   ],
                 ),
@@ -487,13 +557,13 @@ class _CreateSpaceState extends State<_CreateSpace> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.pop(context, false),
-                  child: const Text('取消'),
+                  child: Text(t('取消', 'Cancel')),
                 ),
                 TextButton(
                   onPressed: name.text.trim().isEmpty
                       ? null
                       : () => Navigator.pop(context, true),
-                  child: const Text('确认绑定'),
+                  child: Text(t('确认绑定', 'Confirm pairing')),
                 ),
               ],
             ),
@@ -505,7 +575,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
   Future<void> create() async {
     if (busy) return;
     if (mode == SpaceMode.standalone && name.text.trim().isEmpty) {
-      setState(() => error = '请为 Space 命名');
+      setState(() => error = t('请为 Space 命名', 'Enter a Space name.'));
       return;
     }
     setState(() {
@@ -524,7 +594,12 @@ class _CreateSpaceState extends State<_CreateSpace> {
         );
       } else {
         if (invitation == null) {
-          setState(() => error = '请先扫描电脑上的邀请码');
+          setState(
+            () => error = t(
+              '请先扫描电脑上的邀请码',
+              'Scan the pairing code on your computer first.',
+            ),
+          );
           return;
         }
         if (!await confirmConnection() || !mounted) return;
@@ -541,8 +616,11 @@ class _CreateSpaceState extends State<_CreateSpace> {
       if (mounted) {
         setState(
           () => error = mode == SpaceMode.client
-              ? '暂时无法连接电脑，请检查网络后重试。'
-              : '无法创建 Space，请重试。',
+              ? t(
+                  '暂时无法连接电脑，请检查网络后重试。',
+                  'Could not connect to the computer. Check your network and retry.',
+                )
+              : t('无法创建 Space，请重试。', 'Could not create the Space. Try again.'),
         );
       }
     } finally {
@@ -552,14 +630,21 @@ class _CreateSpaceState extends State<_CreateSpace> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: const Text('创建 Space')),
+    appBar: AppBar(title: Text(t('创建 Space', 'Create a Space'))),
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [
+        Text(
+          t(
+            '新建 Space 不会带入旧 Space 的数据。要更换运行方式，请新建 Space。',
+            'New Spaces start without data from existing Spaces. Create a new Space to change how it runs.',
+          ),
+        ),
+        const SizedBox(height: 16),
         if (mode == SpaceMode.standalone) ...[
           TextField(
             controller: name,
-            decoration: const InputDecoration(labelText: '名称'),
+            decoration: InputDecoration(labelText: t('名称', 'Name')),
           ),
           const SizedBox(height: 24),
         ],
@@ -570,14 +655,19 @@ class _CreateSpaceState extends State<_CreateSpace> {
           },
           child: Column(
             children: [
-              const RadioListTile(
+              RadioListTile(
                 value: SpaceMode.standalone,
-                title: Text('独立运行'),
-                subtitle: Text('此设备运行聊天、资料处理与定时任务。'),
+                title: Text(t('独立运行', 'Run on this device')),
+                subtitle: Text(
+                  t(
+                    '此设备运行聊天、资料处理与定时任务。',
+                    'Chats, data processing, and schedules run here.',
+                  ),
+                ),
               ),
-              const RadioListTile(
+              RadioListTile(
                 value: SpaceMode.client,
-                title: Text('连接 Host'),
+                title: Text(t('连接 Host', 'Connect to a computer')),
                 subtitle: Text('电脑处理聊天与后台任务；此设备展示缓存并发送操作。'),
               ),
             ],
@@ -585,12 +675,17 @@ class _CreateSpaceState extends State<_CreateSpace> {
         ),
         if (mode == SpaceMode.client) ...[
           const SizedBox(height: 16),
-          const Text('Host 不在线时聊天不可用。Host 损坏会丢失这个 Space，不提供备份恢复。'),
+          Text(
+            t(
+              'Host 不在线时聊天不可用。Host 损坏会丢失这个 Space，不提供备份恢复。',
+              'Chats need an online host. If the host is lost, this Space cannot be recovered from a backup.',
+            ),
+          ),
           const SizedBox(height: 12),
           OutlinedButton.icon(
             onPressed: () => setState(() => scanning = !scanning),
             icon: const Icon(Icons.qr_code_scanner),
-            label: const Text('扫描 Host 邀请码'),
+            label: Text(t('扫描 Host 邀请码', 'Scan host pairing code')),
           ),
           if (scanning)
             SizedBox(
@@ -610,13 +705,21 @@ class _CreateSpaceState extends State<_CreateSpace> {
             smartDashesType: SmartDashesType.disabled,
             minLines: 2,
             maxLines: 4,
-            decoration: const InputDecoration(labelText: '或粘贴邀请码'),
+            decoration: InputDecoration(
+              labelText: t('或粘贴邀请码', 'Or paste the pairing code'),
+            ),
           ),
           TextButton(
             onPressed: () => parse(code.text),
-            child: const Text('读取邀请码'),
+            child: Text(t('读取邀请码', 'Read pairing code')),
           ),
-          if (invitation != null) const Text('已读取电脑邀请码，可继续确认连接。'),
+          if (invitation != null)
+            Text(
+              t(
+                '已读取电脑邀请码，可继续确认连接。',
+                'Pairing code read. Confirm the connection to continue.',
+              ),
+            ),
         ],
         if (error != null)
           Padding(
@@ -631,7 +734,7 @@ class _CreateSpaceState extends State<_CreateSpace> {
           onPressed: busy ? null : create,
           child: Text(
             busy
-                ? '正在创建…'
+                ? t('正在创建…', 'Creating…')
                 : mode == SpaceMode.client
                 ? '确认连接电脑'
                 : '创建独立 Space',
@@ -666,6 +769,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   String? startupError;
   final chat = TextEditingController();
   final petAvatar = PetAvatarStore();
+  String? _ideaLanguage;
   bool sending = false;
   int tab = 0;
   Widget _switchSpaceButton() => IconButton(
@@ -677,7 +781,21 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   void initState() {
     super.initState();
     unawaited(petAvatar.load());
+    unawaited(_restoreIdeaLanguage());
     unawaited(_open());
+  }
+
+  Future<void> _restoreIdeaLanguage() async {
+    final system =
+        WidgetsBinding.instance.platformDispatcher.locale.languageCode;
+    var language = system == 'zh' ? 'zh' : 'en';
+    try {
+      final preferences = Preferences(await SharedPreferences.getInstance());
+      language = preferences.language(system) == 'zh' ? 'zh' : 'en';
+    } catch (_) {
+      // Use the system language if App preferences cannot be loaded.
+    }
+    if (mounted) setState(() => _ideaLanguage = language);
   }
 
   Future<void> _open() async {
@@ -743,8 +861,54 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       !['chat', 'topic'].contains(row['kind']) ||
       row['mode'] == 'plan';
 
-  Future<void> send() async {
-    if (tab == 1 &&
+  Map<String, dynamic>? _mainConversation(SpaceClientState state) => state
+      .cards('conversations')
+      .where((row) => row['id'] == 'chat:main')
+      .firstOrNull;
+
+  bool _canSendIdea(SpaceClientState state) {
+    final main = _mainConversation(state);
+    return !sending &&
+        state.hostOnline &&
+        main != null &&
+        main['mode'] != 'plan' &&
+        main['generation_status'] != 'pending' &&
+        !state.previews.values.any(
+          (row) => (row['conversation_id'] ?? 'chat:main') == 'chat:main',
+        );
+  }
+
+  bool _emptyIdeaOpening(SpaceClientState state) {
+    final main = _mainConversation(state);
+    if (main?['opening_empty'] == false) return false;
+    final messages = state.messages
+        .where((row) => (row['conversation_id'] ?? 'chat:main') == 'chat:main')
+        .toList();
+    // Older Hosts do not project the complete-history opening flag.
+    if (main?['opening_empty'] == null &&
+        messages.isEmpty &&
+        (main?['preview'] as String? ?? '').isNotEmpty) {
+      return false;
+    }
+    return emptyIdeaOpening(messages);
+  }
+
+  void _sendIdea(String text, {BuildContext? pageContext}) {
+    if (sending) return;
+    final state = controller?.state;
+    if (state == null || !_canSendIdea(state)) {
+      message('主对话暂时无法发送，请稍后重试。');
+      return;
+    }
+    if (pageContext != null) Navigator.of(pageContext).pop();
+    setState(() => tab = 0);
+    unawaited(send(idea: text));
+  }
+
+  Future<void> send({String? idea}) async {
+    if (sending) return;
+    if (idea == null &&
+        tab == 1 &&
         _readOnlyTask(
           controller!.state
               .cards('conversations')
@@ -754,17 +918,17 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       message('请在电脑上继续处理此任务。');
       return;
     }
-    final text = chat.text;
+    final text = idea ?? chat.text;
     if (text.trim().isEmpty) return;
     setState(() => sending = true);
     try {
       await controller!.sendChat(
         text,
-        conversationId: tab == 1
+        conversationId: idea == null && tab == 1
             ? taskConversation ?? 'chat:main'
             : 'chat:main',
       );
-      chat.clear();
+      if (idea == null) chat.clear();
     } catch (error) {
       message(
         error is StateError && error.message == 'chat_message_too_large'
@@ -968,8 +1132,11 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
           store: personal!.store,
           page: page,
           showHeading: false,
-          language: 'zh',
+          language: page == 3 ? _ideaLanguage ?? 'zh' : 'zh',
           onSettings: () => _settings(controller!),
+          onSharedIdea: _ideaLanguage == null
+              ? null
+              : (text) => _sendIdea(text, pageContext: context),
         ),
       ),
     ],
@@ -1149,6 +1316,20 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
             ],
           ),
         ),
+        if (tab == 0 &&
+            _ideaLanguage != null &&
+            _canSendIdea(state) &&
+            _emptyIdeaOpening(state))
+          ValueListenableBuilder<TextEditingValue>(
+            valueListenable: chat,
+            builder: (_, value, _) => value.text.isEmpty
+                ? SharedIdeaSuggestions(
+                    language: _ideaLanguage!,
+                    compact: true,
+                    onSend: _sendIdea,
+                  )
+                : const SizedBox.shrink(),
+          ),
         SafeArea(
           top: false,
           child: Padding(
@@ -1538,9 +1719,9 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         automaticallyImplyLeading: false,
         centerTitle: true,
         title: tab == 0
-            ? PetAvatarTitle(store: petAvatar)
+            ? PetAvatarTitle(store: petAvatar, title: 'NovaCore')
             : Text(
-                ['Nova', '任务', '时间线', '我的'][tab],
+                ['NovaCore', '任务', '时间线', '我的'][tab],
                 style: const TextStyle(
                   fontSize: 22,
                   fontWeight: FontWeight.w600,
@@ -1589,7 +1770,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                 (
                   CupertinoIcons.chat_bubble,
                   CupertinoIcons.chat_bubble_fill,
-                  'Nova',
+                  'NovaCore',
                   0,
                 ),
                 (

@@ -1,3 +1,4 @@
+import {hasDraftContent} from './personal-controller.mjs'
 import {taskNotificationText,visibleTranscriptMessages} from './tasks-page.mjs'
 import {mountIdleAvatar} from './idle-avatar.mjs'
 import {renderMarkdown} from './markdown.mjs'
@@ -145,7 +146,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  function renderSource(){
   const source=c.state().source_todo;sourceChip.hidden=!source;sourceChip.textContent=source?t('关联待办 · {0}（移除）',c.snapshot?.life?.todos?.find(t=>t.id===source.id)?.title??source.id):''
   recovery.replaceChildren();const failed=c.state().failed_card;recovery.hidden=!failed
-  if(failed){recovery.append(el('summary',t('未发送的卡片请求')),el('p',failed.text));const restore=button(t('放入空草稿'),()=>{c.draft=failed.text;c.state().references=failed.references??[];c.state().failed_card=null;update();draft.focus()},recovery);restore.disabled=Boolean(c.draft.trim()||c.submittedRequestId||c.isVoiceConversation);button(t('关闭'),()=>{c.state().failed_card=null;renderSource()},recovery)}
+  if(failed){recovery.append(el('summary',t('未发送的卡片请求')),el('p',failed.text));const restore=button(t('放入空草稿'),()=>{c.draft=failed.text;c.state().references=failed.references??[];c.state().failed_card=null;update();draft.focus()},recovery);restore.disabled=Boolean(hasDraftContent(c.state())||c.submittedRequestId||c.isVoiceConversation);button(t('关闭'),()=>{c.state().failed_card=null;renderSource()},recovery)}
   referenceChips.replaceChildren()
   for(const ref of c.state().references??[]){
    const list=ref.kind==='todo'?c.snapshot?.life?.todos:ref.kind==='goal'?c.snapshot?.life?.goals:ref.kind==='feed'?c.snapshot?.feed:ref.kind==='timeline'?c.snapshot?.timeline?.cards:[...(c.snapshot?.news?.items??[]),...(c.snapshot?.news?.saved??[])]

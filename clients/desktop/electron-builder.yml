@@ -1,6 +1,7 @@
 appId: ai.deepnovacore.nova-audio-agent.orb
-productName: Nova Personal Agent Desktop
+productName: NovaCore
 electronVersion: 43.2.0
+artifactName: "NovaCore-${version}-${arch}.${ext}"
 asar: true
 asarUnpack:
   - '**/node_modules/@nova-personal-agent/runtime/scripts/autoglm-bridge.py'
@@ -55,6 +56,8 @@ files:
 # macOS-only Swift AEC helper below moves under `mac:` so win/linux builds
 # don't fail on a missing file.
 extraResources:
+  - from: ../../scripts/lib/experience-assets.mjs
+    to: experience-assets.mjs
   - from: resources/tray
     to: tray
   - from: build/endpointing/volcengine-v1
@@ -127,7 +130,7 @@ linux:
   icon: build/icons
   executableName: nova-personal-agent-desktop
   synopsis: "Nova ambient voice orb"
-  artifactName: "nova-personal-agent-desktop-${version}-${arch}.${ext}"
+  artifactName: "NovaCore-${version}-${arch}.${ext}"
   extraResources:
     - from: build/native/codex-sandbox-probe
       to: native/codex-sandbox-probe

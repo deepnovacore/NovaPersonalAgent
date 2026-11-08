@@ -14,6 +14,7 @@ class ModelSettings {
     this.storage = const FlutterSecureStorage(),
     this.native = const NativeLocalAgent(),
     this.headless = false,
+    this.managedConfiguration,
   }) : credentials = ProviderCredentials(storage: storage),
        chatGpt = ChatGptAccounts(storage: storage);
   final ProviderCredentials credentials;
@@ -21,6 +22,7 @@ class ModelSettings {
   final FlutterSecureStorage storage;
   final LocalAgent native;
   final bool headless;
+  final Future<ModelConfiguration> Function()? managedConfiguration;
   String? _projection;
 
   Future<void> clearNativeChatGpt() async {
@@ -48,6 +50,7 @@ class ModelSettings {
 
   /// An unset support route follows the current conversation, including OAuth.
   Future<ModelConfiguration?> readForPurpose(ModelPurpose purpose) async {
+    if (managedConfiguration case final managed?) return managed();
     if (purpose == ModelPurpose.conversationText) return read();
     final draft = await readSupportDraft();
     if (draft == null) return read();
@@ -129,6 +132,7 @@ class ModelSettings {
   static const storageKey = 'nova.dart-model.v1';
 
   Future<ModelConfiguration?> read() async {
+    if (managedConfiguration case final managed?) return managed();
     try {
       final account = await chatGpt.active();
       if (account != null) {

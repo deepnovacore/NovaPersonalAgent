@@ -1,3 +1,4 @@
+import {bindExperienceController} from '../experience-controller.mjs'
 import React,{createRef} from 'react'
 import {createRoot} from 'react-dom/client'
 import {flushSync} from 'react-dom'
@@ -9,6 +10,7 @@ export type DesktopBridge=Record<string,any>
 export type WorkbenchOptions={send:(frame:any)=>any;start:(options?:any)=>any;stop:()=>any;tasks:()=>any;taskAction?:(...args:any[])=>any;results:()=>any;api:DesktopBridge;applyPresentation?:(...args:any[])=>any;speakingLevel?:()=>number;onUnreadChange?:(count:number)=>void;onChange?:()=>void}
 export class WorkbenchRuntime{
  controller:any
+ experience:any
  revision=0
  listeners=new Set<()=>void>()
  chat=createRef<any>()
@@ -23,6 +25,7 @@ export class WorkbenchRuntime{
  constructor(public options:WorkbenchOptions){
   // Written synchronously, not from a React effect: main resizes the window as soon as the presentation IPC lands.
   this.controller=new PersonalController({...options,applyPresentation:options.applyPresentation,changed:()=>this.refresh(),presentationChanged:(mode:string,collapsed:boolean)=>{document.body.dataset.presentationMode=mode;document.body.dataset.personalCollapsed=String(collapsed)},confirmBuildSwitch:()=>new Promise<boolean>(resolve=>{this.confirmation={resolve};this.refresh()})})
+  this.experience=bindExperienceController(this.controller,options.api.experience,()=>this.refresh())
  }
  subscribe=(listener:()=>void)=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
  snapshot=()=>this.revision
@@ -39,6 +42,7 @@ export class WorkbenchRuntime{
   }finally{this.refresh()}
  }
  receive=(frame:any)=>{
+  if(!this.experience.acceptBackend(frame))return
   this.chat.current?.receive(frame)
   if(frame.type==='client.ready'){this.executorFrame=null;this.executorFloat.current?.reset()}
   if(frame.type==='executor.tasks')this.executorFrame=frame
@@ -58,13 +62,13 @@ export function mountPersonalView(options:WorkbenchOptions){
  const invoke=(type:string,value?:any)=>host.dispatchEvent(new CustomEvent(`nova-workbench-${type}`,{detail:value}))
  return {
   controller:runtime.controller,receive:runtime.receive,refresh:runtime.refresh,
-  identity:(value:any)=>{runtime.identityValue=value;runtime.chat.current?.identity(value);runtime.refresh()},
+  identity:(value:any)=>{runtime.identityValue=value;runtime.refresh()},
   setCompanionForm:(value:any)=>{runtime.companionForm=value==='orb'?'orb':'pet';runtime.refresh()},
   setOrb:(value:any)=>runtime.chat.current?.setOrb(value),
   setOrbLevel:(value:number)=>runtime.chat.current?.setOrbLevel(value),
   expand:()=>runtime.run(async()=>{await runtime.controller.setPresentation('workbench');if(runtime.controller.snapshot?.conversations?.items?.some((item:any)=>item.id==='chat:main'))await runtime.controller.home();runtime.chat.current?.reveal()}),
   openTask:(id:string)=>invoke('open-task',id),
   startup:(value:any)=>{runtime.startupValue=value;runtime.refresh()},
-  dispose:()=>{runtime.disposed=true;runtime.confirm(false);root.unmount();runtime.controller.disconnect();runtime.listeners.clear()},
+  dispose:()=>{runtime.disposed=true;runtime.experience.dispose();runtime.confirm(false);root.unmount();runtime.controller.disconnect();runtime.listeners.clear()},
  }
 }

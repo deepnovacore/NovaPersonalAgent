@@ -18,7 +18,7 @@ void main() {
 Future<void> novaScheduleMain() async {
   WidgetsFlutterBinding.ensureInitialized();
   final space = await SpaceStorage.readActive();
-  if (space?.mode != SpaceMode.standalone) return;
+  if (space?.mode != SpaceMode.standalone || space?.personaId != null) return;
   await SpaceNativeScope.activate(space);
   await SpaceStorage.runScoped(space, () async {
     await ScheduledAgentRunner.open(
