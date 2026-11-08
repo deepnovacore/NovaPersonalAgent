@@ -43,7 +43,11 @@ class LocalModelSettings(context: Context, private val spaceId: String) {
         val stream = file.startWrite()
         try { stream.write(bytes);file.finishWrite(stream) } catch(error: Exception) { file.failWrite(stream);throw error }
     }
-    @Synchronized fun clearChatGpt() { if(read()?.protocol == "chatgptResponses") file.delete() }
+    @Synchronized fun clear() {
+        file.delete()
+        check(!file.baseFile.exists()) { "model_settings_unavailable" }
+    }
+    @Synchronized fun clearChatGpt() { if(read()?.protocol == "chatgptResponses") clear() }
     fun status(): JSONObject {
         val value = read()
         return JSONObject().put("configured",value != null)

@@ -41,7 +41,7 @@ import android.os.Looper
 /** The native command boundary used by a local planner. State sync has no path
  * into this controller. The UI can always stop a run without a Hub or model.
  * [shells] and [events] come from the phone bridge; without a running helper every run stays on the main tier. */
-class LocalAgentController(context: Context, spaceId: String, private val shells: ShellProvider? = null,
+class LocalAgentController(context: Context, private val spaceId: String, private val shells: ShellProvider? = null,
     private val events: PhoneEventSink? = null) : PhoneTakeover, RunIdleGate {
     private val app = context.applicationContext
     private val journal=LocalAgentJournal(context.applicationContext, spaceId)
@@ -109,13 +109,21 @@ class LocalAgentController(context: Context, spaceId: String, private val shells
         // substitute the new Space's store under an existing task.
     }
     fun modelSettings() = settings.status()
-    @Synchronized fun clearChatGptSettings():JSONObject {
+    @Synchronized fun clearChatGptSettings(expectedSpace: String = ""):JSONObject {
+        check(!closed && (expectedSpace.isEmpty() || expectedSpace == spaceId)) { "space_changed" }
         active?.let { stop(it.id) }
         settings.clearChatGpt()
         return settings.status()
     }
+    @Synchronized fun clearModelSettings(expectedSpace: String): JSONObject {
+        check(!closed && expectedSpace == spaceId) { "space_changed" }
+        check(active == null) { "stop_task_before_changing_model" }
+        settings.clear()
+        return settings.status()
+    }
     @Synchronized fun saveModelSettings(value:JSONObject):JSONObject {
-        check(!closed) { "space_changed" }
+        val expectedSpace = value.optString("space_id")
+        check(!closed && (expectedSpace.isEmpty() || expectedSpace == spaceId)) { "space_changed" }
         check(active==null){"stop_task_before_changing_model"}
         settings.save(value)
         return settings.status()

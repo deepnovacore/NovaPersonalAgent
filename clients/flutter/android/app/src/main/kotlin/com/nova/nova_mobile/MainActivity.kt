@@ -103,7 +103,8 @@ class MainActivity : FlutterActivity() {
                 when(call.method){
                     "capabilities" -> result.success(JSONObject().put("schema_version",1).put("platform","android").put("host_package",packageName).put("android_api",Build.VERSION.SDK_INT).put("accessibility",LocalGuiService.current!=null).put("screenshots",Build.VERSION.SDK_INT>=30).put("model_runtime",true).put("model_configured",current.modelSettings().getBoolean("configured")).toString())
                     "modelSettings" -> result.success(current.modelSettings().toString())
-                    "clearChatGptSettings" -> result.success(current.clearChatGptSettings().toString())
+                    "clearChatGptSettings" -> result.success(current.clearChatGptSettings(args.optString("space_id")).toString())
+                    "clearModelSettings" -> result.success(current.clearModelSettings(args.getString("space_id")).toString())
                     "saveModelSettings" -> result.success(current.saveModelSettings(args).toString())
                     "run" -> result.success(current.runModel(args).toString())
                     "approve" -> result.success(JSONObject().put("accepted",false).toString())

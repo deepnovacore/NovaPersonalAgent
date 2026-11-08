@@ -43,11 +43,12 @@ final class NativeModelSettings {
     let config = try JSONDecoder().decode(NativeModelConfiguration.self, from: data)
     try config.validate(); return config
   }
+  func clear() throws {
+    let status = SecItemDelete(query as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else { throw LocalAgentError("model_keychain_unavailable") }
+  }
   func clearChatGpt() throws {
-    if try read()?.apiProtocol == "chatgptResponses" {
-      let status = SecItemDelete(query as CFDictionary)
-      guard status == errSecSuccess || status == errSecItemNotFound else { throw LocalAgentError("model_keychain_unavailable") }
-    }
+    if try read()?.apiProtocol == "chatgptResponses" { try clear() }
   }
   func status() throws -> [String: Any] {
     let config = try read()

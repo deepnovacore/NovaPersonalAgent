@@ -97,9 +97,15 @@ import UIKit
     case "tasks": return journal.tasks
     case "modelSettings": return try settings.status()
     case "clearChatGptSettings":
+      if let expected = input["space_id"] as? String, expected != spaceId { throw LocalAgentError("space_changed") }
       if let id = active { try stop(id, phase:"cancelled", summary:"ChatGPT account changed; verify any dispatched action.") }
       try settings.clearChatGpt(); cachedConfiguration = try settings.read(); return try settings.status()
+    case "clearModelSettings":
+      guard input["space_id"] as? String == spaceId else { throw LocalAgentError("space_changed") }
+      guard active == nil else { throw LocalAgentError("stop_task_before_changing_model") }
+      try settings.clear(); cachedConfiguration = nil; return try settings.status()
     case "saveModelSettings":
+      if let expected = input["space_id"] as? String, expected != spaceId { throw LocalAgentError("space_changed") }
       guard active == nil else { throw LocalAgentError("stop_task_before_changing_model") }
       try settings.save(input); cachedConfiguration = try settings.read(); return try settings.status()
     case "run": return try start(input)

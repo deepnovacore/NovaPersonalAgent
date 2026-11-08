@@ -121,13 +121,10 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
   @override
   Future<ModelSettingsView> load() async {
     _supportDraft = support ? await settings.readSupportDraft() : null;
-    final draft = _supportDraft ?? const <String, dynamic>{};
-    final current = support
-        ? null
-        : credentialsOnly
-        ? await settings.readApiKey()
-        : await settings.read();
-    final endpoint = support ? draft['endpoint'] as String? : current?.endpoint;
+    final draft =
+        (support ? _supportDraft : await settings.readConversationDraft()) ??
+        const <String, dynamic>{};
+    final endpoint = draft['endpoint'] as String?;
     final address = endpoint ?? ModelPreset.byId('openrouter')!.endpoint;
     final saved = await savedProviders();
     final selected = saved
@@ -162,14 +159,10 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
             ],
       customEndpoint: credentialsOnly,
       endpoint: address,
-      model:
-          (support ? draft['model'] as String? : current?.model) ??
-          'openai/gpt-4.1-mini',
-      protocol: support
-          ? ModelProtocol.values.byName(
-              draft['protocol'] as String? ?? 'chatCompletions',
-            )
-          : current?.protocol ?? ModelProtocol.chatCompletions,
+      model: draft['model'] as String? ?? 'openai/gpt-4.1-mini',
+      protocol: ModelProtocol.values.byName(
+        draft['protocol'] as String? ?? 'chatCompletions',
+      ),
       canFollow: support,
       following: support && _supportDraft == null,
       allowKeyEntry: credentialsOnly,

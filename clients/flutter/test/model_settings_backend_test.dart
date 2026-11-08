@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
@@ -11,6 +13,8 @@ import 'support/fake_model_http.dart';
 
 class _Native implements LocalAgent {
   final calls = <(String, Map<String, dynamic>)>[];
+  bool rejectClear = false;
+  Future<void> Function()? onSave;
 
   @override
   Future<dynamic> call(
@@ -18,6 +22,8 @@ class _Native implements LocalAgent {
     Map<String, dynamic> input = const {},
   ]) async {
     calls.add((method, input));
+    if (rejectClear && method == 'clearModelSettings') throw StateError('busy');
+    if (method == 'saveModelSettings') await onSave?.call();
   }
 }
 
@@ -27,6 +33,76 @@ void main() {
     FlutterSecureStorage.setMockInitialValues({});
     SpaceStorage.active = null;
   });
+
+  test(
+    'removing a custom model clears only its Space and retains saved keys',
+    () async {
+      const first = SpaceRecord(
+        id: 'local-one',
+        name: 'One',
+        mode: SpaceMode.standalone,
+      );
+      const second = SpaceRecord(
+        id: 'local-two',
+        name: 'Two',
+        mode: SpaceMode.standalone,
+        personaId: 'fixture-persona',
+      );
+      const endpoint = 'https://model.example/v1';
+      final native = _Native();
+      final ordinary = SpaceStorage.runScoped(
+        first,
+        () => ModelSettings(native: native),
+      );
+      final persona = SpaceStorage.runScoped(
+        second,
+        () => ModelSettings(native: native),
+      );
+
+      await ordinary.save(
+        endpoint: endpoint,
+        model: 'ordinary',
+        key: 'key-one',
+      );
+      await persona.save(endpoint: endpoint, model: 'persona', key: 'key-two');
+      native.rejectClear = true;
+      await expectLater(
+        ordinary.clearConversationSelection(),
+        throwsStateError,
+      );
+      expect((await ordinary.read())?.model, 'ordinary');
+
+      native.rejectClear = false;
+      final reader = SpaceStorage.runScoped(
+        first,
+        () => ModelSettings(native: native),
+      );
+      final writeStarted = Completer<void>();
+      final allowWrite = Completer<void>();
+      native.onSave = () {
+        writeStarted.complete();
+        return allowWrite.future;
+      };
+      final refresh = reader.refreshApiKeyProjection();
+      await writeStarted.future;
+      final clearing = SpaceStorage.runScoped(
+        second,
+        ordinary.clearConversationSelection,
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(native.calls.last.$1, 'saveModelSettings');
+      expect(native.calls.last.$2['space_id'], first.id);
+      allowWrite.complete();
+      await Future.wait([refresh, clearing]);
+      expect(native.calls.last.$1, 'clearModelSettings');
+      expect(native.calls.last.$2, {'space_id': first.id});
+      expect(await ordinary.hasConversationSelection(), isFalse);
+      expect(await ordinary.read(), isNull);
+      expect((await ordinary.credentials.resolve(endpoint))?.key, 'key-one');
+      expect((await persona.read())?.model, 'persona');
+      expect((await persona.credentials.resolve(endpoint))?.key, 'key-two');
+    },
+  );
 
   test('local view exposes selection and credential presence only', () async {
     final native = _Native();

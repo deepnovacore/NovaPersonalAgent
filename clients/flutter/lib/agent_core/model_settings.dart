@@ -25,10 +25,31 @@ class ModelSettings {
   final Future<ModelConfiguration> Function()? managedConfiguration;
   String? _projection;
 
-  Future<void> clearNativeChatGpt() async {
-    _projection = null;
-    await native.call('clearChatGptSettings');
+  Map<String, String> get _nativeScope => {'space_id': ?_spaceId};
+
+  static final _projectionTails = <String, Future<void>>{};
+
+  // Validate queued writes against the selection after an in-flight reset.
+  Future<void> _serializeProjection(Future<void> Function() action) {
+    final result = (_projectionTails[_scopedKey] ?? Future<void>.value()).then(
+      (_) => action(),
+    );
+    final tail = result.then<void>((_) {}, onError: (Object _) {});
+    _projectionTails[_scopedKey] = tail;
+    unawaited(
+      tail.whenComplete(() {
+        if (identical(_projectionTails[_scopedKey], tail)) {
+          _projectionTails.remove(_scopedKey);
+        }
+      }),
+    );
+    return result;
   }
+
+  Future<void> clearNativeChatGpt() => _serializeProjection(() async {
+    _projection = null;
+    await native.call('clearChatGptSettings', _nativeScope);
+  });
 
   Future<void> useApiKey() async {
     await chatGpt.useApiKey();
@@ -36,7 +57,7 @@ class ModelSettings {
     await clearNativeChatGpt();
     final config = await readApiKey();
     if (config != null) {
-      await native.call('saveModelSettings', config.toJson());
+      await _projectApiKey(config);
     }
   }
 
@@ -130,6 +151,21 @@ class ModelSettings {
   }
 
   static const storageKey = 'nova.dart-model.v1';
+  final String? _spaceId = SpaceStorage.scope?.id;
+
+  Future<bool> hasConversationSelection() async =>
+      await chatGpt.active() != null ||
+      await storage.read(key: _scopedKey) != null;
+
+  Future<void> clearConversationSelection() => _serializeProjection(() async {
+    if (!headless) {
+      await native.call('clearModelSettings', _nativeScope);
+    }
+    _projection = null;
+    await storage.delete(key: _scopedKey);
+    await chatGpt.useApiKey();
+    _changed();
+  });
 
   Future<ModelConfiguration?> read() async {
     if (managedConfiguration case final managed?) return managed();
@@ -162,11 +198,16 @@ class ModelSettings {
         );
         final projection = jsonEncode(config.toJson());
         if (!headless && _projection != projection) {
-          await native.call('saveModelSettings', {
-            ...config.toJson(),
-            'expires_at': credentials['expires_at'],
+          await _serializeProjection(() async {
+            await validateSelection();
+            if (_projection == projection) return;
+            await native.call('saveModelSettings', {
+              ...config.toJson(),
+              ..._nativeScope,
+              'expires_at': credentials['expires_at'],
+            });
+            _projection = projection;
           });
-          _projection = projection;
         }
         await validateSelection();
         return config;
@@ -185,6 +226,8 @@ class ModelSettings {
     return raw == null ? null : jsonDecode(raw) as Map<String, dynamic>;
   }
 
+  Future<Map<String, dynamic>?> readConversationDraft() => _readRecord();
+
   Future<ModelConfiguration?> readApiKey() async {
     try {
       final value = await _readRecord();
@@ -194,10 +237,13 @@ class ModelSettings {
         endpoint,
         credentialId: value['credentialId'] as String?,
       );
+      if (credential == null) {
+        throw const AgentFailure('provider_credential_missing');
+      }
       return ModelConfiguration(
         endpoint: endpoint,
         model: value['model'] as String,
-        key: credential?.key ?? '',
+        key: credential.key,
         protocol: ModelProtocol.values.byName(
           value['protocol'] as String? ?? 'chatCompletions',
         ),
@@ -209,12 +255,17 @@ class ModelSettings {
     }
   }
 
-  Future<void> _projectApiKey(ModelConfiguration config) async {
-    final projection = jsonEncode(config.toJson());
-    if (_projection == projection) return;
-    await native.call('saveModelSettings', config.toJson());
-    _projection = projection;
-  }
+  Future<void> _projectApiKey(ModelConfiguration config) =>
+      _serializeProjection(() async {
+        final projection = jsonEncode(config.toJson());
+        if (_projection == projection || await chatGpt.active() != null) return;
+        if (jsonEncode((await readApiKey())?.toJson()) != projection) return;
+        await native.call('saveModelSettings', {
+          ...config.toJson(),
+          ..._nativeScope,
+        });
+        _projection = projection;
+      });
 
   /// Credential edits do not change the selected conversation or OAuth mode.
   Future<void> refreshApiKeyProjection([String? changedCredentialId]) async {
