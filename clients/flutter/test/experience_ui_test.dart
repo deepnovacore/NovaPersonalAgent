@@ -35,9 +35,7 @@ void main() {
         );
         if (!welcome) {
           expect(
-            find.text(
-              'Choose a sample persona to browse offline. Online features require active experience access.',
-            ),
+            find.text('Choose a sample persona and browse the sample data.'),
             findsOneWidget,
           );
         }
@@ -113,7 +111,7 @@ void main() {
           expect(find.text('选择模型'), findsNothing);
           expect(find.byTooltip('实时语音'), findsNothing);
           expect(
-            find.text('在线功能需要有效体验资格。请在普通 Space 的设置中兑换体验码。'),
+            find.text('作者 API 尚未配置或已失效，请在普通 Space 的设置中使用体验码配置。'),
             findsOneWidget,
           );
           await tester.tap(find.text('体验模式'));

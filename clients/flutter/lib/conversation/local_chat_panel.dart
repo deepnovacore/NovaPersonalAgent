@@ -454,37 +454,37 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   String _error(String code) => switch (code) {
     'experience_enrollment_required' || 'experience_enrollment_inactive' => t(
       widget.authorModel == null
-          ? '在线功能需要有效体验资格。请在普通 Space 的设置中兑换体验码。'
-          : '体验资格已失效，请在「兑换体验码」中管理体验模型。',
+          ? '作者 API 尚未配置或已失效，请在普通 Space 的设置中使用体验码配置。'
+          : '作者 API 配置已失效，请在「兑换体验码」中重新配置。',
       widget.authorModel == null
-          ? 'Online features require active experience access. Redeem a code in a regular Space’s settings.'
-          : 'Experience access has expired. Manage it under Redeem experience code.',
+          ? 'The author API is not configured or is no longer valid. Configure it with an experience code in a regular Space’s settings.'
+          : 'The author API configuration is no longer valid. Configure it again under Redeem experience code.',
     ),
     'experience_invalid_token' => t(
-      '体验授权已失效，请重新启用体验模型。',
-      'Experience authorization expired. Enable the experience model again.',
+      '作者 API 配置已失效，请重新配置。',
+      'The author API configuration is no longer valid. Configure it again.',
     ),
     'experience_quota_exceeded' => t(
-      '体验额度已用完。',
-      'Experience quota has been exhausted.',
+      '作者 API 额度已用完。',
+      'The author API quota has been exhausted.',
     ),
     'experience_request_too_large' => t(
       '文字太长，请缩短后重试。',
       'Shorten the message and try again.',
     ),
     'experience_text_busy' => t(
-      '体验模型正在处理另一条消息，请稍后重试。',
-      'The experience model is processing another message. Try again shortly.',
+      '作者 API 正在处理另一条消息，请稍后重试。',
+      'The author API is processing another message. Try again shortly.',
     ),
     'experience_text_upstream_unavailable' ||
     'experience_gateway_unavailable' ||
     'experience_unavailable' => t(
-      '体验服务暂时不可用，请稍后重试。',
-      'Experience service is unavailable. Try again shortly.',
+      '作者 API 服务暂时不可用，请稍后重试。',
+      'The author API service is unavailable. Try again shortly.',
     ),
     'experience_rate_limited' => t(
-      '体验额度暂时用完，请稍后重试。',
-      'Experience quota is temporarily exhausted. Try again later.',
+      '作者 API 暂时受限，请稍后重试。',
+      'The author API is temporarily rate-limited. Try again later.',
     ),
     'model_settings_required' => t(
       '先选择一个模型，就可以开始对话。',
@@ -1185,7 +1185,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                             widget.onAuthorModelSettings != null)
                           TextButton(
                             onPressed: widget.onAuthorModelSettings,
-                            child: Text(t('管理体验模型', 'Manage experience model')),
+                            child: Text(
+                              t('管理 API 配置', 'Manage API configuration'),
+                            ),
                           ),
                         if (host.error == 'model_settings_required' &&
                             widget.onChooseModel != null)

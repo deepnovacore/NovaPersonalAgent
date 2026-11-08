@@ -52,8 +52,8 @@ Future<({String? testerId})?> showAuthorModelDialog(
                     'Check the experience code.',
                   ),
                   'enrollment_inactive' => t(
-                    '体验资格已失效。',
-                    'Experience access has expired.',
+                    '作者 API 配置已失效，请重新配置。',
+                    'The author API configuration is no longer valid. Configure it again.',
                   ),
                   'rate_limited' => t(
                     '操作太频繁，稍后再试。',
@@ -86,12 +86,12 @@ Future<({String? testerId})?> showAuthorModelDialog(
                       Text(
                         active
                             ? t(
-                                '当前 Space 正在使用作者提供的对话模型。',
-                                'This Space is using the author-provided chat model.',
+                                '当前 Space 已配置作者提供的 API Key。',
+                                'This Space is configured with the author-provided API Key.',
                               )
                             : t(
-                                '兑换后即可使用作者提供的对话模型。',
-                                'Redeem a code to use the author-provided chat model.',
+                                '体验码用于一键配置作者提供的 API Key。',
+                                'Use an experience code to configure the author-provided API Key in one step.',
                               ),
                       ),
                       if (!pending && existing == null)

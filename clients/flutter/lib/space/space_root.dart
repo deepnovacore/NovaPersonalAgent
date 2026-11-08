@@ -1770,7 +1770,7 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                 (
                   CupertinoIcons.chat_bubble,
                   CupertinoIcons.chat_bubble_fill,
-                  'NovaCore',
+                  'Nova',
                   0,
                 ),
                 (

@@ -40,7 +40,7 @@ class _ExperienceChooserState extends State<ExperienceChooser> {
       await session.redeem(code.text);
       if (mounted) {
         setState(() {
-          notice = t('体验资格已启用', 'Experience access enabled');
+          notice = t('作者提供的 API Key 已配置', 'Author-provided API Key configured');
           code.clear();
         });
       }
@@ -106,8 +106,8 @@ class _ExperienceChooserState extends State<ExperienceChooser> {
         if (widget.allowInvite) ...[
           Text(
             t(
-              '示例资料可以离线浏览。在线对话和重新提取需要先兑换体验码。',
-              'Browse sample data offline. Redeem a code to chat online or refresh the profile.',
+              '示例资料可以直接浏览。体验码用于一键配置作者提供的 API Key。',
+              'Browse the sample data directly. Use an experience code to configure the author-provided API Key in one step.',
             ),
           ),
           const SizedBox(height: 16),
@@ -125,8 +125,8 @@ class _ExperienceChooserState extends State<ExperienceChooser> {
         ] else
           Text(
             t(
-              '选择示例人物，离线浏览资料。在线功能需要有效体验资格。',
-              'Choose a sample persona to browse offline. Online features require active experience access.',
+              '选择示例人物，浏览示例资料。',
+              'Choose a sample persona and browse the sample data.',
             ),
           ),
         if (notice != null) Text(notice!),

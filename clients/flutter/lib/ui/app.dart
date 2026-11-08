@@ -883,7 +883,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     } catch (_) {
       if (mounted && current()) {
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('无法重新提取。请确认已兑换体验码；已保存的资料仍可查看。')),
+          const SnackBar(
+            content: Text('无法重新提取。请检查作者 API 配置、额度或网络；已保存的资料仍可查看。'),
+          ),
         );
       }
     } finally {
@@ -1252,12 +1254,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 if (_canUseAuthorModel)
                   'author_model': _authorTesterId == null
                       ? _t(
-                          '兑换后即可使用作者提供的对话模型。',
-                          'Redeem a code to use the author-provided chat model.',
+                          '体验码用于一键配置作者提供的 API Key。',
+                          'Use an experience code to configure the author-provided API Key in one step.',
                         )
                       : _t(
-                          '正在使用作者提供的对话模型',
-                          'Author-provided chat model enabled',
+                          '已配置作者提供的 API Key',
+                          'Author-provided API Key configured',
                         ),
               },
             ),
@@ -1803,7 +1805,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           (
                             CupertinoIcons.chat_bubble,
                             CupertinoIcons.chat_bubble_fill,
-                            'NovaCore',
+                            'Nova',
                             0,
                           ),
                           (
