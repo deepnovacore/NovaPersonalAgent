@@ -42,6 +42,7 @@ export type PersonalStoreErrorCode =
     | 'personal_store_capacity'
     | 'state_corrupt'
     | 'state_version_unsupported'
+    | 'state_schema_incompatible'
     | 'state_write_failed';
 export class PersonalStoreError extends Error {
     constructor(readonly code: PersonalStoreErrorCode) {
@@ -103,7 +104,8 @@ function parseStateText(text:string):PersonalState {
     }
     try{return parseStoredState(value)}catch(error){
         if(error instanceof PersonalStoreError)throw error;
-        throw new PersonalStoreError('state_corrupt');
+        // A readable file can belong to another schema; never quarantine it as damaged bytes.
+        throw new PersonalStoreError('state_schema_incompatible');
     }
 }
 export class PersonalStore {

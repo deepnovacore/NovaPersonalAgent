@@ -49,7 +49,7 @@ test('persona compatibility stays bounded and does not admit unrelated unknown c
   for(const extra of [{persona:''},{persona:'a'.repeat(129)},{persona:42},{persona:{}},{future_metadata:true}]){
    const state=initialState();Object.assign(state.conversations.items[0]!,extra)
    const original=JSON.stringify(state);await writeFile(path,original,{mode:0o600})
-   await assert.rejects(new PersonalStore(path).read(),{code:'state_corrupt'})
+   await assert.rejects(new PersonalStore(path).read(),{code:'state_schema_incompatible'})
    assert.equal(await readFile(path,'utf8'),original)
   }
  }finally{await rm(root,{recursive:true,force:true})}

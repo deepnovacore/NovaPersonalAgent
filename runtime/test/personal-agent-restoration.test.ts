@@ -1,7 +1,7 @@
 import {feedNotification,feedNotificationKey} from '../src/notifications/feed.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm,realpath,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -279,4 +279,23 @@ test('the personal store reports capacity, corruption and version with stable co
   await store.write(await store.read())
   assert.equal((JSON.parse(await readFile(path,'utf8')) as {schema_version:number}).schema_version,1)
  }finally{await rm(dir,{recursive:true,force:true})}
+})
+
+for(const shape of ['root-field','conversation-field','invalid-known-field'] as const)test(`incompatible readable state stays in place without an empty replacement: ${shape}`,async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-incompatible-')),path=join(dir,'personal.json')
+ const state=initialState(),main=state.conversations.items[0]!,at=new Date().toISOString()
+ main.messages=[{id:'preserved',conversation_id:main.id,role:'user',text:'Keep this history',created_at:at}]
+ if(shape==='root-field')Object.assign(state,{future_metadata:{version:2}})
+ else if(shape==='conversation-field')Object.assign(main,{future_metadata:{version:2}})
+ else Object.assign(main,{persona:42})
+ const text=JSON.stringify(state),backup='existing backup remains untouched'
+ await writeFile(path,text,{mode:0o600});await writeFile(path+'.before-schedules.json',backup,{mode:0o600})
+ const host=new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  await assert.rejects(host.open({deferBackground:true}),{code:'state_schema_incompatible'})
+  await host.close()
+  assert.equal(await readFile(path,'utf8'),text)
+  assert.equal(await readFile(path+'.before-schedules.json','utf8'),backup)
+  assert.equal((await readdir(dir)).some(name=>name.includes('.state_corrupt-')),false)
+ }finally{await host.close().catch(()=>undefined);await rm(dir,{recursive:true,force:true})}
 })

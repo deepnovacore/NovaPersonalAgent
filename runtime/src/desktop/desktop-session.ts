@@ -2229,7 +2229,7 @@ function desktopEntryFailureCode(error: unknown): string {
     if (['state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity'].includes(String(value.code))) return String(value.code)
     // state_corrupt/state_version_unsupported are shared with ProjectStateError; only the personal
     // store owns the reset-state guidance.
-    if (value.name === 'PersonalStoreError' && ['state_corrupt', 'state_version_unsupported'].includes(String(value.code))) return String(value.code)
+    if (value.name === 'PersonalStoreError' && ['state_corrupt', 'state_version_unsupported', 'state_schema_incompatible'].includes(String(value.code))) return String(value.code)
     if (value.code === 'frontbrain_tool_budget_exceeded') return 'configuration_required'
     if (value.code === 'credential_missing') return 'authentication_failed'
     if (new Set([

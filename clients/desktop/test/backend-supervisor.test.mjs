@@ -369,7 +369,7 @@ test('backend classifier maps only stable public failure classes', () => {
   assert.deepEqual(classifyBackendFailure('private exception text'), {
     kind: 'recoverable', code: 'backend_disconnected',
   })
-  for (const code of ['personal_store_capacity', 'state_corrupt', 'state_version_unsupported']) {
+  for (const code of ['personal_store_capacity', 'state_corrupt', 'state_version_unsupported', 'state_schema_incompatible']) {
     assert.deepEqual(classifyBackendFailure(code), {kind: 'unavailable', code})
   }
 })
@@ -467,4 +467,10 @@ test('memory configuration IPC rejects unknown codes and non-allowlisted variabl
       reason: 'configuration_required', startupConfiguration})
     assert.equal(result.startupConfiguration, undefined)
   }
+})
+
+test('schema incompatibility remains a stable unavailable diagnostic',()=>{
+ const collector=createBackendDiagnosticCollector()
+ collector.push('[runtime-diagnostic] state_schema_incompatible\nprivate schema detail')
+ assert.deepEqual(collector.failure(),{kind:'unavailable',code:'state_schema_incompatible'})
 })
