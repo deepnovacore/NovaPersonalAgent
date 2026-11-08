@@ -12,8 +12,8 @@ export function ExperienceSpacesPanel({api,onActiveChange}:any){
  {state.active&&state.personas.find((persona:any)=>persona.id===state.active)?.avatar&&<img src={state.personas.find((persona:any)=>persona.id===state.active).avatar} alt="" width={72} height={72}/>}
  <label>{label('当前空间','Current Space')}<select disabled={busy} value={state.active??''} onChange={event=>void run(async()=>setState(await experience.select(event.target.value||null)))}><option value="">{label('我的空间','My Space')}</option>{state.personas.map((persona:any)=><option key={persona.id} value={persona.id}>{persona.name} · {persona.occupation}</option>)}</select></label>
  {state.active&&<p>{label('当前体验空间仅保存在这台电脑，不支持手机配对。','This experience Space stays on this computer and cannot pair with a phone.')}</p>}
- <p>{label('合成资料可直接浏览。输入体验码后，可进行文字对话和更新画像。','Browse the synthetic data freely. Redeem an experience code to chat and refresh the profile.')}</p>
+ <p>{label('示例资料可直接浏览。体验码用于一键配置作者提供的 API Key。','Browse the sample data directly. Use an experience code to configure the author-provided API Key in one step.')}</p>
  <label>{label('体验码','Experience code')}<TextField.Root type="password" autoComplete="off" value={code} onChange={event=>setCode(event.target.value)} disabled={busy}/></label>
- <Button disabled={busy||!code.trim()} onClick={()=>void run(async()=>{const value=code;setCode('');await experience.redeem(value);setMessage(label('体验码已验证，可以开始对话。','Experience code accepted. You can start chatting.'))})}>{label('验证体验码','Redeem code')}</Button>
+ <Button disabled={busy||!code.trim()} onClick={()=>void run(async()=>{const value=code;setCode('');await experience.redeem(value);setMessage(label('作者提供的 API Key 已配置，可以开始对话。','Author-provided API Key configured. You can start chatting.'))})}>{label('验证体验码','Redeem code')}</Button>
  {message&&<p role="status">{message}</p>}</section>
 }

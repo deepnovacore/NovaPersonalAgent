@@ -143,7 +143,7 @@ void main() {
       );
       await tester.pageBack();
       await tester.pumpAndSettle();
-      await tester.tap(find.text('NovaCore').last);
+      await tester.tap(find.text('Nova').last);
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(NovaApp),
@@ -171,7 +171,7 @@ void main() {
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-tasks.png'),
       );
-      await tester.tap(find.text('NovaCore').last);
+      await tester.tap(find.text('Nova').last);
       await tester.pumpAndSettle();
       // Exercise both compact and landscape layouts at accessible text sizes.
       for (final size in [const Size(320, 640), const Size(844, 390)]) {
