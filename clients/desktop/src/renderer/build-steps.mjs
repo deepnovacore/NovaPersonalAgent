@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {renderMarkdown} from './markdown.mjs'
 import {iconNode,withIcon} from './icons.mjs'
 import {readDisplayPreferences,subscribeDisplayPreferences} from './view-preferences.mjs'
 
@@ -24,6 +25,43 @@ export function computerCallTarget(item){
   :item.name==='computer_key'&&typeof args.keys==='string'?args.keys
   :''
  return t(COMPUTER_LABELS[item.name])+(detail?' · '+detail:'')
+}
+
+/**
+ * @template {{kind:string,id?:string,narration?:string}} Step
+ * @param {Step[]} steps
+ * @returns {{key:string,narration?:string,steps:Step[]}[]}
+ */
+export function buildStepSections(steps){
+ const sections=[]
+ /** @type {{key:string,narration?:string,steps:Step[]}} */
+ let current={key:'start',steps:[]}
+ for(const step of steps){
+  if(step.kind==='tool'&&typeof step.narration==='string'&&step.narration.trim()){
+   if(current.steps.length)sections.push(current)
+   current={key:'tool:'+step.id,narration:step.narration,steps:[]}
+  }
+  current.steps.push(step)
+ }
+ if(current.steps.length)sections.push(current)
+ return sections
+}
+
+export function buildToolSummary(steps){
+ const tools=steps.filter(step=>step.kind==='tool')
+ if(!tools.length)return t('思考 · {0}',steps.length)
+ const read=new Set(),changed=new Set()
+ for(const step of tools){
+  if(step.status!=='completed'||!step.file_key)continue
+  if(step.name==='file_read')read.add(step.file_key)
+  if(step.name==='file_write'||step.name==='file_edit')changed.add(step.file_key)
+ }
+ return [t('{0} 次工具调用',tools.length),read.size?t('读取 {0} 个文件',read.size):'',changed.size?t('写入或编辑 {0} 个文件',changed.size):''].filter(Boolean).join(' · ')
+}
+
+export function buildActivityLabel(step){
+ const labels={file_read:'正在读取文件…',file_write:'正在写入文件…',file_edit:'正在编辑文件…',shell_execute:'正在执行命令…'}
+ return t(labels[step.name]??'正在调用工具…')
 }
 
 /** One-line reasoning preview: standard rows truncate, detailed rows keep the whole text. */
@@ -67,7 +105,7 @@ function thinkIcon(){
  * Reads `build.details {view:'steps'}` incrementally from `build.log_revision`;
  * older hosts that cannot page thoughts gracefully degrade to the `calls` view.
  */
-export function createBuildSteps({c,el,changed,display}){
+export function createBuildSteps({c,el,changed,display,renderNarration}){
  const readPreferences=display?.read??readDisplayPreferences
  const subscribe=display?.subscribe??subscribeDisplayPreferences
  let prefs=readPreferences()
@@ -281,10 +319,11 @@ export function createBuildSteps({c,el,changed,display}){
    const element=el('article',undefined,'message tool-message-group build-steps')
    const header=el('button',undefined,'build-steps-header');header.type='button'
    const dot=el('span',undefined,'build-steps-dot'),label=el('span','','build-steps-label'),duration=el('span','','build-steps-duration'),chevron=el('span',undefined,'build-steps-chevron')
-   header.append(dot,label,duration,chevron)
+   const live=el('span',undefined,'build-steps-live');live.hidden=true
+   header.append(dot,label,duration,chevron,live)
    const rows=el('div',undefined,'build-steps-rows')
    element.append(header,rows)
-   node={element,header,dot,label,duration,chevron,rows,items:shown,open:false,active:null,userToggled:false}
+   node={element,header,dot,label,duration,chevron,live,rows,items:shown,open:false,active:null,userToggled:false}
    node.open=Boolean(activeStatus())
    header.addEventListener('click',()=>{node.open=!node.open;node.userToggled=true;applyOpen(node)})
    groups.set(key,node)
@@ -299,17 +338,38 @@ export function createBuildSteps({c,el,changed,display}){
   const item=current()
   node.element.dataset.buildStatus=item?.build?.status??''
   node.dot.dataset.status=item?.build?.status??''
-  node.label.textContent=t('工作步骤 · {0}',shown.length)
+  node.label.textContent=buildToolSummary(shown)
+  const running=c.connected&&item?.build?.status==='running'?items.findLast(step=>step.kind==='tool'&&step.state==='running'):null
+  node.live.hidden=!running||!shown.includes(running)
+  node.live.textContent=node.live.hidden?'':buildActivityLabel(running)
   const duration=groupDuration(shown)
   node.duration.textContent=duration;node.duration.hidden=!duration
   node.rows.replaceChildren(...shown.map(step=>step?.kind==='thinking'?thinkingRow(step):toolRow(step)))
   applyOpen(node)
   return node.element
  }
+ function renderSections(key,steps){
+  const rows=[];let first=true
+  for(const section of buildStepSections(steps)){
+   if(section.narration){
+    if(renderNarration)rows.push(renderNarration(section.narration,first))
+    else{
+     const message=el('article',undefined,'message assistant build-narration')
+     const body=el('div',undefined,'message-body')
+     body.append(renderMarkdown(section.narration));message.append(body);rows.push(message)
+    }
+    first=false
+   }
+   const tools=group(key+':'+section.key,section.steps)
+   if(tools)rows.push(tools)
+  }
+  return rows
+ }
  return {update,
   get key(){return JSON.stringify([selected,mode,items,error,prefs.steps,prefs.collapse])},
-  forMessage:id=>{const matching=items.filter(step=>step?.message_id===id);const element=matching.length?group('message:'+id,matching):null;return element?[element]:[]},
-  remaining:ids=>{const orphan=items.filter(step=>step&&!ids.has(step.message_id??'')),buckets=new Map();for(const step of orphan){const key=step.message_id??'unlinked';if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(step)}const rows=[...buckets].map(([key,groupItems])=>group('orphan:'+key,groupItems)).filter(Boolean);if(error){errorText.textContent=t('工具日志暂不可用。')+' '+error;rows.push(notice)}return rows},
+  hasNarration:id=>items.some(step=>step.message_id===id&&Boolean(step.narration)),
+  forMessage:id=>renderSections('message:'+id,items.filter(step=>step?.message_id===id)),
+  remaining:ids=>{const orphan=items.filter(step=>step&&!ids.has(step.message_id??'')),buckets=new Map();for(const step of orphan){const key=step.message_id??'unlinked';if(!buckets.has(key))buckets.set(key,[]);buckets.get(key).push(step)}const rows=[...buckets].flatMap(([key,groupItems])=>renderSections('orphan:'+key,groupItems));if(error){errorText.textContent=t('工具日志暂不可用。')+' '+error;rows.push(notice)}return rows},
   destroy:()=>{unsubscribe?.();if(timer)clearInterval(timer);timer=null;nodes.clear();groups.clear();shots.clear()},
  }
 }

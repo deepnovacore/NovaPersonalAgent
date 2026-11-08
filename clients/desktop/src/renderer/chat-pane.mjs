@@ -183,7 +183,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
  history.addEventListener('scroll',()=>{if(history.scrollHeight-history.scrollTop-history.clientHeight<24)newMessages.hidden=true;deliverPresented();read()});const visible=()=>{deliverPresented();read()};document.addEventListener('visibilitychange',visible);window.addEventListener('focus',visible)
 
  let renderedMessages='',renderedConversation=null
- const buildLog=createBuildSteps({c,el,changed:()=>renderHistory()})
+ const buildLog=createBuildSteps({c,el,changed:()=>renderHistory(),renderNarration:(text,first)=>renderMessage({role:'assistant',text,build_narration:true},{first,continuation:!first})})
  function renderConversations(){
   const items=c.snapshot?.conversations?.items??[]
   const active=items.find(item=>item.id===c.selectedId)
@@ -208,7 +208,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const user=message.role==='user',toolOnly=!user&&message.live_tool_only===true
   const feedId=!user&&typeof message.id==='string'&&message.id.startsWith('feed:')?message.id.slice(5):null
   const feed=feedId?c.snapshot?.feed?.find(item=>item.id===feedId):null
-  const node=el('article',undefined,`message ${user?'user':'assistant'}${feed?' message-feed':''}${continuation?' message-continuation':''}${toolOnly?' message-tool-trace-live':''}`);node.dataset.messageId=message.id
+  const node=el('article',undefined,`message ${user?'user':'assistant'}${feed?' message-feed':''}${continuation?' message-continuation':''}${toolOnly?' message-tool-trace-live':''}${message.build_narration?' build-narration':''}`);if(message.id)node.dataset.messageId=message.id
   if(!user&&first){const avatar=avatarNode();if(avatar)node.append(avatar)}
   const body=el('div',undefined,'message-body')
   body.append(el('small',user?identityView?.profile?.userName?.trim()||t('你'):identityView?.profile.assistantName??'Nova','message-role'))
@@ -267,7 +267,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
    if(c.selectedId==='chat:main'&&message.created_at){const date=new Date(message.created_at),timezone=c.snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,stamp=date.toLocaleDateString('en-CA',{timeZone:timezone});if(stamp!==day){day=stamp;previousAssistant=false;const separator=el('div',date.toLocaleDateString(currentLanguage(),{month:'short',day:'numeric',weekday:'short',timeZone:timezone}),'message-date');separator.setAttribute('role','separator');history.append(separator)}}
    const user=message.role==='user',continuation=!user&&previousAssistant
    history.append(renderMessage(message,{first:!user&&!previousAssistant,continuation}))
-   previousAssistant=!user
+   previousAssistant=!user||isBuild&&buildLog.hasNarration(message.id)
    if(isBuild&&user)history.append(...buildLog.forMessage(message.id))
   }
   if(isBuild)history.append(...buildLog.remaining(new Set(persisted.map(message=>message.id))))
