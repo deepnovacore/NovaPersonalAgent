@@ -152,7 +152,7 @@ test('Build status bar shows state, the workspace folder name without exposing t
  assert.equal(status.textContent,'Build · 已暂停');assert.equal(status.attributes['data-state'],'paused')
  const info=walk(agent.element).find(node=>node.children.includes(status)),[, path, reason]=info.children
  assert.equal(path.textContent,'demo');assert.equal(path.title,'demo')
- assert.equal(reason.textContent,'已暂停，点击继续恢复任务');assert.equal(reason.hidden,false)
+ assert.equal(reason.textContent,'');assert.equal(reason.hidden,true,'a plain restart pause needs no extra reason')
 })
 
 test('a paused Build explains an approval denial in words instead of the raw code',()=>{
@@ -165,9 +165,12 @@ test('a paused Build explains an approval denial in words instead of the raw cod
   focus(){}
  }
  const walk=node=>[node,...node.children.flatMap(walk)]
- const bar=reason=>{const item={id:'build',kind:'build',build:{status:'paused',project:'/x/demo',reason}},local={},c={state:()=>local,connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})},parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}});agent.update();const status=walk(agent.element).find(node=>node.attributes.role==='status');return walk(agent.element).find(node=>node.children.includes(status)).children[2]}
- assert.equal(bar('approval_denied').textContent,'你拒绝了一次操作，补充新的要求后继续')
- const unknown=bar('some_internal_code');assert.equal(unknown.textContent,'');assert.equal(unknown.hidden,true,'unknown codes are never shown raw')
+ const bar=(reason,reason_detail)=>{const item={id:'build',kind:'build',build:{status:'paused',project:'/x/demo',reason,reason_detail}},local={},c={state:()=>local,connected:true,selectedId:item.id,selectedConversation:item,command:async()=>({})},parent=new Element('main'),agent=mountWorkbenchAgent(parent,{c,el:(name,text)=>new Element(name,text),run:callback=>callback(),api:{personal:{}}});agent.update();const status=walk(agent.element).find(node=>node.attributes.role==='status');return walk(agent.element).find(node=>node.children.includes(status)).children[2]}
+ assert.equal(bar('approval_denied').textContent,'你拒绝了操作，已暂停；点「继续」会换一种方式接着做')
+ assert.equal(bar('stopped').textContent,'已暂停，做过的步骤都保留了')
+ assert.equal(bar('approval_denied','你拒绝了用 shell 执行「rm -rf build」，未执行').textContent,'你拒绝了用 shell 执行「rm -rf build」，未执行','the host sentence wins over the mapped label')
+ for(const quiet of ['restart_requires_resume','new_user_input_received']){const hidden=bar(quiet);assert.equal(hidden.textContent,'');assert.equal(hidden.hidden,true)}
+ const unknown=bar('some_internal_code');assert.equal(unknown.textContent,'已暂停','unknown codes fall back to a generic pause, never the raw code')
 })
 
 test('plan card workspaces follow the runner: Build and Codex differ, other executors take no workspace',async()=>{

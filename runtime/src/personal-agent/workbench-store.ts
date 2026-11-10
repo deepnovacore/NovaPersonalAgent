@@ -23,7 +23,7 @@ export interface WorkbenchCheckpoint {
  context_dependencies?:ContextDependencies
  confirmed_plan_omitted?:boolean
  version:1;conversation_id:string;generation:number;run_version:number;status:BuildStatus;reason:string|null;model:JsonValue|null;
- inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;assistant:string;updated_at:string
+ inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;denied_classes?:string[];assistant:string;updated_at:string
  voice_message_ids?:string[]
  /** Bounded display-only history; empty for checkpoints written before capture existed. */
  thoughts?:WorkbenchThought[]
@@ -146,7 +146,7 @@ export class WorkbenchStore {
  async checkpoint(id:string,generation:number):Promise<WorkbenchCheckpoint>{
   const value=await this.#images(await this.#readCheckpoint(id,generation),id,generation,true)
   if(value===null)return emptyWorkbenchCheckpoint(id,generation)
-  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),context_dependencies:contextDependenciesSchema.optional(),confirmed_plan_omitted:z.boolean().optional(),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
+  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),context_dependencies:contextDependenciesSchema.optional(),confirmed_plan_omitted:z.boolean().optional(),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),denied_classes:z.array(z.string().max(1100)).max(256).optional(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
   const calls=new Map(checked.calls.map(call=>[call.id,call]));if(calls.size!==checked.calls.length)throw Error('duplicate_tool_call')
   checked.pending_calls=checked.pending_calls.map(call=>{const prior=calls.get(call.id);if(prior?.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');return prior})
   checked.thoughts=boundWorkbenchThoughts((checked.thoughts??[]).map(thought=>({id:thought.id,text:thought.text,created_at:thought.created_at,...(thought.message_id===undefined?{}:{message_id:thought.message_id})})))

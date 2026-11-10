@@ -15,7 +15,7 @@ import {WorkbenchStore,type WorkbenchPlan} from './workbench-store.js'
 import {realpath} from 'node:fs/promises'
 import {canonicalProject,projectResourceKey} from './local-tools.js'
 import {taskResourcesBusy,quarantineTaskResources,releaseQuarantinedTaskResources} from '../executors/task-resources.js'
-import {localShellProcessGone,type LocalShellProcess} from './local-shell.js'
+import {localShellTreeState,type LocalShellProcess} from './local-shell.js'
 import type {Conversation} from './conversations.js'
 import {explicitMemoryTurn,type ExplicitMemoryTurn} from '../memory/explicit-memory.js'
 import {DailyWorkbench} from './daily-workbench.js'
@@ -216,11 +216,11 @@ export class PersonalAgentHost {
         for(const item of this.#state.conversations.items){
             if(!item.build)continue;
             const state=await this.workbench.checkpoint(item.id,item.generation),owners=state.calls.filter(call=>call.name==='shell_execute'&&call.process&&(call.state==='running'||(call.result as {cleanup_confirmed?:boolean}|undefined)?.cleanup_confirmed===false)).map(call=>call.process!);
-            const key=projectResourceKey(item.build.project),live=owners.filter(owner=>!localShellProcessGone(owner));
+            const key=projectResourceKey(item.build.project),live=owners.filter(owner=>localShellTreeState(owner)!=='gone');
             if(live.length){this.#localProcessFences.set(key,[...(this.#localProcessFences.get(key)??[]),...live]);quarantineTaskResources([key])}
         }
     }
-    #refreshLocalProcessFences():void{for(const [key,owners] of this.#localProcessFences)if(owners.every(localShellProcessGone)){releaseQuarantinedTaskResources([key]);this.#localProcessFences.delete(key)}}
+    #refreshLocalProcessFences():void{for(const [key,owners] of this.#localProcessFences)if(owners.every(owner=>localShellTreeState(owner)==='gone')){releaseQuarantinedTaskResources([key]);this.#localProcessFences.delete(key)}}
     activeLocalBuild():Conversation|undefined{return this.#state.conversations.items.find(item=>item.kind==='build'&&item.build&&item.build.status!=='finished'&&(this.#admittingBuilds.has(item.id)||['running','awaiting_approval'].includes(item.build.status)))}
     localBuildAuthorized(id:string):boolean{return this.#localBuildAuthority.has(id)&&this.#state.conversations.items.find(item=>item.id===id)?.build?.status!=='finished'}
     /** Hand voice ownership back before a runtime is cleared or the session changes identity. */
@@ -234,7 +234,7 @@ export class PersonalAgentHost {
     }
     async stopLocalBuild(id:string):Promise<void>{this.#localBuildAuthority.delete(id);await this.#conversationPool?.stopBuild(id);await this.#conversationRuns.get(id);const item=this.#state.conversations.items.find(item=>item.id===id);if(item?.build&&['running','awaiting_approval'].includes(item.build.status))await this.updateLocalBuild(id,item.generation,{status:'paused',reason:'stopped',approval:null})}
     async stopLocalBuilds():Promise<void>{for(const item of this.#state.conversations.items.filter(item=>item.kind==='build'))await this.stopLocalBuild(item.id)}
-    updateLocalBuild(id:string,generation:number,view:Pick<NonNullable<Conversation['build']>,'status'|'reason'|'approval'>):Promise<void>{return this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation||!item.build)return;item.build={...item.build,...view,log_revision:(item.build.log_revision??0)+1};await this.#commit(next)})}
+    updateLocalBuild(id:string,generation:number,view:Pick<NonNullable<Conversation['build']>,'status'|'reason'|'approval'>&{reason_detail?:string|null}):Promise<void>{return this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation||!item.build)return;item.build={...item.build,...view,reason_detail:view.reason_detail??null,log_revision:(item.build.log_revision??0)+1};await this.#commit(next)})}
     finishLocalBuild(id:string,generation:number,currentMessageId?:string):Promise<boolean>{return this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);if(item?.generation!==generation||item.kind!=='build'||!item.build)return false;if(item.build.status==='finished')return true;const currentIndex=item.messages.findIndex(message=>message.id===currentMessageId);if(item.messages.some((message,index)=>message.role==='user'&&message.generation_status==='pending'&&message.id!==currentMessageId&&(currentIndex<0||index>currentIndex)))return false;item.build={...item.build,status:'finished',reason:null,approval:null,log_revision:(item.build.log_revision??0)+1};await this.#commit(next);return true})}
     publishPlan(id:string,generation:number,title:string,content:string,publicationKey?:string,dependencies?:ContextDependencies):Promise<WorkbenchPlan>{return this.#serial(async()=>{
         const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===id);

@@ -9,8 +9,9 @@ import type {Conversation,ConversationRuntime,ConversationTurnContext} from './c
 import type {PersonalAgentHost} from './host.js'
 import {mergeTurnText,type CascadedLlmFactory,type CascadedLlmSession,type CascadedLlmTool,type CascadedLlmInput} from '../realtime/cascaded/llm.js'
 import {LOCAL_TOOLS,executeLocalTool,isLocalTool,localPathEscapesProject,localToolArguments,projectResourceKey} from './local-tools.js'
-import {acquireTaskResources,taskResourcesBusy,quarantineTaskResources} from '../executors/task-resources.js'
-import {localShellProcessGone,type LocalShellOptions} from './local-shell.js'
+import {acquireTaskResources,taskResourcesBusy,taskResourcesUncertain,quarantineTaskResources,releaseQuarantinedTaskResources} from '../executors/task-resources.js'
+import {localShellTreeState,type LocalShellOptions} from './local-shell.js'
+import {approvalClasses,classDenied,commandLine,stepPhrase,workbenchCopy,DENIED_MESSAGE,DENIED_BEFORE_MESSAGE,SKIPPED_MESSAGE,DENIED_RESUME_INSTRUCTION} from './workbench-copy.js'
 import type {JsonValue} from '../core/events.js'
 import type {WorkbenchCall} from './workbench-store.js'
 import {MAX_WORKBENCH_THOUGHTS,MAX_WORKBENCH_THOUGHT_CODEPOINTS} from './workbench-store.js'
@@ -35,7 +36,8 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
  const reasoningMode:'enabled'|'disabled'=options.reasoning===true?'enabled':'disabled'
  const approvalMode=():'ask'|'never'=>typeof options.approval==='function'?options.approval():options.approval
  const turnToolLimit=build?128:24
- const roundLimitReply=()=>options.language==='en'?(build?'Build paused at the 128-call limit. Click Resume to continue.':'Plan paused at the 24-call limit. Send a message to continue planning.'):(build?'已达到本次 128 次工具调用上限，Build 已暂停。点击 Resume 继续。':'已达到本次 24 次工具调用上限，Plan 已暂停。发送消息继续完善计划。')
+ const copy=workbenchCopy(options.language)
+  const roundLimitReply=()=>copy.roundLimit(build,state.calls.filter(call=>call.state==='completed').length,turnToolLimit)
  if(build&&(!conversation.build||!['darwin','win32'].includes(process.platform)))throw Error('local_build_unavailable')
  const state=await store.checkpoint(conversation.id,conversation.generation)
  const confirmedPlan=build&&!state.confirmed_plan_omitted&&conversation.build?.plan_id&&conversation.build.plan_version?await store.plan(conversation.build.plan_id,conversation.build.plan_version):undefined
@@ -70,7 +72,8 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
  let session:CascadedLlmSession|undefined,bridgeRuntime:ConversationRuntime|undefined
  let closed=false,controller:AbortController|undefined,active:Promise<{assistant:string;turn_id?:string}>|undefined,version=state.run_version
  let computer:Pick<ComputerSession,'observe'|'action'|'close'>|undefined
- let currentComputerCall:WorkbenchCall|undefined
+ let currentComputerCall:WorkbenchCall|undefined,connectedApp:string|undefined
+  const deniedByUser=new Map<WorkbenchCall,Record<string,JsonValue>>()
  let computerInputStarted=false
  let observeRequired=true
  let coordinateObservationRequired=true
@@ -91,18 +94,19 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
  let approval:{id:string;call:WorkbenchCall;resolve:(approved:boolean)=>void}|undefined
  const model=()=>{if(!session){session=options.factory.open();session.setHistoryLimits?.({items:2048,codepoints:16*1024*1024});if(state.model!==null){if(!session.restoreCheckpoint)throw Error('model_checkpoint_unsupported');session.restoreCheckpoint(state.model)}else session.checkpoint?.()}return session}
  const bridge=async()=>{bridgeRuntime??=await options.createBridge();if(!bridgeRuntime.toolBridge)throw Error('conversation_tools_unavailable');return bridgeRuntime.toolBridge}
- let saving=Promise.resolve()
+ let saving=Promise.resolve(),reasonDetail:string|null=null
  const save=()=>{
   state.updated_at=new Date().toISOString();const checkpoint=structuredClone(state),pendingApproval=approval?{id:approval.id,call_id:approval.call.id,name:approval.call.name,preview:JSON.stringify(approval.call.arguments,null,2).slice(0,1800)}:null
   // Retrieved context is one-shot: never persist it for retries or process recovery.
   checkpoint.inputs=withoutPendingMemory(checkpoint.inputs)
-  const operation=saving.then(async()=>{await store.saveCheckpoint(checkpoint);if(build)await host.updateLocalBuild(conversation.id,conversation.generation,{status:checkpoint.status,reason:checkpoint.reason,approval:pendingApproval})})
+  const operation=saving.then(async()=>{await store.saveCheckpoint(checkpoint);if(build)await host.updateLocalBuild(conversation.id,conversation.generation,{status:checkpoint.status,reason:checkpoint.reason,reason_detail:checkpoint.reason?reasonDetail:null,approval:pendingApproval})})
   saving=operation.catch(()=>{ /* each caller observes its own persistence failure */ });return operation
  }
+ const treeState=(owner:NonNullable<WorkbenchCall['process']>)=>options.shell?.processState?.(owner)??localShellTreeState(owner)
  // In-flight receipts from an earlier process are facts, never permission to retry.
  if(['running','awaiting_approval'].includes(state.status)){
   for(const call of state.pending_calls)if(call.state!=='completed'){
-   call.result=call.state==='running'?{status:'outcome_unknown',...(call.name==='shell_execute'?{cleanup_confirmed:!call.process||localShellProcessGone(call.process)}:{}),message:'The previous process stopped during this operation. Inspect actual state before continuing.'}:{status:'cancelled_before_execution'};call.state='completed';delete call.approval_id
+   call.result=call.state==='running'?{status:'outcome_unknown',...(call.name==='shell_execute'?{cleanup_confirmed:!call.process||treeState(call.process)==='gone'}:{}),message:'The previous process stopped during this operation. Inspect actual state before continuing.'}:{status:'cancelled_before_execution'};call.state='completed';delete call.approval_id
   }
   state.status=state.pending_calls.some(call=>(call.result as {status?:string}|undefined)?.status==='outcome_unknown')?'outcome_unknown':'paused';state.reason='restart_requires_resume';await save()
  }
@@ -119,10 +123,39 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
   const own=new AbortController();controller=own;const signal=AbortSignal.any([parent,own.signal,options.lifetime]),runVersion=++version;state.run_version=runVersion
   const execute=async()=>{
    let release:(()=>void)|undefined
+    // A shell command can exit while a child it started lives on; that holds the project, not the whole Build.
+    const leftovers=()=>state.calls.filter(call=>call.name==='shell_execute'&&(call.result as {cleanup_confirmed?:boolean}|undefined)?.cleanup_confirmed===false)
+    // No process identity or no tree evidence (Windows) is 'unknown': never proof of cleanup, only the user's acknowledgement releases it.
+    const leftoverState=(call:WorkbenchCall)=>call.process?treeState(call.process):'unknown' as const
+    const blockingLeftover=()=>leftovers().find(call=>leftoverState(call)!=='gone')
+    const releaseProject=()=>{const key=projectResourceKey(conversation.build!.project);if(taskResourcesUncertain([key]))releaseQuarantinedTaskResources([key])}
+    const settleLeftovers=()=>{
+     const all=leftovers();if(!all.length||blockingLeftover())return
+     for(const call of all)call.result={...(call.result as Record<string,JsonValue>),cleanup_confirmed:true}
+     releaseProject()
+    }
+    // Resume on a "cannot verify" pause is the user's acknowledgement. Leftovers that are provably alive stay blocking.
+    const acknowledgeLeftovers=()=>{
+     const unknown=leftovers().filter(call=>leftoverState(call)==='unknown');if(!unknown.length)return
+     for(const call of unknown)call.result={...(call.result as Record<string,JsonValue>),cleanup_confirmed:true,cleanup_acknowledged:true,cleanup_acknowledged_at:new Date().toISOString()}
+     if(!blockingLeftover())releaseProject()
+    }
+    let holding:Promise<void>|undefined
+    const holdProject=async()=>{
+     if(release)return
+     holding??=(async()=>{const key=projectResourceKey(conversation.build!.project);if(taskResourcesBusy([key]))throw Error('project_busy');release=await acquireTaskResources([key],signal)})().finally(()=>{holding=undefined})
+     await holding
+    }
+    const leftoverCopy=(call:WorkbenchCall)=>{
+     const command=commandLine(call),exit=(call.result as {exit_code?:number}|undefined)?.exit_code??0
+     if(leftoverState(call)==='unknown')return {text:copy.unverifiable(command),detail:copy.unverifiableShort(command)}
+     return {text:copy.leftover(command,exit),detail:copy.leftoverShort(command)}
+    }
    try{
-    state.context_dependencies=mergeContextDependencies(state.context_dependencies,host.referenceContextDependencies(context?.references??[]))
+    reasonDetail=null
+     state.context_dependencies=mergeContextDependencies(state.context_dependencies,host.referenceContextDependencies(context?.references??[]))
     await authorizeContext(signal)
-    if(build){const key=projectResourceKey(conversation.build!.project);if(taskResourcesBusy([key]))throw Error('project_busy');release=await acquireTaskResources([key],signal)}
+    if(build){if(context?.resume&&state.reason==='cleanup_unconfirmed')acknowledgeLeftovers();settleLeftovers();if(!blockingLeftover())await holdProject()}
     state.inputs=withoutPendingMemory(state.inputs)
     const toolBridge=await bridge()
     if(!state.model&&!state.inputs.length){
@@ -134,7 +167,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
     state.voice_message_ids=voiceMessages.map(message=>message.id)
     if(!context?.resume){
      // Only typed user input can authorize explicit writes, never any host/tool/voice context.
-     state.last_user=text
+     state.last_user=text;state.denied_classes=[]
      let injected=false
      if(toolBridge.prerecall){
       const budget=AbortSignal.any([signal,AbortSignal.timeout(400)])
@@ -151,12 +184,25 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
     }
     // Resume is a control action: it never invents a user turn in the provider conversation.
     else if(!state.inputs.length&&!state.pending_calls.length)state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'resume_control',instruction:RESUME_CHECK})})
-    if(context?.resume&&state.reason==='approval_denied')return {assistant:'上次操作已拒绝，请补充新的要求后继续。'}
+    if(context?.resume&&state.reason==='approval_denied'){
+      const declined=state.pending_calls.filter(call=>['denied','denied_previously'].includes((call.result as {status?:string}|undefined)?.status??'')).map(call=>stepPhrase(call,'en'))
+      state.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'denial_resume',declined,instruction:DENIED_RESUME_INSTRUCTION})})
+     }
     state.status='running';state.reason=null;state.assistant='';delete state.model_failure;await save()
     const baseTools=build?[...toolBridge.tools.filter(tool=>tool.name!=='dispatch'),...LOCAL_TOOLS,finishTool]:[...toolBridge.tools.filter(tool=>toolBridge.readonlyNames.includes(tool.name)||memoryHostToolNames.has(tool.name)),publishTool]
     const authorizedTools=[...baseTools,...(build?computerTools(true):[])]
     const allowed=new Set(authorizedTools.map(tool=>tool.name));if(allowed.size!==authorizedTools.length||authorizedTools.length>128)throw Error('workbench_tool_configuration')
-    let toolRounds=0,finishedReply:string|undefined
+    let toolRounds=0,finishedReply:string|undefined,denials=0,batchDenied=false,unknownCall:WorkbenchCall|undefined,leftoverCall:WorkbenchCall|undefined
+     const deniedSteps:string[]=[]
+     // A denial covers its whole class for this turn and its resumes; a new typed message may ask again.
+     const deniedClasses=new Set<string>(context?.resume?state.denied_classes??[]:[])
+     const recordDenial=(call:WorkbenchCall,classes:readonly string[],previously:boolean,preview?:Pick<WorkbenchCall,'name'|'arguments'>)=>{
+      // `shell:*` only marks "could not analyse"; it is remembered when nothing more specific is known.
+      for(const klass of classes.length>1?classes.filter(item=>item!=='shell:*'):classes)deniedClasses.add(klass)
+      state.denied_classes=[...deniedClasses].slice(-256).map(item=>item.slice(0,1000))
+      denials++;batchDenied=true;deniedSteps.push(stepPhrase(preview?{...call,...preview}:call,options.language))
+      return {status:previously?'denied_previously':'denied',message:previously?DENIED_BEFORE_MESSAGE:DENIED_MESSAGE,approval_classes:classes.slice(0,16)}
+     }
     // Keep one turn identity across model rounds. Build commits tool-bound text before
     // the tool batch, while Plan keeps the accumulated answer.
     const turn=randomUUID();let turnText='',outputLimitContinues=0,toolTruncationRetried=false
@@ -193,11 +239,13 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
            signal,approve:async(action,params)=>{
             if(action!=='Connect'&&(applicationAuthorized||approvalMode()==='never'))return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
             const app=action==='Connect'?computerApplicationSchema.safeParse((params as {application?:unknown})?.application):undefined
-            if(app?.success&&await store.computerApplicationAllowed(app.data)){applicationAuthorized=true;return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)}
+            if(app?.success&&await store.computerApplicationAllowed(app.data)){applicationAuthorized=true;connectedApp=app.data.bundleId;return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)}
             const current=currentComputerCall!
-            const approved=await ask(current,signal,{name:action==='Connect'?'computer_connect':current.name,arguments:{action,params:JSON.parse(JSON.stringify(params)) as JsonValue}})
-            if(approved&&app?.success)applicationAuthorized=true
-            if(!approved&&!signal.aborted)state.reason='approval_denied'
+            const preview={name:action==='Connect'?'computer_connect':current.name,arguments:{action,params:JSON.parse(JSON.stringify(params)) as JsonValue}},klass=app?.success?'computer:'+app.data.bundleId:'computer-input:'+(connectedApp??'')
+             if(classDenied([klass],deniedClasses)&&!signal.aborted){deniedByUser.set(current,recordDenial(current,[klass],true,preview));return false}
+             const approved=await ask(current,signal,preview)
+            if(approved&&app?.success){applicationAuthorized=true;connectedApp=app.data.bundleId}
+            if(!approved&&!signal.aborted)deniedByUser.set(current,recordDenial(current,[klass],false,preview))
             state.status='running';current.state='running';await save()
             return approved&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
            },acting:(action,point)=>{signal.throwIfAborted();if(!computerState().enabled||!host.localBuildAuthorized(conversation.id))throw Error('computer_use_disabled');computerInputStarted=true;computerFrame('acting',action,point)},
@@ -224,7 +272,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
           let code=error instanceof Error?error.message:'action_failed'
           try{await closeComputer()}catch{code='cleanup_unknown'}
           let cause:unknown=error,detail:string|undefined;for(let depth=0;depth<4&&cause instanceof Error;depth++){if(/^native_gui:[a-z_]{1,80}$/u.test(cause.message))detail=cause.message;cause=cause.cause}
-          call.result={code,...(detail?{detail}:{}),status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
+          call.result=deniedByUser.get(call)??{code,...(detail?{detail}:{}),status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
           observeRequired=true
          }
          call.state='completed';call.finished_at=new Date().toISOString();await save()
@@ -236,10 +284,14 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
         if(!validation.success){call.result={code:'invalid_params',issues:validation.error.issues.map(issue=>({path:issue.path.map(String).join('.'),message:issue.message}))};call.state='completed'}
         else{
          if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
-         // Reads inside the project stay free; a read that leaves it needs the same consent as a write.
+         if(build){settleLeftovers();const stuck=blockingLeftover();if(stuck){leftoverCall=stuck;state.reason='cleanup_unconfirmed';toolRounds--;return}await holdProject()}
+          // Reads inside the project stay free; a read that leaves it needs the same consent as a write.
          const needsApproval=approvalMode()==='ask'&&(call.name!=='file_read'||await localPathEscapesProject(conversation.build!.project,(validation.data as {path:string}).path).catch(()=>true))
-         if(needsApproval&&!await ask(call,signal)){
-          call.result={status:'denied',message:'This call was not executed. Wait for new user instructions.'};call.state='completed';state.reason=signal.aborted?'stopped':'approval_denied';await save();return
+         const klasses=needsApproval?approvalClasses(call,conversation.build!.project):[]
+          if(needsApproval&&classDenied(klasses,deniedClasses)){call.result=recordDenial(call,klasses,true);call.state='completed';await save();return}
+          if(needsApproval&&!await ask(call,signal)){
+           if(signal.aborted){call.result={status:'denied',message:'This call was not executed. Wait for new user instructions.'};call.state='completed';state.reason='stopped';await save();return}
+           call.result=recordDenial(call,klasses,false);call.state='completed';await save();return
          }
          signal.throwIfAborted();if(!host.localBuildAuthorized(conversation.id))throw Error('local_build_not_authorized')
          state.status='running';call.state='running';call.started_at=new Date().toISOString();await save() // intent must reach disk first
@@ -279,7 +331,15 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
         call.state='completed';call.finished_at=new Date().toISOString();await save()
        }
       }
-      if(!wasCompleted&&(call.result as {status?:string}|undefined)?.status==='outcome_unknown'){state.reason='outcome_unknown';if(build&&call.name==='shell_execute'&&(call.result as {cleanup_confirmed?:boolean}).cleanup_confirmed===false){quarantineTaskResources([projectResourceKey(conversation.build!.project)]);release=undefined}}
+      if(!wasCompleted){
+       const result=call.result as {status?:string;exit_code?:number|null;cleanup_confirmed?:boolean}|undefined
+       if(build&&call.name==='shell_execute'&&result?.cleanup_confirmed===false){
+        quarantineTaskResources([projectResourceKey(conversation.build!.project)]);release=undefined
+        // The command itself finished: report its real result and hold the project instead of stopping the Build.
+        if(typeof result.exit_code==='number')call.result={...(call.result as Record<string,JsonValue>),message:'The command exited, but some child processes could not be confirmed stopped. The host holds this project and verifies before the next local operation; continue with work that does not touch the project.'}
+       }
+       if(result?.status==='outcome_unknown'){state.reason='outcome_unknown';unknownCall=call}
+      }
      }
      // The approval slot is single; a read that must ask therefore runs alone like a write.
      const askingReads=new Set<string>()
@@ -304,15 +364,27 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
        const results=await Promise.allSettled(group.map(executeCall)),failure=results.find(result=>result.status==='rejected')
        if(failure?.status==='rejected')throw failure.reason
       }else{await executeCall(call);index++}
+       if(batchDenied){
+        batchDenied=false
+        for(const rest of state.pending_calls)if(rest.state!=='completed'){rest.result={status:'cancelled_before_execution',message:SKIPPED_MESSAGE};rest.state='completed'}
+        if(denials>=2&&!state.reason)state.reason='approval_denied'
+        await save();break
+       }
       if(state.reason)break
       if(finishedReply!==undefined)break
      }
      if(state.reason){
-      for(const call of state.pending_calls)if(call.state==='prepared'){call.result={status:'cancelled_before_execution'};call.state='completed'}
-      state.status=state.reason==='outcome_unknown'?'outcome_unknown':'paused';await save();return {assistant:state.reason==='approval_denied'?'操作已拒绝，Build 已暂停。':state.reason==='outcome_unknown'?'操作结果不确定，Build 已暂停。Resume 后会先核实实际状态。':'Build 已暂停。'}
-     }
+       // A leftover-process pause keeps its call prepared: Resume verifies first, then runs it once.
+       if(state.reason!=='cleanup_unconfirmed')for(const call of state.pending_calls)if(call.state==='prepared'){call.result={status:'cancelled_before_execution'};call.state='completed'}
+       let assistant=copy.generic
+       if(state.reason==='approval_denied'){assistant=copy.denied(deniedSteps);reasonDetail=copy.deniedShort(deniedSteps)}
+       else if(state.reason==='stopped'){const user=signal.reason==='user_stop';assistant=user?copy.stopped(build):copy.pausedNeutral(build);reasonDetail=user?copy.stoppedShort:copy.pausedShort}
+       else if(state.reason==='cleanup_unconfirmed'&&leftoverCall){const note=leftoverCopy(leftoverCall);assistant=note.text;reasonDetail=note.detail}
+       else if(state.reason==='outcome_unknown'){const step=unknownCall?stepPhrase(unknownCall,options.language):options.language==='en'?'the last operation':'上一步操作';assistant=copy.unknown(step);reasonDetail=copy.unknownShort(step)}
+       state.status=state.reason==='outcome_unknown'?'outcome_unknown':'paused';await save();return {assistant}
+      }
      if(finishedReply!==undefined){for(const call of state.pending_calls)if(call.state!=='completed'){call.result={status:'cancelled_after_finish'};call.state='completed'}state.status='finished';await save();return {assistant:finishedReply,turn_id:randomUUID()}}
-     if(state.pending_calls.some(call=>call.state!=='completed')){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
+     if(state.pending_calls.some(call=>call.state!=='completed')){state.status='paused';state.reason='round_limit';reasonDetail=build?copy.roundLimitShort(state.calls.filter(call=>call.state==='completed').length):null;await save();return {assistant:roundLimitReply()}}
      if(state.pending_calls.length){
       const uncertain=state.pending_calls.some(call=>['outcome_unknown','timed_out','cancelled'].includes((call.result as {status?:string}|undefined)?.status??''))
       state.inputs.unshift(...await Promise.all(state.pending_calls.map(async call=>{
@@ -323,7 +395,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
       if(uncertain)state.inputs.push({kind:'host_context',content:RESUME_CHECK})
       state.pending_calls=[];await save()
      }
-     if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';await save();return {assistant:roundLimitReply()}}
+     if(toolRounds>=turnToolLimit){state.status='paused';state.reason='round_limit';reasonDetail=build?copy.roundLimitShort(state.calls.filter(call=>call.state==='completed').length):null;await save();return {assistant:roundLimitReply()}}
      const enabled=computerState(),tools=[...baseTools,...(enabled.enabled?computerTools(enabled.direct):[])]
      try{await authorizeContext(signal)}catch(error){
       signal.throwIfAborted()
@@ -430,12 +502,12 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
        const modeLabel=build?'Build':'Plan',limitLabel=truncatedTool
         ?(en?'the tool call exceeded the model output limit and was not executed':`工具调用超出模型输出长度上限，未执行`)
         :(en?'the model reply exceeded its output limit':'模型回复超出输出长度上限')
-       const continuation=build?(en?'Click Resume to continue; completed operations will not be replayed.':'点击 Resume 继续，已完成的操作不会重放。'):(en?'Send another message to continue.':'发送新消息继续。')
+       const continuation=copy.outputLimitContinue(build)
        const notice=en?`${modeLabel} paused: ${limitLabel}. ${continuation}`:`${modeLabel} 已暂停：${limitLabel}。${continuation}`
        const fullReply=mergeTurnText(turnText,notice)
        if(fullReply.length>16000)await store.saveReply(conversation.id,conversation.generation,turn,fullReply)
        const visible=fullReply.length>16000?turnText.slice(0,16000-notice.length-2)+'\n\n'+notice:fullReply
-       state.assistant=visible;await save()
+       state.assistant=visible;reasonDetail=build?limitLabel.charAt(0).toUpperCase()+limitLabel.slice(1):null;await save()
        return {assistant:visible,...(fullReply.length>16000?{full_text_ref:true}:{}),turn_id:turn}
       }
       if(captionSent&&version===runVersion)emit({type:'caption',role:'assistant',text:'',full_text:'',turn_id:turn,final:true})
@@ -454,10 +526,11 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
     const reason=error instanceof Error?error.message:'build_failed',modelInterrupted=build&&reason.startsWith('model_')
     if(/^model_[a-z_]{1,96}$/u.test(reason))options.onDiagnostic?.('[workbench-diagnostic] '+JSON.stringify({mode:build?'build':'plan',conversation_id:conversation.id,generation:conversation.generation,reason,...(state.model_failure?{model_failure:state.model_failure}:{})}))
     if(reason==='cleanup_unknown')verificationRequired=true
-    state.status=reason==='cleanup_unknown'?'outcome_unknown':signal.aborted||modelInterrupted?'paused':'failed';state.reason=signal.aborted?'stopped':reason;await save();if(signal.aborted)return {assistant:'Build 已暂停。'}
+    state.status=reason==='cleanup_unknown'?'outcome_unknown':signal.aborted||modelInterrupted?'paused':'failed';state.reason=signal.aborted?'stopped':reason;const user=signal.reason==='user_stop';if(signal.aborted)reasonDetail=user?copy.stoppedShort:copy.pausedShort;await save();if(signal.aborted)return {assistant:user?copy.stopped(build):copy.pausedNeutral(build)}
     if(modelInterrupted){
      const label=options.language==='en'?({model_timeout:'The model stopped returning data',model_overflow:'The model response exceeded the stream capacity',model_http:'The model service returned an error',model_network:'The model connection was interrupted',model_output_limit:'The model reply exceeded its output limit',model_output_limit_tool_arguments:'The tool call exceeded the model output limit and was not executed',model_protocol_output_limit:'The model reply exceeded its output limit'} as Record<string,string>)[reason]??'The model response was interrupted':({model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_http:'模型服务返回错误',model_network:'模型连接中断',model_output_limit:'模型回复超出输出长度上限',model_output_limit_tool_arguments:'工具调用超出模型输出长度上限，未执行',model_protocol_output_limit:'模型回复超出输出长度上限'} as Record<string,string>)[reason]??'模型回复中断'
-     return {assistant:options.language==='en'?`Build paused: ${label} (${reason}). Click Resume to continue. Completed operations will not be replayed.`:`Build 已暂停：${label}（${reason}）。点击 Resume 继续，已完成的操作不会重放。`}
+     reasonDetail=label;await save()
+      return {assistant:copy.modelPaused(label)}
     }
     throw error
    }
@@ -475,7 +548,7 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
  }
  return {
   runTurn:run,canSwitch:()=>!active,
-  stopBuild:async()=>{controller?.abort();approval?.resolve(false);await active},
+  stopBuild:async()=>{controller?.abort('user_stop');approval?.resolve(false);await active},
   localApproval:async(id,approved,always)=>{
    if(approval?.id!==id||!active||controller?.signal.aborted)throw Error('local_approval_stale')
    const current=approval

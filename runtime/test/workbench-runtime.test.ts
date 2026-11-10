@@ -65,6 +65,7 @@ async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>
  return {root,host,script,frames,invocations,bridge,plain,command,raw,plan,build,runtime,close:async()=>{await host.close();await rm(root,{recursive:true,force:true})}}
 }
 const buildView=(host:PersonalAgentHost,id:string)=>host.conversationSnapshot().items.find(item=>item.id===id)!.build!
+const toolOutputs=(request:Request)=>request.inputs.flatMap(input=>input.kind==='tool_result'?[input.output as unknown as {status:string;message?:string}]:[])
 const supported=['darwin','win32'].includes(process.platform)
 
 test('production Plan factory admits batched wire calls through the real conversation tool bridge',async context=>{
@@ -251,10 +252,13 @@ test('Build requires approval before side effects, stops on denial and does not 
   assert.equal(f.host.conversationSnapshot().selected_id,id)
   await assert.rejects(f.host.submitConversationText(id,'double',undefined,undefined,{local_desktop:true}),/conversation_busy/)
   await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
-  assert.equal(buildView(f.host,id).reason,'approval_denied');await f.command('build.resume',{id});await f.host.waitConversation(id)
-  await assert.rejects(readFile(join(f.root,'new.txt')));assert.equal(f.script.requests.length,1)
+  // A denial is a tool result, not a pause: the model carries on without the declined action.
+  assert.equal(buildView(f.host,id).status,'completed');assert.equal(buildView(f.host,id).reason,null)
+  await assert.rejects(readFile(join(f.root,'new.txt')));assert.equal(f.script.requests.length,2)
+  const denied=toolOutputs(f.script.requests[1]!)[0]!
+  assert.equal(denied.status,'denied');assert.match(denied.message!,/declined/);assert.match(denied.message!,/Do not retry/)
   await f.host.submitConversationText(id,'请重新写入',undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
-  assert.deepEqual(f.script.requests[1]!.inputs.filter(input=>input.kind==='user_text').map(input=>input.text),['请重新写入'])
+  assert.deepEqual(f.script.requests[2]!.inputs.filter(input=>input.kind==='user_text').map(input=>input.text),['请重新写入'])
   assert.equal(f.host.tasks.list().length,0);assert.equal(f.host.life.snapshot().todos.length,0)
  }finally{await f.close()}
 })
@@ -288,8 +292,40 @@ test('Build asks before a read leaves the project and stops on denial',{skip:!su
   const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
   assert.ok(view.approval)
   await f.command('build.approve',{id,approval_id:view.approval.id,approved:false});await f.host.waitConversation(id)
-  assert.equal(buildView(f.host,id).reason,'approval_denied');assert.equal(f.script.requests.length,1)
+  assert.equal(buildView(f.host,id).status,'completed');assert.equal(f.script.requests.length,2)
+  assert.equal(toolOutputs(f.script.requests[1]!)[0]!.status,'denied')
  }finally{await f.close();await rm(outside,{recursive:true,force:true})}
+})
+
+test('a denial skips the rest of its batch and the model hears about both',{skip:!supported},async()=>{
+  const f=await fixture((_request,step)=>step===0?{calls:[{name:'file_write',arguments:{path:'a.txt',content:'a'},id:'call-a'},{name:'file_write',arguments:{path:'b.txt',content:'b'},id:'call-b'}]}:{text:'done'})
+  try{
+    const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
+    await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+    assert.equal(buildView(f.host,id).status,'completed');assert.equal(f.script.requests.length,2)
+    assert.deepEqual(toolOutputs(f.script.requests[1]!).map(output=>output.status),['denied','cancelled_before_execution'])
+    await assert.rejects(readFile(join(f.root,'a.txt')));await assert.rejects(readFile(join(f.root,'b.txt')))
+  }finally{await f.close()}
+})
+
+test('a denied class is refused without asking again, two denials pause with an explanation and Resume continues',{skip:!supported},async()=>{
+  const f=await fixture((_request,step)=>step<2?{call:{name:'file_write',arguments:{path:'x.txt',content:'x'},id:'call-'+step}}:{text:'carried on'})
+  try{
+    const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
+    await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+    const paused=buildView(f.host,id)
+    assert.equal(paused.status,'paused');assert.equal(paused.reason,'approval_denied');assert.equal(paused.approval,null)
+    assert.match(paused.reason_detail!,/x\.txt/);assert.equal(f.script.requests.length,2)
+    assert.deepEqual(toolOutputs(f.script.requests[1]!).map(output=>output.status),['denied'])
+    const text=f.host.conversationSnapshot().messages.at(-1)!.text
+    assert.match(text,/你拒绝了/);assert.match(text,/x\.txt/);assert.match(text,/点|回复「继续」/);assert.doesNotMatch(text,/Build 已暂停。$/)
+    await f.command('build.resume',{id});await f.host.waitConversation(id)
+    assert.equal(f.script.requests.length,3)
+    assert.deepEqual(toolOutputs(f.script.requests[2]!).map(output=>output.status),['denied_previously'])
+    assert.ok(f.script.requests[2]!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('denial_resume')))
+    const done=buildView(f.host,id);assert.equal(done.status,'completed');assert.equal(done.reason,null);assert.equal(done.reason_detail??null,null)
+    await assert.rejects(readFile(join(f.root,'x.txt')))
+  }finally{await f.close()}
 })
 
 test('approval is scoped to exact call, native Build stays separate and local authority is rechecked',{skip:!supported},async()=>{
@@ -322,7 +358,7 @@ for(const reason of ['model_timeout','model_overflow'])test(`Build pauses with a
   const id=await f.build();await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).status,'paused');assert.equal(buildView(f.host,id).reason,reason)
   const messages=f.host.conversationSnapshot().messages
-  assert.equal(messages.find(message=>message.role==='user')?.generation_status,'completed');assert.match(messages.at(-1)!.text,/Resume/);assert.match(messages.at(-1)!.text,new RegExp(reason))
+  assert.equal(messages.find(message=>message.role==='user')?.generation_status,'completed');assert.match(messages.at(-1)!.text,/点「继续」/);assert.doesNotMatch(messages.at(-1)!.text,/Resume|model_/);assert.equal(buildView(f.host,id).reason_detail,reason==='model_timeout'?'模型等待数据超时':'模型回复超出流容量限制')
   await writeFile(join(f.root,'once.txt'),'user change')
   await f.command('build.resume',{id});await f.host.waitConversation(id)
   assert.equal(await readFile(join(f.root,'once.txt'),'utf8'),'user change');assert.equal(buildView(f.host,id).status,'completed')
@@ -1297,7 +1333,7 @@ test('restart repairs a previously overwritten pause reason from its durable che
   await f.host.updateLocalBuild(id,0,{status:'paused',reason:'restart_requires_resume',approval:null});await f.host.close()
   const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
   try{await reopened.open();assert.equal(buildView(reopened,id).reason,'approval_denied');assert.equal(buildView(reopened,id).status,'paused');assert.equal(reopened.localBuildAuthorized(id),false)}finally{await reopened.close()}
-  assert.equal(f.script.requests.length,1)
+  assert.equal(f.script.requests.length,2)
   await assert.rejects(readFile(join(f.root,'denied.txt')), {code:'ENOENT'})
  }finally{await f.close()}
 })
@@ -1336,11 +1372,11 @@ test('exhausted long output retains full text and a visible pause notice', {skip
   assert.equal(attempts,3);assert.equal(message.full_text_ref,true)
   const page=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:16000}) as {text:string}
   assert.ok(page.text.length>0,'paused output must be durably readable')
-  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/Resume/u)
+  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/点「继续」/u);assert.doesNotMatch(message.text,/Resume/u)
   const first=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:0}) as {text:string}
   assert.ok(first.text.startsWith('1'.repeat(17000)))
   const last=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:51000}) as {text:string}
-  assert.match(last.text,/Resume/u)
+  assert.match(last.text,/点「继续」/u)
  }finally{await f.close()}
 })
 
@@ -1857,5 +1893,96 @@ test('excluded non-product report does not taint an independent Plan publication
   assert.ok(!JSON.stringify(f.invocations).includes(excluded)&&!executorInput.includes(excluded),'executor inputs contain no excluded report')
   await f.command('conversations.select',{id:'chat:main'})
   assert.ok(f.host.conversationSnapshot().messages.some(message=>message.id===report.id&&message.text.includes(excluded)),'original report remains locally visible')
+ }finally{await f.close()}
+})
+
+/** Reopens the fixture's host with a Build runtime whose shell process probe is injected. */
+async function reopenWithLeftover(f:Awaited<ReturnType<typeof fixture>>,id:string,state:()=>'gone'|'alive'|'unknown',platform:'darwin'|'win32'=process.platform==='win32'?'win32':'darwin'){
+ const checkpoint=await f.host.workbench.checkpoint(id,0)
+ checkpoint.calls.push({id:'shell-left',name:'shell_execute',arguments:{command:'sleep 1'},state:'completed',result:{status:'completed',exit_code:0,cleanup_confirmed:false},process:{platform,pid:2**30}})
+ await f.host.workbench.saveCheckpoint(checkpoint);await f.host.close()
+ const host=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[],readonlyNames:[],origin:()=>Promise.resolve('memory:test-user'),invoke:()=>Promise.resolve(null)}
+ const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
+ host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,factory:f.script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>'never',shell:{processState:state}}),()=>{ /* no renderer */ })
+ await host.open();host.setWorkbenchExecutors(['codex'])
+ const shown=await host.command({type:'personal.command',request_id:'reopen-workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(shown.ok,true)
+ return host
+}
+
+test('a leftover that cannot be verified pauses plainly, and Resume is the acknowledgement that releases it',{skip:!supported},async()=>{
+ let calls=0
+ const f=await fixture(()=>{calls++;return calls===1?{text:'done'}:calls===2?{call:{name:'file_write',arguments:{path:'after.txt',content:'ok'}}}:{text:'carried on'}},'never')
+ const id=await f.build();await f.host.waitConversation(id)
+ const host=await reopenWithLeftover(f,id,()=>'unknown')
+ try{
+  await host.submitConversationText(id,'再改一处',undefined,undefined,{local_desktop:true});await host.waitConversation(id)
+  const paused=buildView(host,id)
+  assert.equal(paused.status,'paused');assert.equal(paused.reason,'cleanup_unconfirmed');assert.match(paused.reason_detail!,/没法确认「sleep 1」/)
+  assert.match(host.conversationSnapshot().messages.at(-1)!.text,/Nova 没法确认「sleep 1」留下的进程是否已退出。你确认没问题后点「继续」，Nova 会接着做。/)
+  await assert.rejects(readFile(join(f.root,'after.txt')),{code:'ENOENT'})
+  const result=await host.command({type:'personal.command',request_id:'ack',method:'build.resume',params:{id}},{client_id:'desktop:local'}) as {ok:boolean;error?:string};assert.equal(result.ok,true,result.error)
+  await host.waitConversation(id)
+  assert.equal(buildView(host,id).status,'completed');assert.equal(await readFile(join(f.root,'after.txt'),'utf8'),'ok')
+  const left=(await host.workbench.checkpoint(id,0)).calls.find(call=>call.id==='shell-left')!.result as {cleanup_confirmed:boolean;cleanup_acknowledged?:boolean}
+  assert.equal(left.cleanup_confirmed,true);assert.equal(left.cleanup_acknowledged,true)
+ }finally{await host.close();await f.close()}
+})
+
+test('a leftover that is provably alive is never released by Resume',{skip:!supported},async()=>{
+ let calls=0
+ const f=await fixture(()=>{calls++;return calls===1?{text:'done'}:{call:{name:'file_write',arguments:{path:'after.txt',content:'ok'},id:'w'+calls}}},'never')
+ const id=await f.build();await f.host.waitConversation(id)
+ const host=await reopenWithLeftover(f,id,()=>'alive')
+ try{
+  await host.submitConversationText(id,'再改一处',undefined,undefined,{local_desktop:true});await host.waitConversation(id)
+  assert.equal(buildView(host,id).reason,'cleanup_unconfirmed');assert.match(host.conversationSnapshot().messages.at(-1)!.text,/还有进程没确认退出/)
+  await host.command({type:'personal.command',request_id:'again',method:'build.resume',params:{id}},{client_id:'desktop:local'});await host.waitConversation(id)
+  assert.equal(buildView(host,id).reason,'cleanup_unconfirmed');await assert.rejects(readFile(join(f.root,'after.txt')),{code:'ENOENT'})
+ }finally{await host.close();await f.close()}
+})
+
+test('parallel reads that reacquire the project share one acquisition instead of failing with project_busy',{skip:!supported},async()=>{
+ let calls=0,gone=false
+ const f=await fixture(()=>{calls++;if(calls===1)return {text:'done'};if(calls===2){gone=true;return {calls:[{name:'file_read',arguments:{path:'a.txt'},id:'ra'},{name:'file_read',arguments:{path:'b.txt'},id:'rb'}]}};return {text:'both read'}},'never')
+ await writeFile(join(f.root,'a.txt'),'A');await writeFile(join(f.root,'b.txt'),'B')
+ const id=await f.build();await f.host.waitConversation(id)
+ const host=await reopenWithLeftover(f,id,()=>gone?'gone':'alive')
+ try{
+  await host.submitConversationText(id,'读两个文件',undefined,undefined,{local_desktop:true});await host.waitConversation(id)
+  const state=await host.workbench.checkpoint(id,0)
+  assert.equal(buildView(host,id).status,'completed',JSON.stringify({reason:state.reason}))
+  assert.deepEqual(state.calls.filter(call=>call.name==='file_read').map(call=>(call.result as {code?:string}).code),[undefined,undefined])
+ }finally{await host.close();await f.close()}
+})
+
+test('a denied compound shell command also denies a respelling of its destructive part, and a new message starts clean',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'shell_execute',arguments:{command:'echo x; rm target.txt'},id:'c0'}}:step===1?{call:{name:'shell_execute',arguments:{command:"sh -c 'rm ./target.txt'",cwd:'.'},id:'c1'}}:step===2?{call:{name:'shell_execute',arguments:{command:'rm target.txt'},id:'c2'}}:{text:'ok'})
+ try{
+  const id=await f.build(),view=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+  const paused=await f.host.workbench.checkpoint(id,0)
+  assert.equal(paused.reason,'approval_denied');assert.deepEqual(paused.calls.map(call=>(call.result as {status:string}).status),['denied','denied_previously'])
+  assert.ok(paused.denied_classes!.some(klass=>klass.startsWith('shell:rm@rel:target.txt')))
+  // a new typed message is a new authorization turn: the old denials are not restored
+  await f.host.submitConversationText(id,'再试一次',undefined,undefined,{local_desktop:true})
+  const asked=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  assert.ok(asked.approval)
+  await f.command('build.approve',{id,approval_id:asked.approval!.id,approved:false});await f.host.waitConversation(id)
+ }finally{await f.close()}
+})
+
+test('Resume restores only the denials of the current authorization turn',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step<2?{call:{name:'file_write',arguments:{path:'x.txt',content:'x'},id:'w'+step}}:step===2?{call:{name:'file_write',arguments:{path:'y.txt',content:'y'},id:'w2'}}:{text:'ok'})
+ try{
+  const id=await f.build(),view=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).reason,'approval_denied')
+  const stored=(await f.host.workbench.checkpoint(id,0)).denied_classes!
+  assert.equal(stored.length,1);assert.ok(stored[0]!.endsWith('x.txt'))
+  await f.command('build.resume',{id})
+  const next=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  await f.command('build.approve',{id,approval_id:next.approval!.id,approved:true});await f.host.waitConversation(id)
+  assert.equal(await readFile(join(f.root,'y.txt'),'utf8'),'y');await assert.rejects(readFile(join(f.root,'x.txt')))
  }finally{await f.close()}
 })

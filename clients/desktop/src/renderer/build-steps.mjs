@@ -3,11 +3,26 @@ import {renderMarkdown} from './markdown.mjs'
 import {iconNode,withIcon} from './icons.mjs'
 import {readDisplayPreferences,subscribeDisplayPreferences} from './view-preferences.mjs'
 
-const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'已拒绝',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',cancelled_after_finish:'未执行',outcome_unknown:'结果不确定'}
+const labels={prepared:'等待执行',awaiting_approval:'待确认',running:'执行中',completed:'已完成',failed:'失败',denied:'你拒绝了，未执行',denied_previously:'你拒绝了，未执行',refused:'已拒绝',timed_out:'已超时',cancelled:'已取消',cancelled_before_execution:'未执行',cancelled_after_finish:'未执行',outcome_unknown:'无法确认'}
 /** Exported for the source-coverage test; every code must translate. */
 export const BUILD_STEP_STATUS_LABELS=labels
 export const BUILD_STEP_COMPUTER_LABELS={computer_screenshot:'截图',computer_click:'点击',computer_type:'输入',computer_scroll:'滚动',computer_key:'快捷键'}
-const failed=new Set(['failed','timed_out','outcome_unknown','refused','denied'])
+/** Why a Build is paused, in words the user can act on. One table for both renderers; unknown codes never show raw. */
+export const BUILD_REASONS=Object.freeze({
+ context_authorization_changed:'引用资料或授权已变化，任务已暂停；请核对资料与权限后继续。',model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',model_output_limit:'模型回复达到输出长度上限，已自动续写',model_output_limit_tool_arguments:'工具调用达到输出长度上限，未执行',round_limit:'已达到本次工具调用上限',
+ restart_requires_resume:'已暂停，点击继续恢复任务',approval_denied:'你拒绝了操作，已暂停；点「继续」会换一种方式接着做',stopped:'已暂停，做过的步骤都保留了',cleanup_unconfirmed:'有进程没确认退出，已暂停；点「继续」会先核实',
+ cleanup_unknown:'上一步的清理结果不确定，请核实后继续',outcome_unknown:'上一步的结果不确定，请核实后继续',new_user_input_received:'收到新消息，已暂停当前步骤',
+})
+const HIDDEN_BUILD_REASONS=new Set(['restart_requires_resume','new_user_input_received'])
+/** The pill text: the host's own sentence when it sent one, else the mapped label, else a generic pause. */
+export function buildReasonText(build){
+ const reason=build?.reason
+ if(!reason||HIDDEN_BUILD_REASONS.has(reason))return ''
+ if(typeof build.reason_detail==='string'&&build.reason_detail)return build.reason_detail
+ if(Object.hasOwn(BUILD_REASONS,reason))return t(BUILD_REASONS[reason])
+ return build.status==='paused'?t('已暂停'):''
+}
+const failed=new Set(['failed','timed_out','outcome_unknown','refused','denied','denied_previously'])
 const COMPUTER_LABELS=BUILD_STEP_COMPUTER_LABELS
 const SHOT_CACHE=12
 const ACTIVE_STATUSES=new Set(['running','awaiting_approval'])
