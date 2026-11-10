@@ -86,6 +86,7 @@ class TestVoiceProvider implements VoiceProvider {
   List<Map<String, dynamic>> toolDefinitions = [];
   Completer<void>? connecting;
   Completer<void>? injecting;
+  Completer<void>? submitting;
   final injectedText = <String>[];
   final injected = <String>[],
       submitted = <String>[],
@@ -140,6 +141,7 @@ class TestVoiceProvider implements VoiceProvider {
   Future<void> sendAudio(Uint8List pcm16) async {}
   @override
   Future<void> submitText(String text) async {
+    if (submitting != null) await submitting!.future;
     if (failText) throw StateError('busy');
     submitted.add(text);
   }
@@ -281,6 +283,53 @@ void main() {
   });
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
+
+  test(
+    'late typed voice send cannot resurrect a cleared conversation',
+    () async {
+      await start();
+      provider.submitting = Completer<void>();
+      final send = session.submitText('old call text');
+      await session.stop();
+      await store.clearConversation(conversation);
+      provider.submitting!.complete();
+      await send;
+      expect(store.conversation(conversation)['messages'], isEmpty);
+    },
+  );
+
+  for (final fail in [false, true]) {
+    test(
+      'late voice injection ($fail) cannot restore cleared delivery records',
+      () async {
+        await start();
+        final host = AgentCoreHost(store: store, settings: ModelSettings());
+        final bridge = FactBridge(host);
+        session.attachDelegates(bridge);
+        provider.injecting = Completer<void>();
+        bridge.facts.add(
+          VoiceDelegateUpdate('task', conversation, 'done', terminal: true),
+        );
+        await settle();
+        expect(provider.injected, hasLength(1));
+        await session.stop();
+        await host.clearConversation(conversation);
+        if (fail) {
+          provider.injecting!.completeError(StateError('late failure'));
+        } else {
+          provider.injecting!.complete();
+        }
+        await settle();
+        expect(
+          store.conversation(conversation).containsKey('voice_deliveries'),
+          isFalse,
+        );
+        bridge.dispose();
+        host.dispose();
+        await bridge.facts.close();
+      },
+    );
+  }
 
   for (final mode in SpaceMode.values) {
     test(

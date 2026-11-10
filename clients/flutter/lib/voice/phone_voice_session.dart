@@ -763,7 +763,11 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> _persist(_VoiceResponse response) async {
-    if (response.text.isEmpty || conversationId == null) return;
+    if (response.text.isEmpty ||
+        conversationId == null ||
+        response.epoch != _epoch) {
+      return;
+    }
     await store.upsertVoiceMessage(
       response.conversation,
       itemId: '${response.epoch}:assistant:${response.id}',
@@ -947,6 +951,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     _userTurns[turn] = value;
     try {
       await provider.submitText(value);
+      if (epoch != _epoch) return;
       if (epoch == _epoch && _turn == turn) {
         _memoryUserTurn = turn;
         _memoryUserUtterance = value;
@@ -1158,9 +1163,11 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
         return false;
       }
       await provider.injectHostItem(item).timeout(const Duration(seconds: 5));
+      if (epoch != _epoch) return false;
       if (provider.capabilities.hostItemAcknowledged) {
         await ack.future.timeout(const Duration(seconds: 5));
       }
+      if (epoch != _epoch) return false;
       await store.recordVoiceDelivery(
         conversation,
         item.id,
@@ -1184,6 +1191,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       await _activateNarration();
       return true;
     } catch (_) {
+      if (epoch != _epoch) return false;
       await store.recordVoiceDelivery(
         conversation,
         item.id,
@@ -1249,9 +1257,11 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
         if (epoch != _epoch) return;
       }
     } on VoiceHostBusy {
+      if (epoch != _epoch) return;
       if (epoch == _epoch) _hostResponsePending = false;
       await store.recordVoiceDelivery(conversation, id, activation: 'deferred');
     } catch (_) {
+      if (epoch != _epoch) return;
       if (epoch == _epoch) _hostResponsePending = false;
       _narrations.remove(id);
       _receiptOrigins.remove(id);
