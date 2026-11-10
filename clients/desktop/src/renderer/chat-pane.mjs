@@ -12,7 +12,7 @@ import {mountApprovalDock} from './approval-dock.mjs'
 import {mountWorkspaceBar} from './workspace-bar.mjs'
 import {mountComposerMode,composerMode as currentComposerMode} from './composer-mode.mjs'
 import {mountComposerApproval} from './composer-approval.mjs'
-import {mountComputerUseControl} from './computer-use-control.mjs'
+import {mountComputerUseControl,readComputerPermissions} from './computer-use-control.mjs'
 import {createBuildSteps} from './build-steps.mjs'
 import {createToolTraceNode} from './chat-tool-trace.mjs'
 import {homeTranscript,orderTranscript,mergeLiveCaptionText,createChatStream} from './chat-transcript.mjs'
@@ -110,7 +110,7 @@ export function mountChatPane(columns,{c,el,button,run,api,chips,openTask,openSc
   const submitted=state.draft
   beginning=true;c.changed?.()
   // Clear only what was sent and only after the host accepted the Build, so a refusal keeps the chips.
-  try{await c.command('build.begin',{text,...workspace});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;state.references=[];state.source_todo=null;renderSource();return true}
+  try{const permissions=await readComputerPermissions(api);await c.command('build.begin',{text,...workspace,...(permissions?{computer_permissions:permissions}:{})});if(state.draft===submitted)state.draft='';if(state.execution==='build')delete state.execution;state.references=[];state.source_todo=null;renderSource();return true}
   finally{beginning=false;c.changed?.()}
  }
  const composer=el('div',undefined,'composer');const draft=el('textarea');draft.placeholder=t('输入消息…');draft.maxLength=4000;draft.setAttribute('aria-label',t('消息草稿'));draft.rows=3

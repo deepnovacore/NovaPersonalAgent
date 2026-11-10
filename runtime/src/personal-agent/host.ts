@@ -209,6 +209,18 @@ export class PersonalAgentHost {
     #workbenchModel:{provider:string;model:string}|undefined;
     setWorkbenchModel(model:{provider:string;model:string}):void{this.#workbenchModel={...model}}
     computerUseState(id:string):ComputerUseState{const state=this.#state.conversations.items.find(item=>item.id===id)?.build?.computer_use;return state?{...state,direct:state.enabled&&!!this.#workbenchModel&&supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model)}:{enabled:false,direct:false}}
+    #computerPreflight(permissions?:z.infer<typeof computerUseCommandSchema.shape.permissions>):ComputerPreflightItem[]{
+        const missing:ComputerPreflightItem[]=[];
+        if(!['darwin','win32'].includes(process.platform))missing.push('platform');
+        try{loadComputerDeviceConfig(process.env)}catch{missing.push('configuration')}
+        if(process.platform==='darwin'){
+            if(permissions?.screen!=='granted')missing.push('screen_permission');
+            if(permissions?.accessibility!=='granted')missing.push('accessibility_permission');
+        }
+        if(!this.#workbenchModel||!supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model))missing.push('vision_model');
+        if(permissions?.displayCount!==undefined&&permissions.displayCount!==1)missing.push('display_count');
+        return missing;
+    }
     readonly #admittingBuilds=new Set<string>();
     readonly #planEdits=new Map<string,{version:number;text:string}>();
     readonly #localProcessFences=new Map<string,LocalShellProcess[]>();
@@ -274,20 +286,9 @@ export class PersonalAgentHost {
             if(item?.kind!=='build'||!item.build)throw Error('build_not_found');
             if(this.#state.conversations.selected_id!==item.id)throw Error('build_not_selected');
             if(q.enabled&&item.build.status==='finished')throw Error('build_finished');
-            const missing:ComputerPreflightItem[]=[];
-            const direct=!!this.#workbenchModel&&supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model);
-            if(q.enabled){
-                if(!['darwin','win32'].includes(process.platform))missing.push('platform');
-                try{loadComputerDeviceConfig(process.env)}catch{missing.push('configuration')}
-                if(process.platform==='darwin'){
-                    if(q.permissions?.screen!=='granted')missing.push('screen_permission');
-                    if(q.permissions?.accessibility!=='granted')missing.push('accessibility_permission');
-                }
-                if(!direct)missing.push('vision_model');
-                if(q.permissions?.displayCount!==undefined&&q.permissions.displayCount!==1)missing.push('display_count');
-            }
+            const missing=q.enabled?this.#computerPreflight(q.permissions):[];
             if(missing.length)return {ok:false,state:this.computerUseState(item.id),missing,...(missing.includes('vision_model')?{code:'vision_model_required' as const,message:COMPUTER_VISION_REQUIRED_MESSAGE}:{})} satisfies ComputerUseCommandResult;
-            const state:ComputerUseState=q.enabled?{enabled:true,direct,enabled_at:this.#now().toISOString()}:{enabled:false,direct:false};
+            const state:ComputerUseState=q.enabled?{enabled:true,direct:true,enabled_at:this.#now().toISOString()}:{enabled:false,direct:false};
             // Revoke before awaiting Stop so no new computer call can enter during cleanup.
             await this.#serial(async()=>{const next=structuredClone(this.#state),current=next.conversations.items.find(value=>value.id===item.id);if(current?.generation!==item.generation||!current.build)throw Error('build_not_found');current.build.computer_use=state;await this.#commit(next)});
             if(!q.enabled)await this.stopLocalBuild(item.id);
@@ -309,11 +310,12 @@ export class PersonalAgentHost {
             this.#localBuildAuthority.add(q.id);try{await this.submitConversationText(q.id,'Resume',undefined,undefined,{resume:true,local_desktop:true})}catch(error){this.#localBuildAuthority.delete(q.id);throw error}return {accepted:true};
         }
         if(method==='build.begin'){
-            const q=z.object({text:z.string().trim().min(1).max(16000),project:z.string().min(1).optional(),workspace_id:z.string().min(1).optional(),title:z.string().min(1).max(120).optional()}).strict().parse(p);
+            const q=z.object({text:z.string().trim().min(1).max(16000),project:z.string().min(1).optional(),workspace_id:z.string().min(1).optional(),title:z.string().min(1).max(120).optional(),computer_permissions:computerUseCommandSchema.shape.permissions}).strict().parse(p);
             if(!['darwin','win32'].includes(process.platform))throw Error('local_build_unavailable');
             if(this.activeLocalBuild())throw Error('build_stop_required');
             const project=await this.#buildProject(q),item=createConversation('build',q.title??q.text.slice(0,120));
             item.build={project,source_conversation_id:this.#state.conversations.selected_id,status:'idle',reason:null,approval:null,log_revision:0};
+            if(q.computer_permissions&&!this.#computerPreflight(q.computer_permissions).length)item.build.computer_use={enabled:true,direct:true,enabled_at:this.#now().toISOString()};
             return this.#beginBuild(item,q.text);
         }
         const q=z.object({id:z.string(),plan_id:z.string(),version:z.number().int().positive(),project:z.string().min(1).optional(),workspace_id:z.string().min(1).optional(),executor:z.string().max(128).optional()}).strict().parse(p),source=this.#state.conversations.items.find(item=>item.id===q.id);
