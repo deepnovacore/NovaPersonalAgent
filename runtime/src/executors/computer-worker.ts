@@ -34,11 +34,12 @@ input.on('line', (line: string) => {
     try {
       let value: unknown
       if (native && macWindow) {
-        const params = request.params as {locate?: {center?: [number, number]}; value?: string; mode?:'append'|'replace'|'typeOnly'; keyName?: string; direction?: string; distance?: number; focusLease?: {focus: unknown; targetStarted: unknown; clickGroup: number}}
+        const params = request.params as {locate?: {center?: [number, number]}; value?: string; mode?:'append'|'replace'|'typeOnly'; keyName?: string; direction?: string; distance?: number; focusLease?: {focus: unknown; targetStarted: unknown; clickGroup: number}; expectedEditor?: unknown}
         const point = params?.locate?.center
         const body: Record<string, unknown> = {...macWindow, op: request.op, target: binding}
         if (request.op === 'Tap') Object.assign(body, {x: point?.[0], y: point?.[1], holdMs: clickHoldMs, focus: params?.focusLease?.focus, targetStarted: params?.focusLease?.targetStarted, clickGroup: params?.focusLease?.clickGroup})
         if (['Input','KeyboardPress'].includes(request.op) && editorPoint) body.editorPoint=editorPoint
+        if (['Input','KeyboardPress'].includes(request.op) && params?.expectedEditor) body.expectedEditor=z.object({role:z.string().max(100),value:z.string().max(400)}).strict().parse(params.expectedEditor)
         if (request.op === 'Input') {body.value = params?.value;body.mode=params?.mode==='replace'?'replace':'append'}
         if (request.op === 'KeyboardPress') body.keyName = params?.keyName
         if (request.op === 'Scroll') {

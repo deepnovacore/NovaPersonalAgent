@@ -90,6 +90,38 @@ test('native window binding cannot silently change between target and connect', 
 })
 
 
+test('background editor expectation reaches the native helper once and never on Tap', {skip:process.platform !== 'darwin'}, async t => {
+  const root=await realpath(await mkdtemp(join(tmpdir(),'nova-editor-expectation-'))),recorded=join(root,'requests')
+  await mkdir(join(root,'native'))
+  const helper=`#!/usr/bin/env node\nlet b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);require("node:fs").appendFileSync(${JSON.stringify(recorded)},JSON.stringify(r)+"\\n");console.log(JSON.stringify(r.op==="focusSnapshot"?{focus:{pid:222,windowId:333,started:100},targetStarted:200}:{target:"approved",width:800,height:600,keyWindowMatches:true,posted:true,restored:true}))})`
+  await writeFile(join(root,'native/macos_gui'),helper);await chmod(join(root,'native/macos_gui'),0o755)
+  await writeFile(join(root,'native-resources-v1.json'),JSON.stringify({schema_version:1,target:'darwin-'+process.arch,resources:[{logical_id:'macos_gui',relative_path:'native/macos_gui',kind:'executable',platform:'darwin',architecture:process.arch,byte_size:Buffer.byteLength(helper),sha256:createHash('sha256').update(helper).digest('hex'),build_contract_version:1}]}))
+  const backend=await startComputerBackend('0',new AbortController().signal,10000,undefined,root,100,{pid:12345,windowId:678})
+  t.after(async()=>{await backend.close();await rm(root,{recursive:true,force:true})})
+  await backend.windowTarget();await backend.connect()
+  const key=backend.device.actionSpace().find(a=>a.name==='KeyboardPress')!,tap=backend.device.actionSpace().find(a=>a.name==='Tap')!
+  const editor={role:'AXTextField',value:'q'}
+  backend.expectEditor(editor);await key.call({keyName:'Return'});await key.call({keyName:'Return'})
+  backend.expectEditor(editor);await tap.call({locate:{center:[10,10]}})
+  const requests=(await readFile(recorded,'utf8')).trim().split('\n').map(line=>JSON.parse(line) as Record<string,unknown>).filter(r=>['KeyboardPress','Tap'].includes(r.op as string))
+  assert.deepEqual(requests.map(r=>r.expectedEditor),[editor,undefined,undefined])
+  assert.equal(Object.hasOwn(requests[1]!,'expectedEditor'),false);assert.equal(Object.hasOwn(requests[2]!,'expectedEditor'),false)
+  assert.equal(await backend.close(),true)
+})
+
+for (const actionName of ['KeyboardPress', 'Input']) for (const error of ['editor_unavailable', 'operation_unsupported']) test(`background ${actionName} native ${error} preserves delivery certainty`, {skip:process.platform !== 'darwin'}, async t => {
+  const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-editor-unavailable-')))
+  await mkdir(join(root, 'native'))
+  const helper = `#!/usr/bin/env node\nlet b="";process.stdin.on("data",c=>b+=c);process.stdin.on("end",()=>{const r=JSON.parse(b);if(r.op===${JSON.stringify(actionName)}){console.log(JSON.stringify({error:${JSON.stringify(error)}}));process.exitCode=1;return}console.log(JSON.stringify(r.op==="focusSnapshot"?{focus:{pid:222,windowId:333,started:100},targetStarted:200}:r.op==="focusRestore"?{restored:true}:{target:"approved",width:800,height:600,keyWindowMatches:true}))})`
+  await writeFile(join(root, 'native/macos_gui'),helper);await chmod(join(root, 'native/macos_gui'),0o755)
+  await writeFile(join(root, 'native-resources-v1.json'),JSON.stringify({schema_version:1,target:'darwin-'+process.arch,resources:[{logical_id:'macos_gui',relative_path:'native/macos_gui',kind:'executable',platform:'darwin',architecture:process.arch,byte_size:Buffer.byteLength(helper),sha256:createHash('sha256').update(helper).digest('hex'),build_contract_version:1}]}))
+  const backend=await startComputerBackend('0',new AbortController().signal,10000,undefined,root,100,{pid:12345,windowId:678})
+  t.after(async()=>{await backend.close();await rm(root,{recursive:true,force:true})})
+  await backend.windowTarget();await backend.connect()
+  await assert.rejects(async()=>{await backend.device.actionSpace().find(a=>a.name===actionName)!.call(actionName==='Input'?{value:'test'}:{keyName:'Return'})},error==='editor_unavailable'?/^Error: screen_changed$/u:/cleanup_unknown/u)
+  assert.equal(await backend.close(),true)
+})
+
 for (const actionName of ['Tap', 'KeyboardPress', 'Input']) test(`background ${actionName} releases targeted input outside a killed worker group`, {skip:process.platform !== 'darwin'}, async t => {
   const root = await realpath(await mkdtemp(join(tmpdir(), 'nova-focus-recovery-')))
   await mkdir(join(root, 'native'))

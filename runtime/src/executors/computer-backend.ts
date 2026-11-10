@@ -24,6 +24,8 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
   const focusSchema = z.object({focus: z.object({pid: z.number().int().positive().max(2147483647), windowId: z.number().int().positive().max(4294967295), started: z.number().finite().positive()}), targetStarted: z.number().finite().positive()})
   let focusLease: (z.infer<typeof focusSchema> & {clickGroup: number; releasePointer: boolean; releaseKey?: string}) | undefined
   let pointerReleaseNeeded = false, keyboardReleaseNeeded: string | undefined
+  // The editor seen in the latest observation; the next Input/KeyboardPress must still target it.
+  let expectedEditor: {role: string; value: string} | undefined
   const temporary = mkdtempSync(join(tmpdir(), 'nova-gui-input-'))
   const environment: Record<string, string> = {TMPDIR: temporary, TEMP: temporary, TMP: temporary, ELECTRON_RUN_AS_NODE: '1'}
   // Only driver dependencies; no model credentials or inherited NODE_OPTIONS.
@@ -57,7 +59,11 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
     if (!entry) return
     pending.delete(result.id); clearTimeout(entry.timer); signal.removeEventListener('abort', entry.abort)
     if (result.ok === true) entry.resolve(result.value)
-    else {entry.reject(new Error(entry.write ? 'cleanup_unknown' : 'action_failed',{cause:typeof result.detail==='string'&&/^native_gui:[a-z_]{1,80}$/u.test(result.detail)?new Error(result.detail):undefined})); stop()}
+    else {
+      const detail = typeof result.detail==='string'&&/^native_gui:[a-z_]{1,80}$/u.test(result.detail) ? result.detail : undefined
+      // The helper raises editor_unavailable only before sending input; the model must observe again.
+      entry.reject(new Error(entry.write ? detail === 'native_gui:editor_unavailable' ? 'screen_changed' : 'cleanup_unknown' : 'action_failed',{cause:detail?new Error(detail):undefined})); stop()
+    }
   }
   child.stdout.on('data', (chunk: Buffer) => {
     buffer += chunk.toString('utf8')
@@ -125,7 +131,9 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
           const lease = {...focusSchema.parse(await focusReader.request({...macWindow, op: 'focusSnapshot'}, signal)), clickGroup: randomInt(1, 2147483647), releasePointer: name === 'Tap', ...(name === 'KeyboardPress' ? {releaseKey: actionKeyboardPressParamSchema.parse(params).keyName} : name === 'Input' ? {releaseKey: 'unicode'} : {})}
           if (closed || signal.aborted) throw Error('cancelled')
           focusLease = lease // Host survives worker teardown and releases targeted input before ownership.
-          const receipt = await request(name, {...params as object, focusLease: lease}, true) as {restored?: unknown}
+          const expected = name === 'Tap' ? undefined : expectedEditor
+          expectedEditor = undefined
+          const receipt = await request(name, {...params as object, focusLease: lease, ...(expected ? {expectedEditor: expected} : {})}, true) as {restored?: unknown}
           if (name === 'Tap' && receipt?.restored !== true) {stop(); throw Error('cleanup_unknown')}
           focusLease = undefined
         } else {
@@ -136,7 +144,7 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
           if (name === 'KeyboardPress') keyboardReleaseNeeded = undefined
         }
       }}))}
-  return {device, pid: child.pid, releaseInput: async (pointer: boolean, keyName?: string) => {await request('releaseInput', {pointer, ...(keyName ? {keyName} : {})}, true)}, windowTarget: async () => z.object({target: z.string().min(1), width: z.number().positive(), height: z.number().positive()}).parse(await request('target')), connect: async () => {await request('connect', undefined, true)}, listDisplays: async () => {
+  return {device, pid: child.pid, expectEditor: (editor?: {role: string; value: string}) => {expectedEditor = editor && {role: editor.role, value: editor.value}}, releaseInput: async (pointer: boolean, keyName?: string) => {await request('releaseInput', {pointer, ...(keyName ? {keyName} : {})}, true)}, windowTarget: async () => z.object({target: z.string().min(1), width: z.number().positive(), height: z.number().positive()}).parse(await request('target')), connect: async () => {await request('connect', undefined, true)}, listDisplays: async () => {
     const value = await request('listDisplays')
     return z.array(z.object({id: z.string()})).parse(value)
   }, close}

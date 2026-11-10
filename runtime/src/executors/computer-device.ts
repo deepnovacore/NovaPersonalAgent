@@ -53,7 +53,11 @@ export async function computerWrite(action: () => Promise<unknown>, budgetMs: nu
     await Promise.race([action(), new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('cleanup_unknown')), Math.min(budgetMs, 30_000))
     })])
-  } catch(error) { throw new Error('cleanup_unknown',{cause:error}) }
+  } catch(error) {
+    // Only the helper's proven pre-dispatch refusal stays recoverable.
+    if (error instanceof Error && error.message === 'screen_changed' && error.cause instanceof Error && error.cause.message === 'native_gui:editor_unavailable') throw error
+    throw new Error('cleanup_unknown',{cause:error})
+  }
   finally { clearTimeout(timer) }
 }
 
@@ -104,9 +108,8 @@ export async function guardComputerDevice(raw: AbstractInterface, target: () => 
         planned = undefined
         options.progress({phase: 'action_returned', steps, actionName: action.name})
         check()
-        // Observation is retained in memory; model Finished alone is never verification.
-        const observed = await device.screenshotBase64()
-        options.capture?.(observed, steps)
+        // Build takes a fresh observation explicitly, which may now be in a different window.
+        if (options.capture) options.capture(await device.screenshotBase64(), steps)
       } catch (error) {
         const reason = error instanceof Error ? error.message : ''
         failure ??= ['cleanup_unknown', 'cancelled', 'step_limit', 'screen_changed', 'needs_user_action', 'declined'].includes(reason) ? reason : 'action_failed'

@@ -20,20 +20,21 @@ async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resol
  const image='data:image/png;base64,'+(await sharp({create:{width:2560,height:1440,channels:3,background:'white'}}).png().toBuffer()).toString('base64')
  let target='window-one',closed=0,connected=0,cleanup=true,width=1024
  let backendWindow:unknown
- let closeGate=Promise.resolve(),writeGate=Promise.resolve(),writeFailure=false,afterWrite=()=>{ /* Optional failure hook. */ }
+ let closeGate=Promise.resolve(),writeGate=Promise.resolve(),writeFailure='',afterWrite=()=>{ /* Optional failure hook. */ }
  const acting:string[]=[],events:string[]=[],points:({x:number;y:number}|undefined)[]=[]
  const writes:{name:string;params:unknown}[]=[],approvals:string[]=[]
+ const expectedEditors:({role:string;value:string}|undefined)[]=[]
  const backend:Awaited<ReturnType<typeof startComputerBackend>>={
   pid:process.pid,device:{interfaceType:'computer',size:()=>Promise.resolve({width,height:576}),screenshotBase64:()=>Promise.resolve(image),
-   actionSpace:()=>['Tap','Input','Scroll','KeyboardPress'].map(name=>({name,paramSchema:name==='Tap'?actionTapParamSchema:name==='Input'?z.object({value:z.string()}):name==='Scroll'?actionScrollParamSchema:actionKeyboardPressParamSchema,call:(params:unknown)=>{events.push('input');writes.push({name,params});afterWrite();return writeFailure?Promise.reject(Error('cleanup_unknown')):writeGate}}))},
+   actionSpace:()=>['Tap','Input','Scroll','KeyboardPress'].map(name=>({name,paramSchema:name==='Tap'?actionTapParamSchema:name==='Input'?z.object({value:z.string()}):name==='Scroll'?actionScrollParamSchema:actionKeyboardPressParamSchema,call:(params:unknown)=>{events.push('input');writes.push({name,params});afterWrite();return writeFailure?Promise.reject(Error(writeFailure,writeFailure==='screen_changed'?{cause:Error('native_gui:editor_unavailable')}:undefined)):writeGate}}))},
   connect:()=>{connected++;return Promise.resolve()},listDisplays:()=>Promise.resolve([{id:'1'}]),close:async()=>{closed++;await closeGate;return cleanup},
-  windowTarget:()=>Promise.resolve({target,width,height:576}),releaseInput:()=>Promise.resolve(),
+   windowTarget:()=>Promise.resolve({target,width,height:576}),releaseInput:()=>Promise.resolve(),expectEditor:editor=>{expectedEditors.push(editor)},
  }
  let observationId=''
  const session=new ComputerSession({signal:new AbortController().signal,config:{displayId:'1',lockRoot:root,maxSteps:10,budgetMs:1000,settleMs:0},
   backend:(_display,_signal,_budget,_worker,_resources,_hold,window)=>{backendWindow=window;return Promise.resolve(backend)},foreground:()=>Promise.resolve({target,width,height:576}),approve:name=>{approvals.push(name);return approve(name)},acting:(name,point)=>{events.push('acting');acting.push(name);points.push(point)},...settings})
- return {session,delayWrite:(gate:Promise<void>)=>{writeGate=gate},backendWindow:()=>backendWindow,setWidth:(value:number)=>{width=value},observe:async()=>{const value=await session.observe();observationId=value.id;return value.image},action:(name:Parameters<ComputerSession['action']>[0],args:Record<string,unknown>)=>session.action(name,{observationId,...args}),writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:()=>{writeFailure=true},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
-  dispose:async()=>{await session.close().catch(()=>{ /* test asserts cleanup errors separately */ });releaseQuarantinedTaskResources([COMPUTER_RESOURCE]);await rm(root,{recursive:true,force:true})}}
+ return {session,delayWrite:(gate:Promise<void>)=>{writeGate=gate},backendWindow:()=>backendWindow,setWidth:(value:number)=>{width=value},observe:async()=>{const value=await session.observe();observationId=value.id;return value.image},action:(name:Parameters<ComputerSession['action']>[0],args:Record<string,unknown>)=>session.action(name,{observationId,...args}),writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:(reason='cleanup_unknown')=>{writeFailure=reason},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
+   expectedEditors,dispose:async()=>{await session.close().catch(()=>{ /* test asserts cleanup errors separately */ });releaseQuarantinedTaskResources([COMPUTER_RESOURCE]);await rm(root,{recursive:true,force:true})}}
 }
 test('computer tools require a vision model',{timeout:5000},()=>{
  assert.deepEqual(computerTools(false).map(tool=>tool.name),[])
@@ -91,6 +92,15 @@ test('ambiguous input remains quarantined even when backend cleanup succeeds',{t
   await assert.rejects(f.action('computer_click',{x:10,y:10}),/cleanup_unknown/)
   await assert.rejects(f.session.close(),/cleanup_unknown/)
   assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true)
+ }finally{await f.dispose()}
+})
+
+for(const name of ['computer_key','computer_type'] as const)test(`${name} pre-send screen change releases ownership without quarantine`,{timeout:5000},async()=>{
+ const f=await fixture()
+ try{
+  await f.observe();f.failWrite('screen_changed')
+  await assert.rejects(f.action(name,name==='computer_key'?{keys:'Return'}:{text:'hello'}),/^Error: screen_changed$/)
+  await f.session.close();assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),false)
  }finally{await f.dispose()}
 })
 
@@ -164,6 +174,39 @@ test('explicit application binds background input and returns its window metadat
   assert.deepEqual(f.backendWindow(),{pid:123,windowId:456})
   const receipt=await f.session.action('computer_type',{text:'new value',mode:'replace',observationId:observed.id})
   assert.equal(receipt.executionMode,'background')
+ }finally{await f.dispose()}
+})
+test('session binds key and text input to the observed editor, never clicks',async()=>{
+ const editor={role:'AXTextField',value:'q'}
+ const f=await fixture(undefined,{nativeRequest:input=>Promise.resolve(input.op==='applicationTarget'
+  ?{pid:123,windowId:456,target:'window-one',application:{name:'Editor',bundleId:'test.editor',path:'/Applications/Editor.app'}}
+  :{available:true,...editor,source:'accessibility'})})
+ try{
+  for(const name of ['computer_key','computer_type','computer_click'] as const){
+   const observed=await f.session.observe('Editor')
+   assert.deepEqual(observed.ax.editor,{...editor,source:'accessibility'})
+   await f.session.action(name,{observationId:observed.id,...(name==='computer_key'?{keys:'Return'}:name==='computer_type'?{text:'hello'}:{x:10,y:10})})
+  }
+  assert.deepEqual(f.expectedEditors,[editor,editor,undefined])
+ }finally{await f.dispose()}
+})
+test('a fresh observation can bind a newly opened window in the same app',async()=>{
+ let windowId=456
+ const application={name:'Editor',bundleId:'test.editor',path:'/Applications/Editor.app'}
+ const f=await fixture(undefined,{nativeRequest:input=>Promise.resolve(input.op==='applicationTarget'
+  ?{pid:123,windowId,target:windowId===456?'window-one':'window-two',application}
+  :{status:'unavailable',available:false})})
+ try{
+  const before=await f.session.observe('Editor')
+  f.afterWrite(()=>{windowId=789;f.setTarget('window-two')})
+  await f.session.action('computer_click',{x:10,y:10,observationId:before.id})
+  const after=await f.session.observe('Editor')
+  assert.equal(after.target?.window_id,789)
+  assert.deepEqual(f.backendWindow(),{pid:123,windowId:789})
+  assert.deepEqual(f.approvals,['Connect','Tap','Connect'])
+  await assert.rejects(f.session.action('computer_click',{x:10,y:10,observationId:before.id}),/observe_required/)
+  assert.equal(f.writes.length,1)
+  assert.equal(f.closed(),1)
  }finally{await f.dispose()}
 })
 test('background target is independent of unavailable foreground metadata',async()=>{

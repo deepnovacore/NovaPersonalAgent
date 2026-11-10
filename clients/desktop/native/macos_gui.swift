@@ -166,13 +166,25 @@ private struct Binding: Equatable {
             try reject("action_failed")
         }
         if editorOnly {try reject("operation_unsupported")}
-        var actions:CFArray?
-        guard AXUIElementCopyActionNames(element,&actions) == .success,(actions as? [String] ?? []).contains(kAXPressAction) else {return nil}
-        guard AXUIElementPerformAction(element,kAXPressAction as CFString) == .success else {try reject("action_failed")}
-        return "press"
+        var candidate:AXUIElement?=element
+        // Icons and labels can sit inside the actual pressable control.
+        for _ in 0..<8 {
+            guard let node=candidate,ownerWindow(node,binding.pid)==binding.windowID,
+                  attribute(node,kAXRoleAttribute) as? String != kAXWindowRole else {return nil}
+            var actions:CFArray?
+            if AXUIElementCopyActionNames(node,&actions) == .success,(actions as? [String] ?? []).contains(kAXPressAction) {
+                guard try bind(["pid":binding.pid,"windowId":binding.windowID])==binding,
+                      !IsSecureEventInputEnabled() else {try reject("screen_changed")}
+                guard AXUIElementPerformAction(node,kAXPressAction as CFString) == .success else {try reject("action_failed")}
+                return "press"
+            }
+            candidate=axElement(node,kAXParentAttribute)
+        }
+        return nil
     }
-    private static func editNative(_ binding: Binding,_ text: String?,selectAll: Bool=false,replace: Bool=false) throws -> Bool {
+    private static func editNative(_ binding: Binding,_ text: String?,selectAll: Bool=false,replace: Bool=false,expected: AXUIElement?=nil) throws -> Bool {
         let element=try receiver(binding)
+        if let expected,!CFEqual(element,expected) {try reject("editor_unavailable")}
         let textAttribute=kAXValueAttribute
         func sameEditor() throws {
             guard try bind(["pid":binding.pid,"windowId":binding.windowID])==binding,!IsSecureEventInputEnabled(),
@@ -310,16 +322,36 @@ private struct Binding: Equatable {
                   x>=0,y>=0,x<binding.bounds.width,y<binding.bounds.height else {try reject("needs_user_action")}
             return CGPoint(x:x,y:y)
         }
-        // Background apps can drop their editor focus between process-scoped actions.
+        // Background apps can drop their editor focus between process-scoped actions. Editors can also
+        // move after focus (an expanding search box), so the current AX focus wins over the cached point.
+        // editor_unavailable is only raised here, before any key or text is sent.
         if ["Input","KeyboardPress"].contains(operation),let point=request["editorPoint"] as? [Double],point.count==2 {
-            guard point.allSatisfy({$0.isFinite}),point[0]>=0,point[1]>=0,point[0]<binding.bounds.width,point[1]<binding.bounds.height,
-                  try focusOrPress(binding,CGPoint(x:point[0],y:point[1]),editorOnly:true)=="editor" else {try reject("operation_unsupported")}
+            let focused=(try? receiver(binding)).flatMap{attribute($0,kAXRoleAttribute) as? String}
+            if ![kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole].contains(focused ?? "") {
+                guard point.allSatisfy({$0.isFinite}),point[0]>=0,point[1]>=0,point[0]<binding.bounds.width,point[1]<binding.bounds.height,
+                      (try? focusOrPress(binding,CGPoint(x:point[0],y:point[1]),editorOnly:true))=="editor" else {try reject("editor_unavailable")}
+            }
+        }
+        // Text and keys go only to the editor from the latest observation (same role and value as the editor op reports).
+        var validated:AXUIElement?
+        if ["Input","KeyboardPress"].contains(operation),let expected=request["expectedEditor"] as? [String:Any] {
+            guard let role=expected["role"] as? String,let value=expected["value"] as? String,let current=try? receiver(binding),
+                  attribute(current,kAXRoleAttribute) as? String ?? ""==role,
+                  (attribute(current,kAXValueAttribute) as? String).map({String($0.prefix(200))})==value else {try reject("editor_unavailable")}
+            validated=current
+        }
+        // Before dispatch a moved focus is a safe refusal; after dispatch it is an unknown outcome.
+        func sameEditor(sent: Bool) throws {
+            guard let current=try? receiver(binding),validated.map({CFEqual(current,$0)}) ?? true else {try reject(sent ? "screen_changed" : "editor_unavailable")}
         }
         switch operation {
         case "Tap":
             let local=try point()
             try fresh()
-            if let kind=try focusOrPress(binding,local) {try fresh();return ["posted":true,"restored":true,"delivery":"accessibility","editor":kind=="editor"]}
+            if let kind=try focusOrPress(binding,local) {
+                if kind=="editor" {try fresh()}
+                return ["posted":true,"restored":true,"delivery":"accessibility","editor":kind=="editor"]
+            }
             let screen=CGPoint(x:local.x+binding.bounds.minX,y:local.y+binding.bounds.minY)
             guard let hold=request["holdMs"] as? Int, (10...1000).contains(hold),(1...2147483647).contains(clickGroup),
                   let move=CGEvent(mouseEventSource:source,mouseType:.mouseMoved,mouseCursorPosition:screen,mouseButton:.left),
@@ -330,17 +362,22 @@ private struct Binding: Equatable {
             try fresh()
             send(move,point:local,phase:2);usleep(12000)
             send(down,point:local);usleep(useconds_t(hold*1000));send(up,point:local);usleep(200000)
-            try fresh()
+            // A delivered click may make another window key; the next observation must bind it.
             return ["posted":true,"restored":true,"delivery":"targeted_events"]
         case "Input":
             guard let text=request["value"] as? String, !text.isEmpty,text.utf16.count<=200 else {try reject("needs_user_action")}
             try fresh()
             let mode=request["mode"] as? String ?? "append"
             guard ["append","replace"].contains(mode) else {try reject("invalid_configuration")}
-            if try editNative(binding,text,replace:mode=="replace") {try fresh();return ["posted":true,"delivery":"accessibility"]}
+            if try editNative(binding,text,replace:mode=="replace",expected:validated) {try fresh();return ["posted":true,"delivery":"accessibility"]}
             guard mode=="append" else {try reject("operation_unsupported")}
+            try sameEditor(sent:false)
             try focusRecord(binding.pid,binding.windowID,true)
+            try sameEditor(sent:false)
+            var sent=false
             for scalar in text.unicodeScalars {
+                if sent {try sameEditor(sent:true)}
+                sent=true
                 let units=Array(String(scalar).utf16)
                 guard let down=CGEvent(keyboardEventSource:source,virtualKey:0,keyDown:true),let up=CGEvent(keyboardEventSource:source,virtualKey:0,keyDown:false) else {try reject("action_failed")}
                 for event in [down,up] {event.flags=[];units.withUnsafeBufferPointer {event.keyboardSetUnicodeString(stringLength:units.count,unicodeString:$0.baseAddress!)}}
@@ -357,10 +394,11 @@ private struct Binding: Equatable {
                 modifierDown?.flags=flags;modifierUp?.flags=[]
             }
             try fresh()
-            if code==0 && flags == .maskCommand, try editNative(binding,nil,selectAll:true) {try fresh();return ["posted":true,"delivery":"accessibility"]}
-            _=try receiver(binding)
+            if code==0 && flags == .maskCommand, try editNative(binding,nil,selectAll:true,expected:validated) {try fresh();return ["posted":true,"delivery":"accessibility"]}
+            try sameEditor(sent:false)
             try focusRecord(binding.pid,binding.windowID,true)
             down.flags=flags;up.flags=[];try fresh()
+            try sameEditor(sent:false)
             if let event=modifierDown {send(event);usleep(1000)}
             send(down);usleep(10000);send(up)
             if let event=modifierUp {send(event)}
