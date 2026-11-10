@@ -934,7 +934,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                     () => unawaited(_feedback(message, 'dislike')),
                     selected: message['feedback'] == 'dislike',
                   ),
-                  const Spacer(),
                 ],
                 SizedBox(
                   width: 32,

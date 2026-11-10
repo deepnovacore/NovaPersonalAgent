@@ -487,6 +487,13 @@ void main() {
     expect(buttons, findsNWidgets(2));
     expect(find.byTooltip('Like'), findsOneWidget);
     expect(find.byTooltip('Dislike'), findsOneWidget);
+    expect(
+      (tester.getCenter(buttons.last).dx -
+              tester.getCenter(find.byTooltip('Like')).dx)
+          .abs(),
+      lessThanOrEqualTo(96),
+      reason: 'Copy belongs to the same compact action group as feedback',
+    );
     expect(tester.getSemantics(buttons.first).tooltip, 'Copy');
     expect(tester.getSize(buttons.first).width, greaterThanOrEqualTo(32));
 
