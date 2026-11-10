@@ -187,7 +187,7 @@ class ExperiencePersonaSources {
         indexed.length != rows.length ||
         rows.any(
           (row) =>
-              !const {'im', 'mail', 'calendar'}.contains(row['kind']) ||
+              !const {'im', 'mail', 'calendar', 'file'}.contains(row['kind']) ||
               !(row['locator'] as String).startsWith('synthetic://') ||
               DateTime.tryParse(row['observed_at'] as String) == null ||
               (row['text'] as String).trim().isEmpty,
@@ -241,6 +241,9 @@ class ExperiencePersonaSources {
           {
             'id': row['id'],
             'kind': row['kind'],
+            if (row['kind'] == 'file')
+              for (final key in const ['file_name', 'doc_type', 'version'])
+                key: (row['metadata'] as Map?)?[key],
             'observed_at': row['observed_at'],
             'sender': (row['metadata'] as Map?)?['sender_name'],
             'text': row['text'],

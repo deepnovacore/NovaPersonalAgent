@@ -498,6 +498,7 @@ Future<void> _showSources(
                 final kind = switch (row['kind']) {
                   'im' => '聊天',
                   'mail' => '邮件',
+                  'file' => '文件',
                   _ => '日历',
                 };
                 return ListTile(
