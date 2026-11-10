@@ -23,6 +23,7 @@ type Row = readonly [
 ]
 
 const rows: readonly Row[] = [
+  ['NOVACORE_EXPERIENCE_DIR', 'host_private', false, false, null, 'Private experience asset directory for an unpackaged desktop run.', '未打包桌面运行使用的私有体验资源目录。'],
   ['NOVA_SPACE_HOST_CONFIG', 'core', false, true, null, 'Absolute path to a private Host Space configuration; runtime data stays on this Host.', 'Host Space 私密配置的绝对路径；runtime 与数据保留在本机 Host。'],
   ['MINICPM_REALTIME_API_KEY', 'host_private', true, false, null, 'Desktop MiniCPM serving credential.', '桌面 MiniCPM 服务凭据。'],
   ['PERSONAPLEX_REALTIME_API_KEY', 'host_private', true, false, null, 'Desktop PersonaPlex serving credential.', '桌面 PersonaPlex 服务凭据。'],
