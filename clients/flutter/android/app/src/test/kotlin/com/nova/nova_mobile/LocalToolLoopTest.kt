@@ -17,14 +17,18 @@ class LocalToolLoopTest {
         var observeError: Exception? = null
         var launchPendingCaptures = 0
         var throttledCaptures = 0
+        var missingCaptures = 0
         var executeError: Exception? = null
+        var afterDispatchError: Exception? = null
         var stopDuringExecute = false
         val attemptedActions = mutableListOf<String>()
         var verified = false
+        var screenForObservation: ((Int) -> JSONObject)? = null
         var interruption: String? = null
         override fun active() = active
         override fun observe(): JSONObject {
             captureAttempts++
+            if(captureAttempts <= missingCaptures) throw java.util.concurrent.ExecutionException(IllegalStateException("screen_unavailable"))
             if(captureAttempts <= throttledCaptures) throw IllegalStateException("screenshot_unavailable_3")
             if(captureAttempts <= launchPendingCaptures) throw IllegalStateException("outside_target_app")
             if (transientAfterWrite && writes == 1 && observed == 1) {
@@ -32,13 +36,108 @@ class LocalToolLoopTest {
                 if (stopDuringCapture) active = false
                 throw java.util.concurrent.ExecutionException(IllegalStateException("screen_changed_during_capture"))
             }
-            observeError?.let { throw it }; return JSONObject().put("fingerprint", "frame-${++observed}") }
+            observeError?.let { throw it }; observed++; return screenForObservation?.invoke(observed) ?: JSONObject().put("fingerprint", "frame-$observed") }
         override fun approve(decision: ToolDecision, observation: JSONObject) = accept
-        override fun execute(action: JSONObject): String { attemptedActions.add(action.toString()); if(stopDuringExecute) active=false; executeError?.let { throw it }; writes++; return effect }
+        override fun execute(action: JSONObject): String { attemptedActions.add(action.toString()); if(stopDuringExecute) active=false; executeError?.let { throw it }; writes++; afterDispatchError?.let { throw it }; return effect }
         override fun finish(summary: String) { verified = true; active = false }
         override fun interrupt(reason: String) { interruption = reason; active = false }
     }
     private fun action() = ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Tap fixture","action":{"type":"tap","x":0.5,"y":0.4}}"""))
+    private fun invalidAction(): ToolDecision = ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Bad fields","action":{"type":"back","text":"extra"}}"""))
+
+    @Test fun repairUsesSameObservationAndTurnWithoutExtraDispatchOrBudget() {
+        val host = Host()
+        val observations = mutableListOf<JSONObject>()
+        val turns = mutableListOf<Int>()
+        LocalToolLoop(host, { observation, turn ->
+            observations.add(observation)
+            turns.add(turn)
+            if(observations.size == 1) invalidAction() else {
+                assertTrue(observation.getString("previous_error").contains("invalid_action_fields"))
+                action()
+            }
+        }, maxTurns = 1).run()
+        assertEquals(listOf(0, 0), turns)
+        assertSame(observations[0], observations[1])
+        assertEquals(1, host.observed)
+        assertEquals(1, host.writes)
+        assertEquals(1, host.attemptedActions.size)
+        assertEquals("step_limit", host.interruption)
+    }
+
+    @Test fun threeInvalidDecisionsKeepExistingFailureCode() {
+        val host = Host()
+        var calls = 0
+        LocalToolLoop(host, { _, _ -> calls++; invalidAction() }).run()
+        assertEquals(3, calls)
+        assertEquals(1, host.observed)
+        assertEquals(0, host.writes)
+        assertEquals("model_invalid_action_fields", host.interruption)
+    }
+
+    @Test fun repairBudgetIsSharedAcrossStepsAndNeverRepeatsPriorEffects() {
+        val host = Host()
+        val calls = mutableMapOf<Int, Int>()
+        LocalToolLoop(host, { observation, turn ->
+            val attempt = calls.getOrDefault(turn, 0) + 1
+            calls[turn] = attempt
+            if(attempt == 1) assertFalse(observation.has("previous_error"))
+            if(attempt < 3) invalidAction() else action()
+        }).run()
+        assertEquals(mapOf(0 to 3, 1 to 3, 2 to 3, 3 to 1), calls)
+        assertEquals(4, host.observed)
+        assertEquals(3, host.writes)
+        assertEquals(3, host.attemptedActions.size)
+        assertEquals("model_invalid_action_fields", host.interruption)
+    }
+
+    @Test fun modelShapedErrorFromExecutionNeverRetries() {
+        val host = Host().apply { afterDispatchError = IllegalArgumentException("invalid_action_fields") }
+        var calls = 0
+        LocalToolLoop(host, { _, _ -> calls++; action() }).run()
+        assertEquals(1, calls)
+        assertEquals(1, host.attemptedActions.size)
+        assertEquals(1, host.writes)
+        assertEquals("tool_failed", host.interruption)
+    }
+
+    @Test fun cancellationDuringRejectedDecisionDoesNotRepair() {
+        val host = Host()
+        var calls = 0
+        LocalToolLoop(host, { _, _ -> calls++; host.active = false; invalidAction() }).run()
+        assertEquals(1, calls)
+        assertEquals(0, host.writes)
+        assertNull(host.interruption)
+    }
+
+    @Test fun jsonAndBoundedResponseErrorsCanBeRepairedWithoutLeakingDetails() {
+        for(error in listOf(org.json.JSONException("secret response"), IllegalStateException("invalid_model_response"))) {
+            val host = Host()
+            var calls = 0
+            LocalToolLoop(host, { observation, _ ->
+                if(calls++ == 0) throw java.util.concurrent.ExecutionException(error)
+                assertFalse(observation.getString("previous_error").contains("secret"))
+                ToolDecision.parse(JSONObject("""{"kind":"complete","summary":"Target visible"}"""))
+            }).run()
+            assertEquals(2, calls)
+            assertEquals(1, host.observed)
+            assertTrue(host.verified)
+        }
+    }
+    @Test fun oscillationNoteReachesModelBeforeGuardStopsFurtherEffects() {
+        val host = Host().apply { screenForObservation = { n -> JSONObject().put("package", "test.app").put("tree", if(n % 2 == 1) "list" else "video") } }
+        val notes = mutableListOf<String>()
+        LocalToolLoop(host, { observation, turn ->
+            notes.add(observation.getString("progress_note"))
+            if(turn % 2 == 0) action() else ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Return","action":{"type":"back"}}"""))
+        }).run()
+        assertTrue(notes.take(4).all { it.isEmpty() })
+        assertTrue(notes[4].contains("3 times"))
+        assertEquals(6, host.writes)
+        assertEquals(6, notes.size)
+        assertEquals("no_progress", host.interruption)
+        assertFalse(host.verified)
+    }
     @Test fun platformScreenshotThrottleRetriesOnlyObservation() {
         val host = Host().apply { throttledCaptures=1 }
         LocalToolLoop(host, { _, _ -> ToolDecision.parse(JSONObject("""{"kind":"complete","summary":"Target visible"}""")) }).run()
@@ -234,11 +333,19 @@ class LocalToolLoopTest {
         assertEquals(1, host.writes)
         assertFalse(host.verified)
     }
-    @Test fun unrelatedObservationFailureIsNeverRetried() {
+    @Test fun missingScreenRetriesAreBoundedWithoutEffects() {
         val host = Host().apply { observeError = IllegalStateException("screen_unavailable") }
         LocalToolLoop(host, { _, _ -> action() }).run()
-        assertEquals(1, host.captureAttempts)
+        assertEquals(4, host.captureAttempts)
         assertEquals(0, host.writes)
+        assertEquals("observation_screen_unavailable", host.interruption)
+    }
+    @Test fun missingFirstFrameRecoversBeforePlanningAnyEffect() {
+        val host = Host().apply { missingCaptures = 2 }
+        LocalToolLoop(host, { _, _ -> ToolDecision.parse(JSONObject("""{"kind":"complete","summary":"Target visible"}""")) }).run()
+        assertEquals(3, host.captureAttempts)
+        assertEquals(0, host.writes)
+        assertTrue(host.verified)
     }
     @Test fun malformedOrExpandedModelActionsFailClosed() {
         for (value in listOf(

@@ -106,7 +106,14 @@ class MainActivity : FlutterActivity() {
                     "clearChatGptSettings" -> result.success(current.clearChatGptSettings(args.optString("space_id")).toString())
                     "clearModelSettings" -> result.success(current.clearModelSettings(args.getString("space_id")).toString())
                     "saveModelSettings" -> result.success(current.saveModelSettings(args).toString())
-                    "run" -> result.success(current.runModel(args).toString())
+                    "run" -> worker.execute {
+                        try {
+                            val task=current.runModel(args).toString()
+                            runOnUiThread { result.success(task) }
+                        } catch(error:Throwable) {
+                            runOnUiThread { result.error("local_agent_error",error.message,null) }
+                        }
+                    }
                     "approve" -> result.success(JSONObject().put("accepted",false).toString())
                     "apps" -> worker.execute {
                         try {

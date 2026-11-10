@@ -151,6 +151,18 @@ class LocalToolLoop(
         repeat(8) { cause.cause?.let { if (it !== cause) cause = it } }
         return cause
     }
+    private val safeModelCodes = setOf("invalid_model_decision", "unexpected_action", "unsupported_action",
+        "invalid_action_fields", "invalid_coordinate", "invalid_input", "one_model_choice_required",
+        "one_tool_call_required", "function_required", "unsupported_model_tool", "invalid_model_response",
+        PhoneActionErrors.INVALID_REF, PhoneActionErrors.INVALID_SNAPSHOT_ID, PhoneActionErrors.INVALID_DIRECTION,
+        PhoneActionErrors.INVALID_PACKAGE, PhoneActionErrors.INVALID_REASON, TapGuard.CODE)
+
+    private fun repairCode(cause: Throwable): String? = when {
+        cause is org.json.JSONException -> "invalid_model_response"
+        cause is IllegalArgumentException && cause.message in safeModelCodes -> cause.message
+        cause is IllegalStateException && cause.message == "invalid_model_response" -> cause.message
+        else -> null
+    }
     private fun observeStable(launching: Boolean = false): JSONObject {
         var captureRetries = 0
         var launchRetries = 0
@@ -167,9 +179,10 @@ class LocalToolLoop(
                 }
                 // Re-capture a transition only; never repeat a dispatched action.
                 val throttled = cause.message == "screenshot_unavailable_3"
-                if((cause.message != "screen_changed_during_capture" && !throttled) || captureRetries++ >= 2) throw error
+                val unavailable = cause.message == "screen_unavailable"
+                if((cause.message != "screen_changed_during_capture" && !throttled && !unavailable) || captureRetries++ >= (if(unavailable) 3 else 2)) throw error
                 // Android's screenshot rate limit is a read failure with no effect.
-                Thread.sleep(if(throttled) 500 else 200)
+                Thread.sleep(if(throttled) 500 else 200L shl (captureRetries - 1))
                 if(!host.active()) throw error
             }
         }
@@ -179,14 +192,41 @@ class LocalToolLoop(
         var stage = "observation"
         var stalePlans = 0
         var loadingObservations = 0
+        var repairRetries = 0
+        val progress = ScreenProgressGuard()
+        val taps = TapGuard()
+        var previousAction: String? = null
         try {
             repeat(maxTurns) { turn ->
                 if(!host.active()) return
                 stage = "observation"
                 val observation = observeStable(initialLaunchGrace && turn == 0)
+                taps.observe(observation)
                 if(!host.active()) return
+                val progressResult = progress.observe(observation, previousAction)
+                previousAction = null
+                if(progressResult.interrupt) { host.interrupt("no_progress"); return }
+                observation.put("progress_note", progressResult.note)
                 stage = "model"
-                val decision = model(observation, turn)
+                var decision: ToolDecision? = null
+                var stepRepairs = 0
+                // Parsing and deterministic pre-dispatch refusals share one repair budget.
+                // Reuse the same frame/turn: repairs consume neither observations nor progress checks.
+                while(decision == null) {
+                    if(!host.active()) return
+                    try {
+                        val proposed = model(observation, turn)
+                        taps.check(taps.target(proposed.action, observation))
+                        decision = proposed
+                    } catch(error: Exception) {
+                        val code = repairCode(rootCause(error))
+                        if(!host.active()) return
+                        if(code == null || stepRepairs >= 2 || repairRetries >= 6) throw error
+                        stepRepairs++
+                        repairRetries++
+                        observation.put("previous_error", if (code == TapGuard.CODE) "$code. ${TapGuard.REPAIR}" else "Your last decision was rejected: $code. Return exactly one valid next_step; action keys must match the schema for its type. Summary must describe this screen step.")
+                    }
+                }
                 if(!host.active()) return
                 stage = "tool"
                 when(decision.kind) {
@@ -217,6 +257,8 @@ class LocalToolLoop(
                         }
                         if(!host.active()) return
                         if(outcome != "dispatched") { host.interrupt("action_outcome_$outcome"); return }
+                        taps.dispatched(decision.action!!, taps.target(decision.action, observation))
+                        previousAction = decision.action!!.getString("type")
                         stalePlans = 0
                         loadingObservations = 0
                     }
@@ -234,11 +276,6 @@ class LocalToolLoop(
                 PhoneActionErrors.APP_NOT_LAUNCHABLE, PhoneActionErrors.APP_IN_USE_ON_MAIN, PhoneActionErrors.APP_NOT_ALLOWED,
                 PhoneActionErrors.DISPLAY_UNAVAILABLE, PhoneActionErrors.HELPER_UNAVAILABLE,
                 PhoneActionErrors.TAKEOVER_UNAVAILABLE, PhoneActionErrors.TAKEOVER_TIMEOUT)
-            val safeModelCodes = setOf("invalid_model_decision", "unexpected_action", "unsupported_action",
-                "invalid_action_fields", "invalid_coordinate", "invalid_input", "one_model_choice_required",
-                "one_tool_call_required", "function_required", "unsupported_model_tool", "invalid_model_response",
-                PhoneActionErrors.INVALID_REF, PhoneActionErrors.INVALID_SNAPSHOT_ID, PhoneActionErrors.INVALID_DIRECTION,
-                PhoneActionErrors.INVALID_PACKAGE, PhoneActionErrors.INVALID_REASON)
             val reason = when {
                 stage == "model" && cause is ModelHttpException -> "model_http_${cause.status}"
                 stage == "model" && cause is java.net.UnknownHostException -> "model_dns_failed"

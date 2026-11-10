@@ -5,6 +5,23 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class LocalGuiModelTest {
+    @Test fun repairContextAndScreenStepSummaryInstructionsReachBothTiersAndProtocols() {
+        val task = JSONObject().put("goal", "Search").put("acceptance", "Results visible").put("target_package", "test.app")
+        for(tier in com.nova.nova_mobile.phone.PhoneTier.entries) {
+            for(protocol in listOf("chatCompletions", "responses", "chatgptResponses")) {
+                val screen = virtualScreen().put("tree", "Search").put("previous_error", "Rejected: invalid_action_fields")
+                    .put("last_tap_effect", JSONObject().put("changed", true))
+                val body = LocalGuiModel.requestBody("m", task, screen, 2, protocol, tier = tier)
+                val messages = body.getJSONArray(if(protocol == "chatCompletions") "messages" else "input")
+                assertTrue(messages.getJSONObject(0).getString("content").contains("THIS screen step"))
+                val context = JSONObject(messages.getJSONObject(1).getJSONArray("content").getJSONObject(0).getString("text"))
+                assertEquals("Rejected: invalid_action_fields", context.getString("previous_error"))
+                assertEquals(2, context.getInt("step"))
+                assertTrue(context.getJSONObject("last_tap_effect").getBoolean("changed"))
+                assertTrue(messages.getJSONObject(0).getString("content").contains("A repeated tap on the same element on the same page is refused."))
+            }
+        }
+    }
     @Test fun officialDeepSeekFlashDisablesThinkingForForcedToolCalls() {
         val task = JSONObject().put("goal", "Search").put("acceptance", "Results visible")
         val screen = JSONObject().put("image", "YWJj").put("package", "test.app").put("tree", "Search").put("width", 100).put("height", 200)
@@ -63,12 +80,17 @@ class LocalGuiModelTest {
             assertTrue(instructions.contains("snapshot_id") && instructions.contains("hand_to_user(reason)") && instructions.contains("automatically authorized"))
             assertTrue(instructions.contains("changed_during_read is true") && instructions.contains("belong to the selected app"))
             assertTrue(instructions.contains("secure_frame true") && instructions.contains("only submit does"))
+            assertTrue(instructions.contains("confirm the same item identity"))
+            assertTrue(instructions.contains("Skip an already liked item") && instructions.contains("never toggle twice on uncertainty"))
             val part = messages.getJSONObject(1).getJSONArray("content").getJSONObject(0)
             val context = JSONObject(part.getString("text"))
             assertEquals("ph-1", context.getString("snapshot_id"))
             assertEquals("test.app", context.getString("target_package"))
             assertEquals("@e1", context.getJSONArray("untrusted_elements").getJSONObject(0).getString("ref"))
             assertTrue(context.getBoolean("secure_frame"))
+            assertFalse(context.getBoolean("dark_region"))
+            assertEquals(setOf("goal", "acceptance", "step", "target_package", "package", "snapshot_id", "width", "height", "untrusted_elements", "changed_during_read", "secure_frame", "dark_region", "progress_note", "previous_error", "previous_actions", "last_tap_effect"), context.keys().asSequence().toSet())
+            assertTrue(instructions.contains("Never leave and re-enter the same page"))
             assertFalse(context.has("untrusted_screen_tree"))
         }
         val schema = LocalGuiModel.requestBody("m", task, virtualScreen(), 0, tier = com.nova.nova_mobile.phone.PhoneTier.VIRTUAL)
@@ -86,6 +108,21 @@ class LocalGuiModelTest {
             .getJSONObject("properties").getJSONObject("action").getJSONObject("properties").getJSONObject("type").getJSONArray("enum")
         assertEquals(listOf("tap", "swipe", "type", "back"), (0 until types.length()).map { types.getString(it) })
         assertTrue(body.getJSONArray("messages").getJSONObject(0).getString("content").contains("Never tap the floating Nova stop control"))
+    }
+    @Test fun darkRegionAndProgressNoteReachBothTierContextsForEveryProtocol() {
+        val task = JSONObject().put("goal", "Like").put("acceptance", "Liked").put("target_package", "test.app")
+        for (tier in com.nova.nova_mobile.phone.PhoneTier.entries) for (protocol in listOf("chatCompletions", "responses", "chatgptResponses")) {
+            val screen = virtualScreen().put("tree", "Like unchecked").put("secure_frame", false)
+                .put("dark_region", true).put("progress_note", "Do not repeat this approach.")
+            val body = LocalGuiModel.requestBody("m", task, screen, 4, protocol, tier = tier)
+            val messages = body.getJSONArray(if (protocol == "chatCompletions") "messages" else "input")
+            val context = JSONObject(messages.getJSONObject(1).getJSONArray("content").getJSONObject(0).getString("text"))
+            assertTrue(context.getBoolean("dark_region"))
+            assertEquals("Do not repeat this approach.", context.getString("progress_note"))
+            val instructions = messages.getJSONObject(0).getString("content")
+            assertTrue(instructions.contains("even though the page loaded"))
+            assertTrue(instructions.contains("never toggle twice on uncertainty"))
+        }
     }
     @Test fun virtualResponsesParseTheVirtualActionSet() {
         val call = """{"type":"function","function":{"name":"next_step","arguments":"{\"kind\":\"action\",\"summary\":\"Login\",\"action\":{\"type\":\"hand_to_user\",\"reason\":\"Login required\"}}"}}"""

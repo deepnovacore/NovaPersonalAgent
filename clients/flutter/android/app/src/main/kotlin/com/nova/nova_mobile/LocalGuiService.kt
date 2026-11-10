@@ -19,9 +19,11 @@ import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import android.view.accessibility.AccessibilityWindowInfo
 import androidx.annotation.RequiresApi
-import android.widget.Button
+import android.widget.ImageButton
 import com.nova.nova_mobile.phone.a11y.GestureOutcome
 import com.nova.nova_mobile.phone.a11y.RuntimeFlagLeases
+import com.nova.nova_mobile.phone.a11y.normalize
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.ByteArrayOutputStream
 import java.security.MessageDigest
@@ -33,15 +35,18 @@ import java.util.concurrent.Executors
 class LocalGuiService : AccessibilityService() {
     companion object {
         @Volatile var current: LocalGuiService?=null
+        private val generations=java.util.concurrent.atomic.AtomicLong()
         private const val PAIRING_MAX_NODES=400
     }
     private val main=Handler(Looper.getMainLooper())
     private val observations=Executors.newSingleThreadExecutor()
-    private var stopButton: Button?=null
+    private var stopButton: ImageButton?=null
     private var nextScreenshotAt=0L
     var onStop: (() -> Unit)?=null
-    var onUnavailable: (() -> Unit)?=null
+    var onUnavailable: ((String) -> Unit)?=null
+    @Volatile var generation: Long=0; private set
     override fun onServiceConnected(){
+        generation=generations.incrementAndGet()
         // A reconnect may keep or reset the runtime configuration: stop virtual work that relied on it, restore the saved flags.
         flagLeases.reconnect()
         displayEvents.clear()
@@ -53,8 +58,8 @@ class LocalGuiService : AccessibilityService() {
         val displayId=displayOf(event)
         if(displayId!=Display.INVALID_DISPLAY&&displayId!=Display.DEFAULT_DISPLAY)displayEvents[displayId]=SystemClock.uptimeMillis()
     }
-    override fun onInterrupt(){onUnavailable?.invoke()}
-    override fun onDestroy(){onUnavailable?.invoke();hideStop();current=null;observations.shutdownNow();gestureThread.quitSafely();super.onDestroy()}
+    override fun onInterrupt(){onUnavailable?.invoke("a11y_interrupted")}
+    override fun onDestroy(){onUnavailable?.invoke("a11y_destroyed");hideStop();if(current===this)current=null;observations.shutdownNow();gestureThread.quitSafely();super.onDestroy()}
 
     private fun <T> onMain(run: () -> T): T {
         check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
@@ -65,18 +70,34 @@ class LocalGuiService : AccessibilityService() {
     private fun screen():JSONObject {
         val root=rootInActiveWindow?:throw IllegalStateException("screen_unavailable")
         val tree=StringBuilder();var count=0
+        val elements=JSONArray()
+        val metrics=resources.displayMetrics
         fun visit(node: AccessibilityNodeInfo?, depth: Int) {
             if(node==null||depth>15||count++>250||tree.length>12000)return
             val bounds=Rect();node.getBoundsInScreen(bounds)
             val text=if(node.isPassword)"[private input]" else node.text?.toString()?.take(300).orEmpty()
             val description=if(node.isPassword)"" else node.contentDescription?.toString()?.take(200).orEmpty()
-            tree.append("${node.className}|${node.viewIdResourceName}|${bounds.toShortString()}|$text|$description\n")
+            val stateDescription=if(Build.VERSION.SDK_INT>=30&&!node.isPassword&&!node.isEditable)node.stateDescription?.toString()?.take(200).orEmpty() else ""
+            tree.append("${node.className}|${node.viewIdResourceName}|${bounds.toShortString()}|$text|$description")
+            if(node.isCheckable)tree.append("|checkable=true")
+            if(node.isChecked)tree.append("|checked=true")
+            if(node.isSelected)tree.append("|selected=true")
+            if(!node.isEnabled)tree.append("|enabled=false")
+            if(stateDescription.isNotEmpty())tree.append("|stateDescription=$stateDescription")
+            tree.append('\n')
+            if(node.isVisibleToUser && !bounds.isEmpty) elements.put(JSONObject()
+                .put("package",node.packageName?.toString()).put("class",node.className?.toString())
+                .put("resource_id",node.viewIdResourceName).put("name",text.ifBlank { description })
+                .put("content_description",description).put("clickable",node.isClickable)
+                .put("bounds",JSONArray(listOf(normalize(bounds.left,metrics.widthPixels),normalize(bounds.top,metrics.heightPixels),normalize(bounds.right,metrics.widthPixels),normalize(bounds.bottom,metrics.heightPixels))))
+                .put("checkable",node.isCheckable).put("checked",node.isChecked).put("selected",node.isSelected)
+                .put("state_description",stateDescription))
             for(i in 0 until node.childCount)visit(node.getChild(i),depth+1)
         }
         visit(root,0)
         val pkg=root.packageName?.toString().orEmpty()
         val fingerprint=MessageDigest.getInstance("SHA-256").digest((pkg+tree).toByteArray()).joinToString(""){"%02x".format(it)}
-        return JSONObject().put("package",pkg).put("tree",tree.toString()).put("fingerprint",fingerprint)
+        return JSONObject().put("package",pkg).put("tree",tree.toString()).put("elements",elements).put("fingerprint",fingerprint)
     }
     fun observe(expectedPackage:String?=null): JSONObject {
         check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
@@ -106,6 +127,8 @@ class LocalGuiService : AccessibilityService() {
                             val wrapped=Bitmap.wrapHardwareBuffer(hardware,screenshot.colorSpace)?:throw IllegalStateException("screenshot_unavailable")
                             val bitmap=try { wrapped.copy(Bitmap.Config.ARGB_8888,false) } finally { wrapped.recycle() }
                             val width=bitmap.width;val height=bitmap.height
+                            val darkFraction=com.nova.nova_mobile.phone.display.FrameMath.darkFraction(width,height,bitmap::getPixel)
+                            observed.put("dark_region",com.nova.nova_mobile.phone.display.FrameMath.hasDarkRegion(darkFraction,observed.getString("tree").isNotBlank(),darkFraction>=0.995))
                             val scaled=if(maxOf(width,height)>1280)Bitmap.createScaledBitmap(bitmap,(width*1280.0/maxOf(width,height)).toInt(),(height*1280.0/maxOf(width,height)).toInt(),true)else bitmap
                             val bytes=ByteArrayOutputStream();scaled.compress(Bitmap.CompressFormat.JPEG,75,bytes)
                             if(scaled!==bitmap)scaled.recycle();bitmap.recycle()
@@ -166,8 +189,18 @@ class LocalGuiService : AccessibilityService() {
     fun showStop(){
         main.post {
             if(stopButton!=null)return@post
-            val button=Button(this).apply { text="停止 Nova";setOnClickListener{onStop?.invoke()} }
-            val params=WindowManager.LayoutParams(WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.WRAP_CONTENT,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,android.graphics.PixelFormat.TRANSLUCENT)
+            val density=resources.displayMetrics.density
+            val size=kotlin.math.ceil(48*density).toInt()
+            val button=ImageButton(this).apply {
+                setImageResource(R.drawable.ic_task_stop)
+                setBackgroundResource(R.drawable.task_stop_background)
+                contentDescription=getString(R.string.local_task_stop)
+                val padding=(14*density).toInt()
+                setPadding(padding,padding,padding,padding)
+                elevation=6*density
+                setOnClickListener{onStop?.invoke()}
+            }
+            val params=WindowManager.LayoutParams(size,size,WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE,android.graphics.PixelFormat.TRANSLUCENT)
             // Keep the user stop control away from app search/back navigation.
             params.gravity=Gravity.CENTER_VERTICAL or Gravity.END
             getSystemService(WindowManager::class.java).addView(button,params);stopButton=button

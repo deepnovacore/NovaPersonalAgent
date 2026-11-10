@@ -28,6 +28,7 @@ import com.nova.nova_mobile.phone.a11y.VirtualRunHost
 import com.nova.nova_mobile.phone.a11y.VirtualScope
 import com.nova.nova_mobile.phone.a11y.VirtualScreen
 import com.nova.nova_mobile.phone.a11y.phoneTierFor
+import com.nova.nova_mobile.phone.a11y.phoneTierForAdmission
 import com.nova.nova_mobile.phone.display.AgentDisplay
 import com.nova.nova_mobile.phone.display.LazyAgentDisplay
 import com.nova.nova_mobile.phone.toJson
@@ -40,7 +41,7 @@ import android.os.Looper
 
 /** The native command boundary used by a local planner. State sync has no path
  * into this controller. The UI can always stop a run without a Hub or model.
- * [shells] and [events] come from the phone bridge; without a running helper every run stays on the main tier. */
+ * [shells] and [events] come from the phone bridge; virtual-capable runs require a running helper. */
 class LocalAgentController(context: Context, private val spaceId: String, private val shells: ShellProvider? = null,
     private val events: PhoneEventSink? = null) : PhoneTakeover, RunIdleGate {
     private val app = context.applicationContext
@@ -65,7 +66,8 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
     }
     private data class Active(val id:String,val secret:String,val fence:RunFence,var observation:JSONObject?=null,
         var target:String?=null, var model:LocalGuiModel?=null, var approval:ActionApproval?=null,
-        val tier:PhoneTier=PhoneTier.MAIN, val startedAt:Long=SystemClock.elapsedRealtime(), var virtual:VirtualRun?=null)
+        val tier:PhoneTier=PhoneTier.MAIN, val startedAt:Long=SystemClock.elapsedRealtime(), var virtual:VirtualRun?=null,
+        var lifecycle:JSONObject?=null, val serviceGeneration:Long=0)
     @Volatile private var active:Active?=null
     @Volatile private var closed=false
     init { journal.recover() }
@@ -91,12 +93,12 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         if(todo!=null)require(todo.keys().asSequence().toSet()==setOf("id","version") && todo.getString("id").length in 1..200 && todo.get("version") is Int && todo.getInt("version")>0){"invalid_todo_reference"}
         require(goal.isNotEmpty()&&goal.length<=4000&&acceptance.isNotEmpty()&&acceptance.length<=2000){"goal_and_acceptance_required"}
         val budget=budgetMs(tier)
-        val run=Active(id,UUID.randomUUID().toString(),RunFence(id,SystemClock.elapsedRealtime()+budget,30),tier=tier)
+        val run=Active(id,UUID.randomUUID().toString(),RunFence(id,SystemClock.elapsedRealtime()+budget,30),tier=tier,serviceGeneration=service.generation)
         val record=taskWithTier(JSONObject().put("id",id).put("goal",goal).put("acceptance",acceptance).put("phase","running").put("created_at",System.currentTimeMillis()).put("control_token",run.secret).put("actions",JSONArray()), tier)
         if(todo!=null)record.put("todo_ref",todo)
         journal.save(record);active=run
         service.onStop={stop(id)}
-        service.onUnavailable={interrupt(id,"accessibility_unavailable")}
+        service.onUnavailable={cause -> accessibilityLost(run,service,cause)}
         service.showStop()
         main.postDelayed({ if(active===run) interrupt(id,"time_limit") },budget)
         return record
@@ -128,7 +130,17 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         settings.save(value)
         return settings.status()
     }
-    @Synchronized fun runModel(request:JSONObject):JSONObject {
+    fun runModel(request:JSONObject):JSONObject {
+        // Off-main admission wait lets the helper's main-thread Binder handoff finish. No task or effect exists yet.
+        if(journal.task(request.getString("id"))==null &&
+            phoneTierFor(Build.VERSION.SDK_INT,LocalGuiService.current!=null,true,experimentalAcknowledged())==PhoneTier.VIRTUAL) {
+            check(Looper.myLooper()!=Looper.getMainLooper()) { "blocking_gui_call_on_main" }
+            val deadline=SystemClock.elapsedRealtime()+2000
+            while(shells?.shell==null && SystemClock.elapsedRealtime()<deadline && !closed) Thread.sleep(50)
+        }
+        return runModelReady(request)
+    }
+    @Synchronized private fun runModelReady(request:JSONObject):JSONObject {
         check(!closed) { "space_changed" }
         journal.task(request.getString("id"))?.let { previous ->
             require(previous.optJSONObject("todo_ref")?.toString()==request.optJSONObject("todo_ref")?.toString()){"task_id_conflict"}
@@ -139,7 +151,7 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         val target=request.getString("target_package")
         require(target.matches(Regex("[A-Za-z][A-Za-z0-9_]*(\\.[A-Za-z0-9_]+)+"))){"invalid_target_app"}
         // The tier is chosen once here and fixed for the run. Android 12/13 need the user's experimental acknowledgement.
-        val tier=shells?.let { phoneTierFor(Build.VERSION.SDK_INT, LocalGuiService.current!=null, it.shell!=null, experimentalAcknowledged()) } ?: PhoneTier.MAIN
+        val tier=phoneTierForAdmission(Build.VERSION.SDK_INT,LocalGuiService.current!=null,shells?.shell!=null,experimentalAcknowledged())
         check(tier!=PhoneTier.VIRTUAL || target!=app.packageName){PhoneActionErrors.APP_NOT_ALLOWED}
         val record=start(request, tier)
         val run=active!!
@@ -199,13 +211,13 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         val display=LazyAgentDisplay(width,height) {
             AgentDisplay(provider.shell?:throw IllegalStateException(PhoneActionErrors.HELPER_UNAVAILABLE),width,height,metrics.densityDpi,events)
         }
-        val screen=VirtualScreen(service,provider,display,scope)
+        val screen=VirtualScreen(service,provider,display,scope) { active===run && run.fence.allowsAfterClaim(run.fence.token(),SystemClock.elapsedRealtime()) }
         val takeover=RunTakeover(run.id,screen.takeoverPort(),{ event -> events?.emit(event.toJson()) },SystemClock::elapsedRealtime,onMainLooper)
         val host=VirtualRunHost(run.id,scope,screen,takeover,virtualGate(run),events?.let { sink -> { event:JSONObject -> sink.emit(event) } })
         // Owned by the run before anything is acquired, so the run's end releases whatever was set up.
         val virtual=VirtualRun(screen,takeover,host)
         run.virtual=virtual
-        virtual.flags=service.acquireVirtualFlags { interrupt(run.id,"accessibility_unavailable") }
+        virtual.flags=service.acquireVirtualFlags { accessibilityLost(run,service,"a11y_reconnected") }
     }
     private fun experimentalAcknowledged()=app.getSharedPreferences(PHONE_PREFERENCES,Context.MODE_PRIVATE).getBoolean(PHONE_EXPERIMENTAL_ACK,false)
     /** Self-check admission: [block] runs only while no run is active, atomically with run admission; else `run_active`. */
@@ -289,13 +301,25 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         run.approval=approval
         return approval.resolve(approval.id,true,now)
     }
+    @Synchronized private fun accessibilityLost(run:Active,service:LocalGuiService,cause:String) {
+        if(active!==run)return
+        // VirtualScreen and prepared closures retain this service. Do not resume them against a new generation.
+        run.lifecycle=JSONObject().put("cause",cause).put("tier",run.tier.wire)
+            .put("display_id",if(run.tier==PhoneTier.MAIN) Display.DEFAULT_DISPLAY else run.virtual?.screen?.display?.current?.displayId?:Display.INVALID_DISPLAY)
+            .put("service_generation",service.generation)
+        if(cause=="a11y_reconnected")run.lifecycle!!.put("old_generation",run.serviceGeneration).put("new_generation",service.generation)
+        android.util.Log.i("NovaPhoneTask",journal.refreshSafety(JSONObject(run.lifecycle.toString()).put("task_id",run.id),run.id).toString())
+        interrupt(run.id,"accessibility_unavailable")
+    }
     @Synchronized fun interrupt(id:String,reason:String):JSONObject? {
         val run=active
         if(run?.id!=id)return journal.task(id)
-        endRun(run,DoneOutcome.INTERRUPTED,reason,null)
+        val summary=interruptedSummary(reason,journal.refreshSafety(JSONObject(),id).getBoolean("action_in_flight"))
+        endRun(run,DoneOutcome.INTERRUPTED,reason,summary)
         val task=journal.task(id)!!
         task.remove("proposal")
-        task.put("phase","interrupted").put("reason",reason).put("summary","执行已暂停，请核对 App 后重新委托；不会自动重复未确认的动作。")
+        task.put("phase","interrupted").put("reason",reason).put("summary",summary)
+        run.lifecycle?.let { details -> details.keys().forEach { key -> task.put(key,details.get(key)) } }
         journal.save(task)
         return task
     }
@@ -309,7 +333,10 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         // Release the display off the caller's thread: it may wait for a display being created.
         run.virtual?.let { virtual -> Thread { virtual.close() }.apply { isDaemon=true;start() } }
         if(run.tier==PhoneTier.VIRTUAL) runCatching {
-            events?.emit(PhoneDoneEvent(run.id,outcome,reason,summary,run.virtual?.host?.steps?:0,SystemClock.elapsedRealtime()-run.startedAt).toJson())
+            val event=PhoneDoneEvent(run.id,outcome,reason,summary,run.virtual?.host?.steps?:0,SystemClock.elapsedRealtime()-run.startedAt).toJson()
+            run.lifecycle?.let { details -> details.keys().forEach { key -> event.put(key,details.get(key)) } }
+            journal.refreshSafety(event,run.id)
+            events?.emit(event)
         }
     }
     private fun requireRun(request:JSONObject):Active {
@@ -357,7 +384,10 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
             val task=journal.task(run.id)!!
             task.getJSONArray("actions").put(JSONObject().put("attempt_id",attemptId).put("action",action).put("outcome",outcome).put("observation",fresh.getString("fingerprint")))
             if(active===run&&outcome!="dispatched"){
-                endRun(run,DoneOutcome.INTERRUPTED,"action_outcome_$outcome",null);task.put("phase","interrupted").put("summary","动作结果为 $outcome，请核对 App；不会自动重做。")
+                val reason="action_outcome_$outcome"
+                val summary=interruptedSummary(reason)
+                endRun(run,DoneOutcome.INTERRUPTED,reason,summary)
+                task.put("phase","interrupted").put("reason",reason).put("summary",summary)
             }
             journal.save(task)
         }
@@ -391,3 +421,13 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
     }
     fun tasks()=JSONArray(journal.tasks().map { taskWithTier(it) })
 }
+
+internal fun interruptedSummary(reason:String,actionInFlight:Boolean=false):String = (when {
+    reason=="model_repeat_tap_same_element" -> "已暂停：同一个按钮刚点过，为避免反复切换没有再点。请先在 App 里核对。"
+    reason=="no_progress" -> "已暂停：反复回到同一页面，未能继续推进。已经做过的步骤请先在 App 里核对，再决定是否继续。"
+    reason=="accessibility_unavailable" || reason.startsWith("a11y_") -> "已暂停：系统的无障碍服务断开了。已经做过的步骤请先在 App 里核对，再决定要不要重新开始。"
+    reason=="step_limit" -> "已暂停：这次执行的步骤用完了。请核对已完成的内容，再决定是否继续。"
+    reason=="action_outcome_unknown" || reason=="launch_outcome_unknown" -> "已暂停：有一处操作无法确认是否生效，没有重试。"
+    reason.endsWith("helper_unavailable") -> "已暂停：Nova 的手机助手还没连上，请到「设置 → 手机操作」重新连接。"
+    else -> "已暂停：已经做过的步骤请先在 App 里核对，再决定要不要重新开始。"
+}) + if(actionInFlight) IN_FLIGHT_COPY else ""
