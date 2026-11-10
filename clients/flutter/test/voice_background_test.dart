@@ -237,11 +237,13 @@ void main() {
       expect(companion.stops, 1);
     },
   );
-  test('detached engine ends even a retained call', () async {
+  test('detaching the view preserves a foreground-service call', () async {
     await start();
     session.didChangeAppLifecycleState(AppLifecycleState.detached);
     await settle();
-    expect(session.active, isFalse);
-    expect(companion.stops, 1);
+    expect(session.active, isTrue);
+    expect(companion.stops, 0);
+    session.didChangeAppLifecycleState(AppLifecycleState.resumed);
+    expect(session.active, isTrue);
   });
 }

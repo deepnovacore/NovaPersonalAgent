@@ -249,7 +249,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
  override fun onDetachedFromActivityForConfigChanges(){detachActivity()}
  override fun onReattachedToActivityForConfigChanges(value:ActivityPluginBinding){onAttachedToActivity(value)}
  override fun onDetachedFromActivity(){detachActivity()}
- private fun detachActivity(){if(backgroundCall)fail("Activity detached");binding?.removeRequestPermissionsResultListener(this);activity?.application?.unregisterActivityLifecycleCallbacks(this);binding=null;activity=null;permission?.success(false);permission=null;if(audio.running || aoq?.running==true)fail("Activity detached")}
+ private fun detachActivity(){binding?.removeRequestPermissionsResultListener(this);activity?.application?.unregisterActivityLifecycleCallbacks(this);binding=null;activity=null;permission?.success(false);permission=null;if(!backgroundCall && (audio.running || aoq?.running==true))fail("Activity detached")}
  override fun onDetachedFromEngine(engine:FlutterPlugin.FlutterPluginBinding){hideTask();stopCompanion();companion.setMethodCallHandler(null);detachActivity();audio.dispose();channel.setMethodCallHandler(null);generation=null;resetHandoff()}
  override fun onActivityStopped(value:Activity){
   if(value!=activity)return

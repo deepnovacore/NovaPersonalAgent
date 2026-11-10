@@ -18,24 +18,31 @@ import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
-class NovaSpacePush(private val activity: Activity, messenger: BinaryMessenger) : EventChannel.StreamHandler {
+class NovaSpacePush(activity: Activity, messenger: BinaryMessenger) : EventChannel.StreamHandler {
+    private val app = activity.applicationContext
+    private var owner = java.lang.ref.WeakReference(activity)
+    fun attach(activity: Activity) { owner.clear(); owner = java.lang.ref.WeakReference(activity); opened(activity.intent) }
     private var permissionReply: MethodChannel.Result? = null
     init {
-        initialize(activity)
+        initialize(app)
         MethodChannel(messenger, "nova/space_push").setMethodCallHandler { call, reply ->
             val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
             when (call.method) {
                 "requestPermission" -> {
-                    if (Build.VERSION.SDK_INT >= 33 && activity.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                    if (Build.VERSION.SDK_INT >= 33 && app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                         if (permissionReply != null) { reply.error("permission_pending", null, null) }
-                        else { permissionReply = reply; activity.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), permissionCode) }
-                    } else reply.success(activity.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
+                        else {
+                            val current = owner.get()
+                            if (current == null) reply.error("activity_unavailable", null, null)
+                            else { permissionReply = reply; current.requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), permissionCode) }
+                        }
+                    } else reply.success(app.getSystemService(NotificationManager::class.java).areNotificationsEnabled())
                 }
                 "getToken" -> {
                     if (BuildConfig.NOVA_PUSH_PROVIDER == "mipush") {
-                        val token = activity.getSharedPreferences("nova_push", Context.MODE_PRIVATE).getString("mipush_token", null)
+                        val token = app.getSharedPreferences("nova_push", Context.MODE_PRIVATE).getString("mipush_token", null)
                         reply.success(token?.let { mapOf("provider" to "mipush", "token" to it) })
-                    } else if (FirebaseApp.getApps(activity).isEmpty()) reply.success(null)
+                    } else if (FirebaseApp.getApps(app).isEmpty()) reply.success(null)
                     else FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
                         reply.success(if (task.isSuccessful) mapOf("provider" to "fcm", "token" to task.result) else null)
                     }
@@ -43,16 +50,15 @@ class NovaSpacePush(private val activity: Activity, messenger: BinaryMessenger) 
                 "configureSpace" -> {
                     try {
                         val handle = args["handle"] as? String ?: error("invalid_config")
-                        (args["notificationKey"] as? String)?.let { NovaPushCrypto.save(activity, handle, it) }
+                        (args["notificationKey"] as? String)?.let { NovaPushCrypto.save(app, handle, it) }
                         reply.success(null)
                     } catch (_: Exception) { reply.error("push_key_unavailable", null, null) }
                 }
-                "removeSpace" -> { (args["handle"] as? String)?.let { NovaPushCrypto.remove(activity, it) }; reply.success(null) }
+                "removeSpace" -> { (args["handle"] as? String)?.let { NovaPushCrypto.remove(app, it) }; reply.success(null) }
                 else -> reply.notImplemented()
             }
         }
         EventChannel(messenger, "nova/space_push/events").setStreamHandler(this)
-        opened(activity.intent)
     }
     fun onRequestPermissionsResult(code: Int, grants: IntArray) {
         if (code != permissionCode) return
@@ -61,10 +67,15 @@ class NovaSpacePush(private val activity: Activity, messenger: BinaryMessenger) 
     override fun onListen(arguments: Any?, eventSink: EventChannel.EventSink) {
         sink = eventSink
         synchronized(pending) { pending.forEach { sink?.success(it) }; pending.clear() }
-        val prefs = activity.getSharedPreferences("nova_push", Context.MODE_PRIVATE)
+        val prefs = app.getSharedPreferences("nova_push", Context.MODE_PRIVATE)
         if (prefs.getBoolean("sync_required", false)) { emit(mapOf("type" to "syncRequired")); prefs.edit().remove("sync_required").apply() }
     }
     override fun onCancel(arguments: Any?) { sink = null }
+    fun detach(activity: Activity) {
+        if (owner.get() !== activity) return
+        owner.clear()
+        permissionReply?.error("activity_closed", null, null); permissionReply = null
+    }
     fun close() { permissionReply?.error("activity_closed", null, null); permissionReply = null; sink = null }
     companion object {
         private const val permissionCode = 7430

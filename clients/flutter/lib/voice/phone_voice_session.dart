@@ -1430,8 +1430,9 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    if ((state == AppLifecycleState.paused && !_backgroundReady) ||
-        state == AppLifecycleState.detached) {
+    if (!_backgroundReady &&
+        (state == AppLifecycleState.paused ||
+            state == AppLifecycleState.detached)) {
       error = 'call_paused_by_system';
       unawaited(stop());
     }

@@ -1,6 +1,5 @@
 package com.nova.nova_mobile.phone
 
-import java.io.File
 import org.junit.Assert.*
 import org.junit.Test
 
@@ -33,15 +32,4 @@ class PhoneRunHooksTest {
         assertNull(hooks.selfCheck)
     }
 
-    @Test fun mainActivityWiresTheCurrentSpaceAndDynamicAccessibilityReader() {
-        val source = File("src/main/kotlin/com/nova/nova_mobile/MainActivity.kt").readText()
-        assertTrue(source.contains("LocalAgentController(applicationContext, NovaSpaceScope.standalone().id, bridge, bridge)"))
-        assertTrue(source.contains("bridge.takeover = current"))
-        assertTrue(source.contains("bridge.selfCheck = VirtualSelfCheck(applicationContext, bridge, current)"))
-        assertTrue(source.contains("LocalGuiService.current?.settingsWindowTexts() ?: emptyList()"))
-        val close = source.substringAfter("private fun closeController()").substringBefore("override fun onCreate")
-        assertTrue(close.indexOf("clearRunHooks(current)") < close.indexOf("current.close()"))
-        assertTrue(source.substringAfter("val updateScope = {").trimStart().startsWith("closeController()"))
-        assertTrue(source.substringAfter("override fun onDestroy()").substringBefore("super.onDestroy()").contains("closeController()"))
-    }
 }

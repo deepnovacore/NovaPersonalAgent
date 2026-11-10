@@ -102,8 +102,8 @@ class VoiceDelegateBridge extends ChangeNotifier {
           'content':
               result?['content'] ??
               (intent['delegate_language'] == 'en'
-                  ? 'The app exited before the task finished. Its outcome is unknown; it will not be retried automatically.'
-                  : '任务因应用退出而中断，操作结果未知；不会自动重试。'),
+                  ? 'Task execution was interrupted. Its outcome is unknown; it will not be retried automatically.'
+                  : '任务执行已中断，操作结果未知；不会自动重试。'),
           'delegate_id': task,
           'delegate_context': intent['delegate_context'],
           if (intent['delegate_language'] != null)

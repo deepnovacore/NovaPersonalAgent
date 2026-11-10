@@ -55,7 +55,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
     fun clearRunHooks(owner: PhoneTakeover) = runHooks.clear(owner)
     private val preferences by lazy { app.getSharedPreferences(PHONE_PREFERENCES, Context.MODE_PRIVATE) }
     private val preferenceChanges = MutableStateFlow(0L)
-    private class Registration {
+    private class Registration(var activity: WeakReference<Activity>) {
         @Volatile var events: EventChannel.EventSink? = null
         @Volatile var frames: EventChannel.EventSink? = null
         @Volatile var visible = false
@@ -139,14 +139,13 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
     }.distinctUntilChanged()
 
     private fun attach(activity: Activity, engine: FlutterEngine) {
-        registrations.remove(engine)?.detach?.invoke()
+        registrations[engine]?.let { it.activity = WeakReference(activity); return }
         scope.launch(Dispatchers.IO) { if (supported) manager.start() }
-        val owner = WeakReference(activity)
         val methods = MethodChannel(engine.dartExecutor.binaryMessenger, PHONE_METHOD_CHANNEL)
         val eventChannel = EventChannel(engine.dartExecutor.binaryMessenger, PHONE_EVENT_CHANNEL)
         val frameChannel = EventChannel(engine.dartExecutor.binaryMessenger, PHONE_FRAME_CHANNEL)
         val calls = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
-        val registration = Registration()
+        val registration = Registration(WeakReference(activity))
         registrations[engine] = registration
         methods.setMethodCallHandler { call, result ->
             calls.launch(start = CoroutineStart.UNDISPATCHED) {
@@ -154,7 +153,7 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                     val args = JSONObject(call.arguments as? String ?: "{}")
                     val answer = when (call.method) {
                         "status" -> encodeStatus(status())
-                        "openSettings" -> JSONObject().put("opened", openSettings(owner.get(), args.optString("kind")))
+                        "openSettings" -> JSONObject().put("opened", openSettings(registration.activity.get(), args.optString("kind")))
                         "setExperimentalAck" -> {
                             val acknowledged = acknowledgedArgument(args)
                             withContext(Dispatchers.IO) { setExperimentalAck(preferences, acknowledged) }
@@ -230,7 +229,6 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
         registration.detach = {
             calls.cancel(); registration.clearStreams()
             methods.setMethodCallHandler(null); eventChannel.setStreamHandler(null); frameChannel.setStreamHandler(null)
-            engine.removeEngineLifecycleListener(listener)
             registrations.remove(engine, registration)
         }
     }
