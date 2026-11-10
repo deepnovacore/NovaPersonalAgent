@@ -1,3 +1,6 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
+import 'package:nova_mobile/voice/providers/qwen_realtime_voice_provider.dart';
 import 'dart:async';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -14,6 +17,7 @@ class FakeCompanion implements VoiceCompanion {
   final events = StreamController<String>.broadcast(sync: true);
   Completer<void>? acquiring;
   bool fail = false, failStop = false;
+  Object failure = StateError('native_unavailable');
   int starts = 0, stops = 0;
   final states = <bool>[];
   @override
@@ -22,7 +26,7 @@ class FakeCompanion implements VoiceCompanion {
   Future<void> start() async {
     starts++;
     await acquiring?.future;
-    if (fail) throw StateError('native_unavailable');
+    if (fail) throw failure;
   }
 
   @override
@@ -130,6 +134,67 @@ void main() {
     expect(companion.stops, 1);
     expect(audio.generation, isNull);
   });
+  for (final status in [401, 403, 404, 429, 503]) {
+    test('HTTP $status survives provider startup and cleanup', () async {
+      final previousHttp = HttpOverrides.current;
+      HttpOverrides.global = null;
+      addTearDown(() => HttpOverrides.global = previousHttp);
+      final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+      addTearDown(() => server.close(force: true));
+      server.listen((request) async {
+        request.response.statusCode = status;
+        request.response.write('private response body');
+        await request.response.close();
+      });
+      final realtime = QwenRealtimeVoiceProvider(
+        endpoint: 'ws://127.0.0.1:${server.port}/live',
+        model: 'test-model',
+        apiKey: 'secret-test-key',
+        voice: 'test-voice',
+      );
+      await session.start(provider: realtime, conversation: conversation);
+      await settle();
+      expect(session.error, 'connection_http_$status');
+      expect(session.active, isFalse);
+      expect(audio.generation, isNull);
+    });
+  }
+  test(
+    'native startup error code survives without its sensitive details',
+    () async {
+      companion.fail = true;
+      companion.failure = PlatformException(
+        code: 'call_controls_failed',
+        message: 'private details',
+      );
+      await start();
+      expect(session.error, 'native_call_controls_failed');
+    },
+  );
+  test(
+    'startup diagnostics identify the stage without exception contents',
+    () async {
+      final logs = <String>[];
+      final originalPrint = debugPrint;
+      debugPrint = (String? message, {int? wrapWidth}) {
+        if (message != null) logs.add(message);
+      };
+      try {
+        companion.fail = true;
+        await start();
+        expect(
+          logs.join('\n'),
+          contains('startup stage=companion type=StateError'),
+        );
+        expect(logs.join('\n'), contains('FakeCompanion.start'));
+        expect(logs.join('\n'), isNot(contains('native_unavailable')));
+        expect(session.active, isFalse);
+        expect(companion.stops, 1);
+      } finally {
+        debugPrint = originalPrint;
+      }
+    },
+  );
   test(
     'failed native acquisition cleans up and never starts capture',
     () async {

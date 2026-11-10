@@ -407,13 +407,49 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                                   '手机音频已中断，请重新开始通话。',
                                   'Device audio was interrupted. Please restart the call.',
                                 ),
+                                'microphone_denied' => t(
+                                  '麦克风权限未授予，请在系统设置中允许 NovaCore 使用麦克风。',
+                                  'Microphone permission was denied. Allow NovaCore to use the microphone in system settings.',
+                                ),
+                                'connection_http_401' => t(
+                                  '语音服务鉴权失败（HTTP 401），请检查所选服务的 API 密钥。',
+                                  'Voice authentication failed (HTTP 401). Check the selected service’s API key.',
+                                ),
+                                'connection_http_403' => t(
+                                  '语音服务拒绝访问（HTTP 403），请检查密钥的权限、服务地区和模型访问权限。',
+                                  'Voice access denied (HTTP 403). Check key permissions, service region and model access.',
+                                ),
+                                'connection_http_404' => t(
+                                  '语音服务地址或模型不存在（HTTP 404），请检查语音配置。',
+                                  'Voice endpoint or model not found (HTTP 404). Check voice settings.',
+                                ),
+                                'connection_http_429' => t(
+                                  '语音服务限流或额度不足（HTTP 429），请检查额度或稍后重试。',
+                                  'Voice rate limit or quota exceeded (HTTP 429). Check quota or retry later.',
+                                ),
+                                'connection_network_failed' => t(
+                                  '无法连接语音服务，请检查手机网络、DNS 或代理设置（connection_network_failed）。',
+                                  'Cannot reach the voice service. Check network, DNS or proxy settings (connection_network_failed).',
+                                ),
+                                'connection_tls_failed' => t(
+                                  '语音服务的安全连接失败，请检查设备时间、证书或代理设置（connection_tls_failed）。',
+                                  'Voice TLS handshake failed. Check device time, certificates or proxy settings (connection_tls_failed).',
+                                ),
+                                'connection_timeout' || 'setup_timeout' => t(
+                                  '连接语音服务超时，请检查网络后重试（${session.error}）。',
+                                  'Voice connection timed out. Check your connection and retry (${session.error}).',
+                                ),
+                                'voice_configuration_invalid' => t(
+                                  '语音配置无效，请检查服务地址、模型和密钥（voice_configuration_invalid）。',
+                                  'Invalid voice configuration. Check endpoint, model and key (voice_configuration_invalid).',
+                                ),
                                 'provider_invalid_value' => t(
                                   '语音服务拒绝了本次请求，请重试或检查模型配置。',
                                   'The voice service rejected this request. Retry or check the model configuration.',
                                 ),
                                 _ => t(
-                                  '请检查语音设置或网络，再重新通话。',
-                                  'Check voice settings or your connection, then try again.',
+                                  '通话失败（${session.error}）。请根据错误检查语音配置或服务状态后重试。',
+                                  'Call failed (${session.error}). Check voice settings or service status for this error and retry.',
                                 ),
                               },
                         ),

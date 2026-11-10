@@ -211,6 +211,17 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
+  testWidgets('handshake rejection shows status and an actionable reason', (
+    tester,
+  ) async {
+    final session = PanelSession()..error = 'connection_http_401';
+    await tester.pumpWidget(panelHost(session, reduced: true));
+    expect(find.textContaining('401'), findsOneWidget);
+    expect(find.textContaining('密钥'), findsOneWidget);
+    expect(find.text('请检查语音设置或网络，再重新通话。'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+  });
   testWidgets('capture failure is not mislabeled as a network failure', (
     tester,
   ) async {

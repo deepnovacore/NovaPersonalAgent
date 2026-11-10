@@ -184,9 +184,18 @@ abstract class RealtimeSocketProvider implements VoiceProvider {
         onDone: () => fail('disconnected'),
         cancelOnError: true,
       );
-    } catch (_) {
-      fail('connection_failed');
-      throw StateError('Realtime connection failed');
+    } catch (error) {
+      final code = switch (error) {
+        WebSocketException(httpStatusCode: final int status) =>
+          'connection_http_$status',
+        HandshakeException() => 'connection_tls_failed',
+        SocketException() => 'connection_network_failed',
+        TimeoutException() => 'connection_timeout',
+        FormatException() => 'voice_configuration_invalid',
+        _ => 'connection_failed',
+      };
+      fail(code);
+      throw StateError(code);
     }
   }
 
