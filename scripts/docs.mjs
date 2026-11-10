@@ -80,7 +80,7 @@ export function generateDocs() {
   fs.mkdirSync(path.join(site, 'generated'), { recursive: true });
   fs.writeFileSync(path.join(site, 'generated/docs.json'), JSON.stringify(pages));
   const plain = value => value.replace(/<[^>]*>/g, ' ').replace(/&(?:amp|lt|gt|quot|#39);/g, entity => ({'&amp;':'&','&lt;':'<','&gt;':'>','&quot;':'"','&#39;':"'"})[entity]).replace(/\s+/g, ' ').trim().normalize('NFKC');
-  const userSlugs = ['', 'getting-started', 'features', 'support-matrix', 'knowledge-base', 'personal-memory', 'iphone', 'configuration', 'architecture'];
+  const { userSlugs } = JSON.parse(fs.readFileSync(path.join(site, 'lib/doc-slugs.json'), 'utf8'));
   const index = pages.map(p => ({ title: p.title, url: p.url, lang: p.lang, section: userSlugs.includes(p.slug) ? 'users' : 'developers', headings: p.toc.map(h => h.title).join(' '), text: plain(p.html) }));
   fs.writeFileSync(path.join(site, 'generated/search.json'), JSON.stringify(index));
   // Copy the media actually referenced by the bilingual homepage cards.
