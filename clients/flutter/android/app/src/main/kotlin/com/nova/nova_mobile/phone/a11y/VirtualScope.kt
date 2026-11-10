@@ -19,6 +19,13 @@ fun phoneTierFor(apiLevel: Int, accessibility: Boolean, helperRunning: Boolean, 
     if (apiLevel >= PHONE_VIRTUAL_MIN_API && accessibility && helperRunning &&
         (apiLevel >= PHONE_VIRTUAL_STABLE_API || experimentalAcknowledged)) PhoneTier.VIRTUAL else PhoneTier.MAIN
 
+/** Admission must not turn a missing helper into permission to operate the main display. */
+fun phoneTierForAdmission(apiLevel: Int, accessibility: Boolean, helperRunning: Boolean, experimentalAcknowledged: Boolean): PhoneTier {
+    val tier = phoneTierFor(apiLevel, accessibility, true, experimentalAcknowledged)
+    check(tier != PhoneTier.VIRTUAL || helperRunning) { PhoneActionErrors.HELPER_UNAVAILABLE }
+    return tier
+}
+
 /**
  * Consent scope of a virtual-tier run (contract "App scope (virtual tier)"): the user chose [target]; the agent may act
  * while the display shows [target] or a system mediator (permission dialogs, pickers, the keyboard). Nova's own

@@ -43,6 +43,7 @@ class AgentDisplay(
     private val frameLock = Any()
     private var fullFrame: Bitmap? = null // whole frame with row padding: width = rowStride / pixelStride
     private var hasFrame = false
+    private var frameSequence = 0L
     private var lastProcessedAt = 0L
     private var pending = false
     @Volatile private var released = false
@@ -97,6 +98,7 @@ class AgentDisplay(
                 }
                 bmp.copyPixelsFromBuffer(plane.buffer.rewind())
                 hasFrame = true
+                frameSequence++
             }
         } finally {
             image.close()
@@ -136,11 +138,12 @@ class AgentDisplay(
         if (!hasFrame || bmp == null) null else Bitmap.createBitmap(bmp, 0, 0, width, height)
     }
 
-    /** Waits up to [timeoutMs] for the first frame; returns whether one exists. Call off the main thread. */
-    fun awaitFrame(timeoutMs: Long): Boolean {
+    /** Waits for a frame newer than [afterSequence]; polling also observes cancellation. Call off-main. */
+    fun awaitFrame(timeoutMs: Long, afterSequence: Long = -1, active: () -> Boolean = { true }): Boolean {
         val deadline = SystemClock.uptimeMillis() + timeoutMs
         while (true) {
-            if (synchronized(frameLock) { hasFrame }) return true
+            if (!active()) return false
+            if (synchronized(frameLock) { hasFrame && frameSequence > afterSequence }) return true
             if (released || SystemClock.uptimeMillis() >= deadline) return false
             Thread.sleep(FRAME_POLL_MS)
         }
@@ -148,15 +151,16 @@ class AgentDisplay(
 
     /** Model screenshot: latest frame scaled to [FrameMath.MODEL_MAX_SIDE], base64 JPEG; null before the first frame. */
     fun modelImage(): ModelImage? {
-        val frame = latestFrameBitmap() ?: return null
+        val (frame, sequence) = synchronized(frameLock) { latestFrameBitmap()?.let { it to frameSequence } } ?: return null
         try {
-            val black = FrameMath.isBlack(frame.width, frame.height, frame::getPixel)
+            val darkFraction = FrameMath.darkFraction(frame.width, frame.height, frame::getPixel)
+            val black = darkFraction >= 0.995
             val (mw, mh) = FrameMath.modelSize(frame.width, frame.height)
             val scaled = if (mw != frame.width || mh != frame.height) Bitmap.createScaledBitmap(frame, mw, mh, true) else frame
             try {
                 val out = ByteArrayOutputStream()
                 scaled.compress(Bitmap.CompressFormat.JPEG, MODEL_JPEG_QUALITY, out)
-                return ModelImage(Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP), black)
+                return ModelImage(Base64.encodeToString(out.toByteArray(), Base64.NO_WRAP), black, sequence, darkFraction)
             } finally {
                 if (scaled !== frame) scaled.recycle()
             }
@@ -194,7 +198,7 @@ class AgentDisplay(
     }
 
     /** [jpegBase64] is the encoded frame; [black] is true for a FLAG_SECURE (all black) frame. */
-    class ModelImage(val jpegBase64: String, val black: Boolean)
+    class ModelImage(val jpegBase64: String, val black: Boolean, val sequence: Long, val darkFraction: Double)
 
     private companion object {
         const val FRAME_INTERVAL_MS = 100L

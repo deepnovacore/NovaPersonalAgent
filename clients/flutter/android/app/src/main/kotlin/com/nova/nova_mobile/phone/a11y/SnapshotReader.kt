@@ -24,6 +24,7 @@ internal class ScreenRead(
     val hash: Long,
     val appWindowElements: Int,
     val topPackage: String?,
+    val missingRoot: Boolean = false,
 )
 
 /** Reads the numbered element list and the change hash from one display's windows. Never logs screen content. */
@@ -60,6 +61,7 @@ internal object SnapshotReader {
         var lastLabel: String? = null
         var appWindowElements = 0
         var inAppWindow = false
+        var hasRoot = false
         val rect = Rect()
 
         fun visit(n: AccessibilityNodeInfo, depth: Int, inList: Boolean) {
@@ -83,13 +85,19 @@ internal object SnapshotReader {
                             name = label.take(MAX_NAME),
                             bounds = listOf(normalize(rect.left, width), normalize(rect.top, height),
                                 normalize(rect.right, width), normalize(rect.bottom, height)),
-                            // Fields always carry their id: a search box's name is often only a suggestion.
-                            resourceId = if (label.isEmpty() || n.isEditable) readableResourceId(rid) else null,
+                            resourceId = rid,
+                            packageName = n.packageName?.toString(),
+                            className = n.className?.toString(),
                             clickable = n.isClickable,
                             editable = n.isEditable,
                             scrollable = n.isScrollable,
                             focused = n.isFocused,
                             secret = n.isPassword,
+                            checkable = n.isCheckable,
+                            checked = n.isChecked,
+                            selected = n.isSelected,
+                            enabled = n.isEnabled,
+                            stateDescription = stateDescription(n),
                         )
                         val hint = namedByHint(n, own)
                         entries += NodeEntry(element, ElementLocator(role, label, rid, rect.centerX(), rect.centerY(), lastLabel, hint, inList), n)
@@ -103,6 +111,7 @@ internal object SnapshotReader {
         }
 
         for (w in content) w.root?.let {
+            hasRoot = true
             inAppWindow = w.type == AccessibilityWindowInfo.TYPE_APPLICATION
             visit(it, 0, false)
         }
@@ -111,6 +120,7 @@ internal object SnapshotReader {
             hash = hash,
             appWindowElements = appWindowElements,
             topPackage = topPackage(windows),
+            missingRoot = content.isNotEmpty() && !hasRoot,
         )
     }
 
@@ -171,7 +181,10 @@ internal object SnapshotReader {
     // isChecked is replaced by the tri-state `checked` from API 36; minSdk still needs it.
     @Suppress("DEPRECATION")
     private fun states(n: AccessibilityNodeInfo) =
-        "${n.isChecked}${n.isSelected}${n.isEnabled}${n.isFocused}${n.textSelectionStart}:${n.textSelectionEnd}"
+        "${n.isCheckable}${n.isChecked}${n.isSelected}${n.isEnabled}${n.isFocused}${n.textSelectionStart}:${n.textSelectionEnd}:${stateDescription(n)}"
+
+    private fun stateDescription(n: AccessibilityNodeInfo): String? =
+        if (android.os.Build.VERSION.SDK_INT >= 30 && !isField(n)) n.stateDescription?.toString()?.take(MAX_NAME) else null
 
     /** Editable and secret fields hold user input; their names never come from their own text or description. */
     private fun isField(n: AccessibilityNodeInfo) = n.isEditable || n.isPassword
@@ -211,12 +224,6 @@ internal object SnapshotReader {
         walk(n, 0)
         val joined = parts.joinToString(" ")
         return if (joined.length > AGGREGATE_MAX) joined.take(AGGREGATE_MAX) + "…" else joined
-    }
-
-    /** `com.x:id/cart_icon` -> `cart_icon`; obfuscated short names say nothing and are dropped. */
-    private fun readableResourceId(id: String?): String? {
-        val short = id?.substringAfterLast('/') ?: return null
-        return short.takeIf { Regex("^[A-Za-z0-9_]{4,}$").matches(it) && Regex("[A-Za-z]{3}").containsMatchIn(it) }
     }
 
     private const val FNV_OFFSET = -0x340d631b7bdddcdbL

@@ -14,11 +14,18 @@ fun UiElement.toJson(): JSONObject = JSONObject()
     .put("name", name)
     .put("bounds", JSONArray(bounds))
     .apply { if (resourceId != null) put("resource_id", resourceId) }
+    .apply { if (packageName != null) put("package", packageName) }
+    .apply { if (className != null) put("class", className) }
     .put("clickable", clickable)
     .put("editable", editable)
     .put("scrollable", scrollable)
     .put("focused", focused)
     .put("secret", secret)
+    .put("checkable", checkable)
+    .put("checked", checked)
+    .put("selected", selected)
+    .put("enabled", enabled)
+    .apply { if (stateDescription != null) put("state_description", stateDescription) }
 
 /** The virtual-tier model observation. */
 fun PhoneSnapshot.toJson(): JSONObject = JSONObject()
@@ -31,3 +38,4 @@ fun PhoneSnapshot.toJson(): JSONObject = JSONObject()
     .put("image", image)
     .put("changed_during_read", changedDuringRead)
     .put("secure_frame", secureFrame)
+    .put("dark_region", darkRegion)

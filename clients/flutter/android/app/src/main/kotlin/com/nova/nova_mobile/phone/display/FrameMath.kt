@@ -47,15 +47,23 @@ object FrameMath {
 
     /** Black (FLAG_SECURE) when at least 99.5% of evenly spread samples are <= [BLACK_LEVEL] on every channel. */
     fun isBlack(width: Int, height: Int, pixel: (Int, Int) -> Int): Boolean {
-        if (width <= 1 || height <= 1) return false
+        return darkFraction(width, height, pixel) >= 0.995
+    }
+
+    /** Fraction of the same 24 x 24 samples that are near black; not proof of protected content. */
+    fun darkFraction(width: Int, height: Int, pixel: (Int, Int) -> Int): Double {
+        if (width <= 1 || height <= 1) return 0.0
         var dark = 0
         val total = BLACK_SAMPLES * BLACK_SAMPLES
         for (gy in 0 until BLACK_SAMPLES) for (gx in 0 until BLACK_SAMPLES) {
             val p = pixel(gx * (width - 1) / (BLACK_SAMPLES - 1), gy * (height - 1) / (BLACK_SAMPLES - 1))
             if ((p shr 16 and 0xff) <= BLACK_LEVEL && (p shr 8 and 0xff) <= BLACK_LEVEL && (p and 0xff) <= BLACK_LEVEL) dark++
         }
-        return dark * 1000 >= total * 995
+        return dark.toDouble() / total
     }
+
+    fun hasDarkRegion(fraction: Double, readableElements: Boolean, secureFrame: Boolean): Boolean =
+        fraction >= 0.5 && readableElements && !secureFrame
 
     /**
      * Preview frame size for `nova/phone/frames`: width in [PHONE_FRAME_MIN_WIDTH]..[PHONE_FRAME_MAX_WIDTH]

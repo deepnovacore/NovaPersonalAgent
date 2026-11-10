@@ -37,8 +37,10 @@ class VirtualScreen(
     private val shells: ShellProvider,
     val display: LazyAgentDisplay,
     val scope: VirtualScope,
+    private val active: () -> Boolean = { true },
 ) : VirtualDevice {
     private val ids = NodeIds<AccessibilityNodeInfo>()
+    private var previousSecureFrame = false
     /** Task of the last app `open_app` brought to the front of the display, or -1. */
     @Volatile private var launchedTask = -1
 
@@ -72,17 +74,39 @@ class VirtualScreen(
     override fun topPackage(): String? = display.current?.let { SnapshotReader.topPackage(windows(it)) }
 
     override fun snapshot(): PhoneSnapshot = helperCall {
+        check(active()) { "execution_stopped" }
         val s = shell()
         val d = requireDisplay()
         // Some apps relaunch themselves onto the main display; the run cannot follow them there.
         val task = launchedTask
         if (task >= 0 && s.displayOfTask(task) == android.view.Display.DEFAULT_DISPLAY) throw IllegalStateException(PhoneActionErrors.DISPLAY_UNAVAILABLE)
-        if (!d.awaitFrame(FIRST_FRAME_MS)) throw IllegalStateException(SCREEN_UNAVAILABLE)
-        val r = read(d)
+        if (!d.awaitFrame(FIRST_FRAME_MS, active=active)) {
+            check(active()) { "execution_stopped" }
+            throw IllegalStateException(SCREEN_UNAVAILABLE)
+        }
+        var r = read(d)
+        var image = d.modelImage() ?: throw IllegalStateException(SCREEN_UNAVAILABLE)
+        // A first/transition frame can be black. Re-read only; never replay the preceding effect.
+        if (!(previousSecureFrame && isSecureFrame(image.black,r.appWindowElements))) {
+            for (delay in longArrayOf(200, 400, 800)) {
+                check(active()) { "execution_stopped" }
+                if (!image.black) break
+                // Wait for a new ImageReader frame, not another encoding of the same cached bitmap.
+                val fresh=d.awaitFrame(delay,afterSequence=image.sequence,active=active)
+                check(active()) { "execution_stopped" }
+                shell()
+                if (!fresh) continue
+                r = read(d)
+                image = d.modelImage() ?: throw IllegalStateException(SCREEN_UNAVAILABLE)
+            }
+        }
+        check(active()) { "execution_stopped" }
+        if (r.missingRoot) throw IllegalStateException(SCREEN_UNAVAILABLE)
+        // A readable root without a package (or no windows yet) retains the host's launch grace.
         val after = SnapshotReader.hash(windows(d))
-        val image = d.modelImage() ?: throw IllegalStateException(SCREEN_UNAVAILABLE)
         val snap = NodeSnapshot(snapshotId(), r.entries)
         ids.put(snap)
+        previousSecureFrame = isSecureFrame(image.black, r.appWindowElements)
         PhoneSnapshot(
             snapshotId = snap.id,
             packageName = r.topPackage,
@@ -91,11 +115,12 @@ class VirtualScreen(
             elements = r.entries.map { it.element },
             image = image.jpegBase64,
             changedDuringRead = after != r.hash,
-            secureFrame = isSecureFrame(image.black, r.appWindowElements),
+            secureFrame = previousSecureFrame,
+            darkRegion = FrameMath.hasDarkRegion(image.darkFraction, r.appWindowElements > 0, previousSecureFrame),
         )
     }
 
-    override fun forgetRefs() = ids.clear()
+    override fun forgetRefs() { ids.clear(); previousSecureFrame=false }
 
     override fun prepare(action: PhoneAction): Prepared = helperCall {
         shell()

@@ -73,15 +73,33 @@ class VirtualScopeTest {
         assertEquals("phone.experimental_ack", PHONE_EXPERIMENTAL_ACK)
     }
 
+    @Test fun admissionNeverFallsBackToMainWhenAnEligibleHelperIsMissing() {
+        for (api in listOf(31, 33, 34, 35)) {
+            try { phoneTierForAdmission(api, true, false, true); fail("fell back on API $api") }
+            catch (e: IllegalStateException) { assertEquals("helper_unavailable", e.message) }
+            assertEquals(PhoneTier.VIRTUAL, phoneTierForAdmission(api, true, true, true))
+        }
+        assertEquals(PhoneTier.MAIN, phoneTierForAdmission(30, true, false, true))
+        assertEquals(PhoneTier.MAIN, phoneTierForAdmission(33, true, false, false))
+        assertEquals(PhoneTier.MAIN, phoneTierForAdmission(34, false, false, true))
+    }
+
     @Test fun snapshotWireShapeMatchesTheContract() {
         val element = UiElement("@e1", "EditText", "Password", listOf(1, 2, 3, 4), "password_input", clickable = true,
             editable = true, scrollable = false, focused = true, secret = true)
-        val plain = element.copy(ref = "@e2", resourceId = null, secret = false, name = "Go")
+        val plain = element.copy(ref = "@e2", resourceId = null, secret = false, name = "Like", checkable = true, checked = true, selected = true, enabled = false, stateDescription = "Liked")
         val json = PhoneSnapshot("ph-1", "com.example.shop", 1080, 2400, listOf(element, plain), "YWJj", changedDuringRead = false, secureFrame = true).toJson()
-        assertEquals(setOf("snapshot_id", "tier", "package", "width", "height", "elements", "image", "changed_during_read", "secure_frame"), json.keys().asSequence().toSet())
+        assertEquals(setOf("snapshot_id", "tier", "package", "width", "height", "elements", "image", "changed_during_read", "secure_frame", "dark_region"), json.keys().asSequence().toSet())
+        assertFalse(json.getBoolean("dark_region"))
         assertEquals("virtual", json.getString("tier"))
         val first = json.getJSONArray("elements").getJSONObject(0)
-        assertEquals(setOf("ref", "role", "name", "bounds", "resource_id", "clickable", "editable", "scrollable", "focused", "secret"), first.keys().asSequence().toSet())
+        assertEquals(setOf("ref", "role", "name", "bounds", "resource_id", "clickable", "editable", "scrollable", "focused", "secret", "checkable", "checked", "selected", "enabled"), first.keys().asSequence().toSet())
+        val liked = json.getJSONArray("elements").getJSONObject(1)
+        assertTrue(liked.getBoolean("checkable"))
+        assertTrue(liked.getBoolean("checked"))
+        assertTrue(liked.getBoolean("selected"))
+        assertFalse(liked.getBoolean("enabled"))
+        assertEquals("Liked", liked.getString("state_description"))
         assertEquals(4, first.getJSONArray("bounds").length())
         assertFalse(json.getJSONArray("elements").getJSONObject(1).has("resource_id"))
         assertFalse(PhoneSnapshot("ph-2", null, 1, 1, emptyList(), "", false, false).toJson().has("package"))

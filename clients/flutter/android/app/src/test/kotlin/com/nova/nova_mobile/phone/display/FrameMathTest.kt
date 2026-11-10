@@ -10,6 +10,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class FrameMathTest {
+    @Test fun darkFractionSamplesPartialMediaWithoutChangingSecureThreshold() {
+        assertEquals(0.0, FrameMath.darkFraction(24, 24) { _, _ -> 0xffffffff.toInt() }, 0.0)
+        assertEquals(1.0, FrameMath.darkFraction(24, 24) { _, _ -> 0xff080808.toInt() }, 0.0)
+        assertEquals(0.5, FrameMath.darkFraction(24, 24) { _, y -> if (y < 12) 0xff000000.toInt() else 0xffffffff.toInt() }, 0.0)
+        assertEquals(0.0, FrameMath.darkFraction(0, 0) { _, _ -> error("must not sample") }, 0.0)
+        assertFalse(FrameMath.isBlack(24, 24) { _, y -> if (y < 12) 0xff000000.toInt() else 0xffffffff.toInt() })
+        assertTrue(FrameMath.hasDarkRegion(0.5, true, false))
+        assertFalse(FrameMath.hasDarkRegion(0.49, true, false))
+        assertFalse(FrameMath.hasDarkRegion(0.8, false, false))
+        assertFalse(FrameMath.hasDarkRegion(1.0, true, true))
+    }
     private val w = 360
     private val h = 800
     private val black = 0xff000000.toInt()
