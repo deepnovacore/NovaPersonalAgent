@@ -278,8 +278,8 @@ class ProviderSetupCopy {
   );
   String deleteTitle(String name) => t('删除「$name」？', 'Delete “$name”?');
   String get deleteBody => t(
-    '这家的 API Key 会从这台手机删掉；语音等其他功能用到同一把 Key 时也会失效。',
-    'This provider’s API key is removed from this phone; voice and other features using the same key stop working too.',
+    '这家的 API Key 会从这台手机删掉；所有 Space 中使用同一把 Key 的对话、语音等功能都会失效。',
+    'This provider’s API key is removed from this phone; conversations, voice and other features using this key in any Space stop working too.',
   );
   String get deleteConfirm => t('删除', 'Delete');
   String get actionFailed =>

@@ -275,10 +275,26 @@ class ModelSettings {
     if (config != null) await _projectApiKey(config);
   }
 
+  /// Native task settings are a cache; shared keys may change in another Space.
+  Future<void> syncNative() async {
+    try {
+      final config = await read();
+      if (config == null) {
+        await native.call('clearModelSettings', _nativeScope);
+      } else if (config.protocol != ModelProtocol.chatgptResponses) {
+        await _projectApiKey(config);
+      }
+    } on AgentFailure {
+      await native.call('clearModelSettings', _nativeScope);
+      rethrow;
+    }
+  }
+
   Future<void> save({
     required String endpoint,
     required String model,
     required String key,
+    String? credentialId,
     ModelProtocol protocol = ModelProtocol.chatCompletions,
   }) async {
     final address = endpoint.trim();
@@ -289,7 +305,8 @@ class ModelSettings {
             ProviderCredentials.scopeForEndpoint(address);
     final credential = await credentials.resolve(
       address,
-      credentialId: sameScope ? (old['credentialId'] as String?) : null,
+      credentialId:
+          credentialId ?? (sameScope ? (old['credentialId'] as String?) : null),
     );
     final value = ModelConfiguration(
       endpoint: address,

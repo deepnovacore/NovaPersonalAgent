@@ -185,9 +185,16 @@ void main() {
     await Future.wait(
       List.generate(
         12,
-        (i) => ProviderCredentials().save(
-          endpoint: 'https://custom.example/provider/$i',
-          key: 'key-$i',
+        (i) => SpaceStorage.runScoped(
+          SpaceRecord(
+            id: 'space-$i',
+            name: 'Space $i',
+            mode: SpaceMode.standalone,
+          ),
+          () => ProviderCredentials().save(
+            endpoint: 'https://custom.example/provider/$i',
+            key: 'key-$i',
+          ),
         ),
       ),
     );
@@ -272,7 +279,7 @@ void main() {
       );
     },
   );
-  test('captured stores stay in Space A after switching B', () async {
+  test('Spaces share keys while voice selections stay scoped', () async {
     SpaceStorage.active = const SpaceRecord(
       id: 'a',
       name: 'A',
@@ -295,7 +302,147 @@ void main() {
     );
     await voiceA.save(const VoiceConfiguration());
     expect((await voiceA.read())!.integrated.key, 'a-key');
-    expect((await modelA.credentials.list()).single.key, 'a-key');
-    expect((await ProviderCredentials().list()).single.key, 'b-key');
+    expect((await modelA.credentials.list()).map((e) => e.key), [
+      'a-key',
+      'b-key',
+    ]);
+    expect((await ProviderCredentials().list()).map((e) => e.key), [
+      'a-key',
+      'b-key',
+    ]);
+    expect(await VoiceSettings().readDraft(), isNull);
   });
+
+  test(
+    'experience opened first imports existing Space keys without changing routes',
+    () async {
+      const storage = FlutterSecureStorage();
+      const endpoint = 'https://api.openai.com/v1';
+      for (final id in ['own', 'experience']) {
+        await storage.write(
+          key: '${ProviderCredentials.storageKey}.space.$id',
+          value: jsonEncode({
+            'version': 1,
+            'credentials': [
+              {'id': id, 'endpoint': endpoint, 'label': id, 'key': '$id-key'},
+            ],
+          }),
+        );
+        await storage.write(
+          key: '${ModelSettings.storageKey}.space.$id',
+          value: jsonEncode({
+            'endpoint': endpoint,
+            'model': id,
+            'credentialId': id,
+          }),
+        );
+      }
+      SpaceStorage.active = const SpaceRecord(
+        id: 'experience',
+        name: 'Experience',
+        mode: SpaceMode.standalone,
+        personaId: 'fixture',
+      );
+      final settings = ModelSettings(native: Native());
+      expect((await settings.credentials.list()).map((e) => e.id).toSet(), {
+        'own',
+        'experience',
+      });
+      expect((await settings.read())!.key, 'experience-key');
+      expect((await settings.read())!.model, 'experience');
+      await settings.credentials.save(
+        id: 'own',
+        endpoint: endpoint,
+        key: 'rotated',
+      );
+      expect((await ProviderCredentials().get('own'))!.key, 'rotated');
+      await settings.credentials.delete('own');
+      expect(await ProviderCredentials().get('own'), isNull);
+      expect(
+        await storage.read(key: '${ProviderCredentials.storageKey}.space.own'),
+        isNull,
+      );
+      expect(
+        await storage.read(key: '${ModelSettings.storageKey}.space.own'),
+        contains('"credentialId":"own"'),
+      );
+    },
+  );
+
+  test(
+    'failed shared migration preserves old registry and retries safely',
+    () async {
+      final storage = FailingStorage();
+      final key = '${ProviderCredentials.storageKey}.space.own';
+      final raw = jsonEncode({
+        'version': 1,
+        'credentials': [
+          {
+            'id': 'old',
+            'endpoint': 'https://api.openai.com/v1',
+            'label': 'Old',
+            'key': 'secret',
+          },
+        ],
+      });
+      await storage.write(key: key, value: raw);
+      storage.failKey = ProviderCredentials.storageKey;
+      await expectLater(
+        ProviderCredentials(storage: storage).list(),
+        throwsA(isA<AgentFailure>()),
+      );
+      expect(await storage.read(key: key), raw);
+      storage.failKey = null;
+      expect(
+        (await ProviderCredentials(storage: storage).list()).single.id,
+        'old',
+      );
+      expect(await storage.read(key: key), isNull);
+      expect(
+        (await ProviderCredentials(storage: storage).list()).single.key,
+        'secret',
+      );
+    },
+  );
+
+  test(
+    'experience can discover legacy model and voice keys before opening their Space',
+    () async {
+      const storage = FlutterSecureStorage();
+      const modelKey = '${ModelSettings.storageKey}.space.own';
+      const voiceKey = '${VoiceSettings.storageKey}.space.own';
+      await storage.write(
+        key: modelKey,
+        value: jsonEncode({
+          'endpoint': 'https://api.openai.com/v1',
+          'model': 'own-model',
+          'key': 'old-chat',
+        }),
+      );
+      await storage.write(
+        key: voiceKey,
+        value: jsonEncode(
+          const VoiceConfiguration()
+              .copyWith(
+                integrated: const VoiceConfiguration().integrated.copyWith(
+                  key: 'old-voice',
+                ),
+              )
+              .toJson(),
+        ),
+      );
+      SpaceStorage.active = const SpaceRecord(
+        id: 'experience',
+        name: 'Experience',
+        mode: SpaceMode.standalone,
+        personaId: 'fixture',
+      );
+      final keys = await ProviderCredentials().list();
+      expect(keys.map((e) => e.key).toSet(), {'old-chat', 'old-voice'});
+      expect(await storage.read(key: modelKey), isNot(contains('old-chat')));
+      expect(await storage.read(key: voiceKey), isNot(contains('old-voice')));
+      expect(await ModelSettings(native: Native()).read(), isNull);
+      expect(await VoiceSettings().readDraft(), isNull);
+    },
+  );
 }

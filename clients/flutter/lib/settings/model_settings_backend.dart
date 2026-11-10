@@ -116,22 +116,23 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
   });
   final ModelSettings settings;
   final bool support, credentialsOnly;
-  Map<String, dynamic>? _supportDraft;
+  Map<String, dynamic>? _draft;
 
   @override
   Future<ModelSettingsView> load() async {
-    _supportDraft = support ? await settings.readSupportDraft() : null;
-    final draft =
-        (support ? _supportDraft : await settings.readConversationDraft()) ??
-        const <String, dynamic>{};
+    _draft = support
+        ? await settings.readSupportDraft()
+        : await settings.readConversationDraft();
+    final draft = _draft ?? const <String, dynamic>{};
     final endpoint = draft['endpoint'] as String?;
     final address = endpoint ?? ModelPreset.byId('openrouter')!.endpoint;
     final saved = await savedProviders();
     final selected = saved
         .where(
-          (p) =>
-              ProviderCredentials.scopeForEndpoint(p.endpoint) ==
-              ProviderCredentials.scopeForEndpoint(address),
+          (p) => draft['credentialId'] != null
+              ? p.id == draft['credentialId']
+              : ProviderCredentials.scopeForEndpoint(p.endpoint) ==
+                    ProviderCredentials.scopeForEndpoint(address),
         )
         .firstOrNull;
     return ModelSettingsView(
@@ -164,13 +165,16 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
         draft['protocol'] as String? ?? 'chatCompletions',
       ),
       canFollow: support,
-      following: support && _supportDraft == null,
+      following: support && _draft == null,
       allowKeyEntry: credentialsOnly,
     );
   }
 
-  String? _credentialId(String endpoint) {
-    final draft = _supportDraft;
+  String? _credentialId(String endpoint, [String? providerId]) {
+    if (providerId != null && ModelPreset.byId(providerId) == null) {
+      return providerId;
+    }
+    final draft = _draft;
     if (draft == null || draft['endpoint'] != endpoint) return null;
     return draft['credentialId'] as String?;
   }
@@ -179,7 +183,7 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
   Future<bool> hasCredential(String? providerId, String endpoint) async =>
       await settings.credentials.resolve(
         endpoint,
-        credentialId: _credentialId(endpoint),
+        credentialId: _credentialId(endpoint, providerId),
       ) !=
       null;
 
@@ -191,13 +195,14 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
         endpoint: input.endpoint,
         model: input.model,
         key: input.newKey,
+        credentialId: _credentialId(input.endpoint, input.providerId),
         protocol: input.protocol,
       );
       return;
     }
     final credential = await settings.credentials.resolve(
       input.endpoint,
-      credentialId: _credentialId(input.endpoint),
+      credentialId: _credentialId(input.endpoint, input.providerId),
     );
     if (credential == null) throw const AgentFailure('invalid_model_settings');
     await settings.saveSupport(
@@ -213,7 +218,11 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
 
   Future<String> _key(ModelSettingsInput input) async => input.newKey.isNotEmpty
       ? input.newKey
-      : (await settings.credentials.resolve(input.endpoint))?.key ?? '';
+      : (await settings.credentials.resolve(
+              input.endpoint,
+              credentialId: _credentialId(input.endpoint, input.providerId),
+            ))?.key ??
+            '';
 
   @override
   Future<List<String>> listModels(ModelSettingsInput input) async =>
@@ -272,7 +281,10 @@ class LocalModelSettingsBackend extends ModelSettingsBackend {
 
   @override
   Future<void> saveCredential(ModelSettingsInput input) async {
-    final existing = await settings.credentials.resolve(input.endpoint);
+    final existing = await settings.credentials.resolve(
+      input.endpoint,
+      credentialId: _credentialId(input.endpoint, input.providerId),
+    );
     final saved = await settings.credentials.save(
       id: existing?.id,
       endpoint: input.endpoint.trim(),

@@ -98,7 +98,7 @@ void main() {
       expect(native.calls.last.$2, {'space_id': first.id});
       expect(await ordinary.hasConversationSelection(), isFalse);
       expect(await ordinary.read(), isNull);
-      expect((await ordinary.credentials.resolve(endpoint))?.key, 'key-one');
+      expect((await ordinary.credentials.resolve(endpoint))?.key, 'key-two');
       expect((await persona.read())?.model, 'persona');
       expect((await persona.credentials.resolve(endpoint))?.key, 'key-two');
     },
@@ -167,6 +167,59 @@ void main() {
     expect(native.calls.last.$2['model'], 'second-model');
     expect(native.calls.last.$2['key'], 'private-key');
   });
+
+  test(
+    'same endpoint keys retain the selected reference in every model lane',
+    () async {
+      final settings = ModelSettings(native: _Native());
+      const endpoint = 'https://api.openai.com/v1';
+      final first = await settings.credentials.save(
+        endpoint: endpoint,
+        key: 'first',
+      );
+      for (final support in [false, true]) {
+        final second = await settings.credentials.save(
+          endpoint: endpoint,
+          key: 'second',
+        );
+        final backend = LocalModelSettingsBackend(settings, support: support);
+        await backend.load();
+        await backend.save(
+          ModelSettingsInput(
+            providerId: second.id,
+            endpoint: endpoint,
+            model: 'chosen',
+            protocol: ModelProtocol.chatCompletions,
+          ),
+        );
+        expect((await backend.load()).providerId, second.id);
+        expect(
+          (await settings.readForPurpose(
+            support ? ModelPurpose.support : ModelPurpose.conversationText,
+          ))!.key,
+          'second',
+        );
+        await backend.saveCredential(
+          ModelSettingsInput(
+            providerId: second.id,
+            endpoint: endpoint,
+            model: '',
+            protocol: ModelProtocol.chatCompletions,
+            newKey: 'second',
+          ),
+        );
+        expect((await settings.credentials.get(first.id))!.key, 'first');
+        await settings.credentials.delete(second.id);
+        expect(await backend.hasCredential(second.id, endpoint), isFalse);
+        await expectLater(
+          settings.readForPurpose(
+            support ? ModelPurpose.support : ModelPurpose.conversationText,
+          ),
+          throwsA(isA<AgentFailure>()),
+        );
+      }
+    },
+  );
 
   group('listing goes to each provider\'s own route', () {
     Future<(ModelRequest, ModelListResult)> list(

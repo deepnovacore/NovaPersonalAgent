@@ -31,23 +31,21 @@ class ProviderCredential {
   };
 }
 
-/// API keys only. The captured secure keys never follow a later Space switch.
+/// Device-wide API keys; model selections and OAuth accounts stay Space-scoped.
 class ProviderCredentials {
-  ProviderCredentials({this.storage = const FlutterSecureStorage()})
-    : _scopedKey = SpaceStorage.secureKey(storageKey),
-      _modelKey = SpaceStorage.secureKey('nova.dart-model.v1'),
-      _voiceKey = SpaceStorage.secureKey('nova.voice.v1');
+  ProviderCredentials({this.storage = const FlutterSecureStorage()});
   final FlutterSecureStorage storage;
-  final String _scopedKey, _modelKey, _voiceKey;
   static const storageKey = 'nova.provider-credentials.v1';
   static final Map<String, Future<void>> _tails = {};
 
   Future<T> _run<T>(Future<T> Function(List<ProviderCredential>) body) {
-    final old = _tails[_scopedKey];
+    final old = _tails[storageKey];
     Future<T> execute() async {
       try {
-        final entries = await _load();
-        await _migrate(entries);
+        final records = await storage.readAll();
+        final entries = _load(records[storageKey]);
+        await _migrateRegistries(entries, records);
+        await _migrate(entries, records);
         return await body(entries);
       } catch (_) {
         throw const AgentFailure('provider_credentials_unavailable');
@@ -56,10 +54,10 @@ class ProviderCredentials {
 
     final result = old == null ? execute() : old.then((_) => execute());
     final tail = result.then<void>((_) {}, onError: (Object _) {});
-    _tails[_scopedKey] = tail;
+    _tails[storageKey] = tail;
     unawaited(
       tail.whenComplete(() {
-        if (identical(_tails[_scopedKey], tail)) _tails.remove(_scopedKey);
+        if (identical(_tails[storageKey], tail)) _tails.remove(storageKey);
       }),
     );
     return result;
@@ -177,8 +175,7 @@ class ProviderCredentials {
     }
   }
 
-  Future<List<ProviderCredential>> _load() async {
-    final raw = await storage.read(key: _scopedKey);
+  List<ProviderCredential> _load(String? raw) {
     if (raw == null) return [];
     final value = jsonDecode(raw) as Map;
     if (value['version'] != 1) throw const FormatException('invalid_registry');
@@ -210,22 +207,57 @@ class ProviderCredentials {
       : null;
 
   Future<void> _write(List<ProviderCredential> entries) => storage.write(
-    key: _scopedKey,
+    key: storageKey,
     value: jsonEncode({
       'version': 1,
       'credentials': entries.map((e) => e.toJson()).toList(),
     }),
   );
 
-  Future<void> _migrate(List<ProviderCredential> entries) async {
+  Future<void> _migrateRegistries(
+    List<ProviderCredential> entries,
+    Map<String, String> records,
+  ) async {
+    final oldKeys = records.keys
+        .where((key) => key.startsWith('$storageKey.space.'))
+        .toList();
+    if (oldKeys.isEmpty) return;
+    for (final key in oldKeys) {
+      for (final entry in _load(records[key])) {
+        final existing = entries.where((e) => e.id == entry.id).firstOrNull;
+        if (existing == null) {
+          entries.add(entry);
+        } else if (jsonEncode(existing.toJson()) !=
+            jsonEncode(entry.toJson())) {
+          throw const FormatException('conflicting_credential_id');
+        }
+      }
+    }
+    // Preserve IDs and different keys for the same endpoint; routes keep their references.
+    await _write(entries);
+    for (final key in oldKeys) {
+      await storage.delete(key: key);
+    }
+  }
+
+  Future<void> _migrate(
+    List<ProviderCredential> entries,
+    Map<String, String> records,
+  ) async {
     final rewrites = <String, Map<String, dynamic>>{};
     var registryChanged = false;
-    for (final configKey in [_modelKey, _voiceKey]) {
-      final raw = await storage.read(key: configKey);
-      if (raw == null) continue;
+    for (final record in records.entries) {
+      final configKey = record.key;
+      final model =
+          configKey == 'nova.dart-model.v1' ||
+          configKey.startsWith('nova.dart-model.v1.space.');
+      final voice =
+          configKey == 'nova.voice.v1' ||
+          configKey.startsWith('nova.voice.v1.space.');
+      if (!model && !voice) continue;
       Map<String, dynamic> value;
       try {
-        value = jsonDecode(raw) as Map<String, dynamic>;
+        value = jsonDecode(record.value) as Map<String, dynamic>;
       } catch (_) {
         continue;
       }
@@ -261,9 +293,9 @@ class ProviderCredentials {
         changed = true;
       }
 
-      if (configKey == _modelKey && value['endpoint'] is String) {
+      if (model && value['endpoint'] is String) {
         migrate(value, '对话');
-      } else if (configKey == _voiceKey && value['version'] == 1) {
+      } else if (voice && value['version'] == 1) {
         for (final slot in ['integrated', 'asr', 'tts', 'fastLlm']) {
           final service = value[slot];
           if (service is Map<String, dynamic> &&

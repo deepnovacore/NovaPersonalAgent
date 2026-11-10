@@ -214,8 +214,8 @@ Future<void> showModelSettingsEditor(
                   Text(
                     view.securityText ??
                         t(
-                          '对话和任务所需内容会发送给所选模型服务。API 密钥仅保存在这台设备，保存在当前 Space 的安全存储中。',
-                          'Content needed for conversations and tasks is sent to the selected model provider. Your API key stays on this device and is stored in the current Space secure storage.',
+                          '对话和任务所需内容会发送给所选模型服务。API 密钥保存在本机安全存储中，由这台设备上的所有 Space 共用；模型选择各自独立。修改密钥会影响所有使用它的 Space。',
+                          'Content needed for conversations and tasks is sent to the selected model provider. API keys stay in secure storage on this device and are shared by all Spaces; model choices remain separate. Editing a key affects every Space using it.',
                         ),
                   ),
                   if (onManageCredentials != null)

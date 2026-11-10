@@ -351,8 +351,8 @@ Future<String?> _editCredential(
                 const SizedBox(height: 12),
                 Text(
                   t(
-                    '密钥仅保存在当前 Space 的本机安全存储中。ChatGPT 登录不能代替语音服务所需的 API 密钥。',
-                    'Credentials stay in this Space’s secure storage on this device. ChatGPT sign-in does not provide a voice API key.',
+                    '密钥保存在本机安全存储中，由这台设备上的所有 Space 共用。修改密钥会影响所有使用它的 Space。ChatGPT 登录不能代替语音服务所需的 API 密钥。',
+                    'Credentials stay in secure storage on this device and are shared by all Spaces. Editing a key affects every Space using it. ChatGPT sign-in does not provide a voice API key.',
                   ),
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
@@ -414,7 +414,7 @@ Future<String?> _editCredential(
   }
 }
 
-/// Uses the caller's captured Space store and projection callback. Saving a key
+/// Uses the shared key store and the caller's Space projection callback. Saving a key
 /// can never select an API model or disable a ChatGPT account.
 class _CredentialBackend extends LocalModelSettingsBackend {
   _CredentialBackend(super.settings, this.credentials, this.onChanged)
@@ -424,7 +424,12 @@ class _CredentialBackend extends LocalModelSettingsBackend {
 
   @override
   Future<void> saveCredential(ModelSettingsInput input) async {
-    final existing = await credentials.resolve(input.endpoint);
+    final existing = await credentials.resolve(
+      input.endpoint,
+      credentialId: ModelPreset.byId(input.providerId ?? '') == null
+          ? input.providerId
+          : null,
+    );
     final saved = await credentials.save(
       id: existing?.id,
       endpoint: input.endpoint,

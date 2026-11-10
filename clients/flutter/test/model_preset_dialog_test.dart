@@ -28,6 +28,7 @@ class _Models extends ModelSettings {
     required String endpoint,
     required String model,
     required String key,
+    String? credentialId,
     ModelProtocol protocol = ModelProtocol.chatCompletions,
   }) async {
     last = {
