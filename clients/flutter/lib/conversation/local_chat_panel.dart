@@ -11,6 +11,7 @@ import '../ui/chat_activity.dart';
 import '../ui/thinking_block.dart';
 import '../ui/phone_tool_steps.dart';
 import '../ui/tool_step.dart';
+import '../ui/reason_copy.dart';
 import '../ui/tool_timeline.dart';
 import '../agent/phone_run.dart';
 import 'phone_dictation.dart';
@@ -28,6 +29,7 @@ import '../ui/model_settings_editor.dart';
 import '../settings/model_settings_backend.dart';
 import '../agent_core/tool_registry.dart';
 import 'dart:convert';
+import 'package:flutter/services.dart' show Clipboard, ClipboardData;
 
 /// Also used by native task settings: one Dart source, projected to the host.
 Future<void> showLocalModelSettings(
@@ -145,6 +147,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   late final VoiceSettings _voiceSettings =
       widget.voiceSettings ?? VoiceSettings();
   bool atBottom = true;
+  String? _copiedKey;
+  Timer? _copyTimer;
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
   @override
   void initState() {
@@ -265,6 +269,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
 
   @override
   void dispose() {
+    _copyTimer?.cancel();
     widget.host.removeListener(_changed);
     dictation?.removeListener(_dictationChanged);
     dictation?.dispose();
@@ -366,6 +371,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       !widget.host.busy &&
       !widget.voiceBusy &&
       !widget.externalTaskBusy &&
+      widget.host.deviceHeldByOther?.call() != true &&
       widget.onVoiceText == null &&
       !pickingAttachment &&
       dictation?.busy != true;
@@ -414,6 +420,19 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       return;
     }
     final host = widget.host;
+    if (!host.busy && host.deviceHeldByOther?.call() == true) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            t(
+              '手机正在执行语音委托的任务，草稿已保留，等它结束后再发送。',
+              'The phone is running a voice task. Your draft is kept; send it when that task finishes.',
+            ),
+          ),
+        ),
+      );
+      return;
+    }
     if (host.busy) {
       if (host.activeConversationId == widget.conversationId) {
         host.cancel();
@@ -570,6 +589,26 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       '这次生成达到模型输出上限，请让 Nova 分步完成。',
       'This generation reached the model output limit. Ask Nova to build it in steps.',
     ),
+    'tool_denied' => t(
+      '你拒绝了一步操作，这次就停在这里。要换种方式可以告诉我。',
+      'You declined a step, so this stopped here. Tell me if you want to try another way.',
+    ),
+    'tool_outcome_unknown' when _lastTaskStopped => t(
+      '任务停在了半路，已做的步骤都确认过；要重做请先在 App 里核对。',
+      'The task stopped partway through. Dispatched steps are accounted for; check them in the app before running again.',
+    ),
+    'tool_outcome_unknown' => t(
+      '这一步的结果没有确认，我没有重试。可以看下面的步骤核对。',
+      'The result of this step was not confirmed, and I did not retry. Check the steps below.',
+    ),
+    'tool_failed' => t(
+      '这一步没有完成，原因在下面的步骤里。',
+      'This step did not complete. The reason is in the steps below.',
+    ),
+    'device_busy' => t(
+      '手机正在执行另一个任务，等它结束后再试。',
+      'The phone is running another task. Try again when it finishes.',
+    ),
     'tool_round_limit' => t(
       '已达到本轮操作上限，可以继续对话。',
       'This turn reached its action limit. You can continue chatting.',
@@ -605,10 +644,13 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   }) {
     String status = '';
     String? preview, title, previewKey, completedReadPath, taskId;
+    Map? stepData;
     try {
       final result = jsonDecode(message['content'] as String) as Map;
       status = result['status'] as String? ?? '';
       final data = result['data'];
+      // Blocked or refused calls carry their reason beside the status.
+      stepData = data is Map ? data : result;
       if (message['tool_name'] == 'device_run_task') {
         final id = data is Map ? data['task_id'] : result['task_id'];
         if (id is String && id.isNotEmpty) taskId = id;
@@ -644,6 +686,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       language: widget.language,
       target: target?.label,
       targetKey: target?.key,
+      data: stepData,
     );
     if (status != 'completed' ||
         preview == null ||
@@ -681,6 +724,148 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     );
   }
 
+  bool get _lastTaskStopped {
+    final messages =
+        widget.host.store.conversation(widget.conversationId)['messages']
+            as List;
+    for (final message in messages.reversed) {
+      if (message['role'] == 'user') break;
+      if (message['tool_name'] != 'device_run_task') continue;
+      try {
+        final result = jsonDecode(message['content'] as String) as Map;
+        return knownStepsStopped(
+          result['data'] is Map ? result['data'] as Map : result,
+        );
+      } catch (_) {
+        return false;
+      }
+    }
+    return false;
+  }
+
+  bool get _canRegenerate =>
+      widget.active &&
+      !widget.host.busy &&
+      !widget.voiceBusy &&
+      widget.onVoiceText == null &&
+      !widget.externalTaskBusy &&
+      widget.host.deviceHeldByOther?.call() != true;
+
+  bool _latestReply(Map message) {
+    final messages =
+        widget.host.store.conversation(widget.conversationId)['messages']
+            as List;
+    final user = messages.lastIndexWhere((m) => m['role'] == 'user');
+    final reply = messages.lastIndexWhere(
+      (m) =>
+          m['role'] == 'assistant' &&
+          (m['content'] as String).isNotEmpty &&
+          (m['tool_calls'] as List? ?? []).isEmpty,
+    );
+    return user >= 0 &&
+        reply > user &&
+        messages[reply]['time'] == message['time'];
+  }
+
+  Future<void> _regenerate(Map message) async {
+    if (!_canRegenerate) return;
+    final id = widget.conversationId;
+    final messages = widget.host.store.conversation(id)['messages'] as List;
+    final user = messages.lastIndexWhere((m) => m['role'] == 'user');
+    final pendingDeviceCalls = <String>{};
+    for (final m in messages.skip(user + 1)) {
+      for (final call in m['tool_calls'] as List? ?? []) {
+        if (call['function']?['name'] == 'device_run_task') {
+          pendingDeviceCalls.add(call['id'] as String);
+        }
+      }
+    }
+    var device = false;
+    for (final m in messages.skip(user + 1)) {
+      if (m['tool_name'] != 'device_run_task') continue;
+      pendingDeviceCalls.remove(m['tool_call_id']);
+      device = true;
+      try {
+        final result = jsonDecode(m['content'] as String) as Map;
+        final data = result['data'] is Map ? result['data'] as Map : result;
+        if (result['status'] == 'failed' &&
+            (data['effects'] == 'none' ||
+                (data['dispatched_actions'] == 0 &&
+                    data['unresolved_actions'] == 0 &&
+                    data['action_in_flight'] == false))) {
+          device = false;
+          continue;
+        }
+      } catch (_) {}
+      break;
+    }
+    if (device || pendingDeviceCalls.isNotEmpty) {
+      final confirmed = await showLocalDialog<bool>(
+        context: context,
+        builder: (context) => AlertDialog(
+          title: Text(t('重新生成？', 'Regenerate?')),
+          content: Text(
+            t(
+              '重新生成会再执行一次手机操作，确定吗？',
+              'Regenerating may execute the phone actions again. Continue?',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context, false),
+              child: Text(t('取消', 'Cancel')),
+            ),
+            TextButton(
+              onPressed: () => Navigator.pop(context, true),
+              child: Text(t('重新生成', 'Regenerate')),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+    if (!mounted ||
+        id != widget.conversationId ||
+        !_canRegenerate ||
+        !_latestReply(message)) {
+      return;
+    }
+    await widget.host.regenerate(
+      id,
+      message['time'] as String,
+      approve: _approve,
+      language: widget.language,
+    );
+  }
+
+  Widget _action(
+    IconData icon,
+    String tooltip,
+    VoidCallback? pressed, {
+    bool selected = false,
+  }) => SizedBox(
+    width: 32,
+    height: 32,
+    child: IconButton(
+      tooltip: tooltip,
+      padding: EdgeInsets.zero,
+      constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+      iconSize: 17,
+      color: selected ? Nova.mint : Nova.tertiary,
+      icon: Icon(icon),
+      onPressed: pressed,
+    ),
+  );
+
+  Future<void> _feedback(Map message, String value) async {
+    await widget.host.store.setFeedback(
+      widget.conversationId,
+      message['time'] as String,
+      message['feedback'] == value ? null : value,
+    );
+    if (mounted) setState(() {});
+  }
+
   Widget _message(Map message) {
     final reasoning =
         widget.showProcess &&
@@ -699,75 +884,167 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         (text.isEmpty ||
             message['tool_calls'] is List &&
                 (message['tool_calls'] as List).isNotEmpty);
+    // Stored, finished text messages only: the streaming draft and the pending
+    // user text carry no timestamp, and tool-call envelopes are process steps.
+    final copyText = message['time'] is String && !process
+        ? (user ? text.split(localAttachmentHeader).first.trimRight() : text)
+        : '';
+    final copyKey = '${message['time']}:${message['role']}';
+    final copied = _copiedKey == copyKey;
     return Padding(
-      padding: EdgeInsets.only(bottom: process ? 8 : 24),
-      child: Align(
-        alignment: user ? Alignment.centerRight : Alignment.centerLeft,
-        child: Container(
-          constraints: user ? const BoxConstraints(maxWidth: 300) : null,
-          padding: user
-              ? const EdgeInsets.symmetric(horizontal: 17, vertical: 13)
-              : EdgeInsets.zero,
-          decoration: user
-              ? BoxDecoration(
-                  color: Nova.cell,
-                  borderRadius: BorderRadius.circular(22),
-                )
-              : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (reasoning.isNotEmpty)
-                Padding(
-                  padding: EdgeInsets.only(
-                    bottom: text.isEmpty
-                        ? 0
-                        : process
-                        ? 8
-                        : 10,
+      padding: EdgeInsets.only(
+        bottom: process
+            ? 8
+            : copyText.isEmpty
+            ? 24
+            : 0,
+      ),
+      child: Column(
+        crossAxisAlignment: user
+            ? CrossAxisAlignment.end
+            : CrossAxisAlignment.stretch,
+        children: [
+          _messageBody(message, text, reasoning, user, process),
+          if (copyText.isNotEmpty)
+            Row(
+              mainAxisSize: user ? MainAxisSize.min : MainAxisSize.max,
+              children: [
+                if (!user && message['role'] == 'assistant') ...[
+                  if (_latestReply(message))
+                    _action(
+                      CupertinoIcons.arrow_clockwise,
+                      t('重新生成', 'Regenerate'),
+                      _canRegenerate
+                          ? () => unawaited(_regenerate(message))
+                          : null,
+                    ),
+                  _action(
+                    message['feedback'] == 'like'
+                        ? CupertinoIcons.hand_thumbsup_fill
+                        : CupertinoIcons.hand_thumbsup,
+                    t('赞', 'Like'),
+                    () => unawaited(_feedback(message, 'like')),
+                    selected: message['feedback'] == 'like',
                   ),
-                  child: ThinkingBlock(
-                    key: ValueKey('thinking:${message['time']}'),
-                    text: reasoning,
-                    language: widget.language,
+                  _action(
+                    message['feedback'] == 'dislike'
+                        ? CupertinoIcons.hand_thumbsdown_fill
+                        : CupertinoIcons.hand_thumbsdown,
+                    t('踩', 'Dislike'),
+                    () => unawaited(_feedback(message, 'dislike')),
+                    selected: message['feedback'] == 'dislike',
+                  ),
+                  const Spacer(),
+                ],
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: IconButton(
+                    key: ValueKey('copy:$copyKey'),
+                    tooltip: copied ? t('已复制', 'Copied') : t('复制', 'Copy'),
+                    padding: EdgeInsets.zero,
+                    constraints: const BoxConstraints.tightFor(
+                      width: 32,
+                      height: 32,
+                    ),
+                    iconSize: 17,
+                    color: Nova.tertiary,
+                    icon: Icon(
+                      copied
+                          ? CupertinoIcons.checkmark_alt
+                          : CupertinoIcons.doc_on_doc,
+                      color: copied ? Nova.mint : Nova.tertiary,
+                    ),
+                    onPressed: () => unawaited(_copyMessage(copyKey, copyText)),
                   ),
                 ),
-              if (text.isNotEmpty)
-                user
-                    ? SelectableText(
-                        text,
-                        style: const TextStyle(fontSize: 16, height: 1.5),
-                      )
-                    : DefaultTextStyle.merge(
-                        style: const TextStyle(fontSize: 16, height: 1.6),
-                        child: AssistantText(
-                          text,
-                          onArtifactLink: _openArtifact,
-                        ),
-                      ),
-              if (user &&
-                  (message['voice_transcript_final'] == false ||
-                      message['voice_input_origin_verified'] == false))
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    t('转写未确认', 'Transcript unconfirmed'),
-                    style: const TextStyle(color: Nova.secondary, fontSize: 12),
-                  ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _copyMessage(String key, String text) async {
+    await Clipboard.setData(ClipboardData(text: text));
+    if (!mounted) return;
+    _copyTimer?.cancel();
+    setState(() => _copiedKey = key);
+    _copyTimer = Timer(const Duration(milliseconds: 1500), () {
+      if (mounted) setState(() => _copiedKey = null);
+    });
+  }
+
+  Widget _messageBody(
+    Map message,
+    String text,
+    String reasoning,
+    bool user,
+    bool process,
+  ) {
+    return Align(
+      alignment: user ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        constraints: user ? const BoxConstraints(maxWidth: 300) : null,
+        padding: user
+            ? const EdgeInsets.symmetric(horizontal: 17, vertical: 13)
+            : EdgeInsets.zero,
+        decoration: user
+            ? BoxDecoration(
+                color: Nova.cell,
+                borderRadius: BorderRadius.circular(22),
+              )
+            : null,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (reasoning.isNotEmpty)
+              Padding(
+                padding: EdgeInsets.only(
+                  bottom: text.isEmpty
+                      ? 0
+                      : process
+                      ? 8
+                      : 10,
                 ),
-              if (message['interrupted'] == true)
-                Padding(
-                  padding: const EdgeInsets.only(top: 8),
-                  child: Text(
-                    message['error'] is String
-                        ? _error(message['error'] as String)
-                        : t('回复已中断', 'Response interrupted'),
-                    style: const TextStyle(color: Nova.secondary, fontSize: 12),
-                  ),
+                child: ThinkingBlock(
+                  key: ValueKey('thinking:${message['time']}'),
+                  text: reasoning,
+                  language: widget.language,
                 ),
-            ],
-          ),
+              ),
+            if (text.isNotEmpty)
+              user
+                  ? SelectableText(
+                      text,
+                      style: const TextStyle(fontSize: 16, height: 1.5),
+                    )
+                  : DefaultTextStyle.merge(
+                      style: const TextStyle(fontSize: 16, height: 1.6),
+                      child: AssistantText(text, onArtifactLink: _openArtifact),
+                    ),
+            if (user &&
+                (message['voice_transcript_final'] == false ||
+                    message['voice_input_origin_verified'] == false))
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  t('转写未确认', 'Transcript unconfirmed'),
+                  style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                ),
+              ),
+            if (message['interrupted'] == true)
+              Padding(
+                padding: const EdgeInsets.only(top: 8),
+                child: Text(
+                  message['error'] is String
+                      ? _error(message['error'] as String)
+                      : t('回复已中断', 'Response interrupted'),
+                  style: const TextStyle(color: Nova.secondary, fontSize: 12),
+                ),
+              ),
+          ],
         ),
       ),
     );
@@ -837,6 +1114,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             steps: steps,
             // While the run goes on, only its own plan messages follow it.
             running: runningHere && messageWidgets.length == runInternalWidgets,
+            canConfirmChecked: (id) =>
+                widget.host.tools?.journal.awaitsConfirmation(id) ?? false,
+            onConfirmChecked: (id) async {
+              await widget.host.tools?.journal.confirmDeviceTaskChecked(id);
+              if (mounted) setState(() {});
+            },
           ),
         );
         toolSteps.clear();

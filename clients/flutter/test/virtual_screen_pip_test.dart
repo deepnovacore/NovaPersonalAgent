@@ -74,6 +74,30 @@ final _needsYou = find.byKey(const ValueKey('pip-needs-you'));
 final _cross = find.byIcon(CupertinoIcons.xmark);
 
 void main() {
+  testWidgets('takeover maps known reasons and hides future reason codes', (
+    tester,
+  ) async {
+    final h = await _pump(tester, reduced: true);
+    await _emit(tester, h, stepEvent());
+    for (final entry in {
+      'secure_page': '遇到受保护页面',
+      'outside_target_app': '离开了目标 App',
+      'future_takeover_reason': '需要你处理后才能继续',
+    }.entries) {
+      await _emit(
+        tester,
+        h,
+        PhoneTakeoverEvent(
+          taskId: 't1',
+          state: TakeoverState.requested,
+          byModel: true,
+          reason: entry.key,
+        ),
+      );
+      expect(find.text('${entry.value}。点“我来”接管到主屏。'), findsOneWidget);
+      expect(find.textContaining(entry.key), findsNothing);
+    }
+  });
   testWidgets(
     'nothing shows, and no frames are asked for, without a virtual task',
     (tester) async {
@@ -180,6 +204,7 @@ void main() {
   testWidgets('take over, hand back and stop reach their handlers', (
     tester,
   ) async {
+    final semantics = tester.ensureSemantics();
     final h = await _pump(tester);
     await _emit(tester, h, stepEvent());
     await tester.tap(_working);
@@ -196,8 +221,13 @@ void main() {
     await tester.pump();
     expect(h.channel.calls, contains('handBack:t1'));
     expect(_working, findsOneWidget);
-    await tester.tap(find.byKey(const ValueKey('pip-stop')));
+    final stop = find.byKey(const ValueKey('pip-stop'));
+    expect(tester.getSemantics(stop).tooltip, '停止任务');
+    expect(tester.getSize(stop).width, greaterThanOrEqualTo(44));
+    expect(tester.getSize(stop).height, greaterThanOrEqualTo(44));
+    await tester.tap(stop);
     expect(h.stops, 1);
+    semantics.dispose();
   });
 
   testWidgets('a takeover request expands it and glows orange', (tester) async {
@@ -205,7 +235,7 @@ void main() {
     await _emit(tester, h, stepEvent());
     expect(_working, findsOneWidget);
     await _emit(tester, h, takeoverEvent(TakeoverState.requested));
-    expect(find.text('需要你处理后才能继续；点“我来”接管到主屏。'), findsOneWidget);
+    expect(find.text('需要你处理后才能继续。点“我来”接管到主屏。'), findsOneWidget);
     expect(h.channel.calls.where((c) => c.startsWith('takeover:')), isEmpty);
     // It breathes, so time is advanced by hand.
     await tester.pump(const Duration(milliseconds: 300));

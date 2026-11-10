@@ -324,7 +324,7 @@ void main() {
           ],
           incomplete: true,
         ),
-        '2 tool calls · Some incomplete or unverified',
+        '2 tool calls · 1 step incomplete or needs your confirmation',
       );
     });
 
@@ -455,7 +455,7 @@ void main() {
         ..._shells(2),
         const ToolStep(name: 'shell_execute', status: 'outcome_unknown'),
       ]);
-      expect(find.text('3 次工具调用 · 有未完成或待核实'), findsOneWidget);
+      expect(find.text('3 次工具调用 · 有 1 步没完成或需要你确认'), findsOneWidget);
       expect(find.byIcon(Icons.info_outline), findsOneWidget);
     });
 

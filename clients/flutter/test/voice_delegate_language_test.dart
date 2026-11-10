@@ -120,7 +120,8 @@ void main() {
         );
         expect(nativePrompts, native ? 1 : 0);
         expect(fetches, allowed ? 1 : 0);
-        expect(model.rounds, hasLength(allowed ? 2 : 1));
+        // A stopped tool gets one extra tool-free round to explain itself.
+        expect(model.rounds, hasLength(2));
         final messages = workerStore.conversations.single['messages'] as List;
         expect(
           jsonDecode(

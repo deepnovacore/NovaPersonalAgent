@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'components.dart';
 import 'local_task_request.dart';
 import 'theme.dart';
+import 'reason_copy.dart';
 import '../agent/local_agent.dart';
 import '../agent/task_todo_completion.dart';
 import '../personal/local_life.dart';
@@ -15,10 +16,10 @@ String _phaseText(Object? phase) =>
     const {
       'running': '执行中',
       'waiting_approval': '等待批准',
-      'verifying': '等待核验',
+      'verifying': '等你确认',
       'completed': '已完成',
       'cancelled': '已停止',
-      'interrupted': '已暂停，需核对',
+      'interrupted': '已暂停',
     }[phase] ??
     '处理中';
 
@@ -227,9 +228,30 @@ class _LocalTasksPageState extends State<LocalTasksPage>
                 ),
                 const SizedBox(height: 6),
                 Text('完成标准：${task['acceptance']}', style: _metaStyle),
+                if (task['phase'] == 'interrupted' &&
+                    hasReasonCopy(task['reason'] ?? task['cause']) &&
+                    reasonCopy(task['reason'] ?? task['cause']) !=
+                        humanReason(task['summary'])) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    reasonCopy(task['reason'] ?? task['cause']),
+                    style: _metaStyle,
+                  ),
+                ],
                 if (task['summary'] != null) ...[
                   const SizedBox(height: 4),
-                  Text(task['summary'] as String, style: _metaStyle),
+                  Text(
+                    '${task['phase'] == 'verifying' ? '等你确认：' : ''}${humanReason(task['summary'])}',
+                    style: _metaStyle,
+                  ),
+                ],
+                if (task['evidence'] is String &&
+                    (task['evidence'] as String).trim().isNotEmpty) ...[
+                  const SizedBox(height: 4),
+                  Text(
+                    '依据：${humanReason(task['evidence'])}',
+                    style: _metaStyle,
+                  ),
                 ],
                 if (task['todo_ref'] != null) ...[
                   const SizedBox(height: 4),
@@ -279,7 +301,7 @@ class _LocalTasksPageState extends State<LocalTasksPage>
                 if (task['phase'] == 'verifying')
                   TextButton(
                     onPressed: () => _command('verify', {'id': task['id']}),
-                    child: const Text('确认已完成'),
+                    child: const Text('对，已完成'),
                   ),
                 if ([
                   'running',

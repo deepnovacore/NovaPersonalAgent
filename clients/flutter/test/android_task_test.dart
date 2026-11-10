@@ -56,6 +56,31 @@ class Device implements LocalAgent {
 }
 
 void main() {
+  test(
+    'no progress after dispatched effects is not an admission failure',
+    () async {
+      final device = Device()
+        ..terminal = {
+          'phase': 'interrupted',
+          'reason': 'no_progress',
+          'action_in_flight': false,
+          'unresolved_actions': 0,
+          'dispatched_actions': 6,
+        };
+      final result =
+          await NativeChatTaskRunner(
+            agent: device,
+            pollInterval: Duration.zero,
+          ).run({
+            'target_package': 'com.xingin.xhs',
+            'goal': 'like',
+            'acceptance': 'liked',
+          }, 'no-progress');
+      expect(result['status'], 'outcome_unknown');
+      expect(result['reason'], 'no_progress');
+      expect(result['effects'], isNot('none'));
+    },
+  );
   for (final reason in ['accessibility_required', 'model_settings_required']) {
     test(
       'native admission rejection preserves $reason without stopping',
@@ -118,6 +143,7 @@ void main() {
     'launch_outcome_unknown',
     'tool_timeout',
     'execution_interrupted',
+    'no_progress',
   ]) {
     test(
       'native terminal classification and legacy reconciliation: $reason',
@@ -195,7 +221,9 @@ void main() {
         'acceptance': 'visible',
       };
       final running = native.run(args, 'cancel-before-dispatch');
-      expect((await native.run(args, 'competing'))['reason'], 'task_busy');
+      final busy = await native.run(args, 'competing');
+      expect(busy['reason'], 'device_busy');
+      expect(busy['status'], 'failed');
       await native.cancel();
       device.appsGate!.complete();
       expect((await running)['status'], 'cancelled');
@@ -212,7 +240,13 @@ void main() {
     'model failure after native dispatch blocks cross-turn replay',
     () async {
       final device = Device()
-        ..terminal = {'phase': 'interrupted', 'reason': 'model_timeout'};
+        ..terminal = {
+          'phase': 'interrupted',
+          'reason': 'model_timeout',
+          'dispatched_actions': 1,
+          'unresolved_actions': 0,
+          'action_in_flight': false,
+        };
       final native = NativeChatTaskRunner(
         agent: device,
         pollInterval: Duration.zero,
@@ -240,7 +274,11 @@ void main() {
         },
         approve: (_) async => false,
       );
-      expect((await run('first'))['data']['status'], 'outcome_unknown');
+      final first = await run('first');
+      expect(first['data']['status'], 'outcome_unknown');
+      expect(first['data']['dispatched_actions'], 1);
+      expect(first['data']['unresolved_actions'], 0);
+      expect(first['data']['action_in_flight'], false);
       final second = await run('second');
       expect(second.toString(), contains('blocked_by_unresolved_prior_action'));
       expect(device.calls.where((call) => call == 'run').length, 1);

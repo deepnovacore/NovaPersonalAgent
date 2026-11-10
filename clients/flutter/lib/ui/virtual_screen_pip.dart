@@ -9,6 +9,7 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import '../agent/phone_run.dart';
 import 'theme.dart';
+import 'reason_copy.dart';
 
 /// Width of the small picture and of the expanded one.
 const pipCollapsedWidth = 96.0;
@@ -20,14 +21,12 @@ const pipNeedsYouColor = Color(0xffe8913a);
 
 String _takeoverPrompt(PhoneRun run, String language) {
   final zh = language == 'zh';
-  final reason = switch (run.takeoverReason) {
-    'secure_page' => zh ? '页面受保护，需要你处理。' : 'This protected page needs you.',
-    'outside_target_app' =>
-      zh ? '当前页面超出任务范围，需要你处理。' : 'The current page is outside this task.',
-    final String reason when reason.isNotEmpty => reason,
-    _ => zh ? '需要你处理后才能继续；' : 'Your help is needed to continue. ',
-  };
-  return '$reason${zh ? '点“我来”接管到主屏。' : 'Tap Take over to open it on your screen.'}';
+  final reason = reasonCopy(
+    run.takeoverReason,
+    language: language,
+    fallback: zh ? '需要你处理后才能继续' : 'Your help is needed to continue',
+  );
+  return '$reason${zh ? '。点“我来”接管到主屏。' : '. Tap Take over to open it on your screen.'}';
 }
 
 enum PipCorner { topLeft, topRight, bottomLeft, bottomRight }
@@ -486,6 +485,10 @@ class _VirtualScreenPipState extends State<VirtualScreenPip>
               tooltip: t('停止任务', 'Stop task'),
               onPressed: widget.onStop,
               constraints: const BoxConstraints(minWidth: 48, minHeight: 48),
+              style: IconButton.styleFrom(
+                backgroundColor: Nova.red.withValues(alpha: 0.14),
+                shape: const CircleBorder(),
+              ),
               icon: const Icon(
                 CupertinoIcons.stop_fill,
                 size: 18,
@@ -632,7 +635,10 @@ class _VirtualScreenViewState extends State<VirtualScreenView>
                                                   '你正在手机上操作这个 App',
                                                   'You have the app on your phone',
                                                 )
-                                              : _takeoverPrompt(run, widget.language),
+                                              : _takeoverPrompt(
+                                                  run,
+                                                  widget.language,
+                                                ),
                                           textAlign: TextAlign.center,
                                           style: const TextStyle(
                                             color: Colors.white70,

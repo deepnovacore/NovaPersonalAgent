@@ -435,7 +435,12 @@ void main() {
       expect(shell.cancellations, 0);
       host.activeTool = 'shell_execute';
       host.cancel();
+      // A streamed tool name alone is not a running shell command.
+      expect(shell.cancellations, 0);
+      host.debugExecutingTool = 'shell_execute';
+      host.cancel();
       expect(shell.cancellations, 1);
+      host.debugExecutingTool = null;
       host.activeTool = null;
       host.dispose();
       expect(shell.cancellations, 1);
@@ -486,7 +491,7 @@ void main() {
       ).definitions.singleWhere((t) => t.name == 'device.run_task');
       expect(
         nativeTool.wire['function']['description'],
-        contains('opening Android apps'),
+        contains('operate an installed Android app'),
       );
       expect(model.instructions, contains('nova-file:///workspace/'));
       expect(

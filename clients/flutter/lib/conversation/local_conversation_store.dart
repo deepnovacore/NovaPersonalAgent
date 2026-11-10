@@ -219,6 +219,54 @@ class ConversationStore {
         .remove('active_turn');
   });
 
+  /// Drops every message and per-conversation derived state (voice delivery
+  /// records, in-flight turn checkpoint). The conversation itself is kept.
+  Future<void> clearConversation(String id) => _write((data) {
+    final item = (data['conversations'] as List).firstWhere(
+      (e) => e['id'] == id,
+    );
+    item['messages'] = <dynamic>[];
+    item.remove('active_turn');
+    item.remove('voice_deliveries');
+  });
+
+  Future<void> setFeedback(String id, String time, String? feedback) =>
+      _write((data) {
+        final item = (data['conversations'] as List).firstWhere(
+          (e) => e['id'] == id,
+        );
+        final message = (item['messages'] as List)
+            .where((e) => e['time'] == time && e['role'] == 'assistant')
+            .firstOrNull;
+        if (message == null) return;
+        // Local feedback only; no backend reporting yet.
+        if (feedback == null) {
+          message.remove('feedback');
+        } else if (feedback == 'like' || feedback == 'dislike') {
+          message['feedback'] = feedback;
+        }
+      });
+
+  Future<void> truncateForRegeneration(String id, String replyTime) =>
+      _write((data) {
+        final item = (data['conversations'] as List).firstWhere(
+          (e) => e['id'] == id,
+        );
+        final messages = item['messages'] as List;
+        final user = messages.lastIndexWhere((m) => m['role'] == 'user');
+        final reply = messages.lastIndexWhere(
+          (m) =>
+              m['role'] == 'assistant' &&
+              (m['content'] as String).isNotEmpty &&
+              (m['tool_calls'] as List? ?? []).isEmpty,
+        );
+        if (user < 0 || reply <= user || messages[reply]['time'] != replyTime) {
+          throw StateError('stale_regeneration');
+        }
+        messages.removeRange(user, messages.length);
+        item.remove('active_turn');
+      });
+
   /// Voice projections never enter a backbrain's tool call wire history.
   /// A late ASR final is inserted before the assistant response for its turn.
   Future<void> upsertVoiceMessage(

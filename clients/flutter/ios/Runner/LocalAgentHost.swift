@@ -183,18 +183,44 @@ import UIKit
             try check(id)
           }
         }
-        try stop(id, phase: "interrupted", summary: "达到本次操作上限，请核对进展。")
+        try stop(id, phase: "interrupted", summary: "已暂停：这次的步骤用完了。你可以查看进展，再决定下一步。")
       } catch {
         if active == id {
           let code = (error as? LocalAgentError)?.code ?? "native_or_model_failed"
-          try? stop(id, phase: "interrupted", summary: "执行暂停（\(code)）。请核对结果；不会自动重复操作。")
+          let reason = [
+            "task_stopped": "任务已停止",
+            "cancelled": "任务已取消",
+            "foreground_required": "需要回到 Nova 才能继续",
+            "permission_denied": "你未允许访问，操作没有执行",
+            "permission_required_in_settings": "需要在系统设置中允许访问",
+            "model_settings_required": "请先配置模型",
+            "chatgpt_sign_in_required": "请先登录 ChatGPT",
+            "model_request_failed": "模型没连上",
+            "model_stream_interrupted": "模型连接中断了",
+            "invalid_model_response": "模型返回的内容暂时无法使用",
+            "invalid_model_decision": "模型返回的操作暂时无法使用",
+            "model_output_limit": "模型这次的回复太长了",
+            "model_admission_full": "模型服务正忙",
+            "model_cleanup_pending": "上一次模型请求还在结束中",
+            "local_runtime_unavailable": "本机任务服务暂时没连上",
+            "life_tool_unavailable_or_conflict": "本机事项暂时不可用，或已被修改",
+            "version_conflict": "事项已经被修改了",
+            "item_not_found": "没有找到要操作的事项",
+            "stale_approval": "这次确认已失效，请查看最新任务状态",
+            "space_changed": "当前空间已切换",
+            "action_outcome_unknown": "有一处操作无法确认是否生效",
+            "no_progress": "页面反复出现，已暂停；请先在 App 里核对",
+            "device_busy": "手机正忙"
+          ][code] ?? "本机服务或模型暂时没能继续"
+          let stopped = code == "task_stopped" || code == "cancelled"
+          try? stop(id, phase: "interrupted", summary: stopped ? "\(reason)。请查看任务进展；我没有自动重复操作。" : "已暂停：\(reason)。请查看任务进展；我没有自动重复操作。")
         }
       }
     }
     Task { [weak self] in
       try? await Task.sleep(nanoseconds: 300_000_000_000)
       guard let self = self, self.active == id else { return }
-      try? self.stop(id, phase: "interrupted", summary: "达到 5 分钟执行上限，请核对进展。")
+      try? self.stop(id, phase: "interrupted", summary: "已暂停：这次已经执行了 5 分钟。你可以查看进展，再决定下一步。")
     }
     return task
   }

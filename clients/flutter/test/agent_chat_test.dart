@@ -370,7 +370,7 @@ void main() {
       // the narration of the step it introduced.
       expect(find.byType(ThinkingBlock), findsNothing);
       expect(find.textContaining('4 次工具调用'), findsOneWidget);
-      expect(find.textContaining('有未完成或待核实'), findsOneWidget);
+      expect(find.textContaining('没完成或需要你确认'), findsOneWidget);
       await tester.tap(find.textContaining('4 次工具调用'));
       await tester.pumpAndSettle();
       expect(find.text('Check next step'), findsOneWidget);
@@ -473,11 +473,14 @@ void main() {
         },
       );
       expect(host.error, 'tool_denied');
-      expect(model.calls, 2);
+      // One tool-free round explains the stop; the injected call in it is ignored.
+      expect(model.calls, 3);
       expect(approvals, 1);
       expect(writes, 0);
       expect(
-        (store.conversation(id)['messages'] as List).last['content'],
+        (store.conversation(id)['messages'] as List).lastWhere(
+          (m) => m['role'] == 'tool',
+        )['content'],
         contains('denied'),
       );
     },

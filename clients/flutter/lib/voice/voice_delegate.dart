@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import '../space/space_storage.dart';
 import '../agent_core/agent_core_host.dart';
 import '../agent_core/tool_registry.dart';
+import '../agent_core/tool_owner.dart';
 import '../conversation/local_conversation_store.dart';
 import '../personal/local_life.dart';
 import '../protocol/request_id.dart';
@@ -52,6 +53,8 @@ class VoiceDelegateBridge extends ChangeNotifier {
         settings: primary.settings,
         tools: primary.tools,
         allowLocalMemory: false,
+        // Its cancel and device-task ownership stay separate from the text lane.
+        owner: '${ToolOwner.voice}:delegate',
         // A separate Dart HTTP client avoids the iOS singleton stream handler.
       ),
     );
@@ -109,6 +112,22 @@ class VoiceDelegateBridge extends ChangeNotifier {
               ? 'process_interrupted_unknown'
               : result['delegate_status'] ?? 'returned',
         });
+      }
+    }
+  }
+
+  /// Called while the primary lane is reserved for clearing. Keep the links
+  /// until these writes finish, so a failed clear can be retried safely.
+  Future<void> clearConversationContext(String conversation) async {
+    if (busy || worker.busy) throw StateError('delegate_busy');
+    final contexts =
+        (primary.store.conversation(conversation)['messages'] as List)
+            .map((message) => message['delegate_context'])
+            .whereType<String>()
+            .toSet();
+    for (final context in contexts) {
+      if (worker.store.conversations.any((c) => c['id'] == context)) {
+        await worker.store.clearConversation(context);
       }
     }
   }

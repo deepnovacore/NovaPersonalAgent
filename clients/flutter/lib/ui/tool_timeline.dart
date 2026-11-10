@@ -146,7 +146,7 @@ String clipNarration(String text) {
 }
 
 /// The single line a finished run collapses to. Keeps Nova's established
-/// wording: "查看了 N 个文件 · N 次工具调用 · 有未完成或待核实".
+/// wording: "查看了 N 个文件 · N 次工具调用" plus an incomplete-step count.
 String toolTimelineSummary({
   required String language,
   required List<ToolStep> steps,
@@ -160,11 +160,18 @@ String toolTimelineSummary({
           step.completedReadPath != null)
         step.completedReadPath!,
   };
+  final unfinished = steps.where((step) => !step.completed).length;
   return [
     if (files.isNotEmpty)
       t('查看了 ${files.length} 个文件', 'Read ${files.length} files'),
     t('${steps.length} 次工具调用', '${steps.length} tool calls'),
-    if (incomplete) t('有未完成或待核实', 'Some incomplete or unverified'),
+    if (incomplete)
+      t(
+        '有 $unfinished 步没完成或需要你确认',
+        unfinished == 1
+            ? '1 step incomplete or needs your confirmation'
+            : '$unfinished steps incomplete or need your confirmation',
+      ),
   ].join(' · ');
 }
 
@@ -232,13 +239,9 @@ class _Draft {
 
 ToolStepState _liveState(String status, bool running) => switch (status) {
   'completed' => running ? ToolStepState.run : ToolStepState.ok,
-  'running' => ToolStepState.run,
-  'failed' ||
-  'error' ||
-  'cancelled' ||
-  'rejected' ||
-  'denied' => ToolStepState.dim,
-  _ => ToolStepState.wait,
+  'running' || 'executing' || 'prepared' => ToolStepState.run,
+  'awaiting_approval' || 'outcome_unknown' => ToolStepState.wait,
+  _ => ToolStepState.dim,
 };
 
 String? _narrationOf(ToolStep step) {
@@ -270,6 +273,7 @@ List<ToolTimelineRow> buildToolSteps(
         step.mergeKey != null &&
         step.mergeKey == previous.first.mergeKey &&
         step.status == previous.last.status &&
+        step.explanation == previous.last.explanation &&
         _narrationOf(step) == _narrationOf(previous.first)) {
       previous
         ..last = step
@@ -295,7 +299,10 @@ List<ToolTimelineRow> buildToolSteps(
               (draft.count > 1
                   ? '$title · ${t('${draft.count} 次', '×${draft.count}')}'
                   : title),
-          subtitle: last.completed ? '' : last.state,
+          subtitle: [
+            if (!last.completed) last.state,
+            if (last.explanation.isNotEmpty) last.explanation,
+          ].join(' · '),
           state: i == drafts.length - 1
               ? _liveState(last.status, running)
               : ToolStepState.ok,

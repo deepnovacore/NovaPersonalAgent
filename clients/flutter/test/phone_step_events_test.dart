@@ -135,7 +135,7 @@ void main() {
         ],
         ['running', 'completed', 'failed', 'outcome_unknown'],
       );
-      expect(map(StepStatus.unknown).state, '结果待核实');
+      expect(map(StepStatus.unknown).state, '无法确认结果');
       expect(map(StepStatus.running).state, '进行中');
       expect(step.label, '输入文字');
     });

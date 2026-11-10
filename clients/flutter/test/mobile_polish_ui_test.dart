@@ -53,9 +53,9 @@ void main() {
         ),
       );
       expect(find.text('写入文件 · 已完成'), findsOneWidget);
-      expect(find.text('执行命令 · 未执行'), findsOneWidget);
+      expect(find.text('执行命令 · Nova 未执行（不被允许）'), findsOneWidget);
       expect(find.text('读取网页 · 已取消'), findsOneWidget);
-      expect(find.text('使用工具 · 结果待核实'), findsOneWidget);
+      expect(find.text('使用工具 · 无法确认结果'), findsOneWidget);
       await tester.tap(find.text('写入文件 · 已完成'));
       await tester.pumpAndSettle();
       expect(find.textContaining('file_write'), findsOneWidget);

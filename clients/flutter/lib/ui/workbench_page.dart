@@ -9,6 +9,7 @@ import '../personal/personal_store.dart';
 import '../personal/commands.dart';
 import 'components.dart';
 import 'strings.dart';
+import 'reason_copy.dart';
 import 'task_details.dart';
 import 'theme.dart';
 import 'todo_editor.dart';
@@ -815,7 +816,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     ),
     subtitle: MetaLine([
       _label('phase', task['phase']),
-      task['waiting_reason'] as String?,
+      if (task['waiting_reason'] != null)
+        reasonCopy(task['waiting_reason'], language: widget.language),
     ]),
     trailing: const CupertinoListTileChevron(),
     onTap: () => showTaskSheet(

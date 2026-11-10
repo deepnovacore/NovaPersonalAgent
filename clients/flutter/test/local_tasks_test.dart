@@ -11,6 +11,7 @@ class TestAgent implements LocalAgent {
   Map<String, dynamic>? lastRun, savedModel;
   String platform = 'android';
   String target = 'com.nova.nova_mobile';
+  String? reason;
   @override
   Future<dynamic> call(
     String method, [
@@ -43,6 +44,8 @@ class TestAgent implements LocalAgent {
                 'action': {'type': 'back'},
               },
             'summary': 'Count shows 1',
+            'reason': reason,
+            'evidence': 'The counter reads 1',
             'actions': [],
           },
         ];
@@ -87,7 +90,7 @@ void main() {
     agent.phase = 'verifying';
     await tester.pump(const Duration(seconds: 2));
     await tester.pumpAndSettle();
-    expect(find.text('确认已完成'), findsOneWidget);
+    expect(find.text('对，已完成'), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
   });
   testWidgets('iOS still exposes native approval controls', (tester) async {
@@ -206,14 +209,29 @@ void main() {
       final agent = TestAgent();
       await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
       await tester.pumpAndSettle();
-      expect(find.text('等待核验'), findsOneWidget);
+      expect(find.text('等你确认'), findsOneWidget);
+      expect(find.text('等你确认：Count shows 1'), findsOneWidget);
+      expect(find.text('依据：The counter reads 1'), findsOneWidget);
       expect(agent.verifications, 0);
-      await tester.tap(find.text('确认已完成'));
+      await tester.tap(find.text('对，已完成'));
       await tester.pumpAndSettle();
       expect(agent.verifications, 1);
       expect(find.text('已完成'), findsOneWidget);
-      expect(find.text('确认已完成'), findsNothing);
+      expect(find.text('对，已完成'), findsNothing);
       await tester.pumpWidget(const SizedBox());
     },
   );
+  testWidgets('interrupted task explains the reason without raw codes', (
+    tester,
+  ) async {
+    final agent = TestAgent()
+      ..phase = 'interrupted'
+      ..reason = 'accessibility_unavailable';
+    await tester.pumpWidget(MaterialApp(home: LocalTasksPage(agent: agent)));
+    await tester.pumpAndSettle();
+    expect(find.text('系统的无障碍服务断开了'), findsOneWidget);
+    expect(find.textContaining('已暂停：已暂停'), findsNothing);
+    expect(find.textContaining('accessibility_unavailable'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

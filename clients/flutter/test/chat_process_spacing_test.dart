@@ -121,16 +121,18 @@ void main() {
           gap(find.widgetWithText(ListTile, 'page.html'), thoughts.at(1)),
           closeTo(16, .01),
         );
+        // A finished text message ends in its 32 px copy-button row, which
+        // replaces the 24 px bottom padding.
         expect(
           gap(reply('Final paragraph one'), reply('Final paragraph two')),
-          closeTo(24, .01),
+          closeTo(32, .01),
         );
         final users = find.byWidgetPredicate(
           (widget) =>
               widget is Container && widget.constraints?.maxWidth == 300,
         );
-        expect(gap(users.first, tools.at(0)), closeTo(24, .01));
-        expect(gap(reply('Final paragraph two'), users.last), closeTo(24, .01));
+        expect(gap(users.first, tools.at(0)), closeTo(32, .01));
+        expect(gap(reply('Final paragraph two'), users.last), closeTo(32, .01));
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
       },

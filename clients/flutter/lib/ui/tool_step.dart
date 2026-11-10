@@ -1,6 +1,7 @@
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'tool_timeline.dart';
+import 'reason_copy.dart';
 
 /// Tool payloads stay in storage; the conversation shows only safe metadata.
 ///
@@ -24,9 +25,14 @@ class ToolStep extends StatelessWidget {
     this.stepIndex,
     this.refLabel,
     this.frame,
+    this.data,
   });
   final String name, status, language;
   final String? completedReadPath;
+
+  /// The tool message's result data, used only for its human explanation.
+  final Map? data;
+  String get explanation => toolResultCopy(data, language: language);
 
   /// Where the tool acted (file name, host, app name). Equal consecutive
   /// targets of observe-like tools merge into one timeline row.
@@ -77,8 +83,18 @@ class ToolStep extends StatelessWidget {
     stepIndex: stepIndex,
     refLabel: refLabel,
     frame: frame,
+    data: data,
   );
   bool get completed => status == 'completed';
+
+  /// The earlier phone task this step was refused for, until the user checks it.
+  String? get priorTaskId {
+    final d = data;
+    if (d == null || d['reason'] != 'prior_task_unverified') return null;
+    final id = (d['prior_task'] as Map?)?['task_id'];
+    return id is String && id.isNotEmpty ? id : null;
+  }
+
   String get label {
     String t(String zh, String en) => language == 'zh' ? zh : en;
     return switch (name) {
@@ -113,13 +129,32 @@ class ToolStep extends StatelessWidget {
 
   String get state {
     String t(String zh, String en) => language == 'zh' ? zh : en;
+    if (knownStepsStopped(data) &&
+        ['outcome_unknown', 'failed', 'error'].contains(status)) {
+      return t('中途停止', 'Stopped partway through');
+    }
     return switch (status) {
       'completed' => t('已完成', 'Completed'),
-      'running' => t('进行中', 'In progress'),
+      'running' || 'executing' || 'prepared' => t('进行中', 'In progress'),
+      'awaiting_approval' => t('等你允许', 'Waiting for your approval'),
       'cancelled' => t('已取消', 'Cancelled'),
-      'rejected' || 'denied' => t('未执行', 'Not executed'),
+      'timed_out' => t('已超时', 'Timed out'),
+      'blocked' ||
+      'blocked_by_unresolved_prior_action' ||
+      'prior_task_unverified' => t(
+        '已跳过：先核对上一步',
+        'Skipped: check the previous step first',
+      ),
+      'cancelled_before_execution' => t('未执行', 'Not executed'),
+      'device_busy' => t('手机正忙，未执行', 'Phone busy; not executed'),
+      'denied' => t('你未允许，未执行', 'Not executed because you did not allow it'),
+      'rejected' => t(
+        'Nova 未执行（不被允许）',
+        'Nova did not execute this (not permitted)',
+      ),
+      'outcome_unknown' => t('无法确认结果', 'Unable to confirm the result'),
       'failed' || 'error' => t('未完成', 'Failed'),
-      _ => t('结果待核实', 'Outcome unknown'),
+      _ => t('未完成', 'Incomplete'),
     };
   }
 
@@ -133,12 +168,55 @@ class ToolStep extends StatelessWidget {
 /// [toolTimelineVisibleSteps] rows, once finished one expandable summary line
 /// in the established "查看了 N 个文件 · N 次工具调用" wording.
 class ToolStepGroup extends StatelessWidget {
-  const ToolStepGroup({super.key, required this.steps, this.running = false});
+  const ToolStepGroup({
+    super.key,
+    required this.steps,
+    this.running = false,
+    this.canConfirmChecked,
+    this.onConfirmChecked,
+  });
   final List<ToolStep> steps;
   final bool running;
 
+  /// Whether a refused phone task still waits for the user's check, and the
+  /// callback that confirms exactly that task.
+  final bool Function(String taskId)? canConfirmChecked;
+  final void Function(String taskId)? onConfirmChecked;
+
   @override
   Widget build(BuildContext context) {
+    final body = _body(context);
+    final confirm = onConfirmChecked;
+    if (confirm == null || steps.isEmpty) return body;
+    final ids = {
+      for (final s in steps)
+        if (s.priorTaskId != null &&
+            (canConfirmChecked?.call(s.priorTaskId!) ?? true))
+          s.priorTaskId!,
+    };
+    if (ids.isEmpty) return body;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        body,
+        for (final id in ids)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 8),
+            child: OutlinedButton(
+              onPressed: () => confirm(id),
+              child: Text(
+                steps.first.language == 'zh'
+                    ? '我核对过了，可以重新做'
+                    : 'I checked it; it can run again',
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _body(BuildContext context) {
     if (steps.isEmpty) return const SizedBox.shrink();
     if (steps.length > 1 || !steps.first.isPlain) {
       return Padding(
@@ -166,6 +244,7 @@ class ToolStepGroup extends StatelessWidget {
           [step.label, ?step.target, step.state].join(' · '),
           style: Theme.of(context).textTheme.bodySmall,
         ),
+        subtitle: step.explanation.isEmpty ? null : Text(step.explanation),
         children: [
           Align(
             alignment: Alignment.centerLeft,

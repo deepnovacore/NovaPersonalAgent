@@ -52,6 +52,7 @@ import '../services/preferences.dart';
 import '../personal/personal_store.dart';
 import 'package:nova_audio/nova_audio.dart';
 import 'devices_page.dart';
+import 'local_dialog.dart';
 import 'workbench_page.dart';
 import 'components.dart';
 import 'connectors_page.dart';
@@ -66,6 +67,7 @@ import '../agent_core/agent_core_host.dart';
 import '../agent_core/background_execution.dart';
 import '../agent_core/ios_model_client.dart';
 import '../agent_core/tool_registry.dart';
+import '../agent_core/tool_owner.dart';
 import '../agent_core/web_fetch.dart';
 import '../conversation/local_chat_panel.dart';
 import '../conversation/local_conversation_store.dart';
@@ -225,6 +227,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   final localConversation = GlobalKey<LocalChatPanelState>();
   PhoneChannel? phoneChannel;
   PhoneRunTracker? phoneRun;
+  NativeChatTaskRunner? nativeTasks;
 
   /// One companion for the call and the phone-task pet: the native channel has
   /// a single callback handler.
@@ -383,7 +386,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         );
         if (!mounted) return;
       }
-      final nativeTasks = NativeChatTaskRunner();
+      final nativeTasks = this.nativeTasks = NativeChatTaskRunner();
       final iosTasks = defaultTargetPlatform == TargetPlatform.iOS
           ? nativeTasks
           : null;
@@ -467,6 +470,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           ),
                     runChatTask: iosTasks?.run,
                     cancelChatTask: nativeTasks.cancel,
+                    deviceReadiness: _phoneReadiness,
                     listDeviceApps: iosTasks != null
                         ? null
                         : () async => {
@@ -488,6 +492,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                           },
                   ),
           );
+      host.deviceHeldByOther ??= () =>
+          nativeTasks.activeOwner != null &&
+          ToolOwner.lane(nativeTasks.activeOwner!) == ToolOwner.voice;
       await host.store.ensureMain();
       if (!mounted) {
         if (widget.agentCore == null) host.dispose();
@@ -1681,12 +1688,27 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             Future<void>.value(),
       );
     }
-    final core = agentCore;
-    final voice = phoneVoice;
-    if (core != null && core.busy && core.activeTool == 'device_run_task') {
-      core.cancel();
-    } else if (voice != null && voice.active && voiceDelegates?.busy == true) {
-      voice.cancelDelegate();
+    // The run's own owner decides whose turn stops, not what the UI shows.
+    final owner = nativeTasks?.ownerOf(taskId);
+    if (owner == null) return;
+    if (ToolOwner.lane(owner) == ToolOwner.voice) {
+      phoneVoice?.cancelDelegate();
+    } else {
+      agentCore?.cancel();
+    }
+  }
+
+  /// One fresh line per turn; null when the phone bridge cannot be read.
+  Future<String?> _phoneReadiness() async {
+    final channel = phoneChannel;
+    if (channel == null) return null;
+    try {
+      final s = await channel.status().timeout(const Duration(seconds: 2));
+      return 'Live phone task readiness, checked just now: accessibility ${s.accessibility ? 'on' : 'off'}; virtual screen ${s.helperRunning && s.tier == PhoneTier.virtual ? 'available' : 'unavailable (main screen only)'}. '
+          'This supersedes earlier claims about current accessibility or screen availability, not prior action outcomes or user authorization. '
+          '${s.accessibility ? 'For a new explicit request to operate a phone app, call device_run_task rather than refusing or asking them to re-enable settings because earlier attempts failed. Its result explains any new problem. Do not retry a denied or unknown action based on readiness alone.' : 'If the user asks to operate a phone app, tell them to turn on NovaCore in system accessibility settings.'}';
+    } catch (_) {
+      return null;
     }
   }
 
@@ -1736,10 +1758,85 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       title: 'NovaCore',
     ),
     actions: [
+      _clearButton(),
       if (widget.space == null) _settingsButton(),
       const SizedBox(width: 10),
     ],
   );
+
+  bool _mainClearBlocked(AgentCoreHost host) =>
+      host.busy ||
+      host.deviceHeldByOther?.call() == true ||
+      voiceDelegates?.busy == true ||
+      phoneVoice?.active == true ||
+      phoneVoice?.connecting == true;
+
+  Widget _clearButton() {
+    final host = agentCore;
+    if (host == null) return const SizedBox.shrink();
+    return ListenableBuilder(
+      listenable: Listenable.merge([host, ?voiceDelegates, ?phoneVoice]),
+      builder: (context, _) {
+        final blocked = _mainClearBlocked(host);
+        final empty =
+            (host.store.conversation(ConversationStore.mainId)['messages']
+                    as List)
+                .isEmpty;
+        return IconButton(
+          key: const ValueKey('global.clear'),
+          tooltip: blocked
+              ? _t('任务进行中，结束后再清空', 'A task is running. Clear after it ends.')
+              : _t('清空对话', 'Clear conversation'),
+          icon: const Icon(CupertinoIcons.trash, size: 21),
+          onPressed: blocked || empty ? null : () => unawaited(_clearMain()),
+        );
+      },
+    );
+  }
+
+  Future<void> _clearMain() async {
+    final host = agentCore;
+    if (host == null || _mainClearBlocked(host)) return;
+    final confirmed = await showLocalDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text(_t('清空当前对话？', 'Clear this conversation?')),
+        content: Text(
+          _t(
+            '当前对话的消息和上下文将被清除，长期记忆和操作记录会保留。',
+            'This conversation’s messages and context will be erased. Long-term memory and action records will be kept.',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: Text(_t('取消', 'Cancel')),
+          ),
+          TextButton(
+            style: TextButton.styleFrom(foregroundColor: Colors.red),
+            onPressed: () => Navigator.pop(context, true),
+            child: Text(_t('清空', 'Clear')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted || _mainClearBlocked(host)) return;
+    try {
+      await host.clearConversation(
+        ConversationStore.mainId,
+        clearDerivedContext: () async =>
+            voiceDelegates?.clearConversationContext(ConversationStore.mainId),
+      );
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(_t('清空失败，请重试', 'Could not clear. Please retry.')),
+          ),
+        );
+      }
+    }
+  }
 
   /// An open task keeps only the back affordance; the tab bar says “Tasks”.
   PreferredSizeWidget _taskBar() => AppBar(
