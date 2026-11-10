@@ -13,7 +13,8 @@
 | Import your documents | [Knowledge base](knowledge-base.md) |
 | View or disable memories | [Personal memory](personal-memory.md) |
 | Connect an iPhone | [iPhone guide](iphone.md) |
-| Adjust common settings | [Core configuration](configuration.md) |
+| Adjust desktop settings | [Settings](settings.md) |
+| Configure runtime options | [Core configuration](configuration.md) |
 | Understand task execution | [How it works](architecture.md) |
 
-Developer reference: [Architecture](archs/00-overview.md) · [Client protocol](protocols/client-v1.md) · [Remote deployment](deployment/remote-server.md)
+Developer reference: [Architecture](archs/00-overview.md) · [Client protocol](protocols/client-v1.md) · [Conversations, modes and workspaces](archs/08-conversations-modes-workspaces.md) · [Remote deployment](deployment/remote-server.md)

@@ -13,7 +13,8 @@
 | 导入你的文档 | [知识库](knowledge-base.md) |
 | 查看或关闭个人记忆 | [个人记忆](personal-memory.md) |
 | 连接 iPhone | [手机使用指南](iphone.md) |
-| 调整常用配置 | [核心配置](configuration.md) |
+| 调整桌面设置 | [设置](settings.md) |
+| 配置运行时选项 | [核心配置](configuration.md) |
 | 了解任务如何执行 | [工作原理](architecture.md) |
 
-开发参考：[架构](archs/00-overview.md) · [客户端协议](protocols/client-v1.md) · [远程部署](deployment/remote-server.md)
+开发参考：[架构](archs/00-overview.md) · [客户端协议](protocols/client-v1.md) · [会话、模式与工作区](archs/08-conversations-modes-workspaces.md) · [远程部署](deployment/remote-server.md)
