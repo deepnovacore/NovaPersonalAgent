@@ -148,10 +148,7 @@ class ToolStep extends StatelessWidget {
       'cancelled_before_execution' => t('未执行', 'Not executed'),
       'device_busy' => t('手机正忙，未执行', 'Phone busy; not executed'),
       'denied' => t('你未允许，未执行', 'Not executed because you did not allow it'),
-      'rejected' => t(
-        'Nova 未执行（不被允许）',
-        'Nova did not execute this (not permitted)',
-      ),
+      'rejected' => t('Nova 未执行', 'Nova did not execute this'),
       'outcome_unknown' => t('无法确认结果', 'Unable to confirm the result'),
       'failed' || 'error' => t('未完成', 'Failed'),
       _ => t('未完成', 'Incomplete'),

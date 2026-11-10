@@ -14,7 +14,7 @@ void main() {
       'cancelled_before_execution': '未执行',
       'device_busy': '手机正忙，未执行',
       'denied': '你未允许，未执行',
-      'rejected': 'Nova 未执行（不被允许）',
+      'rejected': 'Nova 未执行',
       'outcome_unknown': '无法确认结果',
       'future_status': '未完成',
       'completed': '已完成',

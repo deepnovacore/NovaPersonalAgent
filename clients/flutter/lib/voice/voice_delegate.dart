@@ -8,6 +8,7 @@ import '../agent_core/tool_owner.dart';
 import '../conversation/local_conversation_store.dart';
 import '../personal/local_life.dart';
 import '../protocol/request_id.dart';
+import '../ui/reason_copy.dart';
 
 class VoiceDelegateUpdate {
   const VoiceDelegateUpdate(
@@ -221,7 +222,15 @@ class VoiceDelegateBridge extends ChangeNotifier {
           );
       result = finals.isNotEmpty ? finals.last['content'] as String : '';
       if (worker.error != null) {
-        result = '$result\n${t('任务状态', 'Task status')}: ${worker.error}';
+        // Raw codes stay in delegate_status; the user and the voice model get
+        // copy, preferring the specific reason behind a tool_<status> code.
+        final detail = worker.errorDetail;
+        final reason = reasonCopy(
+          detail != null && hasReasonCopy(detail) ? detail : worker.error,
+          language: language,
+        );
+        result =
+            '$result\n${t('任务状态', 'Task status')}: ${t('未完成', 'not completed')} — $reason';
       }
       if (result.trim().isEmpty) {
         result = t(

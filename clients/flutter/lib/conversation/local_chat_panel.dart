@@ -605,6 +605,14 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       '这一步没有完成，原因在下面的步骤里。',
       'This step did not complete. The reason is in the steps below.',
     ),
+    'invalid_tool_arguments' => t(
+      '任务参数不符合工具要求，这次调用没有执行。可以再说一次。',
+      'The task arguments did not meet the tool requirements, so nothing was executed. You can ask again.',
+    ),
+    'tool_rejected' => t(
+      '这一步没有执行，原因在下面的步骤里。',
+      'This step was not executed. The reason is in the steps below.',
+    ),
     'device_busy' => t(
       '手机正在执行另一个任务，等它结束后再试。',
       'The phone is running another task. Try again when it finishes.',
@@ -1486,7 +1494,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                       crossAxisAlignment: WrapCrossAlignment.center,
                       children: [
                         Text(
-                          _error(host.error!),
+                          _error(
+                            host.error == 'tool_rejected' &&
+                                    host.errorDetail == 'invalid_tool_arguments'
+                                ? host.errorDetail!
+                                : host.error!,
+                          ),
                           style: const TextStyle(color: Nova.red, fontSize: 13),
                         ),
                         if (_experienceCodeError(host.error!) &&

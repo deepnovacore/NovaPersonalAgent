@@ -158,7 +158,20 @@ const _reasons = <String, (String, String)>{
   'prior_task_unverified': ('先核对上一步', 'Check the previous step first'),
   'cancelled_before_execution': ('未执行', 'Not executed'),
   'denied': ('你未允许，未执行', 'Not executed because you did not allow it'),
-  'rejected': ('Nova 未执行（不被允许）', 'Nova did not execute this (not permitted)'),
+  'rejected': ('Nova 未执行', 'Nova did not execute this'),
+  'invalid_tool_arguments': (
+    '任务参数不符合工具要求，这次调用没有执行',
+    'The task arguments did not meet the tool requirements; nothing was executed',
+  ),
+  'tool_rejected': ('这一步没有执行', 'This step was not executed'),
+  'tool_denied': ('你未允许，未执行', 'Not executed because you did not allow it'),
+  'tool_failed': ('这一步没有完成', 'This step did not complete'),
+  'tool_cancelled': ('任务已取消', 'The task was cancelled'),
+  'tool_outcome_unknown': (
+    '无法确认结果，没有自动重试',
+    'Unable to confirm the result; it was not retried',
+  ),
+  'tool_round_limit': ('已达到本轮操作上限', 'This turn reached its action limit'),
   'model_required': ('请先配置模型', 'Set up a model first'),
   'model_settings_required': ('请先配置模型', 'Set up a model first'),
   'schedule_schema': (
