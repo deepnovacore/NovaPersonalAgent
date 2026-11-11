@@ -1,5 +1,6 @@
 import {createSharedIdeas} from './shared-ideas.mjs'
 import {installExperienceIpc} from './experience-ipc.mjs'
+import {completeConfiguredExperience} from './experience-model.mjs'
 import {probeNativeVoice} from './native-voice-service.mjs'
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
@@ -2350,7 +2351,10 @@ async function startSelectedCamera(camera, smokeChannel) {
     return applyDesktopSettings(payload, restart)
   })
   installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,screen,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
-  installExperienceIpc({ipcMain,app,windows:()=>[mainWindow,settingsWindow],codec:secretCodec,loadRuntime:loadSpaceHostRuntime,fetcher:(...args)=>net.fetch(...args)})
+  installExperienceIpc({ipcMain,app,windows:()=>[mainWindow,settingsWindow],codec:secretCodec,loadRuntime:loadSpaceHostRuntime,fetcher:(...args)=>net.fetch(...args),complete:async(messages,signal)=>{
+    const configuration=await accessCredentials(()=>({settings:{...backendSettings(currentSettings),...(spaceModelsCache?.routes?{modelRoutes:spaceModelsCache.routes}:{})},secrets:decryptSecretsForSpawn(currentSettings,secretCodec),environment:process.env}))
+    return completeConfiguredExperience(configuration,messages,signal)
+  }})
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push
     // sent before then has nobody to reach. Riding the verdict on the very payload the

@@ -4,7 +4,7 @@ export const ENGLISH_MESSAGES = Object.freeze({
   '记忆 · Nova Personal Agent': 'Memory · Nova Personal Agent',
   '关键词': 'Keywords',
   '聊点什么': 'Something to talk about',
-  "体验对话未完成，请在空间设置中检查体验码、额度与网络后重试。": "The experience conversation did not finish. Check your experience code, quota and connection in Space settings, then retry.",
+  "体验对话未完成，请检查模型配置、额度与网络后重试。": "The experience conversation did not finish. Check your model configuration, quota and connection, then retry.",
   "体验空间目前支持文字对话。": "Experience Spaces currently support text conversations.",
   "体验操作未完成，请检查体验码、额度与网络后重试。": "The experience action did not finish. Check your experience code, quota and connection, then retry.",
   "我的待办": "My to-dos",

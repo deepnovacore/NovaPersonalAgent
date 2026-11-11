@@ -21,6 +21,11 @@ test('ordinary pages render persona profile, readable sources and editable todo 
  const api:any={welcome:{save:async()=>{welcomeWrites++}},experience:{list:async()=>({available:true,active:'sample',epoch:1,snapshot}),onChanged:(callback:any)=>{changed=callback;return()=>{off++}},send:async(request:any)=>{frames.push(request.frame);const frame=request.frame;if(frame.method==='life.mutate'){snapshot.life.todos[0]={...snapshot.life.todos[0],...frame.params,version:2};snapshot.revision++;changed({id:'sample',epoch:1,frame:structuredClone(snapshot)})}return {frame:{type:frame.type==='input.text'?'input.text_result':'personal.result',request_id:frame.request_id,conversation_id:frame.conversation_id,ok:true,data:{}}}}},personal:{setUnread:async()=>{}},orbMenu:{openSettings:()=>{}},windowControls:{},computerUse:{clear:()=>{}}}
  await act(async()=>{view=mountPersonalView({api,send:()=>{throw Error('real runtime must not receive experience commands')},start:async()=>{throw Error('microphone must not start')},stop:async()=>{},tasks:()=>({tasks:[]}),results:()=>[]})})
  await waitFor(()=>assert.equal(view.controller.connected,true))
+ await act(async()=>view.startup({stage:'credentials'}))
+ assert.equal(document.querySelector('#startup-notice')?.getAttribute('data-stage'),'credentials')
+ assert.match(document.querySelector('#startup-notice')!.textContent!,/正在读取凭据/)
+ await act(async()=>view.startup({stage:'ready'}))
+ assert.equal(document.querySelector('#startup-notice'),null)
  await act(async()=>view.identity({profile:{assistantName:'PRIVATE ASSISTANT',avatar:'data:image/png;base64,PRIVATE_AVATAR'},defaultAvatar:'data:image/png;base64,NOVA_DEFAULT'}))
  assert.equal(document.querySelector<HTMLImageElement>('#chat-pane .idle-avatar img')?.getAttribute('src'),'data:image/png;base64,NOVA_DEFAULT')
  assert.equal(document.querySelector('#chat-pane')!.innerHTML.includes('PRIVATE_AVATAR'),false)

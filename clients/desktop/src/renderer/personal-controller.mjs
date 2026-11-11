@@ -10,7 +10,7 @@ const DICTATION_FAILURES={
   no_speech:'没有听清，请再说一次 · 原有草稿已保留',
 }
 const MODEL_FAILURES={
-  experience_unavailable:'体验对话未完成，请在空间设置中检查体验码、额度与网络后重试。',
+  experience_unavailable:'体验对话未完成，请检查模型配置、额度与网络后重试。',
   model_protocol_tool_arguments_json:'模型返回的工具参数不是有效 JSON，请重试。',
   model_protocol_tool_identity:'模型返回了重复或无效的工具调用标识，请重试。',
   model_protocol_tool_call_limit:'单次回复的工具调用数量超出限制，请重试。',

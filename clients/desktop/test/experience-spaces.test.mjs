@@ -41,6 +41,22 @@ test('late async model completion is fenced after switching persona',async()=>{
   await service.select('sample-b');resolveReply(Response.json({choices:[{message:{content:'stale'}}]}));await assert.rejects(reply,/experience_space_changed/)
  }finally{await rm(directory,{recursive:true,force:true})}
 })
+test('configured model serves isolated personas and failures never fall through to the experience gateway',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'experience-own-model-')),hosts=[]
+ let reply=async()=> 'Configured reply'
+ const service=new ExperienceSpaces({directory,codec,loadAssets:async()=>assets,loadRuntime:async()=>({createExperienceHost:async options=>{hosts.push(options);return {snapshot:()=>({}),close:async()=>{}}}}),complete:async(messages,signal)=>reply(messages,signal),fetcher:async()=>{throw Error('experience gateway must not be used')}})
+ try{
+  await service.list();await service.select('sample-a')
+  assert.equal(await hosts[0].complete([{role:'user',content:'Persona A'}],new AbortController().signal),'Configured reply')
+  reply=async()=>{throw Error('configured_model_failed')}
+  await assert.rejects(hosts[0].complete([],new AbortController().signal),/configured_model_failed/)
+  let finish;reply=()=>new Promise(resolve=>{finish=resolve})
+  const pending=hosts[0].complete([],new AbortController().signal)
+  await service.select('sample-b');finish('Old persona reply')
+  await assert.rejects(pending,/experience_space_changed/)
+  assert.notEqual(hosts[0].path,hosts[1].path)
+ }finally{await rm(directory,{recursive:true,force:true})}
+})
 test('experience controller never sends to personal transport and rejects stale persona frames',async()=>{
  const real=[],experience=[],state={type:'personal.state',revision:1,conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main'}],messages:[]}}
  let changed,resolveReply

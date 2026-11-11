@@ -7,7 +7,7 @@ const object=value=>value&&typeof value==='object'&&!Array.isArray(value)
 const codeError=status=>Error(status===401||status===403?'experience_code_required':status===429?'experience_limit_reached':'experience_unavailable')
 /** Credentials are only decrypted in main and never projected into a renderer or runtime environment. */
 export class ExperienceSpaces {
- constructor({directory,loadAssets,loadRuntime,codec,fetcher=fetch,changed=()=>{}}){Object.assign(this,{directory,loadAssets,loadRuntime,codec,fetcher,changed});this.epoch=0;this.active=null;this.host=null;this.tail=Promise.resolve();this.tokens=new Map()}
+ constructor({directory,loadAssets,loadRuntime,codec,complete,fetcher=fetch,changed=()=>{}}){Object.assign(this,{directory,loadAssets,loadRuntime,codec,complete,fetcher,changed});this.epoch=0;this.active=null;this.host=null;this.tail=Promise.resolve();this.tokens=new Map()}
  async init(){
   if(!this.initializing)this.initializing=(async()=>{this.assets=await this.loadAssets();if(!this.assets)return;await mkdir(this.directory,{recursive:true,mode:0o700});let selection;try{selection=JSON.parse(await readFile(join(this.directory,'selected.json'),'utf8'))}catch(error){if(error.code!=='ENOENT')throw Error('experience_state_invalid')}if(selection?.id)await this.select(selection.id)})()
   return this.initializing
@@ -54,7 +54,7 @@ export class ExperienceSpaces {
     const parse=key=>JSON.parse(files[key].toString('utf8')),sources=parse('sources'),memory=parse('memory')
     const {createExperienceHost}=await this.loadRuntime()
     this.host=await createExperienceHost({path:join(root,'personal.json'),personaId:id,name:persona.name,sourceVersion:persona.sha256.sources,profile:parse('profile'),records:sources.records,memory:memory.entries,snapshot:parse('snapshot'),
-     complete:async(messages,signal)=>{const token=await this.token('text',signal),value=await this.request('/v1/chat/completions',{model:'deepseek-flash',messages,stream:false},token,signal);if(epoch!==this.epoch)throw Error('experience_space_changed');const text=value.choices?.[0]?.message?.content;if(typeof text!=='string'||!text.trim())throw Error('experience_response_invalid');return text},
+     complete:async(messages,signal)=>{let text=await this.complete?.(messages,signal);if(text==null){const token=await this.token('text',signal),value=await this.request('/v1/chat/completions',{model:'deepseek-flash',messages,stream:false},token,signal);text=value.choices?.[0]?.message?.content}if(epoch!==this.epoch)throw Error('experience_space_changed');if(typeof text!=='string'||!text.trim())throw Error('experience_response_invalid');return text},
      refresh:async(sourceVersion,signal)=>{const token=await this.token('profile',signal),value=await this.request('/persona-profile',{persona_id:id,source_version:sourceVersion},token,signal);if(epoch!==this.epoch)throw Error('experience_space_changed');return value},
      emit:frame=>{if(epoch===this.epoch&&this.active===id)this.changed({id,epoch,frame})},
     });this.active=id

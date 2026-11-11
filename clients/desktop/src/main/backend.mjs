@@ -276,16 +276,7 @@ export function backendLaunchSpec({
   }
   // The generic cross-provider model overrides are retired; never forward them to the runtime.
   for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY']) delete env[name]
-  const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
-  Object.assign(env, {
-    CASCADE_LLM_PROVIDER: llmProvider,
-    CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[llmProvider]
-      ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
-      ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
-    OPENAI_COMPATIBLE_BASE_URL: settings?.openaiCompatibleBaseUrl ?? SETTINGS_DEFAULTS.openaiCompatibleBaseUrl,
-    OPENAI_COMPATIBLE_PROTOCOL: settings?.openaiCompatibleProtocol ?? SETTINGS_DEFAULTS.openaiCompatibleProtocol,
-    SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
-  })
+  Object.assign(env, textModelEnvironment(settings))
   if (pipelineMode === 'cascaded') {
     Object.assign(env, {
       DOUBAO_ASR_VOICEPRINT_ENABLED: String(settings?.voiceprintEnabled === true && Boolean(settings?.voiceprintUploadUrl)),
@@ -655,6 +646,18 @@ export async function shutdownBackendBestEffort(child, options) {
     return true
   } catch {
     return false
+  }
+}
+
+/** Shared by the ordinary runtime and isolated experience conversations. */
+export function textModelEnvironment(settings) {
+  const provider = selectedTextLlmProvider(settings)
+  return {
+    CASCADE_LLM_PROVIDER: provider,
+    CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[provider] ?? SETTINGS_DEFAULTS.cascadedLlmModels[provider] ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
+    OPENAI_COMPATIBLE_BASE_URL: settings?.openaiCompatibleBaseUrl ?? SETTINGS_DEFAULTS.openaiCompatibleBaseUrl,
+    OPENAI_COMPATIBLE_PROTOCOL: settings?.openaiCompatibleProtocol ?? SETTINGS_DEFAULTS.openaiCompatibleProtocol,
+    SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
   }
 }
 
