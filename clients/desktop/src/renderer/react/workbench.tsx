@@ -55,7 +55,7 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
   return()=>{current=false}
  },[api,ideasVisible,c.presentationMode,language])
  const pageApi=useMemo(()=>c.ordinarySpace?api:{personal:{openArticle:api.personal?.openArticle}},[api,c.ordinarySpace])
- useLayoutEffect(()=>{runtime.chat.current?.identity(c.ordinarySpace?runtime.identityValue:null)},[runtime,c.ordinarySpace,runtime.identityValue,c.experience?.id])
+ useLayoutEffect(()=>{runtime.chat.current?.identity(c.ordinarySpace?runtime.identityValue:{defaultAvatar:runtime.identityValue?.defaultAvatar})},[runtime,c.ordinarySpace,runtime.identityValue,c.experience?.id])
  const lastWorkspacePage=useRef('timeline');if(selected!=='tasks')lastWorkspacePage.current=selected
  const originFocus=useRef<HTMLElement|null>(null),taskHistories=useRef(new Map<string,any>()),viewedCursors=useRef(new Map<string,number>()),opening=useRef(0),initialHome=useRef(false),orbVoiceTried=useRef(false),lastPlan=useRef(''),tabRefs=useRef(new Map<string,HTMLButtonElement>())
  useLayoutEffect(()=>{const reveal=()=>tabRefs.current.get(selected)?.scrollIntoView?.({block:'nearest',inline:'nearest'});reveal();window.addEventListener('resize',reveal);return()=>window.removeEventListener('resize',reveal)},[selected,assistantName])
