@@ -41,6 +41,29 @@ test('isolated experience uses host life persistence and retains multi-turn hist
 function sampleOptions(path:string,version='a'.repeat(64),id='sample:1'){
  return {path,personaId:'sample',name:'Sample',sourceVersion:version,records:[{id,source_id:'sample',kind:'mail',text:'Current source '+version[0],observed_at:'2026-01-01T00:00:00Z'}],memory:[],profile:{},snapshot:{source_version:version,profile:[{title:'Baseline',text:'Baseline '+version[0],refs:[id]}],timeline:[{title:'Current event',summary:'Current summary',refs:[id]}]},complete:async()=> 'Sample reply',refresh:async()=>({profile:[],timeline:[]}),emit:()=>{}}
 }
+test('structured Timeline details survive refresh and restart and reject ungrounded nested references',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'experience-details-'))
+ const base=sampleOptions(join(root,'personal.json'))
+ const details={kind:'attention',category:'Delivery',why_now:'Review is pending',status_label:'Blocked',facts:[{label:'Dependency',tone:'warning',text:'Review is pending',quote:'Current source a',ref:'sample:1'}],people:[],next_steps:[{title:'Ask for review',detail:'Confirm the pending review before delivery'}],uncertainty:'No later confirmation',temporal:{kind:'unknown',dates:[]},actions:[{kind:'draft',label:'Draft review request'}]}
+ let timeline=[{...base.snapshot.timeline[0]!,...details}]
+ const options={...base,refresh:async()=>({profile:[],timeline})}
+ let host=await createExperienceHost(options)
+ try{
+  const refresh=()=>host.command({type:'personal.command',request_id:'refresh',method:'timeline.refresh',params:{}})
+  await refresh()
+  const card:any=host.snapshot().timeline.cards[0]!
+  assert.equal(card.kind,'attention');assert.equal(card.status_label,'Blocked');assert.equal(card.category,'Delivery')
+  assert.equal(card.facts[0].text,'Review is pending');assert.equal(card.next_steps[0].title,'Ask for review')
+  assert.equal(card.uncertainty,'No later confirmation');assert.equal(card.actions[0].label,'Draft review request')
+  await host.close();host=await createExperienceHost(options)
+  assert.deepEqual(host.snapshot().timeline.cards[0],card)
+  timeline=[{...timeline[0]!,facts:[{...details.facts[0]!,ref:'missing'}]}]
+  await assert.rejects(refresh(),/experience_reference_invalid/)
+  assert.deepEqual(host.snapshot().timeline.cards[0],card)
+  timeline=[{...timeline[0]!,facts:[{...details.facts[0]!,quote:'Invented quote'}]}]
+  await assert.rejects(refresh(),/experience_reference_invalid/)
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
 test('source upgrades and malformed saved projections recover the bundled baseline without losing old bytes',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'experience-upgrade-')),path=join(root,'personal.json'),file=path+'.experience.json'
  try{
@@ -55,6 +78,18 @@ test('source upgrades and malformed saved projections recover the bundled baseli
   const mismatched=sampleOptions(path);mismatched.snapshot.source_version='c'.repeat(64)
   await assert.rejects(createExperienceHost(mismatched),/experience_source_version_mismatch/)
  }finally{await rm(root,{recursive:true,force:true})}
+})
+test('chat retains source text and attribution without oversized ingestion metadata',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'experience-context-')),calls:any[]=[]
+ const base=sampleOptions(join(root,'personal.json'))
+ const host=await createExperienceHost({...base,records:[{...base.records[0]!,metadata:{sender_name:'Sample Author',thread_id:'thread-1',ingestion_log:'x'.repeat(140000)}}],complete:async(messages:any[])=>{calls.push(messages);return 'Grounded reply'}})
+ try{
+  await host.input('chat:main','What is the latest?','context');await host.wait('chat:main')
+  assert.equal(calls.length,1)
+  assert.ok(calls[0][0].content.includes('Current source a'));assert.ok(calls[0][0].content.includes('Sample Author'));assert.ok(calls[0][0].content.includes('thread-1'))
+  assert.equal(calls[0][0].content.includes('ingestion_log'),false)
+  assert.ok(host.snapshot().conversations.messages.some(message=>message.text==='Grounded reply'))
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
 })
 test('displayed Timeline card discussion and draft use exact versioned source context',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'experience-timeline-')),calls:any[]=[]
