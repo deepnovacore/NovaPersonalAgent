@@ -10,7 +10,7 @@ import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createPackageWithOptions, extractFile, getRawHeader, statFile, uncache} from '@electron/asar'
 import {replacePackagedAsar, refreshSignedAsar, refreshMacAsarIntegrity} from '../scripts/build-owned-asar.mjs'
-import {inspectApplication, inspectMacAsarIntegrity, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
+import {inspectApplication, inspectMacApplicationInfo, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
 import {loadSettings} from '../src/main/settings-store.mjs'
 import {backendLaunchSpec} from '../src/main/backend.mjs'
 import {describeMissingBlockingEnvironment} from '@nova-personal-agent/runtime/desktop'
@@ -48,9 +48,9 @@ test('signing growth refreshes unpacked ASAR metadata without replacing sealed b
     assert.equal(extractFile(archive, join('src', 'main', 'main.mjs')).toString(), 'entry')
     const plistPath = join(root, 'Info.plist')
     await writeFile(plistPath, plist.build({CFBundleIdentifier: 'fixture', ElectronAsarIntegrity: {'Resources/other.asar': {hash: 'preserved'}}}))
-    await assert.rejects(inspectMacAsarIntegrity(dirname(archive)), /macOS ASAR integrity mismatch/)
+    await assert.rejects(inspectMacApplicationInfo(dirname(archive)), /macOS ASAR integrity mismatch/)
     await refreshMacAsarIntegrity(archive, plistPath)
-    await inspectMacAsarIntegrity(dirname(archive))
+    await inspectMacApplicationInfo(dirname(archive))
     const info = plist.parse(await readFile(plistPath, 'utf8'))
     assert.equal(info.CFBundleIdentifier, 'fixture')
     assert.equal(info.ElectronAsarIntegrity['Resources/other.asar'].hash, 'preserved')
@@ -58,6 +58,28 @@ test('signing growth refreshes unpacked ASAR metadata without replacing sealed b
       algorithm: 'SHA256', hash: createHash('sha256').update(getRawHeader(archive).headerString).digest('hex'),
     })
   } finally {uncache(archive); await rm(root, {recursive: true, force: true})}
+})
+
+test('macOS candidate inspection rejects bundles hidden from the Dock', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'nova-dock-plist-'))
+  const source = join(root, 'source'), resources = join(root, 'Resources')
+  const archive = join(resources, 'app.asar')
+  try {
+    await file(source, 'src/main/main.mjs', 'entry')
+    await mkdir(resources)
+    await createPackageWithOptions(source, archive, {})
+    const integrity = {ElectronAsarIntegrity: {'Resources/app.asar': {
+      algorithm: 'SHA256', hash: createHash('sha256').update(getRawHeader(archive).headerString).digest('hex'),
+    }}}
+    for (const flags of [{}, {LSUIElement: false, LSBackgroundOnly: false}]) {
+      await writeFile(join(root, 'Info.plist'), plist.build({...integrity, ...flags}))
+      await inspectMacApplicationInfo(resources)
+    }
+    for (const flag of ['LSUIElement', 'LSBackgroundOnly']) {
+      await writeFile(join(root, 'Info.plist'), plist.build({...integrity, [flag]: true}))
+      await assert.rejects(inspectMacApplicationInfo(resources), /macOS application must appear in the Dock/)
+    }
+  } finally { uncache(archive); await rm(root, {recursive: true, force: true}) }
 })
 
 test('installed smoke selects the controlled provider without requiring unrelated credentials', async () => {

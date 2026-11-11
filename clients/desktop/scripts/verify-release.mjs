@@ -67,8 +67,12 @@ export async function inspectApplication(resourcesRoot, targetId) {
   assert.equal(manifest.target, targetId, 'native manifest target mismatch')
 }
 
-export async function inspectMacAsarIntegrity(resourcesRoot) {
+export async function inspectMacApplicationInfo(resourcesRoot) {
   const info = plist.parse(await readFile(resolve(resourcesRoot, '../Info.plist'), 'utf8'))
+  for (const flag of ['LSUIElement', 'LSBackgroundOnly']) {
+    assert.ok(info[flag] === undefined || info[flag] === false,
+      `macOS application must appear in the Dock: ${flag} must be absent or false`)
+  }
   assert.deepEqual(info.ElectronAsarIntegrity?.['Resources/app.asar'], {
     algorithm: 'SHA256',
     hash: createHash('sha256').update(getRawHeader(resolve(resourcesRoot, 'app.asar')).headerString).digest('hex'),
@@ -284,7 +288,7 @@ export async function verifyRelease({app, artifact, distRoot, unsigned = false, 
     const executable = resolve(app, process.platform === 'darwin' ? `Contents/MacOS/${product}` : process.platform === 'win32' ? `${product}.exe` : 'nova-personal-agent-desktop')
     const targetId = `${process.platform}-${process.arch}${process.platform === 'linux' ? '-gnu' : ''}`
     await inspectApplication(resources, targetId)
-    if (process.platform === 'darwin') await inspectMacAsarIntegrity(resources)
+    if (process.platform === 'darwin') await inspectMacApplicationInfo(resources)
     if (unsigned && process.platform === 'darwin') {
       run('/usr/bin/codesign', ['--verify', '--deep', '--strict', app])
       process.stdout.write('macOS seal verified; Developer ID/Gatekeeper verification skipped (--unsigned)\n')
