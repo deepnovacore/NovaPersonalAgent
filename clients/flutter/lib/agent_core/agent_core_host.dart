@@ -97,16 +97,15 @@ String _deviceSummary(Object? content) {
 final _leakedCallOpen = RegExp(
   r'^[ \t]*<\s*[|｜]+\s*DSML\s*[|｜]+\s*(function_calls|calls|invoke)\b',
 );
-final _leakedCallClose = RegExp(
-  r'<\s*/\s*[|｜]+\s*DSML\s*[|｜]+\s*(function_calls|calls)\s*>',
-);
+RegExp _leakedCallClose(String kind) =>
+    RegExp('<\\s*/\\s*[|｜]+\\s*DSML\\s*[|｜]+\\s*$kind\\s*>');
 String stripToolCallMarkup(String text) {
   final lines = text.split('\n');
   final kept = <String>[];
-  String? fence;
-  var leaked = false, removed = false;
+  String? fence, block;
+  var removed = false;
   for (final line in lines) {
-    if (!leaked) {
+    if (block == null) {
       final marker = RegExp(r'^[ \t]*(`{3,}|~{3,})').firstMatch(line)?[1];
       if (marker != null) {
         if (fence == null) {
@@ -116,15 +115,17 @@ String stripToolCallMarkup(String text) {
         }
       }
     }
-    if (!leaked && fence == null && _leakedCallOpen.hasMatch(line)) {
-      leaked = true;
+    if (block == null && fence == null) {
+      // The block closes with the tag that opened it; a call list may hold
+      // several invocations before its own closing tag.
+      block = _leakedCallOpen.firstMatch(line)?[1];
     }
-    if (leaked) {
+    if (block != null) {
       removed = true;
       // A closed block ends here; an unclosed one runs to the end.
-      final close = _leakedCallClose.firstMatch(line);
+      final close = _leakedCallClose(block).firstMatch(line);
       if (close != null) {
-        leaked = false;
+        block = null;
         final rest = line.substring(close.end);
         if (rest.trim().isNotEmpty) kept.add(rest);
       }

@@ -143,6 +143,12 @@ void main() {
         '前言\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="a">\n'
         '</｜DSML｜invoke>\n</｜DSML｜function_calls>\n结尾说明';
     expect(stripToolCallMarkup(after), '前言\n结尾说明');
+    expect(
+      stripToolCallMarkup(
+        '<|DSML|invoke name="file_edit"></|DSML|invoke>\nNo files were changed.',
+      ),
+      'No files were changed.',
+    );
     const tilde =
         '~~~xml\n<|DSML|function_calls>\n</|DSML|function_calls>\n~~~';
     expect(stripToolCallMarkup(tilde), tilde);
