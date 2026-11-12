@@ -27,20 +27,40 @@ Future<Map<String, dynamic>> readProfileForModel({
   if (provider == null || provider.isEmpty) {
     return unavailable('model_settings_required');
   }
-  try {
-    sources.validateProcessing(provider, 'profile', sources.processingRevision);
-  } catch (_) {
-    return unavailable('processing_consent_required');
+  bool permitted() {
+    try {
+      sources.validateProcessing(
+        provider,
+        'profile',
+        sources.processingRevision,
+      );
+      return true;
+    } catch (_) {
+      return false;
+    }
   }
+
+  if (!permitted()) return unavailable('processing_consent_required');
   await repository.open();
+  // Consent may be withdrawn while the projection loads.
+  if (!permitted()) return unavailable('processing_consent_required');
   final value = repository.value;
   if (value == null) return unavailable('no_confirmed_profile');
+  // A correction is granted to the model the user named when saving it.
+  final corrections =
+      repository.corrections
+          ?.values(repository.correctionScope, provider: provider)
+          .keys
+          .toSet() ??
+      const <String>{};
   final section = args['section'] as String;
   final query = (args['query'] as String? ?? '').trim().toLowerCase();
   final offset = args['offset'] as int? ?? 0;
   final rows = [
     for (final entry in (value['entries'] as List).whereType<Map>())
-      if ((entry['kind'] ?? 'profile') == section) _project(entry),
+      if ((entry['kind'] ?? 'profile') == section &&
+          (entry['explicit'] != true || corrections.contains(entry['key'])))
+        _project(entry),
   ];
   if (section == 'timeline') {
     rows.sort((a, b) => '${b['date'] ?? ''}'.compareTo('${a['date'] ?? ''}'));

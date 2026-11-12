@@ -234,7 +234,8 @@ class ToolRegistry {
   final Future<Map<String, dynamic>> Function(String)? publishProfile;
 
   /// Read-only confirmed profile/timeline projection for the current Space.
-  final Future<Map<String, dynamic>> Function(Map<String, dynamic>)?
+  /// The second argument is the `endpoint|model` receiving the result.
+  final Future<Map<String, dynamic>> Function(Map<String, dynamic>, String?)?
   readProfile;
   final AgentWorkspace? workspace;
   final WorkspaceShell? shell;
@@ -563,6 +564,7 @@ class ToolRegistry {
     Map<String, dynamic> args,
     String operationId, {
     String? userUtterance,
+    String? modelProvider,
   }) async {
     switch (tool.name) {
       case 'memory.remember':
@@ -579,7 +581,7 @@ class ToolRegistry {
       case 'source.read':
         return readEvidence!(args);
       case 'profile.read':
-        return readProfile!(args);
+        return readProfile!(args, modelProvider);
       case 'profile.publish':
         return publishProfile!(args['entries'] as String);
       case 'life.list':
@@ -870,6 +872,7 @@ class ToolRunner {
     String? userUtterance,
     bool Function()? isCancelled,
     String owner = ToolOwner.text,
+    String? modelProvider,
   }) async {
     if (_busy.contains(owner)) throw const AgentFailure('tool_runner_busy');
     _busy.add(owner);
@@ -884,6 +887,7 @@ class ToolRunner {
           approve,
           isCancelled ?? () => false,
           userUtterance,
+          modelProvider,
         ),
       );
     } finally {
@@ -899,6 +903,7 @@ class ToolRunner {
     ToolApproval approve,
     bool Function() isCancelled,
     String? userUtterance,
+    String? modelProvider,
   ) async {
     final tool = registry.resolve(name, args);
     if (tool.name.startsWith('memory.') || tool.name == 'profile.read') {
@@ -914,6 +919,7 @@ class ToolRunner {
           args,
           requestId(),
           userUtterance: userUtterance,
+          modelProvider: modelProvider,
         ),
       };
     }

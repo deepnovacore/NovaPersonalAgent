@@ -975,14 +975,14 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     await showVoiceSettings(context, voiceSettings, language: language);
   }
 
-  /// Read-only profile/timeline for model tools; the registry is shared by the
-  /// text lane and its voice delegate, which run on the same model settings.
+  /// Read-only profile/timeline for model tools, checked against the model
+  /// that receives the result.
   Future<Map<String, dynamic>> _readProfileForModel(
     Map<String, dynamic> args,
+    String? provider,
   ) async {
     final connector = feishu ??= FeishuHost();
     await connector.open();
-    final model = await agentCore?.settings.read();
     return readProfileForModel(
       repository: ProfileRepository(
         SecureContextPersistence('nova.profile.local.v1'),
@@ -991,7 +991,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         corrections: ProfileCorrections(),
       ),
       sources: connector.sources,
-      provider: model == null ? null : '${model.endpoint}|${model.model}',
+      provider: provider,
       args: args,
     );
   }

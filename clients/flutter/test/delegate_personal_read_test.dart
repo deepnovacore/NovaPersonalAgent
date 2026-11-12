@@ -5,6 +5,7 @@ import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/tool_registry.dart';
 import 'package:nova_mobile/context/local_publication.dart';
+import 'package:nova_mobile/context/profile_corrections.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/profile_tool.dart';
 import 'package:nova_mobile/context/source_store.dart';
@@ -25,8 +26,9 @@ Map<String, dynamic> _emptyLife() => {
 
 /// Replays one scripted tool round per request, then answers with text.
 class _ScriptedModel extends ModelClient {
-  _ScriptedModel(this.rounds);
+  _ScriptedModel(this.rounds, {this.reasoning = const {}});
   final List<List<(String, Map<String, dynamic>)>> rounds;
+  final Map<int, String> reasoning;
   final prompts = <List<Map<String, dynamic>>>[];
   final advertised = <List<String>>[];
   @override
@@ -38,6 +40,9 @@ class _ScriptedModel extends ModelClient {
     final round = prompts.length;
     prompts.add(messages.map(Map<String, dynamic>.from).toList());
     advertised.add([for (final t in tools) t['function']['name'] as String]);
+    if (reasoning[round] case final String thought) {
+      yield {'reasoning': thought};
+    }
     if (round >= rounds.length) {
       yield {'content': 'Done'};
       return;
@@ -60,13 +65,16 @@ Future<(AgentCoreHost, ConversationStore, String, _ScriptedModel)> _delegate({
   required List<List<(String, Map<String, dynamic>)>> rounds,
   required Future<Map<String, dynamic>> Function(Map<String, dynamic>)
   readProfile,
+  void Function(String?)? onProvider,
+  Map<int, String> reasoning = const {},
+  List<String>? fetched,
 }) async {
   final store = ConversationStore(MemoryPersistence());
   await store.open();
   final id = await store.create();
   final journal = ToolJournal(MemoryPersistence());
   await journal.open();
-  final model = _ScriptedModel(rounds);
+  final model = _ScriptedModel(rounds, reasoning: reasoning);
   final host = AgentCoreHost(
     store: store,
     settings: FixtureSettings(),
@@ -79,8 +87,14 @@ Future<(AgentCoreHost, ConversationStore, String, _ScriptedModel)> _delegate({
         snapshot: _emptyLife,
         mutate: (_, {required operationId}) async => {},
         hasConflict: () => false,
-        fetch: (_) async => {'status': 200, 'body': 'page'},
-        readProfile: readProfile,
+        fetch: (url) async {
+          fetched?.add(url);
+          return {'status': 200, 'body': 'page'};
+        },
+        readProfile: (args, provider) {
+          onProvider?.call(provider);
+          return readProfile(args);
+        },
         automaticExecution: true,
         localMemory: memory,
         spaceMode: SpaceMode.standalone,
@@ -148,6 +162,86 @@ void main() {
       final durable = jsonEncode(store.conversation(id));
       expect(durable, isNot(contains('minimal dark design')));
       expect(durable, isNot(contains('private robotics engineer')));
+    },
+  );
+
+  test('profile_read is checked against the model the turn sends to', () async {
+    String? seen = 'unset';
+    final (host, _, id, _) = await _delegate(
+      memory: memory,
+      rounds: [
+        [
+          ('profile_read', {'section': 'profile'}),
+        ],
+      ],
+      readProfile: (_) async => {'available': false},
+      onProvider: (provider) => seen = provider,
+    );
+    await host.send(
+      id,
+      'Build a site',
+      userAuthored: false,
+      approve: (_) async => true,
+    );
+    expect(seen, 'https://model.invalid|fixture');
+  });
+
+  test('reasoning after a personal read is never stored', () async {
+    final (host, store, id, model) = await _delegate(
+      memory: memory,
+      rounds: [
+        [
+          ('memory_recall', {'query': 'design'}),
+        ],
+        [
+          ('life_list', {'kind': 'todo'}),
+        ],
+      ],
+      reasoning: {
+        1: 'thinking: the user prefers a minimal dark design',
+        2: 'final thought: minimal dark design again',
+      },
+      readProfile: (_) async => {'available': false},
+    );
+    await host.send(
+      id,
+      'Build a personal website',
+      userAuthored: false,
+      approve: (_) async => true,
+    );
+    expect(host.error, isNull);
+    // The live round still replays its own reasoning to the provider.
+    expect(jsonEncode(model.prompts[2]), contains('thinking: the user'));
+    expect(
+      jsonEncode(store.conversation(id)),
+      isNot(contains('minimal dark design')),
+    );
+  });
+
+  test(
+    'a web_fetch batched with a personal read still runs; later rounds lose it',
+    () async {
+      final fetched = <String>[];
+      final (host, _, id, model) = await _delegate(
+        memory: memory,
+        rounds: [
+          [
+            ('profile_read', {'section': 'profile'}),
+            ('web_fetch', {'url': 'https://example.com/'}),
+          ],
+        ],
+        readProfile: (_) async => {'available': true, 'entries': []},
+        fetched: fetched,
+      );
+      await host.send(
+        id,
+        'Build a site',
+        userAuthored: false,
+        approve: (_) async => true,
+      );
+      expect(host.error, isNull);
+      expect(fetched, ['https://example.com/']);
+      expect(model.advertised[1], isNot(contains('web_fetch')));
     },
   );
 
@@ -229,6 +323,7 @@ void main() {
     late SourceStore sources;
     late LocalPublicationContext publication;
     late ProfileRepository profile;
+    late List<Map<String, dynamic>> published;
     setUp(() async {
       final now = DateTime.utc(2026, 11, 12);
       final older = DateTime.utc(2026, 11, 1, 8);
@@ -263,27 +358,28 @@ void main() {
         for (final m in sources.messages('c'))
           m['message_id']: m['evidence_id'],
       };
-      await profile.publish(
-        jsonEncode([
+      published = [
+        {
+          'key': 'about',
+          'kind': 'profile',
+          'text': 'Builds voice agents',
+          'evidence_ids': [refs['m1']],
+        },
+        for (final (key, id, time) in [
+          ('older', 'm1', older),
+          ('newer', 'm2', newer),
+        ])
           {
-            'key': 'about',
-            'kind': 'profile',
-            'text': 'Builds voice agents',
-            'evidence_ids': [refs['m1']],
+            'key': key,
+            'kind': 'timeline',
+            'policy_revision': 2,
+            'text': '$key project',
+            'observed_at': time.toIso8601String(),
+            'evidence_ids': [refs[id]],
           },
-          for (final (key, id, time) in [
-            ('older', 'm1', older),
-            ('newer', 'm2', newer),
-          ])
-            {
-              'key': key,
-              'kind': 'timeline',
-              'policy_revision': 2,
-              'text': '$key project',
-              'observed_at': time.toIso8601String(),
-              'evidence_ids': [refs[id]],
-            },
-        ]),
+      ];
+      await profile.publish(
+        jsonEncode(published),
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'p',
@@ -313,6 +409,37 @@ void main() {
       expect(timeline['entries'].first['date'], '2026-11-09');
       final filtered = await read({'section': 'timeline', 'query': 'OLDER'});
       expect([for (final e in filtered['entries']) e['key']], ['older']);
+    });
+
+    test('corrections reach only the model they were granted to', () async {
+      final corrections = ProfileCorrections(
+        persistence: MemoryLifePersistence(),
+      );
+      profile = ProfileRepository(
+        MemoryLifePersistence(),
+        publication,
+        sources,
+        corrections: corrections,
+      );
+      // Re-publish into the corrections-aware repository.
+      await profile.publish(
+        jsonEncode(published),
+        sourceRevision: sources.revision,
+        consentRevision: sources.processingRevision,
+        provider: 'p',
+      );
+      await sources.grantProcessing('q', 'profile', true);
+      await corrections.correct(
+        profile.correctionScope,
+        'work',
+        'Says Q only',
+        'q',
+      );
+      final forP = await read({'section': 'profile'});
+      expect(jsonEncode(forP), isNot(contains('Says Q only')));
+      expect(jsonEncode(forP), contains('Builds voice agents'));
+      final forQ = await read({'section': 'profile'}, provider: 'q');
+      expect(jsonEncode(forQ), contains('Says Q only'));
     });
 
     test('a model without a processing grant reads nothing', () async {
