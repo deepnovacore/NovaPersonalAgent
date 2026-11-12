@@ -135,7 +135,10 @@ const _reasons = <String, (String, String)>{
     '系统的无障碍服务断开了',
     'The system accessibility service disconnected',
   ),
-  'helper_unavailable': ('手机助手没连上', 'The phone helper is not connected'),
+  'helper_unavailable': (
+    '手机助手没在运行：请打开「无线调试」，Nova 会自动重连',
+    'The phone helper isn’t running: turn on Wireless debugging and Nova reconnects',
+  ),
   'step_limit': ('步骤用完了', 'The step budget was used up'),
   'no_progress': (
     '页面反复出现，已暂停；请先在 App 里核对',

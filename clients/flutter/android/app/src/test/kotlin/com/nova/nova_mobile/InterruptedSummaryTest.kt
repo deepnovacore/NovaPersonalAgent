@@ -11,6 +11,7 @@ class InterruptedSummaryTest {
         assertTrue(interruptedSummary("no_progress").contains("请先在 App 里核对"))
         assertFalse(interruptedSummary("no_progress").contains("不会重复"))
         assertTrue(interruptedSummary("tool_helper_unavailable").contains("设置 → 手机操作"))
+        assertTrue(interruptedSummary("tool_helper_unavailable").contains("无线调试"))
         for (reason in listOf("accessibility_unavailable", "a11y_interrupted", "a11y_destroyed", "a11y_reconnected")) {
             assertTrue(interruptedSummary(reason).contains("无障碍服务断开"))
             assertTrue(interruptedSummary(reason).contains("已经做过的步骤请先在 App 里核对"))

@@ -103,8 +103,12 @@ class NativeChatTaskRunner {
     'task_id': id,
     'reason': reason,
     'effects': 'none',
+    if (reason == 'helper_unavailable') 'summary': _helperUnavailableSummary,
     ...extra,
   };
+
+  static const _helperUnavailableSummary =
+      '没有执行：Nova 的手机助手没在运行（更新 Nova 或换了 Wi‑Fi 后常见）。请在「开发者选项」里打开「无线调试」，Nova 会自动重连；还不行就到「设置 → 手机操作」重新配对。';
 
   /// A native task that ended without completing. Known action outcomes make
   /// it a failure; anything unconfirmed stays an unknown outcome.

@@ -136,7 +136,9 @@ class LocalToolLoop(
     private val host: Host,
     private val model: (JSONObject, Int) -> ToolDecision,
     private val maxTurns: Int = 30,
-    private val initialLaunchGrace: Boolean = false
+    private val initialLaunchGrace: Boolean = false,
+    // Receives only fixed enums, counters and booleans; never screen text, packages or summaries.
+    private val trace: (String) -> Unit = {}
 ) {
     interface Host {
         fun active(): Boolean
@@ -228,6 +230,10 @@ class LocalToolLoop(
                     }
                 }
                 if(!host.active()) return
+                trace("step=$turn kind=${decision.kind} action=${decision.action?.getString("type") ?: "none"}" +
+                    " elements=${observation.optJSONArray("elements")?.length() ?: 0}" +
+                    " secure_frame=${observation.optBoolean("secure_frame")} dark_region=${observation.optBoolean("dark_region")}" +
+                    " progress_warned=${progressResult.note.isNotEmpty()} repairs=$stepRepairs")
                 stage = "tool"
                 when(decision.kind) {
                     "complete" -> { host.finish(decision.summary); return }

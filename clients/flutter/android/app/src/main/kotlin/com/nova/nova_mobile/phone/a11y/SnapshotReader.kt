@@ -74,7 +74,7 @@ internal object SnapshotReader {
                 clip(rect, width, height)
                 val usable = rect.width() >= MIN_SIZE && rect.height() >= MIN_SIZE
                 val interactive = n.isClickable || n.isEditable || n.isScrollable
-                if (usable && (own != null || interactive) && entries.size < MAX_ELEMENTS) {
+                if (usable && isListed(own != null, interactive, n.isSelected || n.isChecked) && entries.size < MAX_ELEMENTS) {
                     val label = labelOf(n, own)
                     val role = roleOf(n)
                     if (seen.add("$role|$label|${rect.flattenToString()}")) {
@@ -257,6 +257,13 @@ internal fun nodeName(text: CharSequence?, description: CharSequence?, hint: Cha
  * secure, even when system windows on the display have elements.
  */
 internal fun isSecureFrame(black: Boolean, appWindowElements: Int): Boolean = black && appWindowElements > 0
+
+/**
+ * Named or interactive nodes are elements. An unnamed node that is selected or checked is listed
+ * too: icon-only toggles (a filled like heart inside an unnamed button) carry their state only there.
+ */
+internal fun isListed(named: Boolean, interactive: Boolean, selectedOrChecked: Boolean): Boolean =
+    named || interactive || selectedOrChecked
 
 /** Pixel [p] on an axis of [size] pixels to the snapshot's 0..[SNAPSHOT_BOUNDS_MAX] space. */
 internal fun normalize(p: Int, size: Int): Int {

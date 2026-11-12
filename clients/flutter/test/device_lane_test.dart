@@ -193,6 +193,11 @@ void main() {
       expect(first['status'], 'failed');
       expect(first['data']['reason'], reason);
       expect(first['data']['effects'], 'none');
+      if (reason == 'helper_unavailable') {
+        expect(first['data']['summary'], contains('无线调试'));
+      } else {
+        expect(first['data'], isNot(contains('summary')));
+      }
       expect(device.stops, isEmpty);
       expect(journal.hasUnresolved, isFalse);
       device.runError = null;

@@ -28,6 +28,13 @@ class SnapshotReaderTest {
         assertFalse(isSecureFrame(black = false, appWindowElements = 3))
     }
 
+    @Test fun unnamedNodesAreListedOnlyWhenInteractiveOrCarryingState() {
+        assertTrue(isListed(named = false, interactive = false, selectedOrChecked = true))
+        assertTrue(isListed(named = false, interactive = true, selectedOrChecked = false))
+        assertTrue(isListed(named = true, interactive = false, selectedOrChecked = false))
+        assertFalse(isListed(named = false, interactive = false, selectedOrChecked = false))
+    }
+
     @Test fun otherNodesAreNamedByTextThenDescriptionThenHint() {
         assertEquals("Buy", nodeName(" Buy ", "Purchase", "hint", field = false) { "label" })
         assertEquals("Purchase", nodeName("", "Purchase", "hint", field = false) { "label" })

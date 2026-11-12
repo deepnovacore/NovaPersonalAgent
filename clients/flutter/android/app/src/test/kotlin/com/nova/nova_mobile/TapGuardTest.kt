@@ -32,14 +32,62 @@ class TapGuardTest {
         val guard = TapGuard()
         val original = screen(element())
         guard.dispatched(tap(), guard.target(tap(), original))
+        // A back that did not follow a tap's navigation still clears the page's taps.
+        guard.dispatched(JSONObject().put("type", "back"), null)
+        guard.check(guard.target(tap(), original))
+        guard.dispatched(tap(), guard.target(tap(), original))
         guard.check(guard.target(tap(), screen(element(left = 400))))
         guard.observe(screen())
         guard.check(guard.target(tap(), original))
-        for (action in listOf("back", "open_app")) {
-            guard.dispatched(tap(), guard.target(tap(), original))
-            guard.dispatched(JSONObject().put("type", action), null)
-            guard.check(guard.target(tap(), original))
-        }
+        guard.dispatched(tap(), guard.target(tap(), original))
+        guard.dispatched(JSONObject().put("type", "open_app"), null)
+        guard.check(guard.target(tap(), original))
+    }
+
+    private fun results() = screen(element("First note"), element("Second note", left = 400).put("ref", "@e2"))
+    private fun back() = JSONObject().put("type", "back")
+    private fun openFirstNote(guard: TapGuard) {
+        guard.dispatched(tap(), guard.target(tap(), results()))
+        guard.observe(screen(element("Like", left = 700)))
+    }
+
+    @Test fun backToTheSamePageRefusesOnlyTheImmediateReopen() {
+        val guard = TapGuard()
+        openFirstNote(guard)
+        guard.dispatched(back(), null)
+        guard.observe(results())
+        refused(guard, guard.target(tap(), results()))
+        val second = JSONObject(tap().toString()).put("ref", "@e2")
+        guard.check(guard.target(second, results()))
+        // Any other dispatched action lifts the refusal: a later revisit is legitimate.
+        guard.dispatched(JSONObject().put("type", "scroll").put("direction", "down"), null)
+        guard.observe(results())
+        guard.check(guard.target(tap(), results()))
+    }
+
+    @Test fun backThatStaysOnTheOpenedPageKeepsTheCandidate() {
+        val guard = TapGuard()
+        openFirstNote(guard)
+        guard.dispatched(back(), null)
+        guard.observe(screen(element("Like", left = 700)))
+        guard.dispatched(back(), null)
+        guard.observe(results())
+        refused(guard, guard.target(tap(), results()))
+    }
+
+    @Test fun backThatDoesNotRestoreTheSourcePageRefusesNothing() {
+        val guard = TapGuard()
+        openFirstNote(guard)
+        // e.g. back only closed the keyboard; the opened item stays pending for the real back.
+        guard.dispatched(back(), null)
+        guard.observe(screen(element("Like", left = 700)))
+        guard.dispatched(back(), null)
+        val changed = screen(element("First note"), element("Another note", left = 400))
+        guard.observe(changed)
+        guard.check(guard.target(tap(), changed))
+        guard.dispatched(back(), null)
+        guard.observe(results())
+        guard.check(guard.target(tap(), results()))
     }
 
     @Test fun pointUsesSmallestClickableElementAndUnresolvedPointsAreUnguarded() {

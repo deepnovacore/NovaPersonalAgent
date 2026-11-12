@@ -45,6 +45,15 @@ class LocalToolLoopTest {
     private fun action() = ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Tap fixture","action":{"type":"tap","x":0.5,"y":0.4}}"""))
     private fun invalidAction(): ToolDecision = ToolDecision.parse(JSONObject("""{"kind":"action","summary":"Bad fields","action":{"type":"back","text":"extra"}}"""))
 
+    @Test fun traceCarriesOnlyEnumsCountersAndFlags() {
+        val host = Host()
+        host.screenForObservation = { JSONObject().put("package", "private.app").put("secure_frame", true)
+            .put("elements", org.json.JSONArray().put(JSONObject().put("name", "private text").put("bounds", org.json.JSONArray(listOf(0, 0, 10, 10))))) }
+        val lines = mutableListOf<String>()
+        LocalToolLoop(host, { _, _ -> action() }, maxTurns = 1) { lines.add(it) }.run()
+        assertEquals(listOf("step=0 kind=action action=tap elements=1 secure_frame=true dark_region=false progress_warned=false repairs=0"), lines)
+    }
+
     @Test fun repairUsesSameObservationAndTurnWithoutExtraDispatchOrBudget() {
         val host = Host()
         val observations = mutableListOf<JSONObject>()
