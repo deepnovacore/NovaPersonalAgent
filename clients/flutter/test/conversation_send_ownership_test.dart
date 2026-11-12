@@ -24,7 +24,53 @@ class RecordingHost extends AgentCoreHost {
   }
 }
 
+class PlainReplySettings extends ModelSettings {
+  @override
+  Future<ModelConfiguration?> read() async => ModelConfiguration(
+    endpoint: 'https://example.com/v1',
+    model: 'test',
+    key: 'synthetic',
+  );
+}
+
+class PlainReplyClient extends ModelClient {
+  @override
+  Stream<Map<String, dynamic>> stream(
+    ModelConfiguration config,
+    List<Map<String, dynamic>> messages, {
+    List<Map<String, dynamic>> tools = const [],
+  }) async* {
+    yield {'content': 'Still here while your task runs'};
+  }
+}
+
 void main() {
+  test(
+    'phone held by a background task does not block plain main conversation',
+    () async {
+      final store = ConversationStore(MemoryLifePersistence());
+      await store.open();
+      await store.ensureMain();
+      final host = AgentCoreHost(
+        store: store,
+        settings: PlainReplySettings(),
+        clientFactory: PlainReplyClient.new,
+      )..deviceHeldByOther = () => true;
+      try {
+        await host.send(ConversationStore.mainId, 'Are you still here?');
+        expect(host.error, isNull);
+        expect(
+          (store.conversation(ConversationStore.mainId)['messages'] as List)
+              .last['content'],
+          'Still here while your task runs',
+        );
+        expect(host.busy, false);
+      } finally {
+        host.dispose();
+      }
+    },
+  );
+
   testWidgets(
     'sending in another chat does not stop a busy task or lose draft',
     (tester) async {

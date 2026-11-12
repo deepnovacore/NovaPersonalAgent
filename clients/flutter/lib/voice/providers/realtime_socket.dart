@@ -229,6 +229,7 @@ abstract class RealtimeSocketProvider implements VoiceProvider {
       throw StateError('Realtime outbound rate exceeded');
     }
     _socket!.add(json);
+    _touch();
   }
 
   void onFrame(Map<String, dynamic> frame);

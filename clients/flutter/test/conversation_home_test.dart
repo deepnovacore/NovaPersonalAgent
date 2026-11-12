@@ -129,6 +129,34 @@ void main() {
     },
   );
 
+  testWidgets(
+    'delegated task status refreshes and opens while another lane is busy',
+    (tester) async {
+      final store = await _openStore([]);
+      final origin = await store.ensureMain();
+      final child = await store.delegateTask(
+        origin: origin,
+        task: 'run',
+        request: 'Build a game',
+        language: 'en',
+      );
+      final host = AgentCoreHost(store: store, settings: ModelSettings())
+        ..busy = true;
+      String? opened;
+      await tester.pumpWidget(
+        _home(host, language: 'en', onOpen: (id) => opened = id),
+      );
+      expect(find.text('Running'), findsOneWidget);
+      await tester.tap(find.text('Build a game').first);
+      expect(opened, child);
+      await store.delegateStatus(child, 'run', 'cancelled');
+      await tester.pump();
+      expect(find.text('Stopped'), findsOneWidget);
+      expect(find.text('Running'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
   testWidgets('task rows group by last-message day and show session duration', (
     tester,
   ) async {

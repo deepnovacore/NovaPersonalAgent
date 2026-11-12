@@ -52,6 +52,7 @@ void main() {
       );
       addTearDown(bridge.dispose);
       expect(bridge.worker.allowLocalMemory, false);
+      expect(identical(bridge.worker.store, primary.store), true);
       expect(identical(bridge.worker.tools, primary.tools), true);
     },
   );

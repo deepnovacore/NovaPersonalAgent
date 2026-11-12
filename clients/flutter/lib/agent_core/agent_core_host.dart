@@ -120,7 +120,7 @@ class AgentCoreHost extends ChangeNotifier {
   final bool experiencePersona;
   bool lastTurnCompleted = false;
 
-  /// True while another lane holds the phone task; this lane must not start.
+  /// Phone ownership gates destructive UI actions; tools enforce execution locks.
   bool Function()? deviceHeldByOther;
   final ModelClient Function() clientFactory;
   ModelClient? _active;
@@ -269,12 +269,6 @@ class AgentCoreHost extends ChangeNotifier {
     Future<void> Function()? prepare,
   }) async {
     if (busy || _disposed || text.trim().isEmpty) return;
-    if (deviceHeldByOther?.call() == true) {
-      error = 'device_busy';
-      errorDetail = null;
-      _changed();
-      return;
-    }
     if (store.conversation(conversationId)['backend'] != 'local') {
       throw const AgentFailure('computer_backend_selected');
     }
@@ -352,7 +346,7 @@ class AgentCoreHost extends ChangeNotifier {
         memoryListening = memoryStore != null;
       }
       if (experience == null) await beforeModel?.call(config);
-      await store.recoverInterruptedCalls();
+      await store.recoverInterruptedCalls(conversationId: conversationId);
       final turnId = requestId();
       await prepare?.call();
       await store.append(conversationId, {

@@ -70,12 +70,13 @@ void main() {
   );
 
   testWidgets(
-    'ordinary composer stops external task with an empty draft; failed voice send preserves text visibly',
+    'background task stop is separate from the main send button; failed voice send keeps draft',
     (tester) async {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
       final chat = await store.create();
-      final host = AgentCoreHost(store: store, settings: ModelSettings());
+      final host = TopicHost(store);
+      host.release.complete();
       var cancelled = 0;
       final key = GlobalKey<LocalChatPanelState>();
       await tester.pumpWidget(
@@ -93,7 +94,15 @@ void main() {
         ),
       );
       await tester.pump();
-      await tester.tap(find.byTooltip('停止'));
+      expect(find.byTooltip('停止'), findsNothing);
+      expect(find.byTooltip('停止任务'), findsOneWidget);
+      key.currentState!.input.text = 'Continue our conversation';
+      await tester.pump();
+      await tester.tap(find.byTooltip('发送'));
+      await tester.pump();
+      expect(host.delivered, ['Continue our conversation']);
+      expect(cancelled, 0);
+      await tester.tap(find.byTooltip('停止任务'));
       expect(cancelled, 1);
       await tester.pumpWidget(
         MaterialApp(
@@ -119,6 +128,100 @@ void main() {
       host.dispose();
     },
   );
+  testWidgets(
+    'task receipts stay visible without process details and update from shared store',
+    (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final origin = await store.ensureMain();
+      final child = await store.delegateTask(
+        origin: origin,
+        task: 'run',
+        request: 'Build a game',
+        language: 'en',
+      );
+      final host = TopicHost(store);
+      String? opened;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              host: host,
+              conversationId: origin,
+              showProcess: false,
+              language: 'en',
+              onOpenTask: (id) => opened = id,
+            ),
+          ),
+        ),
+      );
+      await store.append(origin, {
+        'role': 'assistant',
+        'content': 'Created a task.',
+        'delegate_id': 'run',
+        'delegate_context': child,
+        'delegate_status': 'dispatched',
+      }, external: true);
+      await tester.pump();
+      expect(find.text('Created a task.'), findsOneWidget);
+      await tester.tap(
+        find.byKey(const ValueKey('delegate.open:run:dispatched')),
+      );
+      expect(opened, child);
+      await store.append(origin, {
+        'role': 'assistant',
+        'content': 'Finished the game.',
+        'delegate_id': 'run',
+        'delegate_context': child,
+        'delegate_status': 'returned',
+      }, external: true);
+      await tester.pump();
+      expect(find.text('Finished the game.'), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('delegate.open:run:returned')),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
+
+  testWidgets('task continuation uses its lane and keeps failed draft', (
+    tester,
+  ) async {
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final chat = await store.create();
+    final host = TopicHost(store);
+    final key = GlobalKey<LocalChatPanelState>();
+    final delivered = <String>[];
+    host.error = 'provider_credential_missing';
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(
+            key: key,
+            host: host,
+            conversationId: chat,
+            onTaskText: (text, approve) async {
+              delivered.add(text);
+              throw StateError('delegate_busy');
+            },
+          ),
+        ),
+      ),
+    );
+    expect(find.text('自配模型缺少有效密钥，请检查模型设置。'), findsNothing);
+    key.currentState!.input.text = 'Add touch controls';
+    await tester.pump();
+    await tester.tap(find.byTooltip('发送'));
+    await tester.pump();
+    expect(delivered, ['Add touch controls']);
+    expect(host.delivered, isEmpty);
+    expect(key.currentState!.input.text, 'Add touch controls');
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+  });
   testWidgets('large delegate output remains bounded on small voice panel', (
     tester,
   ) async {

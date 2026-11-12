@@ -108,6 +108,8 @@ class LocalChatPanel extends StatefulWidget {
     this.requestMicrophone,
     this.voiceSettings,
     this.onVoiceText,
+    this.onTaskText,
+    this.onOpenTask,
     this.externalTaskBusy = false,
     this.onCancelExternalTask,
     this.header,
@@ -130,6 +132,8 @@ class LocalChatPanel extends StatefulWidget {
   final Future<bool> Function()? requestMicrophone;
   final VoiceSettings? voiceSettings;
   final Future<void> Function(String)? onVoiceText;
+  final Future<void> Function(String, ToolApproval)? onTaskText;
+  final ValueChanged<String>? onOpenTask;
   final bool externalTaskBusy;
   final VoidCallback? onCancelExternalTask;
   final String conversationId;
@@ -179,6 +183,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       )..addListener(_dictationChanged);
     }
     widget.host.addListener(_changed);
+    widget.host.store.addListener(_changed);
     scroll.addListener(() {
       atBottom = !scroll.hasClients || scroll.position.extentAfter < 100;
     });
@@ -261,7 +266,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     if (oldWidget.host != widget.host) {
       unawaited(dictation?.cancel());
       oldWidget.host.removeListener(_changed);
+      oldWidget.host.store.removeListener(_changed);
       widget.host.addListener(_changed);
+      widget.host.store.addListener(_changed);
     }
     if (oldWidget.conversationId != widget.conversationId) {
       unawaited(dictation?.cancel());
@@ -280,6 +287,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   void dispose() {
     _copyTimer?.cancel();
     widget.host.removeListener(_changed);
+    widget.host.store.removeListener(_changed);
     dictation?.removeListener(_dictationChanged);
     dictation?.dispose();
     input.dispose();
@@ -371,10 +379,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     if (pickingAttachment) return;
     final origin = widget.conversationId;
     if (dictation?.busy == true) return;
-    if (widget.externalTaskBusy && widget.onVoiceText == null) {
-      widget.onCancelExternalTask?.call();
-      return;
-    }
     if (widget.onVoiceText != null) {
       final text = input.text.trim();
       if (text.isNotEmpty) {
@@ -405,19 +409,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       return;
     }
     final host = widget.host;
-    if (!host.busy && host.deviceHeldByOther?.call() == true) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(
-            t(
-              '手机正在执行语音委托的任务，草稿已保留，等它结束后再发送。',
-              'The phone is running a voice task. Your draft is kept; send it when that task finishes.',
-            ),
-          ),
-        ),
-      );
-      return;
-    }
     if (host.busy) {
       if (host.activeConversationId == widget.conversationId) {
         host.cancel();
@@ -446,7 +437,34 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     atBottom = true;
     final before = (host.store.conversation(origin)['messages'] as List).length;
     input.clear();
-    await host.send(origin, text, approve: _approve);
+    try {
+      final sendTask = widget.onTaskText;
+      if (sendTask == null) {
+        await host.send(origin, text, approve: _approve);
+      } else {
+        await sendTask(text, _approve);
+      }
+    } catch (_) {
+      if (!mounted) return;
+      if (widget.conversationId == origin) {
+        if (input.text.isEmpty) input.text = draft;
+      } else if ((drafts[origin] ?? '').isEmpty) {
+        drafts[origin] = draft;
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              t(
+                '暂未发送，草稿已保留，请稍后重试。',
+                'Not sent. Your draft is preserved; try again shortly.',
+              ),
+            ),
+          ),
+        );
+      }
+      return;
+    }
     // Preserve a message that could not reach the conversation store.
     final messages = host.store.conversation(origin)['messages'] as List;
     final stored = messages
@@ -897,7 +915,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
               (m) => m['feedback'] is String,
               orElse: () => turns[i].last,
             ),
-            regenerate: i == latest && _latestReply(turns[i].last),
+            regenerate:
+                widget.onTaskText == null &&
+                i == latest &&
+                turns[i].last['delegate_context'] == null &&
+                _latestReply(turns[i].last),
           ),
     };
   }
@@ -909,7 +931,15 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             message['reasoning_content'] is String
         ? (message['reasoning_content'] as String).trim()
         : '';
-    final text = message['content'] as String;
+    final rawText = message['content'] as String;
+    final text =
+        message['role'] == 'user' &&
+            widget.host.store.conversation(
+                  widget.conversationId,
+                )['delegate_origin']
+                is String
+        ? delegateRequestLabel(rawText)
+        : rawText;
     if (text.isEmpty && reasoning.isEmpty && message['interrupted'] != true) {
       return const SizedBox.shrink();
     }
@@ -1103,7 +1133,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: Listenable.merge([widget.host, ?widget.phoneRun]),
+    listenable: Listenable.merge([
+      widget.host,
+      widget.host.store,
+      ?widget.phoneRun,
+    ]),
     builder: (context, _) {
       final host = widget.host;
       final runningHere =
@@ -1203,6 +1237,32 @@ class LocalChatPanelState extends State<LocalChatPanel> {
         if (message['role'] == 'user') {
           seenPreviews.clear();
           finalReplyShown = false;
+        }
+        final child = message['delegate_context'];
+        if (child is String &&
+            message['delegate_status'] is String &&
+            widget.onOpenTask != null) {
+          flushTools();
+          messageWidgets.add(
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _message(message),
+                TextButton.icon(
+                  key: ValueKey(
+                    'delegate.open:${message['delegate_id']}:${message['delegate_status']}',
+                  ),
+                  onPressed: () => widget.onOpenTask!(child),
+                  icon: const Icon(
+                    CupertinoIcons.arrow_up_right_square,
+                    size: 17,
+                  ),
+                  label: Text(t('查看任务', 'View task')),
+                ),
+              ],
+            ),
+          );
+          continue;
         }
         if (!widget.showProcess) {
           if (message['role'] == 'tool') continue;
@@ -1469,7 +1529,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                           ),
                   ),
                 ),
-                if (host.error != null)
+                if (host.error != null && widget.onTaskText == null)
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,
@@ -1739,8 +1799,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 color: Nova.secondary,
                               ),
                             ),
-                          if (widget.externalTaskBusy &&
-                              widget.onVoiceText != null)
+                          if (widget.externalTaskBusy)
                             IconButton(
                               tooltip: t('停止任务', 'Stop task'),
                               onPressed: widget.onCancelExternalTask,
@@ -1749,10 +1808,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                           ValueListenableBuilder<TextEditingValue>(
                             valueListenable: input,
                             builder: (context, value, _) => IconButton.filled(
-                              tooltip:
-                                  runningHere ||
-                                      (widget.externalTaskBusy &&
-                                          widget.onVoiceText == null)
+                              tooltip: runningHere
                                   ? t('停止', 'Stop')
                                   : t('发送', 'Send'),
                               style: IconButton.styleFrom(
@@ -1765,16 +1821,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                   dictation?.busy == true ||
                                       pickingAttachment ||
                                       (!runningHere &&
-                                          !(widget.externalTaskBusy &&
-                                              widget.onVoiceText == null) &&
                                           value.text.trim().isEmpty &&
                                           attachments.isEmpty)
                                   ? null
                                   : _send,
                               icon: Icon(
-                                runningHere ||
-                                        (widget.externalTaskBusy &&
-                                            widget.onVoiceText == null)
+                                runningHere
                                     ? CupertinoIcons.stop_fill
                                     : CupertinoIcons.arrow_up,
                                 size: 22,

@@ -6,7 +6,7 @@ import 'agent_workspace.dart';
 import 'model_client.dart';
 
 const browserScriptInstructions =
-    'check.js must contain a synchronous JavaScript function BODY, with no enclosing function or arrow wrapper, no Promise, await or timer-based checks. Example: const button = document.querySelector("button"); if (!button) throw new Error("missing button"); button.click(); return {title: document.title, clicked: true}; Return JSON-safe data and throw on failed assertions. execution_ok only means the inspection ran without reported errors; inspect the returned checks before claiming behavior passed.';
+    'Use the built-in nova-browser for browser checks; do not install separate JavaScript runtimes or browser testing libraries. If inspection fails, read its errors and fix the page or script. check.js must contain a synchronous JavaScript function BODY, with no enclosing function or arrow wrapper, no Promise, await or timer-based checks. Example: const button = document.querySelector("button"); if (!button) throw new Error("missing button"); button.click(); return {title: document.title, clicked: true}; Return JSON-safe data and throw on failed assertions. execution_ok only means the inspection ran without reported errors; inspect the returned checks before claiming behavior passed.';
 
 /// A short-lived capability for a single guest execution. No public listener,
 /// host file paths, model credentials, or native commands cross this bridge.
