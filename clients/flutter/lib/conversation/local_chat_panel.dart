@@ -376,6 +376,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   }
 
   Future<void> _send() async {
+    final host = widget.host;
+    if (host.busy && host.activeConversationId == widget.conversationId) {
+      host.cancel();
+      return;
+    }
     if (pickingAttachment) return;
     final origin = widget.conversationId;
     if (dictation?.busy == true) return;
@@ -408,22 +413,17 @@ class LocalChatPanelState extends State<LocalChatPanel> {
       }
       return;
     }
-    final host = widget.host;
     if (host.busy) {
-      if (host.activeConversationId == widget.conversationId) {
-        host.cancel();
-      } else {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(
-              t(
-                '另一项任务正在处理，草稿已保留，请稍后发送。',
-                'Another task is running. Your draft is kept; send it when that task finishes.',
-              ),
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            t(
+              '另一项任务正在处理，草稿已保留，请稍后发送。',
+              'Another task is running. Your draft is kept; send it when that task finishes.',
             ),
           ),
-        );
-      }
+        ),
+      );
       return;
     }
     final draft = input.text.trim();
@@ -1529,7 +1529,12 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                           ),
                   ),
                 ),
-                if (host.error != null && widget.onTaskText == null)
+                if (host.error != null &&
+                    (widget.onTaskText == null ||
+                        _modelSetupError(host.error!) ||
+                        host.error!.startsWith('experience_') ||
+                        messages.lastOrNull?['interrupted'] != true ||
+                        messages.lastOrNull?['error'] != host.error))
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,

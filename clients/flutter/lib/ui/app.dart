@@ -2039,8 +2039,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     voiceSettings: voiceSettings,
                                     externalTaskBusy:
                                         voiceDelegates?.busy == true &&
-                                        voiceDelegates?.conversationId ==
-                                            chatId,
+                                        (voiceDelegates?.conversationId ==
+                                                chatId ||
+                                            voiceDelegates
+                                                    ?.taskConversationId ==
+                                                chatId),
                                     onCancelExternalTask: () {
                                       final task = voiceDelegates?.id;
                                       if (task != null) {
@@ -2053,7 +2056,6 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                                 selectedChat!,
                                                 text,
                                                 approve: approve,
-                                                language: language,
                                               )
                                         : null,
                                     onOpenTask: (id) => setState(() {

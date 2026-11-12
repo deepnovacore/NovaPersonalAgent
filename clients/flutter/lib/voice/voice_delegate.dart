@@ -55,6 +55,11 @@ class VoiceDelegateBridge extends ChangeNotifier {
         store: primary.store,
         settings: primary.settings,
         tools: primary.tools,
+        experienceModel: primary.experienceModel,
+        experiencePersona: primary.experiencePersona,
+        additionalContext: primary.additionalContext,
+        backgroundExecution: primary.backgroundExecution,
+        clientFactory: primary.clientFactory,
         allowLocalMemory: false,
         owner: '${ToolOwner.voice}:delegate',
       ),
@@ -70,16 +75,22 @@ class VoiceDelegateBridge extends ChangeNotifier {
   }
 
   Future<void> _importLegacy() async {
-    final directory = await SpaceStorage.directory();
-    final raw = await FileLifePersistence(
-      File('${directory.path}/voice-delegate-contexts-v1.json'),
-    ).read();
-    if (raw == null) {
+    final Map data;
+    try {
+      final directory = await SpaceStorage.directory();
+      final raw = await FileLifePersistence(
+        File('${directory.path}/voice-delegate-contexts-v1.json'),
+      ).read();
+      if (raw == null) {
+        return;
+      }
+      data = jsonDecode(raw) as Map;
+      if (data['schema_version'] != 1 || data['conversations'] is! List) {
+        throw const FormatException('unsupported_delegate_schema');
+      }
+    } catch (_) {
+      debugPrint('[VoiceDelegate] Skipped unreadable legacy contexts.');
       return;
-    }
-    final data = jsonDecode(raw) as Map;
-    if (data['schema_version'] != 1 || data['conversations'] is! List) {
-      throw const FormatException('unsupported_delegate_schema');
     }
     final linked = <String, ({String origin, Map intent})>{};
     for (final conversation in primary.store.conversations) {
@@ -94,20 +105,24 @@ class VoiceDelegateBridge extends ChangeNotifier {
       }
     }
     for (final source in data['conversations'] as List) {
-      if (source is! Map) {
-        throw const FormatException('invalid_delegate_context');
+      try {
+        if (source is! Map) {
+          throw const FormatException('invalid_delegate_context');
+        }
+        final link = linked[source['id']];
+        if (link == null) {
+          continue;
+        }
+        await primary.store.importDelegateTask(
+          Map<String, dynamic>.from(source),
+          origin: link.origin,
+          task: link.intent['delegate_id'] as String,
+          status: link.intent['delegate_status'] as String? ?? 'returned',
+          language: link.intent['delegate_language'] as String? ?? 'zh',
+        );
+      } catch (_) {
+        debugPrint('[VoiceDelegate] Skipped invalid legacy context.');
       }
-      final link = linked[source['id']];
-      if (link == null) {
-        continue;
-      }
-      await primary.store.importDelegateTask(
-        Map<String, dynamic>.from(source),
-        origin: link.origin,
-        task: link.intent['delegate_id'] as String,
-        status: link.intent['delegate_status'] as String? ?? 'returned',
-        language: link.intent['delegate_language'] as String? ?? 'zh',
-      );
     }
     // The old file remains intact, including unlinked recovery contexts.
   }

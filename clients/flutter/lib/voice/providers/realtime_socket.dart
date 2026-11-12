@@ -229,6 +229,7 @@ abstract class RealtimeSocketProvider implements VoiceProvider {
       throw StateError('Realtime outbound rate exceeded');
     }
     _socket!.add(json);
+    // Idle means this end was silent; the 20s WebSocket ping checks liveness.
     _touch();
   }
 

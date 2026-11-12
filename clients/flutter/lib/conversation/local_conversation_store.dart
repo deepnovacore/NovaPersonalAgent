@@ -462,11 +462,8 @@ class ConversationStore extends ChangeNotifier {
               (e) => e['voice_turn'] == turnId && e['role'] == 'assistant',
             )
           : -1;
-      if (before < 0) {
-        messages.add(value);
-      } else {
-        messages.insert(before, value);
-      }
+      final safe = _externalInsertion(messages);
+      messages.insert(before < 0 || safe < before ? safe : before, value);
     }
   });
 
@@ -548,32 +545,38 @@ class ConversationStore extends ChangeNotifier {
       ...Map<String, dynamic>.from(jsonDecode(jsonEncode(message)) as Map),
       'time': DateTime.now().toUtc().toIso8601String(),
     };
-    var insertion = messages.length;
-    if (external) {
-      final results = <String>{};
-      for (var index = messages.length - 1; index >= 0; index--) {
-        final previous = messages[index] as Map;
-        if (previous['role'] == 'tool') {
-          final call = previous['tool_call_id'];
-          if (call is String) results.add(call);
-          continue;
-        }
-        final calls = previous['tool_calls'];
-        if (previous['role'] == 'assistant' &&
-            calls is List &&
-            calls.any(
-              (call) =>
-                  call is Map &&
-                  call['id'] is String &&
-                  !results.contains(call['id']),
-            )) {
-          insertion = index;
-        }
-        break;
-      }
-    }
-    messages.insert(insertion, saved);
+    messages.insert(
+      external ? _externalInsertion(messages) : messages.length,
+      saved,
+    );
   });
+
+  int _externalInsertion(List messages) {
+    final results = <String>{};
+    for (var index = messages.length - 1; index >= 0; index--) {
+      final previous = messages[index] as Map;
+      if (previous['role'] == 'tool') {
+        final call = previous['tool_call_id'];
+        if (call is String) {
+          results.add(call);
+        }
+        continue;
+      }
+      final calls = previous['tool_calls'];
+      if (previous['role'] == 'assistant' &&
+          calls is List &&
+          calls.any(
+            (call) =>
+                call is Map &&
+                call['id'] is String &&
+                !results.contains(call['id']),
+          )) {
+        return index;
+      }
+      break;
+    }
+    return messages.length;
+  }
 
   void _validateMessage(Map<String, dynamic> message) {
     if (!['user', 'assistant', 'tool'].contains(message['role']) ||

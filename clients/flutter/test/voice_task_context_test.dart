@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
+import 'package:nova_mobile/agent_core/background_execution.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
@@ -18,6 +19,11 @@ class _Settings extends ModelSettings {
     model: 'fixture',
     key: 'fixture',
   );
+}
+
+class _MissingSettings extends ModelSettings {
+  @override
+  Future<ModelConfiguration?> read() async => null;
 }
 
 class _Summary extends ModelClient {
@@ -94,6 +100,66 @@ class _GateCreation extends MemoryPersistence {
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test(
+    'opened worker inherits options and continues with an experience model',
+    () async {
+      final root = await Directory.systemTemp.createTemp('voice-task-options-');
+      addTearDown(() => root.delete(recursive: true));
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => root.path);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final origin = await store.ensureMain();
+      final child = await store.delegateTask(
+        origin: origin,
+        task: 'initial',
+        request: 'Build a game',
+        language: 'en',
+      );
+      final rounds = <List<Map<String, dynamic>>>[];
+      final primary = AgentCoreHost(
+        store: store,
+        settings: _MissingSettings(),
+        experienceModel: () async => (await _Settings().read())!,
+        experiencePersona: true,
+        additionalContext: (_) async => 'Fixture persona context',
+        backgroundExecution: BackgroundExecution(),
+        clientFactory: () => _Summary(rounds, text: 'Finished'),
+      );
+      addTearDown(primary.dispose);
+      final bridge = await VoiceDelegateBridge.open(primary);
+      addTearDown(bridge.dispose);
+      expect(bridge.worker.experienceModel, same(primary.experienceModel));
+      expect(bridge.worker.experiencePersona, true);
+      expect(bridge.worker.additionalContext, same(primary.additionalContext));
+      expect(
+        bridge.worker.backgroundExecution,
+        same(primary.backgroundExecution),
+      );
+      expect(bridge.worker.clientFactory, same(primary.clientFactory));
+      expect(bridge.worker.allowLocalMemory, false);
+      expect(bridge.worker.owner, 'voice:delegate');
+      await bridge.continueTask(child, 'Add touch controls');
+      expect(bridge.worker.error, isNull);
+      expect(bridge.worker.lastTurnCompleted, true);
+      expect(store.conversation(child)['delegate_status'], 'returned');
+      expect(store.conversation(child)['delegate_language'], 'en');
+      expect(
+        rounds.single.any((m) => m['content'] == 'Fixture persona context'),
+        true,
+      );
+      expect(
+        (store.conversation(child)['messages'] as List).last['content'],
+        'Finished',
+      );
+    },
+  );
 
   test(
     'independent requests get separate task histories and continuation returns to origin',
@@ -212,7 +278,7 @@ void main() {
   );
 
   test(
-    'legacy import keeps original bytes and restores a single visible task without replay',
+    'legacy import skips invalid and colliding rows while importing valid rows once without rewriting bytes',
     () async {
       final root = await Directory.systemTemp.createTemp('voice-task-import-');
       addTearDown(() => root.delete(recursive: true));
@@ -236,6 +302,16 @@ void main() {
       final raw = jsonEncode({
         'schema_version': 1,
         'conversations': [
+          42,
+          {
+            'id': 'invalid-context',
+            'backend': 'local',
+            'messages': [
+              {'role': 'user', 'content': 42},
+            ],
+          },
+          {'id': ConversationStore.mainId, 'backend': 'local', 'messages': []},
+          {'id': 'unlinked-context'},
           {
             'id': 'old-context',
             'backend': 'local',
@@ -260,6 +336,15 @@ void main() {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
       final origin = await store.ensureMain();
+      for (final context in ['invalid-context', origin]) {
+        await store.append(origin, {
+          'role': 'assistant',
+          'content': '',
+          'delegate_id': 'bad-$context',
+          'delegate_context': context,
+          'delegate_status': 'returned',
+        });
+      }
       await store.append(origin, {
         'role': 'assistant',
         'content': '',
@@ -291,8 +376,47 @@ void main() {
         store.conversations.where((c) => c['id'] == 'old-context'),
         hasLength(1),
       );
-      expect(store.conversation(origin)['messages'], hasLength(2));
-      expect(await legacy.readAsString(), raw);
+      expect(store.conversation(origin)['messages'], hasLength(4));
+      expect(
+        store.conversations.any((c) => c['id'] == 'invalid-context'),
+        false,
+      );
+      expect(store.conversation(origin)['delegate_origin'], isNull);
+      expect(await legacy.readAsBytes(), utf8.encode(raw));
+    },
+  );
+
+  test(
+    'unreadable or unsupported legacy data does not disable delegation',
+    () async {
+      final root = await Directory.systemTemp.createTemp('voice-task-invalid-');
+      addTearDown(() => root.delete(recursive: true));
+      const channel = MethodChannel('plugins.flutter.io/path_provider');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (_) async => root.path);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(channel, null),
+      );
+      final directory = await SpaceStorage.directory();
+      final legacy = File('${directory.path}/voice-delegate-contexts-v1.json');
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      await store.ensureMain();
+      final primary = AgentCoreHost(store: store, settings: _Settings());
+      addTearDown(primary.dispose);
+      for (final bytes in [
+        [0xff],
+        utf8.encode('{'),
+        utf8.encode('{"schema_version":2,"conversations":[]}'),
+      ]) {
+        await legacy.writeAsBytes(bytes);
+        final bridge = await VoiceDelegateBridge.open(primary);
+        expect(bridge.busy, false);
+        expect(store.conversations, hasLength(1));
+        expect(await legacy.readAsBytes(), bytes);
+        bridge.dispose();
+      }
     },
   );
 
@@ -662,6 +786,76 @@ void main() {
       expect(reopened.conversation(origin)['messages'], messages);
     },
   );
+  for (final role in ['user', 'assistant']) {
+    test('voice $role stays before an unfinished task tool round', () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final origin = await store.ensureMain();
+      final child = await store.delegateTask(
+        origin: origin,
+        task: 'task',
+        request: 'Run a tool',
+        language: 'en',
+      );
+      await store.append(child, {
+        'role': 'assistant',
+        'content': '',
+        'tool_calls': [
+          {
+            'id': 'call',
+            'function': {'name': 'web_fetch', 'arguments': '{}'},
+          },
+        ],
+      });
+      await store.upsertVoiceMessage(
+        child,
+        itemId: 'voice',
+        role: role,
+        text: 'Voice text',
+        turnId: 'turn',
+      );
+      var messages = store.conversation(child)['messages'] as List;
+      expect(messages.first['voice_item'], 'voice');
+      expect(messages.last['tool_calls'], hasLength(1));
+      await store.append(child, {
+        'role': 'tool',
+        'content': '{}',
+        'tool_call_id': 'call',
+      });
+      await store.upsertVoiceMessage(
+        child,
+        itemId: 'next',
+        role: 'assistant',
+        text: 'Next reply',
+        turnId: 'next-turn',
+      );
+      await store.upsertVoiceMessage(
+        child,
+        itemId: 'next-user',
+        role: 'user',
+        text: 'Late transcript',
+        turnId: 'next-turn',
+      );
+      await store.upsertVoiceMessage(
+        child,
+        itemId: 'voice',
+        role: role,
+        text: 'Final voice text',
+        turnId: 'turn',
+      );
+      messages = store.conversation(child)['messages'] as List;
+      expect(messages.map((m) => m['role']), [
+        role,
+        'assistant',
+        'tool',
+        'user',
+        'assistant',
+      ]);
+      expect(messages.first['content'], 'Final voice text');
+      expect(messages[3]['content'], 'Late transcript');
+      expect(messages.last['content'], 'Next reply');
+    });
+  }
   test(
     'cancellation while task creation persists prevents the worker from starting',
     () async {
