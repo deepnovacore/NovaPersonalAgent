@@ -367,6 +367,35 @@ void main() {
     },
   );
 
+  test(
+    'a hidden forget beside a recall keeps the recalled payload live',
+    () async {
+      final (host, _, id, model) = await _delegate(
+        memory: memory,
+        rounds: [
+          [
+            ('memory_recall', {'query': 'design'}),
+            ('memory_forget', {'id': 'anything'}),
+          ],
+        ],
+        readProfile: (_) async => {'available': false},
+      );
+      await host.send(
+        id,
+        'Build a personal website',
+        userAuthored: false,
+        approve: (_) async => true,
+      );
+      expect(host.error, isNull);
+      expect(
+        memory.recall('design'),
+        hasLength(1),
+        reason: 'nothing forgotten',
+      );
+      expect(jsonEncode(model.prompts[1]), contains('minimal dark design'));
+    },
+  );
+
   test('a delegate cannot save memory even when it names the tool', () async {
     final (host, store, id, _) = await _delegate(
       memory: memory,

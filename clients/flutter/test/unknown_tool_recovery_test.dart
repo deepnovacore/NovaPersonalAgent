@@ -132,4 +132,27 @@ void main() {
       expect(stripToolCallMarkup('<|DSML|function_calls>'), '');
     },
   );
+
+  test('quoted markup in an explanation is kept', () {
+    const inline =
+        'The literal marker is `<|DSML|function_calls>`. Explanation follows.';
+    expect(stripToolCallMarkup(inline), inline);
+    const fenced = 'Example:\n```\n<｜DSML｜invoke name="x">\n```\nThat is all.';
+    expect(stripToolCallMarkup(fenced), fenced);
+    const after =
+        '前言\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="a">\n'
+        '</｜DSML｜invoke>\n</｜DSML｜function_calls>\n结尾说明';
+    expect(stripToolCallMarkup(after), '前言\n结尾说明');
+  });
+
+  test('a reply that is only leaked markup does not count as done', () async {
+    final model = _Model(
+      [],
+      finalText: '<｜DSML｜function_calls>\n<｜DSML｜invoke name="file_edit">',
+    );
+    final (host, store, id) = await _host(model);
+    await host.send(id, 'Edit the site', approve: (_) async => true);
+    expect(host.error, 'empty_response');
+    expect(jsonEncode(store.conversation(id)), isNot(contains('DSML')));
+  });
 }

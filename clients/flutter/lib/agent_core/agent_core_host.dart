@@ -91,11 +91,35 @@ String _deviceSummary(Object? content) {
 
 /// Some providers (DeepSeek) occasionally write their native tool-call
 /// markup as plain text, for example when no tools are offered. Nothing ran,
-/// so the markup is dropped; any prose before it is kept.
-final _toolCallMarkup = RegExp(r'<\s*/?\s*[|｜]+\s*DSML\s*[|｜]+');
+/// so a leaked block is dropped; prose around it is kept. Only a block that
+/// opens a call list or invocation at the start of a line, outside a fenced
+/// code block, counts: quoted markup in an explanation stays.
+final _leakedCallOpen = RegExp(
+  r'^[ \t]*<\s*[|｜]+\s*DSML\s*[|｜]+\s*(function_calls|calls|invoke)\b',
+);
+final _leakedCallClose = RegExp(
+  r'<\s*/\s*[|｜]+\s*DSML\s*[|｜]+\s*(function_calls|calls)\s*>',
+);
 String stripToolCallMarkup(String text) {
-  final start = _toolCallMarkup.firstMatch(text);
-  return start == null ? text : text.substring(0, start.start).trimRight();
+  final lines = text.split('\n');
+  final kept = <String>[];
+  var fenced = false, leaked = false;
+  for (final line in lines) {
+    if (!leaked && line.trimLeft().startsWith('```')) fenced = !fenced;
+    if (!leaked && !fenced && _leakedCallOpen.hasMatch(line)) leaked = true;
+    if (leaked) {
+      // A closed block ends here; an unclosed one runs to the end.
+      final close = _leakedCallClose.firstMatch(line);
+      if (close != null) {
+        leaked = false;
+        final rest = line.substring(close.end);
+        if (rest.trim().isNotEmpty) kept.add(rest);
+      }
+      continue;
+    }
+    kept.add(line);
+  }
+  return kept.length == lines.length ? text : kept.join('\n').trim();
 }
 
 class AgentCoreHost extends ChangeNotifier {
@@ -628,8 +652,10 @@ class AgentCoreHost extends ChangeNotifier {
           throw const AgentFailure('invalid_tool_calls');
         }
         final visible = stripToolCallMarkup(draft);
+        var draftWasOnlyMarkup = false;
         if (visible.length != draft.length) {
           debugPrint('[NovaAgent] dropped tool-call markup written as text');
+          draftWasOnlyMarkup = visible.trim().isEmpty;
           draft = visible;
         }
         final assistantMessage = <String, dynamic>{
@@ -660,6 +686,8 @@ class AgentCoreHost extends ChangeNotifier {
         draft = '';
         reasoning = '';
         if (calls.isEmpty) {
+          // A reply that was only leaked call markup did nothing.
+          if (draftWasOnlyMarkup) throw const AgentFailure('empty_response');
           delivered = true;
           return;
         }
@@ -767,8 +795,9 @@ class AgentCoreHost extends ChangeNotifier {
             'tool_call_id': call['id'],
             'tool_name': call['function']['name'],
           };
-          if (call['function']['name'] == 'memory_forget') {
+          if (call['function']['name'] == 'memory_forget' && !correctable) {
             // Never replay earlier live recall results after a forget either.
+            // A forget that provably did not run changes nothing.
             liveArtifacts.clear();
           } else if (isLiveOnlyTool(call['function']['name'])) {
             liveArtifacts['tool:${call['id']}'] = toolMessage;
