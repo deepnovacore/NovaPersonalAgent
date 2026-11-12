@@ -151,7 +151,7 @@ void main() {
         'selfCheck' => jsonEncode(object('self_check')),
         'takeover' || 'handBack' => '{"state":"active"}',
         'openSettings' => '{"opened":true}',
-        'setPreview' => '{}',
+        'setPreview' || 'setStopCovered' => '{}',
         _ => jsonEncode(object('status')),
       };
     });
@@ -170,6 +170,7 @@ void main() {
     await channel.submitCode('123456', port: 37123);
     await channel.takeover('task-1');
     await channel.handBack('task-1');
+    await channel.setStopCovered('task-1', true);
     for (final method in [
       'openSettings',
       'setExperimentalAck',
@@ -177,6 +178,7 @@ void main() {
       'submitCode',
       'takeover',
       'handBack',
+      'setStopCovered',
     ]) {
       expect(sent[method], methods[method], reason: method);
     }

@@ -171,6 +171,7 @@ arguments, `tasks` entries, enum wires, safe errors) are pinned by one fixture,
 | `setPreview` | `{visible: bool}` | `{}` |
 | `takeover` | `{task_id}` | `{state: TakeoverState}` |
 | `handBack` | `{task_id}` | `{state: TakeoverState}` |
+| `setStopCovered` | `{task_id, covered: bool}` | `{}`; the floating pet's stop covers (or no longer covers) the current virtual run. A virtual run's accessibility stop button appears 2 s after start unless covered, and at once when uncovered; other runs and ids are ignored. |
 
 `PhoneStatus` = `{schema_version:1, api_level, tier:"virtual"|"main", experimental:bool, experimental_ack:bool, accessibility, overlay, battery_whitelisted, notifications_allowed:bool,
 pairing_stage:"idle"|"waiting_code"|"pairing"|"connecting"|"done"|"failed",

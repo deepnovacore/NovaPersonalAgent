@@ -17,6 +17,7 @@ import com.nova.nova_mobile.phone.PhoneTier
 import com.nova.nova_mobile.phone.RunIdleGate
 import com.nova.nova_mobile.phone.RunTakeover
 import com.nova.nova_mobile.phone.ShellProvider
+import com.nova.nova_mobile.phone.StopCover
 import com.nova.nova_mobile.phone.TakeoverState
 import com.nova.nova_mobile.phone.VirtualSelfCheck
 import com.nova.nova_mobile.phone.onMainLooper
@@ -67,7 +68,7 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
     private data class Active(val id:String,val secret:String,val fence:RunFence,var observation:JSONObject?=null,
         var target:String?=null, var model:LocalGuiModel?=null, var approval:ActionApproval?=null,
         val tier:PhoneTier=PhoneTier.MAIN, val startedAt:Long=SystemClock.elapsedRealtime(), var virtual:VirtualRun?=null,
-        var lifecycle:JSONObject?=null, val serviceGeneration:Long=0)
+        var lifecycle:JSONObject?=null, val serviceGeneration:Long=0, val stopCover:StopCover=StopCover(tier))
     @Volatile private var active:Active?=null
     @Volatile private var closed=false
     init { journal.recover() }
@@ -99,7 +100,8 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
         journal.save(record);active=run
         service.onStop={stop(id)}
         service.onUnavailable={cause -> accessibilityLost(run,service,cause)}
-        service.showStop()
+        if(run.stopCover.showAtStart) service.showStop()
+        else main.postDelayed({ synchronized(this) { if(active===run && run.stopCover.showAfterGrace()) LocalGuiService.current?.showStop() } },StopCover.GRACE_MS)
         main.postDelayed({ if(active===run) interrupt(id,"time_limit") },budget)
         return record
     }
@@ -192,7 +194,7 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
                     override fun execute(action:JSONObject)=this@LocalAgentController.execute(JSONObject(control.toString()).put("attempt_id",UUID.randomUUID().toString()).put("action",action)).getString("state")
                     override fun finish(summary:String) {this@LocalAgentController.finish(JSONObject(control.toString()).put("summary",summary))}
                     override fun interrupt(reason:String) {this@LocalAgentController.interrupt(run.id,reason)}
-                },{ observation,turn -> run.model!!.decide(journal.task(run.id)!!,observation,turn) },maxTurns=29,initialLaunchGrace=true).run()
+                },{ observation,turn -> run.model!!.decide(journal.task(run.id)!!,observation,turn) },maxTurns=29,initialLaunchGrace=true) { android.util.Log.i("NovaAgentStep",it) }.run()
             } catch(_:Exception) {interrupt(run.id,"native_loop_failed")}
             finally { if(active===run) interrupt(run.id,"execution_interrupted") }
         }
@@ -238,7 +240,7 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
             if(outcome!="dispatched") { interrupt(run.id,"launch_outcome_$outcome"); return }
             LocalToolLoop(virtual.host,{ observation,turn ->
                 virtual.host.decided(run.model!!.decide(journal.task(run.id)!!,observation,turn,PhoneTier.VIRTUAL))
-            },maxTurns=29,initialLaunchGrace=true).run()
+            },maxTurns=29,initialLaunchGrace=true) { android.util.Log.i("NovaAgentStep",it) }.run()
         } catch(_:Exception) {interrupt(run.id,"native_loop_failed")}
         finally { if(active===run) interrupt(run.id,"execution_interrupted") }
     }
@@ -284,6 +286,20 @@ class LocalAgentController(context: Context, private val spaceId: String, privat
     override fun takeover(taskId:String):TakeoverState = virtualRun(taskId).takeover.request(byModel=false,reason=null)
     /** User "done": moves the app back; the loop resumes with a fresh observation. */
     override fun handBack(taskId:String):TakeoverState = virtualRun(taskId).takeover.handBack()
+    /** The floating pet covers (or stopped covering) the run's stop; the a11y stop is hidden (or shown) to match.
+     * A cover lapses after [StopCover.LEASE_MS] unless renewed. */
+    @Synchronized override fun setStopCovered(taskId:String,covered:Boolean) {
+        val run=active?.takeIf { it.id==taskId }?:return
+        val show=run.stopCover.cover(covered,SystemClock.elapsedRealtime())?:return
+        if(!show) {
+            val generation=run.stopCover.generation
+            main.postDelayed({ synchronized(this) {
+                if(active===run && run.stopCover.expire(generation,SystemClock.elapsedRealtime())) LocalGuiService.current?.showStop()
+            } },StopCover.LEASE_MS)
+        }
+        val service=LocalGuiService.current?:return
+        if(show) service.showStop() else service.hideStop()
+    }
     /** Starting a task authorizes its steps within the selected app. Keep a
      * single-use, screen-bound permit, but never wait for a per-step UI approval. */
     @Synchronized private fun authorizeAction(run:Active,decision:ToolDecision,observation:JSONObject):Boolean {
@@ -428,6 +444,6 @@ internal fun interruptedSummary(reason:String,actionInFlight:Boolean=false):Stri
     reason=="accessibility_unavailable" || reason.startsWith("a11y_") -> "已暂停：系统的无障碍服务断开了。已经做过的步骤请先在 App 里核对，再决定要不要重新开始。"
     reason=="step_limit" -> "已暂停：这次执行的步骤用完了。请核对已完成的内容，再决定是否继续。"
     reason=="action_outcome_unknown" || reason=="launch_outcome_unknown" -> "已暂停：有一处操作无法确认是否生效，没有重试。"
-    reason.endsWith("helper_unavailable") -> "已暂停：Nova 的手机助手还没连上，请到「设置 → 手机操作」重新连接。"
+    reason.endsWith("helper_unavailable") -> "已暂停：Nova 的手机助手没在运行（更新 Nova 或换了 Wi‑Fi 后常见）。请在「开发者选项」里打开「无线调试」，Nova 会自动重连；还不行就到「设置 → 手机操作」重新配对。"
     else -> "已暂停：已经做过的步骤请先在 App 里核对，再决定要不要重新开始。"
 }) + if(actionInFlight) IN_FLIGHT_COPY else ""

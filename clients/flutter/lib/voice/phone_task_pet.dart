@@ -13,10 +13,14 @@ import 'voice_companion.dart';
 /// `needs_user`, a `completed` run `done`, a `failed`/`interrupted` run
 /// `failed`. A cancelled run (the user stopped it) or a run that ended without
 /// a `done` event releases the overlay at once. Pet actions are executed here:
-/// `task_stop` through [onStop] (the PiP Stop path), `task_takeover` through
-/// the tracker, `open` through [onOpen] (native has already brought Nova
-/// forward). A task whose overlay could not be shown is not retried until Nova
-/// is resumed again, so a blocked overlay never turns into a retry loop.
+/// `task_stop` through [onStop] (the PiP Stop path), `open` through [onOpen]
+/// (native has already brought Nova forward); takeover stays in the app. A
+/// task whose overlay could not be shown is not retried until Nova is resumed
+/// again, so a blocked overlay never turns into a retry loop.
+///
+/// While the pet carries an active run, its stop covers the run:
+/// [onStopCoverChanged] reports it so native hides its own stop button, and
+/// reports the loss when the overlay fails or disappears so the button returns.
 class PhoneTaskPet with WidgetsBindingObserver {
   PhoneTaskPet({
     required this.tracker,
@@ -25,6 +29,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
     required this.onStop,
     this.onOpen,
     this.onOverlayPermissionNeeded,
+    this.onStopCoverChanged,
   }) : _actionSource = actions;
 
   final PhoneRunTracker tracker;
@@ -41,6 +46,9 @@ class PhoneTaskPet with WidgetsBindingObserver {
   /// once per lifetime, so the hint never nags.
   final void Function()? onOverlayPermissionNeeded;
 
+  /// Whether the pet's stop covers the active run [taskId]. Must not throw.
+  final void Function(String taskId, bool covered)? onStopCoverChanged;
+
   /// The active run mirrored on the pet.
   String? _runId;
 
@@ -50,6 +58,14 @@ class PhoneTaskPet with WidgetsBindingObserver {
   (String, String, String, int?)? _sent;
   final _blocked = <String>{};
   final _stopRequested = <String>{};
+
+  /// Native's cover is a lease (eight seconds); it is renewed this often while
+  /// the pet covers the run, so a dead Flutter engine brings native's stop back.
+  static const renewCoverEvery = Duration(seconds: 3);
+
+  /// The run whose stop the pet covers.
+  String? _covered;
+  Timer? _renewal;
   bool _started = false, _disposed = false, _hinted = false;
   bool _previewHeld = false;
   final _subscriptions = <StreamSubscription<Object?>>[];
@@ -93,6 +109,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
         _hide(id);
       } else if (!run.active) {
         _runId = null;
+        if (_covered == id) _dropCover();
         _finish(run);
       }
     }
@@ -129,12 +146,51 @@ class PhoneTaskPet with WidgetsBindingObserver {
     unawaited(
       companion
           .showTask(taskId: id, status: status, label: state.$3, step: state.$4)
-          .then<void>((_) {}, onError: (Object error) => _failed(id, error)),
+          .then<void>(
+            (_) => _cover(id),
+            onError: (Object error) => _failed(id, error),
+          ),
     );
+  }
+
+  void _cover(String id) {
+    if (_disposed || _covered == id || _overlayId != id || !_isActive(id)) {
+      return;
+    }
+    _covered = id;
+    onStopCoverChanged?.call(id, true);
+    _renewal?.cancel();
+    _renewal = Timer.periodic(renewCoverEvery, (_) {
+      final covered = _covered;
+      if (covered == null || _overlayId != covered || !_isActive(covered)) {
+        _dropCover();
+      } else {
+        onStopCoverChanged?.call(covered, true);
+      }
+    });
+  }
+
+  /// The overlay no longer carries the run [id]: native's stop takes over.
+  void _uncover(String id) {
+    if (_covered == id) _dropCover();
+    if (_isActive(id)) onStopCoverChanged?.call(id, false);
+  }
+
+  /// Forgets the cover without telling native; its lease then lapses.
+  void _dropCover() {
+    _covered = null;
+    _renewal?.cancel();
+    _renewal = null;
+  }
+
+  bool _isActive(String id) {
+    final run = tracker.run(id);
+    return run != null && run.active && run.isVirtual;
   }
 
   void _failed(String id, Object error) {
     if (_disposed) return;
+    _uncover(id);
     _blocked.add(id);
     // A timed-out start may still bring the overlay up late: keep its id so
     // the run's end still hides it. Other failures mean nothing is shown.
@@ -152,6 +208,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
   }
 
   void _hide(String id) {
+    if (_covered == id) _dropCover();
     if (_overlayId != id) return;
     _overlayId = null;
     _sent = null;
@@ -167,6 +224,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
     // for this task until Nova is resumed.
     if (gone.reason != 'expired' && gone.reason != 'hidden') {
       _blocked.add(gone.taskId);
+      _uncover(gone.taskId);
     }
     if (gone.reason == 'overlay_permission') _hint();
     _syncPreview();
@@ -184,13 +242,6 @@ class PhoneTaskPet with WidgetsBindingObserver {
         if (!_stopRequested.add(id)) return;
         onStop(id);
         Timer(const Duration(seconds: 5), () => _stopRequested.remove(id));
-      case 'task_takeover':
-        final id = _runId;
-        final run = id == null ? null : tracker.run(id);
-        if (id == null || run == null || !run.active || run.takeoverActive) {
-          return;
-        }
-        unawaited(tracker.takeover(id));
       case 'open':
         // Call-only `open` arrives here too; it is ours only while the
         // overlay carries a task.
@@ -257,6 +308,8 @@ class PhoneTaskPet with WidgetsBindingObserver {
     }
     _syncPreview();
     _unbindAvatar?.call();
+    final covered = _covered;
+    if (covered != null) _uncover(covered);
     final id = _overlayId;
     _overlayId = null;
     if (id != null) {

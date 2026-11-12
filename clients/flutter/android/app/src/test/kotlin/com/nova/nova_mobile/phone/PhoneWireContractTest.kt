@@ -91,6 +91,10 @@ class PhoneWireContractTest {
         assertEquals("task-1", methods.getJSONObject("handBack").getString("task_id"))
         assertEquals("task-1", methods.getJSONObject("stop").getString("id"))
         assertEquals(true, methods.getJSONObject("setPreview").opt("visible"))
+        assertEquals("task-1" to true, PhoneBridge.stopCoveredArguments(methods.getJSONObject("setStopCovered")))
+        for (bad in listOf(JSONObject().put("task_id", "task-1"), JSONObject().put("task_id", "task-1").put("covered", "true"),
+            JSONObject().put("covered", false)))
+            assertEquals("invalid_task", PhoneBridge.safeError(runCatching { PhoneBridge.stopCoveredArguments(bad) }.exceptionOrNull() as Exception))
         assertEquals("invalid_settings", PhoneBridge.safeError(
             runCatching { PhoneBridge.settingsKind("") }.exceptionOrNull() as Exception))
     }

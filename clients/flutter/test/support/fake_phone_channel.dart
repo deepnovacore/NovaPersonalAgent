@@ -90,6 +90,12 @@ class FakePhoneChannel implements PhoneChannel {
     return handBackResult;
   }
 
+  /// `setStopCovered` calls, kept apart from [calls].
+  final stopCovers = <(String, bool)>[];
+  @override
+  Future<void> setStopCovered(String taskId, bool covered) async =>
+      stopCovers.add((taskId, covered));
+
   @override
   Future<void> requestNotifications() async =>
       calls.add('requestNotifications');

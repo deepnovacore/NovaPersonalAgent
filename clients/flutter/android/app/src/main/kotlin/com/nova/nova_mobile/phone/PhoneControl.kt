@@ -121,6 +121,8 @@ enum class TakeoverState(val wire: String) {
 interface PhoneTakeover {
     fun takeover(taskId: String): TakeoverState
     fun handBack(taskId: String): TakeoverState
+    /** `setStopCovered`: whether the floating pet's stop covers the virtual run [taskId]; other runs are ignored. */
+    fun setStopCovered(taskId: String, covered: Boolean) {}
 }
 
 /** One `selfCheck` row. Wire: {id, ok, detail?}. Ids are listed in the contract doc. */

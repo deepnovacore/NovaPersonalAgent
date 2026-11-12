@@ -6,7 +6,7 @@ import '../ui/pet_avatar.dart';
 abstract interface class VoiceCompanion {
   Future<bool> Function()? onRestore;
 
-  /// Call controls plus task_stop, task_takeover and open. Task actions are
+  /// Call controls plus task_stop and open. Task actions are
   /// filtered to the currently shown task; integration executes the operation.
   Stream<String> get actions;
   Future<void> start();

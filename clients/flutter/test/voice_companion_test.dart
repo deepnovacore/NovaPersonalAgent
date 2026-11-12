@@ -196,13 +196,13 @@ void main() {
           isTrue,
         );
         await action('stale', 'task_stop');
-        await action('one', 'task_takeover');
+        await action('one', 'task_stop');
         await companion.showTask(taskId: 'one', status: 'needs_user');
         await action('one', 'open');
         await companion.showTask(taskId: 'two', status: 'failed');
         await action('one', 'task_stop');
         await action('two', 'task_stop');
-        expect(actions, ['task_takeover', 'open', 'task_stop']);
+        expect(actions, ['task_stop', 'open', 'task_stop']);
         expect(calls.first.arguments, {
           'pngBytes': null,
           'filePath': '/private/portrait.png',
@@ -231,7 +231,7 @@ void main() {
         await companion.start();
         final id = (calls.last.arguments as Map)['callId'];
         await companion.hideTask();
-        await action('one', 'task_takeover');
+        await action('one', 'task_stop');
         await messenger.handlePlatformMessage(
           channel.name,
           const StandardMethodCodec().encodeMethodCall(
@@ -313,8 +313,8 @@ void main() {
         await companion.showTask(taskId: 'one', status: 'needs_user');
         first.complete(true);
         expect(await pending, isTrue);
-        await action('one', 'task_takeover');
-        expect(actions, ['task_takeover']);
+        await action('one', 'task_stop');
+        expect(actions, ['task_stop']);
         await sub.cancel();
       },
     );

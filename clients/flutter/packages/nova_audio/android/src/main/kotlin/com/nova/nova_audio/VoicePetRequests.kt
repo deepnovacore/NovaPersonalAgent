@@ -34,9 +34,9 @@ internal object VoicePetControls {
 }
 
 internal object VoicePetImages {
-    fun sampleSize(longest: Int): Int {
+    fun sampleSize(longest: Int, cap: Int = 256): Int {
         var sample = 1
-        while (longest / (sample * 2) >= 256) sample *= 2
+        while (longest / (sample * 2) >= cap) sample *= 2
         return sample
     }
 }

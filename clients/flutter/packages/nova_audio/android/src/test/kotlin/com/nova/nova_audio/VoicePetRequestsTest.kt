@@ -62,5 +62,7 @@ class VoicePetRequestsTest {
         assertEquals(1, VoicePetImages.sampleSize(511))
         assertEquals(2, VoicePetImages.sampleSize(512))
         assertEquals(8, VoicePetImages.sampleSize(2400)) // 300px, then scale to 256; not 150px upscaled.
+        assertEquals(4, VoicePetImages.sampleSize(2670, 512)) // 667px preview frame, then scale to 512.
+        assertEquals(1, VoicePetImages.sampleSize(1023, 512))
     }
 }

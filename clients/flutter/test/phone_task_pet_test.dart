@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:fake_async/fake_async.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -67,6 +68,7 @@ void main() {
   late StreamController<String> actions;
   late List<String> stopped;
   late int opened, hints;
+  late List<(String, bool)> covers;
   late PhoneTaskPet pet;
 
   Future<void> settle() => Future<void>.delayed(Duration.zero);
@@ -79,6 +81,7 @@ void main() {
     stopped = [];
     opened = 0;
     hints = 0;
+    covers = [];
     pet = PhoneTaskPet(
       tracker: tracker,
       companion: companion,
@@ -86,6 +89,7 @@ void main() {
       onStop: stopped.add,
       onOpen: () => opened++,
       onOverlayPermissionNeeded: () => hints++,
+      onStopCoverChanged: (id, covered) => covers.add((id, covered)),
     )..start();
   });
 
@@ -161,7 +165,7 @@ void main() {
     expect(companion.hides, isEmpty);
   });
 
-  test('stop, takeover and open run on the current task', () async {
+  test('stop and open run on the current task; takeover is in-app', () async {
     actions.add('task_stop');
     actions.add('open');
     expect(stopped, isEmpty, reason: 'no task shown yet');
@@ -170,7 +174,7 @@ void main() {
     await settle();
     actions.add('task_takeover');
     await settle();
-    expect(channel.calls, contains('takeover:t1'));
+    expect(channel.calls, isNot(contains('takeover:t1')));
     actions.add('task_stop');
     actions.add('task_stop');
     expect(stopped, ['t1'], reason: 'a repeated stop request is ignored');
@@ -300,5 +304,154 @@ void main() {
     second.dispose();
     expect(companion.hides, ['t1']);
     store.dispose();
+  });
+
+  group('stop cover', () {
+    test('a shown run is covered once', () async {
+      channel.emit(stepEvent());
+      await settle();
+      channel.emit(stepEvent(step: 2));
+      channel.emit(takeoverEvent(TakeoverState.requested));
+      await settle();
+      expect(companion.shows, hasLength(3));
+      expect(covers, [('t1', true)]);
+    });
+
+    test('a failed show uncovers until a retry succeeds', () async {
+      companion.errors.add(PlatformException(code: 'overlay_blocked'));
+      channel.emit(stepEvent());
+      await settle();
+      expect(covers, [('t1', false)]);
+      await resume();
+      expect(covers, [('t1', false), ('t1', true)]);
+    });
+
+    test('a failed update of a covered run uncovers it', () async {
+      channel.emit(stepEvent());
+      await settle();
+      companion.errors.add(PlatformException(code: 'timeout'));
+      channel.emit(stepEvent(step: 2));
+      await settle();
+      expect(covers, [('t1', true), ('t1', false)]);
+    });
+
+    test('expiry and our own hide never uncover', () async {
+      channel.emit(stepEvent());
+      await settle();
+      companion.gone.add(const TaskOverlayGone('t1', 'hidden'));
+      await settle();
+      channel.emit(stepEvent(taskId: 't2'));
+      await settle();
+      companion.gone.add(const TaskOverlayGone('t2', 'expired'));
+      await settle();
+      expect(covers, [('t1', true), ('t2', true)]);
+    });
+
+    test('an overlay lost while the run is active uncovers it', () async {
+      channel.emit(stepEvent());
+      await settle();
+      companion.gone.add(const TaskOverlayGone('t1', 'notification_stop'));
+      await settle();
+      expect(covers, [('t1', true), ('t1', false)]);
+    });
+
+    test('an overlay lost after the run ended does not uncover', () async {
+      channel.emit(stepEvent());
+      await settle();
+      channel.emit(doneEvent());
+      await settle();
+      companion.gone.add(const TaskOverlayGone('t1', 'overlay_blocked'));
+      await settle();
+      expect(covers, [('t1', true)]);
+    });
+
+    test('dispose uncovers the active run', () async {
+      channel.emit(stepEvent());
+      await settle();
+      pet.dispose();
+      expect(covers, [('t1', true), ('t1', false)]);
+    });
+
+    // Everything is built inside the fake zone so its timers and microtasks
+    // are the ones being elapsed.
+    void leased(
+      void Function(
+        FakeAsync,
+        FakePhoneChannel,
+        FakeTaskCompanion,
+        PhoneTaskPet,
+      )
+      body,
+    ) {
+      fakeAsync((async) {
+        final channel = FakePhoneChannel();
+        final tracker = PhoneRunTracker(channel)..start();
+        final companion = FakeTaskCompanion();
+        final pet = PhoneTaskPet(
+          tracker: tracker,
+          companion: companion,
+          actions: const Stream.empty(),
+          onStop: (_) {},
+          onStopCoverChanged: (id, covered) => covers.add((id, covered)),
+        )..start();
+        channel.emit(stepEvent());
+        async.flushMicrotasks();
+        body(async, channel, companion, pet);
+        pet.dispose();
+        tracker.dispose();
+        async.flushMicrotasks();
+      });
+    }
+
+    const every = PhoneTaskPet.renewCoverEvery;
+
+    test('a covered run renews its lease until the run ends', () {
+      leased((async, channel, companion, pet) {
+        async.elapse(every * 2);
+        expect(covers, [('t1', true), ('t1', true), ('t1', true)]);
+        channel.emit(doneEvent());
+        async.flushMicrotasks();
+        async.elapse(every * 3);
+        expect(covers, hasLength(3));
+        expect(async.periodicTimerCount, 0);
+      });
+    });
+
+    test('renewals stop after an uncover', () {
+      leased((async, channel, companion, pet) {
+        async.elapse(every);
+        companion.gone.add(const TaskOverlayGone('t1', 'overlay_blocked'));
+        async.elapse(every * 3);
+        expect(covers, [('t1', true), ('t1', true), ('t1', false)]);
+        expect(async.periodicTimerCount, 0);
+      });
+    });
+
+    test('renewals stop on dispose', () {
+      leased((async, channel, companion, pet) {
+        pet.dispose();
+        async.elapse(every * 3);
+        expect(covers, [('t1', true), ('t1', false)]);
+        expect(async.periodicTimerCount, 0);
+      });
+    });
+
+    test('renewals stop when a cancelled run hides the pet', () {
+      leased((async, channel, companion, pet) {
+        channel.emit(doneEvent(outcome: 'cancelled'));
+        async.flushMicrotasks();
+        async.elapse(every * 3);
+        expect(covers, [('t1', true)]);
+        expect(async.periodicTimerCount, 0);
+      });
+    });
+
+    test('main-tier runs are never covered or uncovered', () async {
+      companion.errors.add(PlatformException(code: 'overlay_blocked'));
+      channel.emit(stepEvent(tier: PhoneTier.main));
+      await settle();
+      pet.dispose();
+      expect(covers, isEmpty);
+    });
   });
 }

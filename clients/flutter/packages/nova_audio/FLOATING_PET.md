@@ -22,8 +22,8 @@ and mirrors only virtual-tier runs:
 
 A newer run replaces the task in place (no hide in between). `task_stop` runs the
 same path as the in-app picture's Stop (native `stop` by task id, then the owning
-chat turn or voice delegate is cancelled), once per task; `task_takeover` calls the
-tracker's takeover; `open` restores an active call's screen (native has already
+chat turn or voice delegate is cancelled), once per task; the overlay no longer
+offers takeover (Dart handling of a `task_takeover` action is legacy); `open` restores an active call's screen (native has already
 brought Nova forward). `bindTaskAvatar` binds the shell's `PetAvatarStore` and is
 unbound on teardown before the store is disposed. `overlay_permission` (as a
 `showTask` error or a disappearance) shows one in-app hint per session with a
@@ -69,8 +69,9 @@ again until Nova is next resumed (one retry per resume), so there is no retry lo
   frames. Never forward secure/takeover frames. Frames clear on task replacement,
   needs-user, terminal status, collapse and foreground hiding.
 - Native file reads and bitmap decode run on a single worker, never the UI thread.
-  Inputs are bounded to 4MiB; decoding samples without undershooting 256px, then
-  scales the longest edge to at most 256px. Only one preview decode is in flight;
+  Inputs are bounded to 4MiB; decoding samples without undershooting the cap, then
+  scales the longest edge to at most the cap (512px for preview frames, 256px for
+  portraits). Only one preview decode is in flight;
   invalidated results and replaced bitmaps are recycled.
 - `hideTask(taskId: id)` releases only that task's overlay lifetime, not the phone
   task or call. A mismatched id is a no-op in both Dart and native. The no-argument
@@ -83,9 +84,9 @@ again until Nova is next resumed (one retry per resume), so there is no retry lo
   `notification_stop`, `overlay_permission`, `overlay_blocked`, `timeout`,
   `foreground_blocked`, `hidden`. Engine/process death cannot deliver an event to
   a dead Dart isolate; rebuild state after engine creation.
-- `actions` emits `task_stop`, `task_takeover`, and `open` for the current task,
-  plus call controls. IDs are filtered by Dart. Native opens Nova for `open`;
-  stop/takeover are **requests**, executed idempotently by integration over the
+- `actions` emits `task_stop` and `open` for the current task, plus call controls
+  (`mute`, `end`). IDs are filtered by Dart. Native opens Nova for `open`;
+  stop is a **request**, executed idempotently by integration over the
   task channels. The task notification also sends `task_stop`, then releases the
   overlay lifetime. If notification permission is denied, that shade affordance
   is unavailable; keep in-app task controls reachable.
@@ -113,7 +114,21 @@ flashing over permission dialogs or between activities. Minimize probes the real
 WindowManager add before moving Nova to the background; a grant alone is not proof
 that an OEM allows overlays. Later failures are reported for tasks.
 
-The 48dp-minimum buttons grow with large fonts; controls scroll on short screens.
+Expanded with a task, the card is the orb (kept on the docked edge) above the
+virtual-screen preview and one centred row of icon-only circular buttons: Stop
+(red glyph) and Open Nova, plus Mute/Unmute and End call while a call is active.
+The preview is 288dp tall with width from the latest decoded frame's aspect
+(the 1200×2670 virtual display before the first frame), rounded and without
+letterboxing; frames wider than tall cap the width at 240dp and derive the
+height. The card wraps the preview with 4dp padding, widening only so the row
+fits. Aspect changes under ~2px are ignored; larger ones resize the preview and
+window width in place and re-clamp the dock. Visual buttons are 40dp (two) or
+30dp (four); each touch target is 44dp tall and an equal share of the row width,
+so targets never overlap. Every control has an accessible label. Stop is
+disabled (dimmed) for done/failed. There is no step text: step/label and status
+are part of the orb's description, announced through its polite live region.
+Without a task, expansion shows the vertical 48dp Return/Mute/End controls.
+Controls scroll on short screens.
 Step/label and running/needs-user updates change existing views in place, preserving
 button gestures and scroll position. Rebuilds occur only on task identity/nullity,
 terminal-control state, call-mode changes or explicit expansion. Light/dark themed
@@ -139,7 +154,10 @@ this overlay. No claim of engine-independent task execution is made.
 JVM tests cover the library manifest's specialUse permission/type/subtype, pending
 show completion/hide ordering and scoped hide, sampling, and state/ownership.
 Robolectric tests exercise startForeground on cancelled/owned commands, scoped
-notification stop, and actual button identity/click retention across step updates.
+notification stop, actual button identity/click retention across step updates, and
+the card: label-based controls in one row (2 or 4), no takeover control or step
+text, expand/task ordering, in-place aspect resize with hysteresis, right dock and
+terminal Stop.
 Dart channel tests cover errors with a concurrent call, native preview/disappearance,
 scoped hide, default/custom avatar binding and deterministic-clock frame throttling.
 

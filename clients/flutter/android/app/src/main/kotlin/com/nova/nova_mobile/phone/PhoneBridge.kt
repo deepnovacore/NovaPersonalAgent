@@ -192,6 +192,11 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
                             } ?: throw IllegalStateException("task_not_running")
                             JSONObject().put("state", state.wire)
                         }
+                        "setStopCovered" -> {
+                            val (taskId, covered) = stopCoveredArguments(args)
+                            takeover?.setStopCovered(taskId, covered)
+                            JSONObject()
+                        }
                         else -> { result.notImplemented(); return@launch }
                     }
                     result.success(answer.toString())
@@ -276,6 +281,12 @@ class PhoneBridge private constructor(context: Context) : ShellProvider, PhoneEv
         /** `setExperimentalAck` argument; a missing or non-boolean value is `invalid_acknowledged`, never `unknown`. */
         internal fun acknowledgedArgument(args: JSONObject): Boolean =
             args.opt("acknowledged") as? Boolean ?: throw IllegalArgumentException("invalid_acknowledged")
+        /** `setStopCovered` arguments; a blank task id or a non-boolean `covered` is `invalid_task`. */
+        internal fun stopCoveredArguments(args: JSONObject): Pair<String, Boolean> {
+            val taskId = args.optString("task_id").takeIf { it.isNotBlank() } ?: throw IllegalArgumentException("invalid_task")
+            val covered = args.opt("covered") as? Boolean ?: throw IllegalArgumentException("invalid_task")
+            return taskId to covered
+        }
         internal fun setExperimentalAck(preferences: SharedPreferences, acknowledged: Boolean) {
             preferences.edit().putBoolean(PHONE_EXPERIMENTAL_ACK, acknowledged).apply()
         }

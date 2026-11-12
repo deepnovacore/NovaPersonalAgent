@@ -34,6 +34,7 @@
     "submitCode": {"code": "123456", "port": 37123},
     "takeover": {"task_id": "task-1"},
     "handBack": {"task_id": "task-1"},
+    "setStopCovered": {"task_id": "task-1", "covered": true},
     "stop": {"id": "task-1"}
   },
   "tasks": [

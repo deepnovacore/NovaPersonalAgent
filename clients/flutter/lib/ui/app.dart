@@ -284,6 +284,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         onStop: _stopPhoneRun,
         onOpen: _openFromTaskPet,
         onOverlayPermissionNeeded: _overlayPermissionHint,
+        onStopCoverChanged: (taskId, covered) => unawaited(
+          phoneChannel!
+              .setStopCovered(taskId, covered)
+              .catchError((Object _) {}),
+        ),
       )..start(avatar: petAvatarStore);
     }
     language =

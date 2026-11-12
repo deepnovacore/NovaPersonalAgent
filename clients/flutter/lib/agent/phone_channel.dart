@@ -335,6 +335,10 @@ abstract interface class PhoneChannel {
   Future<TakeoverState> takeover(String taskId);
   Future<TakeoverState> handBack(String taskId);
 
+  /// Tells native whether the floating pet's stop covers the virtual run
+  /// [taskId]; native shows its own stop button while it does not.
+  Future<void> setStopCovered(String taskId, bool covered);
+
   /// Asks the system for notification access (runtime permission prompt).
   Future<void> requestNotifications();
 
@@ -426,6 +430,10 @@ class NativePhoneChannel implements PhoneChannel {
   @override
   Future<TakeoverState> handBack(String taskId) async =>
       _takeoverState(await _call('handBack', {'task_id': taskId}));
+  @override
+  Future<void> setStopCovered(String taskId, bool covered) async {
+    await _call('setStopCovered', {'task_id': taskId, 'covered': covered});
+  }
 
   @override
   Future<void> requestNotifications() => ScheduleWake.requestNotifications();
