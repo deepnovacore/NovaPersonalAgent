@@ -362,10 +362,12 @@ class ExperiencePersonaTimeline extends StatefulWidget
               row['time'] ??
               sources.timelineTime((row['refs'] as List).cast<String>()),
           'brief': {
-            'title': row['title'],
-            'facts': [
-              {'text': row['summary']},
-            ],
+            ...row,
+            'facts':
+                row['facts'] ??
+                [
+                  {'text': row['summary']},
+                ],
           },
         },
     ],

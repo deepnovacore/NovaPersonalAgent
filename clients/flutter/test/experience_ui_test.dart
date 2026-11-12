@@ -95,13 +95,14 @@ void main() {
                 onModelSettings: () => picked++,
                 onChooseModel: () => picked++,
                 onExperienceCode: () => redeemed++,
-                onVoice: persona ? null : () => voiced++,
+                onVoice: () => voiced++,
               ),
             ),
           ),
         );
         await tester.pumpAndSettle();
-        expect(find.text('体验服务'), findsOneWidget);
+        expect(find.text('体验服务'), findsNothing);
+        expect(find.byTooltip('对话方式'), findsNothing);
         key.currentState!.prefill('保留这条草稿');
         await tester.pumpAndSettle();
         await tester.tap(find.byTooltip('发送'));
@@ -115,17 +116,8 @@ void main() {
         await tester.tap(find.text('配置自己的模型'));
         expect(redeemed, 1);
         expect(picked, 1);
-        await tester.tap(find.text('体验服务'));
-        await tester.pumpAndSettle();
-        await tester.tap(find.text('模型设置'));
-        expect(picked, 2);
-        await tester.pumpAndSettle();
-        if (persona) {
-          expect(find.byTooltip('实时语音'), findsNothing);
-        } else {
-          await tester.tap(find.byTooltip('实时语音'));
-          expect(voiced, 1);
-        }
+        await tester.tap(find.byTooltip('实时语音'));
+        expect(voiced, 1);
         await tester.pumpWidget(const SizedBox.shrink());
         host.dispose();
       },

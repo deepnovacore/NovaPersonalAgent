@@ -37,8 +37,11 @@ class ExperiencePersonaSources {
       }
       for (final row in rows) {
         if (row is! Map ||
-            row.length !=
-                (section == 'timeline' && row.containsKey('time') ? 4 : 3) ||
+            !_fields(row, {
+              'title',
+              body,
+              'refs',
+            }, section == 'timeline' ? {'time', ..._richFields} : const {}) ||
             (row.containsKey('time') &&
                 (section != 'timeline' || !_validTime(row['time']))) ||
             !_bounded(row['title'], 120) ||
@@ -53,9 +56,153 @@ class ExperiencePersonaSources {
             refs.any((ref) => !records.containsKey(ref))) {
           throw const FormatException('invalid_persona_reference');
         }
+        if (section == 'timeline' && !_validRichTimeline(row, refs)) {
+          throw const FormatException('invalid_persona_snapshot');
+        }
       }
     }
     return {...data, 'source_version': version};
+  }
+
+  // Mirrors the optional timeline fields in runtime/src/experience/host.ts.
+  static const _richFields = {
+    'temporal',
+    'kind',
+    'status_label',
+    'people',
+    'category',
+    'why_now',
+    'facts',
+    'next_steps',
+    'uncertainty',
+    'actions',
+  };
+  static const _timeKinds = {
+    'event',
+    'ongoing',
+    'deadline',
+    'scheduled',
+    'synthesis',
+    'background',
+    'unknown',
+  };
+
+  static bool _fields(
+    Object? value,
+    Set<String> required, [
+    Set<String> optional = const {},
+  ]) =>
+      value is Map &&
+      required.every(value.containsKey) &&
+      value.keys.every(
+        (key) => required.contains(key) || optional.contains(key),
+      );
+
+  static bool _rows(
+    Object? value,
+    int max,
+    bool Function(dynamic) valid, {
+    int min = 0,
+  }) =>
+      value is List &&
+      value.length >= min &&
+      value.length <= max &&
+      value.every(valid);
+
+  bool _validRichTimeline(Map row, List refs) {
+    bool cited(Map claim) =>
+        _bounded(claim['ref'], 600) &&
+        refs.contains(claim['ref']) &&
+        _bounded(claim['quote'], 600) &&
+        (records[claim['ref']]!['text'] as String).contains(
+          claim['quote'] as String,
+        );
+    for (final field in _richFields.where(row.containsKey)) {
+      final value = row[field];
+      final valid = switch (field) {
+        'kind' => const {
+          'attention',
+          'deadline',
+          'progress',
+          'insight',
+        }.contains(value),
+        'status_label' => value is String && value.trim().length <= 18,
+        'category' => _bounded(value, 40),
+        'why_now' => _bounded(value, 160),
+        'uncertainty' => value is String && value.length <= 160,
+        'people' => _rows(
+          value,
+          8,
+          (v) =>
+              _fields(v, {'name', 'quote', 'ref'}) &&
+              _bounded(v['name'], 60) &&
+              cited(v as Map),
+        ),
+        'facts' => _rows(
+          value,
+          3,
+          (v) =>
+              _fields(v, {'text', 'quote', 'ref'}, {'label', 'tone'}) &&
+              _bounded(v['text'], 160) &&
+              (!v.containsKey('label') ||
+                  (v['label'] is String &&
+                      (v['label'] as String).trim().length <= 32)) &&
+              (!v.containsKey('tone') ||
+                  const {
+                    'neutral',
+                    'risk',
+                    'warning',
+                    'positive',
+                  }.contains(v['tone'])) &&
+              cited(v as Map),
+          min: 1,
+        ),
+        'next_steps' => _rows(
+          value,
+          3,
+          (v) =>
+              _fields(v, {'title', 'detail'}) &&
+              _bounded(v['title'], 40) &&
+              _bounded(v['detail'], 100),
+        ),
+        'actions' => _rows(
+          value,
+          2,
+          (v) =>
+              _fields(v, {'label', 'kind'}) &&
+              _bounded(v['label'], 40) &&
+              const {'discuss', 'draft'}.contains(v['kind']),
+        ),
+        'temporal' =>
+          _fields(value, {'kind', 'dates'}) &&
+              _timeKinds.contains((value as Map)['kind']) &&
+              _rows(
+                value['dates'],
+                3,
+                (v) =>
+                    _fields(v, {'role', 'date', 'ref', 'quote'}) &&
+                    const {
+                      'occurred',
+                      'started',
+                      'deadline',
+                      'scheduled',
+                    }.contains(v['role']) &&
+                    _validDate(v['date']) &&
+                    cited(v as Map),
+              ),
+        _ => false,
+      };
+      if (!valid) return false;
+    }
+    return true;
+  }
+
+  static bool _validDate(Object? day) {
+    if (day is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(day)) {
+      return false;
+    }
+    final parsed = DateTime.tryParse(day);
+    return parsed != null && parsed.toIso8601String().substring(0, 10) == day;
   }
 
   static bool _validTime(Object? value) {
@@ -75,15 +222,7 @@ class ExperiencePersonaSources {
         value.keys.any(
           (key) => !{...dates, 'kind', 'anchor_basis'}.contains(key),
         ) ||
-        !const {
-          'event',
-          'ongoing',
-          'deadline',
-          'scheduled',
-          'synthesis',
-          'background',
-          'unknown',
-        }.contains(value['kind']) ||
+        !_timeKinds.contains(value['kind']) ||
         !const {
           'occurred',
           'deadline',
@@ -96,11 +235,7 @@ class ExperiencePersonaSources {
     return dates.every((key) {
       final day = value[key];
       if (day == null) return key != 'as_of';
-      if (day is! String || !RegExp(r'^\d{4}-\d{2}-\d{2}$').hasMatch(day)) {
-        return false;
-      }
-      final parsed = DateTime.tryParse(day);
-      return parsed != null && parsed.toIso8601String().substring(0, 10) == day;
+      return _validDate(day);
     });
   }
 
