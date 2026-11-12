@@ -1935,6 +1935,43 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     ],
   );
 
+  Widget _compactCallPanel() => PhoneVoicePanel(
+    petAvatar: petAvatarStore,
+    session: phoneVoice!,
+    language: language,
+    compact: true,
+    onExpand: _expandPhoneVoice,
+    onMinimize: _minimizePhoneVoice,
+    onEnd: _dismissPhoneVoice,
+    onSettings: () => unawaited(_voiceSettings()),
+    onStart: () => unawaited(_startPhoneVoice()),
+  );
+
+  /// The compact call bar as the chat header. A task chat keeps its way back.
+  PreferredSizeWidget _callBar({required bool back}) => PreferredSize(
+    preferredSize: const Size.fromHeight(64),
+    child: SafeArea(
+      bottom: false,
+      child: Padding(
+        padding: EdgeInsets.fromLTRB(back ? 0 : 8, 4, 8, 4),
+        child: Row(
+          children: [
+            if (back)
+              IconButton(
+                tooltip: _t('所有任务', 'All tasks'),
+                icon: const Icon(CupertinoIcons.chevron_left, size: 23),
+                onPressed: () {
+                  FocusManager.instance.primaryFocus?.unfocus();
+                  setState(() => _taskOpen = false);
+                },
+              ),
+            Expanded(child: _compactCallPanel()),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Widget _settingsButton() => IconButton(
     key: const ValueKey('global.settings'),
     tooltip: _t('设置', 'Settings'),
@@ -1961,9 +1998,20 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     final fullCall = _phoneVoiceExpanded && phoneVoice != null;
     final connector = feishu;
     final profileHint = _profileHint();
-    final appBar = _tab == 0
+    final compactCall =
+        _phoneVoiceShown &&
+        phoneVoice != null &&
+        !fullCall &&
+        (phoneVoice!.active || phoneVoice!.connecting);
+    // In a chat, the call bar takes the chat header's place instead of
+    // stacking under it; other pages keep their bar and show it below.
+    final taskChat = _tab == 1 && _taskOpen && host != null;
+    final callInHeader = compactCall && (_tab == 0 || taskChat);
+    final appBar = callInHeader
+        ? _callBar(back: taskChat)
+        : _tab == 0
         ? _novaBar()
-        : _tab == 1 && _taskOpen && host != null
+        : taskChat
         ? _taskBar()
         : widget.space == null
         ? _pageBar()
@@ -2048,21 +2096,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 ),
                               ),
                             ),
-                          if (_phoneVoiceShown &&
-                              phoneVoice != null &&
-                              !fullCall &&
-                              (phoneVoice!.active || phoneVoice!.connecting))
-                            PhoneVoicePanel(
-                              petAvatar: petAvatarStore,
-                              session: phoneVoice!,
-                              language: language,
-                              compact: true,
-                              onExpand: _expandPhoneVoice,
-                              onMinimize: _minimizePhoneVoice,
-                              onEnd: _dismissPhoneVoice,
-                              onSettings: () => unawaited(_voiceSettings()),
-                              onStart: () => unawaited(_startPhoneVoice()),
-                            ),
+                          if (compactCall && !callInHeader) _compactCallPanel(),
                           Expanded(
                             child: IndexedStack(
                               index: host == null && _tab < 2

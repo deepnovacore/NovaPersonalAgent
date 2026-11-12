@@ -273,6 +273,19 @@ void main() {
           await tester.tap(find.byTooltip('Minimize call'));
           await tester.pumpAndSettle();
           expect(call.active, isTrue);
+          // The call bar replaces the chat header rather than stacking.
+          expect(
+            find.byKey(const ValueKey('voice-compact-bar')),
+            findsOneWidget,
+          );
+          expect(find.text('NovaCore'), findsNothing);
+          expect(
+            find.descendant(
+              of: find.byType(AppBar),
+              matching: find.byKey(const ValueKey('voice-compact-bar')),
+            ),
+            findsNothing,
+          );
         }
         final stoppedBefore = audio.stopCount;
         final gate = audio.stopGate = Completer<void>();
@@ -283,6 +296,7 @@ void main() {
         await tester.pump();
         expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
         expect(find.byKey(const ValueKey('voice-compact-bar')), findsNothing);
+        expect(find.text('NovaCore'), findsOneWidget);
         expect(
           tester.state<LocalChatPanelState>(find.byType(LocalChatPanel)),
           same(original),
