@@ -1,10 +1,23 @@
 import 'dart:async';
 import 'package:flutter/services.dart' show PlatformException;
+import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/widgets.dart'
     show AppLifecycleState, WidgetsBinding, WidgetsBindingObserver;
 import '../agent/phone_run.dart';
 import '../ui/pet_avatar.dart';
 import 'voice_companion.dart';
+
+/// A running Nova agent turn (text lane or delegated task) for the pet.
+/// [id] is stable for the turn; [label] names the current step.
+class AgentActivity {
+  const AgentActivity(this.id, this.label);
+  final String id, label;
+  @override
+  bool operator ==(Object other) =>
+      other is AgentActivity && other.id == id && other.label == label;
+  @override
+  int get hashCode => Object.hash(id, label);
+}
 
 /// Mirrors the virtual-tier phone run on the Android floating pet
 /// (packages/nova_audio/FLOATING_PET.md "Integration contract").
@@ -30,7 +43,19 @@ class PhoneTaskPet with WidgetsBindingObserver {
     this.onOpen,
     this.onOverlayPermissionNeeded,
     this.onStopCoverChanged,
+    this.agentActivity,
+    this.onStopAgent,
   }) : _actionSource = actions;
+
+  /// Nova's own running turn, shown as `running` while no virtual-screen run
+  /// is active. Its stop is not covered: native keeps its own stop button.
+  final ValueListenable<AgentActivity?>? agentActivity;
+
+  /// Cancels the agent turn [id] the pet showed.
+  final void Function(String id)? onStopAgent;
+
+  /// The agent turn the overlay carries, if any.
+  String? _agentId;
 
   final PhoneRunTracker tracker;
   final TaskCompanion companion;
@@ -79,6 +104,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
     if (_started || _disposed) return;
     _started = true;
     tracker.addListener(_sync);
+    agentActivity?.addListener(_sync);
     WidgetsBinding.instance.addObserver(this);
     _subscriptions
       ..add(_actionSource.listen(_onAction))
@@ -119,9 +145,45 @@ class PhoneTaskPet with WidgetsBindingObserver {
     if (next != null && next.taskId != _runId) _runId = next.taskId;
     final current = _runId == null ? null : tracker.run(_runId!);
     if (current != null) {
+      // A phone run takes the overlay in place; the agent turn yields.
+      _agentId = null;
       _show(current, current.needsUser ? 'needs_user' : 'running');
+    } else {
+      _syncAgent();
     }
     _syncPreview();
+  }
+
+  void _syncAgent() {
+    final activity = agentActivity?.value;
+    final previous = _agentId;
+    if (activity == null) {
+      if (previous != null) {
+        _agentId = null;
+        _hide(previous);
+      }
+      return;
+    }
+    // A finished run still holds its terminal state for three seconds.
+    if (_overlayId != null && _overlayId != previous) return;
+    if (_blocked.contains(activity.id)) return;
+    _agentId = activity.id;
+    final state = (activity.id, 'running', activity.label, null);
+    if (state == _sent) return;
+    _sent = state;
+    _overlayId = activity.id;
+    unawaited(
+      companion
+          .showTask(
+            taskId: activity.id,
+            status: 'running',
+            label: activity.label,
+          )
+          .then<void>(
+            (_) {},
+            onError: (Object error) => _failed(activity.id, error),
+          ),
+    );
   }
 
   void _finish(PhoneRun run) {
@@ -227,6 +289,10 @@ class PhoneTaskPet with WidgetsBindingObserver {
       _uncover(gone.taskId);
     }
     if (gone.reason == 'overlay_permission') _hint();
+    if (gone.taskId == _agentId) _agentId = null;
+    // A finished phone run's terminal state ended: a running agent turn may
+    // take the overlay now.
+    if (_runId == null) _syncAgent();
     _syncPreview();
   }
 
@@ -234,6 +300,13 @@ class PhoneTaskPet with WidgetsBindingObserver {
     if (_disposed) return;
     switch (action) {
       case 'task_stop':
+        final agent = _agentId;
+        if (_runId == null && agent != null && agent == _overlayId) {
+          if (!_stopRequested.add(agent)) return;
+          onStopAgent?.call(agent);
+          Timer(const Duration(seconds: 5), () => _stopRequested.remove(agent));
+          return;
+        }
         final id = _runId ?? _overlayId;
         final run = id == null ? null : tracker.run(id);
         if (id == null || run == null || !run.active) return;
@@ -301,6 +374,7 @@ class PhoneTaskPet with WidgetsBindingObserver {
     _disposed = true;
     if (_started) {
       tracker.removeListener(_sync);
+      agentActivity?.removeListener(_sync);
       WidgetsBinding.instance.removeObserver(this);
     }
     for (final subscription in _subscriptions) {

@@ -27,6 +27,7 @@ import '../agent_core/schedule_wake.dart';
 import '../voice/audio_owner.dart';
 import '../voice/voice_companion.dart';
 import '../voice/phone_task_pet.dart';
+import 'tool_step.dart';
 import '../voice/phone_voice_session.dart';
 import '../voice/phone_voice_panel.dart';
 import '../voice/voice_delegate.dart';
@@ -287,6 +288,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         onStop: _stopPhoneRun,
         onOpen: _openFromTaskPet,
         onOverlayPermissionNeeded: _overlayPermissionHint,
+        agentActivity: _agentActivity,
+        onStopAgent: _stopAgentActivity,
         onStopCoverChanged: (taskId, covered) => unawaited(
           phoneChannel!
               .setStopCovered(taskId, covered)
@@ -515,7 +518,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
         store: host.store,
       )..addListener(_phoneVoiceChanged);
       setState(() {
-        agentCore = host;
+        agentCore = host..addListener(_agentChanged);
         phoneVoice = call;
         _localMemory = localMemory;
         memoryAdopted = true;
@@ -541,7 +544,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           return;
         }
         setState(() {
-          voiceDelegates = bridge..addListener(_voiceChanged);
+          voiceDelegates = bridge
+            ..addListener(_voiceChanged)
+            ..addListener(_agentChanged);
           phoneVoice?.attachDelegates(bridge);
         });
       } catch (_) {
@@ -1690,6 +1695,8 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   @override
   void dispose() {
     _watchedSources?.removeListener(_profileAccessListener);
+    agentCore?.removeListener(_agentChanged);
+    voiceDelegates?.removeListener(_agentChanged);
     _experienceSession.dispose();
     _personaSources?.snapshot.dispose();
     // Before the tracker and the avatar store it uses.
@@ -1721,6 +1728,34 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   void _stopPhoneTask() => _stopPhoneRun(phoneRun?.activeVirtual?.taskId);
 
   /// The Stop path of the picture and of the floating pet.
+  /// The running agent turn mirrored on the floating pet: a delegated task
+  /// first, then the text lane.
+  final _agentActivity = ValueNotifier<AgentActivity?>(null);
+  void _agentChanged() {
+    final delegate = voiceDelegates;
+    final text = agentCore;
+    String label(String? tool) => tool == null
+        ? (language == 'zh' ? '正在处理' : 'Working')
+        : ToolStep(name: tool, status: 'running', language: language).label;
+    _agentActivity.value = delegate != null && delegate.busy
+        ? AgentActivity('agent:task:${delegate.id}', label(delegate.activeTool))
+        : text != null && text.busy
+        ? AgentActivity(
+            'agent:chat:${text.turnStartedAt?.microsecondsSinceEpoch ?? 0}',
+            label(text.activeTool),
+          )
+        : null;
+  }
+
+  void _stopAgentActivity(String id) {
+    if (id.startsWith('agent:task:')) {
+      final task = id.substring('agent:task:'.length);
+      if (voiceDelegates?.id == task) voiceDelegates!.cancel(task);
+    } else if (id.startsWith('agent:chat:')) {
+      agentCore?.cancel();
+    }
+  }
+
   void _stopPhoneRun(String? taskId) {
     if (taskId != null) {
       unawaited(

@@ -454,4 +454,68 @@ void main() {
       expect(covers, isEmpty);
     });
   });
+
+  group('agent turns', () {
+    late ValueNotifier<AgentActivity?> activity;
+    late List<String> agentStops;
+    setUp(() {
+      // Replace the default pet with one that also mirrors agent turns.
+      pet.dispose();
+      companion.hides.clear();
+      activity = ValueNotifier(null);
+      agentStops = [];
+      pet = PhoneTaskPet(
+        tracker: tracker,
+        companion: companion,
+        actions: actions.stream,
+        onStop: stopped.add,
+        onStopCoverChanged: (id, covered) => covers.add((id, covered)),
+        agentActivity: activity,
+        onStopAgent: agentStops.add,
+      )..start();
+    });
+
+    test('a running agent turn spins the pet and hides when idle', () async {
+      activity.value = const AgentActivity('agent:task:a', '写入文件');
+      await settle();
+      activity.value = const AgentActivity('agent:task:a', '执行命令');
+      await settle();
+      activity.value = null;
+      await settle();
+      expect(companion.shows, [
+        'agent:task:a|running|写入文件|null',
+        'agent:task:a|running|执行命令|null',
+      ]);
+      expect(companion.hides, ['agent:task:a']);
+      expect(covers, isEmpty, reason: 'native keeps its own stop button');
+    });
+
+    test(
+      'a phone run takes the overlay in place, then the turn returns',
+      () async {
+        activity.value = const AgentActivity('agent:chat:1', '正在处理');
+        await settle();
+        channel.emit(stepEvent(status: StepStatus.running, label: '打开小红书'));
+        await settle();
+        expect(companion.shows.last, 't1|running|打开小红书|1');
+        expect(companion.hides, isEmpty);
+        channel.emit(doneEvent());
+        await settle();
+        expect(companion.shows.last, 't1|done|打开小红书|1');
+        // The done state is native's for three seconds; then the turn is back.
+        companion.gone.add(const TaskOverlayGone('t1', 'expired'));
+        await settle();
+        expect(companion.shows.last, 'agent:chat:1|running|正在处理|null');
+      },
+    );
+
+    test('the pet stop cancels the agent turn once per tap burst', () async {
+      activity.value = const AgentActivity('agent:task:a', '写入文件');
+      await settle();
+      actions.add('task_stop');
+      actions.add('task_stop');
+      expect(agentStops, ['agent:task:a']);
+      expect(stopped, isEmpty);
+    });
+  });
 }
