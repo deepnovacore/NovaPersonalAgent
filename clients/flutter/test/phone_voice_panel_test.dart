@@ -211,6 +211,22 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
+  for (final code in ['idle_timeout', 'provider_response_idle_timeout']) {
+    testWidgets('$code reads as a quiet end, not a failure', (tester) async {
+      final session = PanelSession()..error = code;
+      await tester.pumpWidget(panelHost(session, reduced: true));
+      expect(find.text('通话因长时间静音已自动结束，可随时重新开始。'), findsOneWidget);
+      expect(find.textContaining('通话失败'), findsNothing);
+      expect(isVoiceIdleEnd(code), isTrue);
+      await tester.pumpWidget(const SizedBox());
+      session.dispose();
+    });
+  }
+  test('other provider errors are not idle ends', () {
+    expect(isVoiceIdleEnd('provider_disconnected'), isFalse);
+    expect(isVoiceIdleEnd(null), isFalse);
+  });
+
   testWidgets('handshake rejection shows status and an actionable reason', (
     tester,
   ) async {

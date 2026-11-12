@@ -709,7 +709,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           }
         });
       }
-      if (ended && call.error == 'idle_timeout') {
+      if (ended && isVoiceIdleEnd(call.error)) {
         // The compact bar is gone with the call; say why it ended.
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(

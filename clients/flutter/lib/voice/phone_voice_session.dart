@@ -59,6 +59,12 @@ const voiceDelegateTools = <Map<String, dynamic>>[
   },
 ];
 
+/// A call ended because nothing was said for a while: this app's own idle
+/// limit, or the realtime service's (Qwen sends response_idle_timeout after
+/// about three silent minutes). Not a failure the user has to fix.
+bool isVoiceIdleEnd(String? error) =>
+    error == 'idle_timeout' || error == 'provider_response_idle_timeout';
+
 String voiceDelegateAccepted(String task, {String? taskId}) =>
     'Delegate $task accepted${taskId == null ? '' : ' (task_id $taskId; pass it to continue this task later)'} and is now running in the background; its result will arrive later. If you have not spoken yet, say in one short, warm first-person sentence what you are starting now, for example 好的，我来打开小红书看看 or OK, I\'ll open Xiaohongshu for you; do not mention task ids or say it has finished.';
 
