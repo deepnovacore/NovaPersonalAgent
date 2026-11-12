@@ -121,11 +121,11 @@ void main() {
           gap(find.widgetWithText(ListTile, 'page.html'), thoughts.at(1)),
           closeTo(16, .01),
         );
-        // A finished text message ends in its 32 px copy-button row, which
-        // replaces the 24 px bottom padding.
+        // Only the turn's last text ends in the 32 px action row; earlier
+        // texts keep the 24 px bottom padding.
         expect(
           gap(reply('Final paragraph one'), reply('Final paragraph two')),
-          closeTo(32, .01),
+          closeTo(24, .01),
         );
         final users = find.byWidgetPredicate(
           (widget) =>

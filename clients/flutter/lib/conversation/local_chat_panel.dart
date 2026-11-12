@@ -77,6 +77,18 @@ Future<void> showLocalModelSettings(
   );
 }
 
+class _TurnActions {
+  const _TurnActions({
+    required this.copy,
+    required this.feedback,
+    required this.regenerate,
+  });
+  final String copy;
+  // The message whose stored feedback the turn shows and toggles.
+  final Map feedback;
+  final bool regenerate;
+}
+
 class LocalChatPanel extends StatefulWidget {
   const LocalChatPanel({
     super.key,
@@ -107,7 +119,7 @@ class LocalChatPanel extends StatefulWidget {
   /// single `device_run_task` result and join the group it sits in.
   final PhoneRunTracker? phoneRun;
 
-  /// Floats over the message list only, never over the header, the model row
+  /// Floats over the message list only, never over the header
   /// or the composer, whatever the text size.
   final Widget? floating;
   final Widget? header;
@@ -137,7 +149,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   bool pickingAttachment = false;
   List<Map<String, dynamic>> get attachments =>
       attachmentDrafts.putIfAbsent(widget.conversationId, () => []);
-  String? model;
   bool? hasCustomModel;
   bool get _experienceDefault =>
       widget.host.experienceModel != null && hasCustomModel == false;
@@ -149,6 +160,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
   bool atBottom = true;
   String? _copiedKey;
   Timer? _copyTimer;
+  Map<String, _TurnActions> _actions = const {};
   String t(String zh, String en) => widget.language == 'zh' ? zh : en;
   @override
   void initState() {
@@ -212,11 +224,9 @@ class LocalChatPanelState extends State<LocalChatPanel> {
 
   Future<void> _readModel() async {
     final host = widget.host;
-    String? name;
     bool? selected;
     try {
       final value = await host.settings.read();
-      name = value?.model;
       selected = value != null;
     } catch (_) {
       if (host.experienceModel != null) {
@@ -229,7 +239,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     }
     if (mounted && identical(widget.host, host)) {
       setState(() {
-        model = name;
         hasCustomModel = selected;
       });
     }
@@ -302,30 +311,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           ),
         ) ??
         false;
-  }
-
-  Future<void> _modelSettings() async {
-    if (widget.onModelSettings != null) {
-      widget.onModelSettings!();
-      return;
-    }
-    try {
-      await showLocalModelSettings(
-        context,
-        widget.host.settings,
-        language: widget.language,
-        experienceDefault: widget.host.experienceModel != null,
-      );
-      await _readModel();
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(t('无法读取模型设置', 'Could not read model settings')),
-          ),
-        );
-      }
-    }
   }
 
   Future<void> cancelDictation() async => dictation?.cancel();
@@ -874,6 +859,49 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     if (mounted) setState(() {});
   }
 
+  // One action row per turn, keyed by the time of the turn's last finished
+  // assistant text. A late delegate result joins the turn that dispatched it.
+  Map<String, _TurnActions> _turnActions(List messages, bool runningHere) {
+    final turns = <List<Map>>[[]];
+    final delegateTurns = <Object, int>{};
+    for (final m in messages.cast<Map>()) {
+      if (m['role'] == 'user') {
+        turns.add([]);
+        continue;
+      }
+      var turn = turns.length - 1;
+      final delegate = m['delegate_id'];
+      if (delegate != null && widget.showProcess) {
+        if (m['delegate_status'] == 'dispatched') {
+          delegateTurns.putIfAbsent(delegate, () => turn);
+        } else {
+          turn = delegateTurns[delegate] ?? turn;
+        }
+      }
+      if (m['role'] == 'assistant' &&
+          m['time'] is String &&
+          (m['content'] as String? ?? '').trim().isNotEmpty &&
+          (m['tool_calls'] as List? ?? []).isEmpty) {
+        turns[turn].add(m);
+      }
+    }
+    final latest = turns.length - 1;
+    return {
+      for (var i = 0; i < turns.length; i++)
+        if (turns[i].isNotEmpty && !(i == latest && runningHere))
+          turns[i].last['time'] as String: _TurnActions(
+            copy: widget.showProcess
+                ? turns[i].map((m) => m['content'] as String).join('\n\n')
+                : turns[i].last['content'] as String,
+            feedback: turns[i].lastWhere(
+              (m) => m['feedback'] is String,
+              orElse: () => turns[i].last,
+            ),
+            regenerate: i == latest && _latestReply(turns[i].last),
+          ),
+    };
+  }
+
   Widget _message(Map message) {
     final reasoning =
         widget.showProcess &&
@@ -894,9 +922,15 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 (message['tool_calls'] as List).isNotEmpty);
     // Stored, finished text messages only: the streaming draft and the pending
     // user text carry no timestamp, and tool-call envelopes are process steps.
-    final copyText = message['time'] is String && !process
-        ? (user ? text.split(localAttachmentHeader).first.trimRight() : text)
-        : '';
+    final actions = user || process || text.isEmpty
+        ? null
+        : _actions[message['time']];
+    final copyText = user
+        ? (message['time'] is String
+              ? text.split(localAttachmentHeader).first.trimRight()
+              : '')
+        : actions?.copy ?? '';
+    final feedback = actions?.feedback['feedback'];
     final copyKey = '${message['time']}:${message['role']}';
     final copied = _copiedKey == copyKey;
     return Padding(
@@ -917,8 +951,8 @@ class LocalChatPanelState extends State<LocalChatPanel> {
             Row(
               mainAxisSize: user ? MainAxisSize.min : MainAxisSize.max,
               children: [
-                if (!user && message['role'] == 'assistant') ...[
-                  if (_latestReply(message))
+                if (actions != null) ...[
+                  if (actions.regenerate)
                     _action(
                       CupertinoIcons.arrow_clockwise,
                       t('重新生成', 'Regenerate'),
@@ -927,20 +961,20 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                           : null,
                     ),
                   _action(
-                    message['feedback'] == 'like'
+                    feedback == 'like'
                         ? CupertinoIcons.hand_thumbsup_fill
                         : CupertinoIcons.hand_thumbsup,
                     t('赞', 'Like'),
-                    () => unawaited(_feedback(message, 'like')),
-                    selected: message['feedback'] == 'like',
+                    () => unawaited(_feedback(actions.feedback, 'like')),
+                    selected: feedback == 'like',
                   ),
                   _action(
-                    message['feedback'] == 'dislike'
+                    feedback == 'dislike'
                         ? CupertinoIcons.hand_thumbsdown_fill
                         : CupertinoIcons.hand_thumbsdown,
                     t('踩', 'Dislike'),
-                    () => unawaited(_feedback(message, 'dislike')),
-                    selected: message['feedback'] == 'dislike',
+                    () => unawaited(_feedback(actions.feedback, 'dislike')),
+                    selected: feedback == 'dislike',
                   ),
                 ],
                 SizedBox(
@@ -1076,6 +1110,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           host.busy && host.activeConversationId == widget.conversationId;
       final conversation = host.store.conversation(widget.conversationId);
       final messages = conversation['messages'] as List;
+      _actions = _turnActions(messages, runningHere);
       final messageWidgets = <Widget>[];
       final seenPreviews = <String>{};
       final toolSteps = <ToolStep>[];
@@ -1269,55 +1304,6 @@ class LocalChatPanelState extends State<LocalChatPanel> {
           return Column(
             children: [
               ?widget.header,
-              if (!compact)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    Flexible(
-                      child: PopupMenuButton<String>(
-                        tooltip: t('对话方式', 'Conversation mode'),
-                        enabled: !host.busy,
-                        onSelected: (_) => _modelSettings(),
-                        itemBuilder: (_) => [
-                          PopupMenuItem(
-                            value: 'model',
-                            child: Text(t('模型设置', 'Model settings')),
-                          ),
-                        ],
-                        child: Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  _experienceDefault
-                                      ? t('体验服务', 'Experience service')
-                                      : model ??
-                                            (hasCustomModel == true
-                                                ? t('自配模型', 'Your model')
-                                                : t('选择模型', 'Choose model')),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Nova.secondary,
-                                    fontSize: 13,
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 5),
-                              const Icon(
-                                CupertinoIcons.chevron_down,
-                                size: 10,
-                                color: Nova.secondary,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
               ...[
                 Expanded(
                   child: _floatOver(

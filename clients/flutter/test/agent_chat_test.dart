@@ -516,12 +516,8 @@ void main() {
       await tester.tap(find.byTooltip('发送'));
       await tester.pumpAndSettle();
       expect(find.text('Hello there', findRichText: true), findsOneWidget);
-      await tester.tap(find.byTooltip('对话方式'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('模型设置'));
-      await tester.pumpAndSettle();
-      await tester.tap(find.text('取消'));
-      await tester.pumpAndSettle();
+      expect(find.text('m'), findsNothing);
+      expect(find.byTooltip('对话方式'), findsNothing);
       expect(tester.takeException(), isNull);
       expect(host.busy, false);
       expect(host.error, isNull);

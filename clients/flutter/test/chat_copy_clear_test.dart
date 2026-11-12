@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'package:flutter/cupertino.dart' show CupertinoIcons;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
@@ -509,6 +510,211 @@ void main() {
     expect(copied.last, 'the answer [file](nova-file:///workspace/a.pdf)');
     await tester.pump(const Duration(milliseconds: 1600));
     semantics.dispose();
+  });
+
+  testWidgets('assistant actions appear once per turn on its last text', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final id = await store.create();
+    await store.append(id, {'role': 'assistant', 'content': 'hello'});
+    await store.append(id, {'role': 'assistant', 'content': 'welcome'});
+    await store.append(id, {'role': 'user', 'content': 'open the app'});
+    await store.append(id, {'role': 'assistant', 'content': 'on it'});
+    await store.append(id, {
+      'role': 'assistant',
+      'content': '',
+      'tool_calls': [
+        {
+          'id': 'c1',
+          'type': 'function',
+          'function': {'name': 'file_read', 'arguments': '{}'},
+        },
+      ],
+    });
+    await store.append(id, {
+      'role': 'tool',
+      'content': jsonEncode({'status': 'completed'}),
+      'tool_call_id': 'c1',
+      'tool_name': 'file_read',
+    });
+    await store.append(id, {'role': 'assistant', 'content': 'opened'});
+    await store.append(id, {'role': 'user', 'content': 'thanks'});
+    await store.append(id, {'role': 'assistant', 'content': 'first part'});
+    await store.append(id, {'role': 'assistant', 'content': 'last part'});
+    List messages() => store.conversation(id)['messages'] as List;
+    await store.setFeedback(id, messages()[3]['time'] as String, 'like');
+    final model = _Model();
+    final host = AgentCoreHost(
+      store: store,
+      settings: await _settings(),
+      clientFactory: () => model,
+    );
+    addTearDown(host.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(host: host, conversationId: id, language: 'en'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    // Greeting, two user messages and two assistant turns.
+    expect(find.byTooltip('Copy'), findsNWidgets(5));
+    expect(find.byTooltip('Like'), findsNWidgets(3));
+    expect(find.byTooltip('Dislike'), findsNWidgets(3));
+    expect(find.byTooltip('Regenerate'), findsOneWidget);
+    for (final tail in ['welcome', 'opened', 'last part']) {
+      final time = messages().firstWhere((m) => m['content'] == tail)['time'];
+      expect(find.byKey(ValueKey('copy:$time:assistant')), findsOneWidget);
+    }
+    expect(
+      tester.getCenter(find.byTooltip('Regenerate')).dy,
+      greaterThan(tester.getCenter(find.text('last part')).dy),
+    );
+
+    final openedTime = messages().firstWhere(
+      (m) => m['content'] == 'opened',
+    )['time'];
+    await tester.tap(find.byKey(ValueKey('copy:$openedTime:assistant')));
+    await tester.pump();
+    expect(copied.last, 'on it\n\nopened');
+    await tester.pump(const Duration(milliseconds: 1600));
+    final greetingTime = messages()[1]['time'];
+    await tester.tap(find.byKey(ValueKey('copy:$greetingTime:assistant')));
+    await tester.pump();
+    expect(copied.last, 'hello\n\nwelcome');
+    await tester.pump(const Duration(milliseconds: 1600));
+
+    // The earlier feedback on "on it" is the turn's, and toggles there.
+    final likes = find.byWidgetPredicate(
+      (w) =>
+          w is Icon &&
+          (w.icon == CupertinoIcons.hand_thumbsup_fill ||
+              w.icon == CupertinoIcons.hand_thumbsup),
+    );
+    expect(likes, findsNWidgets(3));
+    expect(
+      find.byWidgetPredicate(
+        (w) => w is Icon && w.icon == CupertinoIcons.hand_thumbsup_fill,
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(find.byTooltip('Dislike').at(1));
+    await tester.pumpAndSettle();
+    expect(messages()[3]['feedback'], 'dislike');
+    expect(messages()[6]['feedback'], isNull);
+    await tester.tap(find.byTooltip('Dislike').at(1));
+    await tester.pumpAndSettle();
+    expect(messages()[3]['feedback'], isNull);
+    await tester.tap(find.byTooltip('Like').last);
+    await tester.pumpAndSettle();
+    expect(messages().last['feedback'], 'like');
+    expect(messages()[messages().length - 2]['feedback'], isNull);
+  });
+
+  testWidgets('a late delegate result joins the turn that dispatched it', (
+    tester,
+  ) async {
+    final copied = <String>[];
+    tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+      SystemChannels.platform,
+      (call) async {
+        if (call.method == 'Clipboard.setData') {
+          copied.add((call.arguments as Map)['text'] as String);
+        }
+        return null;
+      },
+    );
+    addTearDown(
+      () => tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+        SystemChannels.platform,
+        null,
+      ),
+    );
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final id = await store.create();
+    await store.append(id, {'role': 'user', 'content': 'open notes'});
+    await store.append(id, {'role': 'assistant', 'content': 'opening notes'});
+    await store.append(id, {
+      'role': 'assistant',
+      'content': '',
+      'voice_delegate_call': 'v1',
+      'delegate_id': 'd1',
+      'delegate_status': 'dispatched',
+      'delegate_context': 'ctx',
+      'request': 'open notes',
+    });
+    await store.append(id, {'role': 'user', 'content': 'and the weather?'});
+    await store.append(id, {'role': 'assistant', 'content': 'sunny'});
+    await store.append(id, {
+      'role': 'assistant',
+      'content': 'notes opened',
+      'delegate_id': 'd1',
+      'delegate_context': 'ctx',
+      'delegate_status': 'returned',
+    });
+    List messages() => store.conversation(id)['messages'] as List;
+    final host = AgentCoreHost(store: store, settings: ModelSettings());
+    addTearDown(host.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(host: host, conversationId: id, language: 'en'),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byTooltip('Like'), findsNWidgets(2));
+    final opening = messages()[1]['time'];
+    final sunny = messages()[4]['time'];
+    final result = messages()[5]['time'];
+    expect(find.byKey(ValueKey('copy:$opening:assistant')), findsNothing);
+    expect(find.byKey(ValueKey('copy:$sunny:assistant')), findsOneWidget);
+    await tester.tap(find.byKey(ValueKey('copy:$result:assistant')));
+    await tester.pump();
+    expect(copied.last, 'opening notes\n\nnotes opened');
+    await tester.pump(const Duration(milliseconds: 1600));
+    await tester.tap(find.byKey(ValueKey('copy:$sunny:assistant')));
+    await tester.pump();
+    expect(copied.last, 'sunny');
+    await tester.pump(const Duration(milliseconds: 1600));
+    // Rerunning the latest turn would also drop the late result: no rerun.
+    expect(find.byTooltip('Regenerate'), findsNothing);
+
+    // While the latest turn still runs, its stored text has no actions yet.
+    host.busy = true;
+    host.activeConversationId = id;
+    await tester.pumpWidget(const SizedBox());
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(host: host, conversationId: id, language: 'en'),
+        ),
+      ),
+    );
+    expect(find.byKey(ValueKey('copy:$sunny:assistant')), findsNothing);
+    expect(find.byKey(ValueKey('copy:$result:assistant')), findsOneWidget);
+    host.busy = false;
+    host.activeConversationId = null;
   });
 
   testWidgets('no copy button on a message that is still streaming', (
