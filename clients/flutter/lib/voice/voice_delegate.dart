@@ -494,10 +494,25 @@ class VoiceDelegateBridge extends ChangeNotifier {
       if (cancelledBeforeStart) {
         result = t('任务已停止，未开始执行。', 'Task stopped before execution started.');
       } else if (worker.error == 'cancelled') {
-        result = t(
-          '任务已停止，没有完成。已经做过的修改会保留，未做完的部分没有继续。',
-          'The task was stopped and did not finish. Changes already made are kept; the rest was not done.',
-        );
+        // A step that was already dispatched may have taken effect.
+        final uncertain = messages.skip(before).any((m) {
+          if (m['role'] != 'tool') return false;
+          try {
+            return (jsonDecode(m['content'] as String) as Map)['status'] ==
+                'outcome_unknown';
+          } catch (_) {
+            return false;
+          }
+        });
+        result = uncertain
+            ? t(
+                '任务已停止，没有完成。停止时最后一步可能已经生效，请到对应 App 里核对；不会自动重试。',
+                'The task was stopped and did not finish. The last step may already have taken effect; check the app. It will not be retried.',
+              )
+            : t(
+                '任务已停止，没有完成。已经做过的修改会保留，未做完的部分没有继续。',
+                'The task was stopped and did not finish. Changes already made are kept; the rest was not done.',
+              );
       } else if (worker.error != null) {
         final detail = worker.errorDetail;
         final reason = reasonCopy(

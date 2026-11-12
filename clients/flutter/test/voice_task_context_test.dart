@@ -1062,4 +1062,41 @@ void main() {
       expect(parent.last['content'], contains('任务已停止'));
     },
   );
+
+  test(
+    'a stop after a dispatched phone step says it may have taken effect',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final origin = await store.ensureMain();
+      final model = _Midway();
+      final primary = AgentCoreHost(store: store, settings: _Settings());
+      final bridge = VoiceDelegateBridge(
+        primary: primary,
+        worker: AgentCoreHost(
+          store: store,
+          settings: primary.settings,
+          allowLocalMemory: false,
+          clientFactory: () => model,
+        ),
+      );
+      addTearDown(bridge.dispose);
+      addTearDown(primary.dispose);
+      final terminal = bridge.updates.firstWhere((u) => u.terminal);
+      await bridge.start(conversation: origin, callId: 'send', request: '发消息');
+      await model.started.future;
+      // The phone step whose result is unknown, as the runner records it.
+      await store.append(bridge.taskConversationId!, {
+        'role': 'tool',
+        'content': jsonEncode({'untrusted': true, 'status': 'outcome_unknown'}),
+        'tool_call_id': 'device-1',
+        'tool_name': 'device_run_task',
+      });
+      bridge.cancel(bridge.id!);
+      model.release.complete();
+      final fact = await terminal;
+      expect(fact.text, contains('可能已经生效'));
+      expect(fact.text, isNot(contains('没有继续')));
+    },
+  );
 }
