@@ -1792,7 +1792,7 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                               ),
                             ),
                           ),
-                          if (dictation != null)
+                          if (dictation != null && widget.onVoiceText == null)
                             Tooltip(
                               message: t('按住说话', 'Hold to speak'),
                               triggerMode: TooltipTriggerMode.manual,
@@ -1821,7 +1821,10 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 ),
                               ),
                             ),
-                          if (widget.onVoice != null)
+                          // In a call the call bar already holds the voice
+                          // controls; keep the row to attach and send.
+                          if (widget.onVoice != null &&
+                              widget.onVoiceText == null)
                             IconButton(
                               tooltip: t('实时语音', 'Live voice'),
                               onPressed: () async {
@@ -1834,39 +1837,46 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                                 color: Nova.secondary,
                               ),
                             ),
-                          if (widget.externalTaskBusy)
-                            IconButton(
-                              tooltip: t('停止任务', 'Stop task'),
-                              onPressed: widget.onCancelExternalTask,
-                              icon: const Icon(CupertinoIcons.stop_fill),
-                            ),
                           ValueListenableBuilder<TextEditingValue>(
                             valueListenable: input,
-                            builder: (context, value, _) => IconButton.filled(
-                              tooltip: runningHere
-                                  ? t('停止', 'Stop')
-                                  : t('发送', 'Send'),
-                              style: IconButton.styleFrom(
-                                backgroundColor: Nova.mint,
-                                foregroundColor: Colors.white,
-                                disabledBackgroundColor: Nova.separator,
-                                disabledForegroundColor: Nova.tertiary,
-                              ),
-                              onPressed:
-                                  dictation?.busy == true ||
-                                      pickingAttachment ||
-                                      (!runningHere &&
-                                          value.text.trim().isEmpty &&
-                                          attachments.isEmpty)
-                                  ? null
-                                  : _send,
-                              icon: Icon(
-                                runningHere
-                                    ? CupertinoIcons.stop_fill
-                                    : CupertinoIcons.arrow_up,
-                                size: 22,
-                              ),
-                            ),
+                            builder: (context, value, _) {
+                              // A running delegated task shares this key: it
+                              // stops the task while there is nothing to send.
+                              final stopTask =
+                                  !runningHere &&
+                                  widget.externalTaskBusy &&
+                                  widget.onCancelExternalTask != null &&
+                                  value.text.trim().isEmpty &&
+                                  attachments.isEmpty;
+                              return IconButton.filled(
+                                tooltip: runningHere
+                                    ? t('停止', 'Stop')
+                                    : stopTask
+                                    ? t('停止任务', 'Stop task')
+                                    : t('发送', 'Send'),
+                                style: IconButton.styleFrom(
+                                  backgroundColor: Nova.mint,
+                                  foregroundColor: Colors.white,
+                                  disabledBackgroundColor: Nova.separator,
+                                  disabledForegroundColor: Nova.tertiary,
+                                ),
+                                onPressed: stopTask
+                                    ? widget.onCancelExternalTask
+                                    : dictation?.busy == true ||
+                                          pickingAttachment ||
+                                          (!runningHere &&
+                                              value.text.trim().isEmpty &&
+                                              attachments.isEmpty)
+                                    ? null
+                                    : _send,
+                                icon: Icon(
+                                  runningHere || stopTask
+                                      ? CupertinoIcons.stop_fill
+                                      : CupertinoIcons.arrow_up,
+                                  size: 22,
+                                ),
+                              );
+                            },
                           ),
                         ],
                       ),

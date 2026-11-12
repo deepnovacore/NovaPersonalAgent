@@ -315,7 +315,7 @@ void main() {
   );
 
   testWidgets(
-    'background task stop is separate from the main send button; failed voice send keeps draft',
+    'a running background task turns the empty send key into its stop; failed voice send keeps draft',
     (tester) async {
       final store = ConversationStore(MemoryPersistence());
       await store.open();
@@ -341,8 +341,10 @@ void main() {
       await tester.pump();
       expect(find.byTooltip('停止'), findsNothing);
       expect(find.byTooltip('停止任务'), findsOneWidget);
+      // One key: typing turns it into send, without losing the task.
       key.currentState!.input.text = 'Continue our conversation';
       await tester.pump();
+      expect(find.byTooltip('停止任务'), findsNothing);
       await tester.tap(find.byTooltip('发送'));
       await tester.pump();
       expect(host.delivered, ['Continue our conversation']);
@@ -511,5 +513,36 @@ void main() {
     bridge.dispose();
     host.dispose();
     await audio.controller.close();
+  });
+
+  testWidgets('during a call the row keeps only attach and the shared key', (
+    tester,
+  ) async {
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final chat = await store.create();
+    final host = TopicHost(store);
+    host.release.complete();
+    for (final inCall in [false, true]) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              host: host,
+              conversationId: chat,
+              onVoice: () {},
+              externalTaskBusy: true,
+              onCancelExternalTask: () {},
+              onVoiceText: inCall ? (_) async {} : null,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.byTooltip('实时语音'), inCall ? findsNothing : findsOneWidget);
+      expect(find.byTooltip('停止任务'), findsOneWidget);
+    }
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
   });
 }
