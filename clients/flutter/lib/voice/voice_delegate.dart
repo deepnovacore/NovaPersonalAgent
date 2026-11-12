@@ -57,6 +57,7 @@ class VoiceDelegateBridge extends ChangeNotifier {
         settings: primary.settings,
         tools: primary.tools,
         experienceModel: primary.experienceModel,
+        profileAccessChanged: primary.profileAccessChanged,
         experiencePersona: primary.experiencePersona,
         additionalContext: primary.additionalContext,
         backgroundExecution: primary.backgroundExecution == null

@@ -17,6 +17,7 @@ import '../context/profile_acceptance_diagnostics.dart';
 import '../context/profile_generation_coordinator.dart';
 import '../context/profile_repository.dart';
 import '../context/profile_tool.dart';
+import '../context/source_store.dart';
 import '../context/secure_persistence.dart';
 import 'feishu_direct_page.dart';
 import 'local_profile_results.dart';
@@ -407,6 +408,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                 ? _experienceSession.model
                 : null,
             experiencePersona: _experience,
+            profileAccessChanged: _profileAccessChanged,
             additionalContext: (model) async {
               if (_experience) return _personaContext;
               final provider = '${model.endpoint}|${model.model}';
@@ -975,6 +977,27 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
     await showVoiceSettings(context, voiceSettings, language: language);
   }
 
+  /// Pulses when profile consent or the source identity changes, so a running
+  /// turn holding a profile_read result is fenced.
+  final _profileAccessChanged = ValueNotifier<int>(0);
+  SourceStore? _watchedSources;
+  (int, String?)? _profileAccessKey;
+  void _profileAccessListener() {
+    final sources = _watchedSources!;
+    final key = (sources.processingRevision, sources.identity);
+    if (key == _profileAccessKey) return;
+    _profileAccessKey = key;
+    _profileAccessChanged.value++;
+  }
+
+  void _watchProfileAccess(SourceStore sources) {
+    if (identical(sources, _watchedSources)) return;
+    _watchedSources?.removeListener(_profileAccessListener);
+    _watchedSources = sources;
+    _profileAccessKey = (sources.processingRevision, sources.identity);
+    sources.addListener(_profileAccessListener);
+  }
+
   /// Read-only profile/timeline for model tools, checked against the model
   /// that receives the result.
   Future<Map<String, dynamic>> _readProfileForModel(
@@ -983,6 +1006,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   ) async {
     final connector = feishu ??= FeishuHost();
     await connector.open();
+    _watchProfileAccess(connector.sources);
     return readProfileForModel(
       repository: ProfileRepository(
         SecureContextPersistence('nova.profile.local.v1'),
@@ -1665,6 +1689,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
 
   @override
   void dispose() {
+    _watchedSources?.removeListener(_profileAccessListener);
     _experienceSession.dispose();
     _personaSources?.snapshot.dispose();
     // Before the tracker and the avatar store it uses.

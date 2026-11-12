@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
@@ -26,7 +27,13 @@ Map<String, dynamic> _emptyLife() => {
 
 /// Replays one scripted tool round per request, then answers with text.
 class _ScriptedModel extends ModelClient {
-  _ScriptedModel(this.rounds, {this.reasoning = const {}, this.failAt});
+  _ScriptedModel(
+    this.rounds, {
+    this.reasoning = const {},
+    this.failAt,
+    this.onRound,
+  });
+  final void Function(int round)? onRound;
   final List<List<(String, Map<String, dynamic>)>> rounds;
   final Map<int, String> reasoning;
   final int? failAt;
@@ -40,6 +47,7 @@ class _ScriptedModel extends ModelClient {
   }) async* {
     final round = prompts.length;
     prompts.add(messages.map(Map<String, dynamic>.from).toList());
+    onRound?.call(round);
     advertised.add([for (final t in tools) t['function']['name'] as String]);
     if (reasoning[round] case final String thought) {
       yield {'reasoning': thought};
@@ -72,18 +80,26 @@ Future<(AgentCoreHost, ConversationStore, String, _ScriptedModel)> _delegate({
   List<String>? fetched,
   int? failAt,
   MemoryPersistence? persistence,
+  Listenable? profileAccessChanged,
+  void Function(int round)? onRound,
 }) async {
   final store = ConversationStore(persistence ?? MemoryPersistence());
   await store.open();
   final id = await store.create();
   final journal = ToolJournal(MemoryPersistence());
   await journal.open();
-  final model = _ScriptedModel(rounds, reasoning: reasoning, failAt: failAt);
+  final model = _ScriptedModel(
+    rounds,
+    reasoning: reasoning,
+    failAt: failAt,
+    onRound: onRound,
+  );
   final host = AgentCoreHost(
     store: store,
     settings: FixtureSettings(),
     allowLocalMemory: false,
     memoryReadOnly: true,
+    profileAccessChanged: profileAccessChanged,
     clientFactory: () => model,
     tools: ToolRunner(
       journal: journal,
@@ -221,6 +237,72 @@ void main() {
       isNot(contains('minimal dark design')),
     );
   });
+
+  test(
+    'withdrawn profile access fences a turn holding a profile read',
+    () async {
+      final access = ValueNotifier<int>(0);
+      addTearDown(access.dispose);
+      final (host, _, id, model) = await _delegate(
+        memory: memory,
+        rounds: [
+          [
+            ('profile_read', {'section': 'profile'}),
+          ],
+          [
+            ('life_list', {'kind': 'todo'}),
+          ],
+        ],
+        readProfile: (_) async => {
+          'available': true,
+          'entries': [
+            {'key': 'about', 'text': 'private robotics engineer'},
+          ],
+        },
+        profileAccessChanged: access,
+        // The user withdraws consent while round 1 is being generated.
+        onRound: (round) {
+          if (round == 1) access.value++;
+        },
+      );
+      await host.send(
+        id,
+        'Build a personal website',
+        userAuthored: false,
+        approve: (_) async => true,
+      );
+      expect(host.error, 'cancelled');
+      expect(model.prompts.length, 2);
+    },
+  );
+
+  test(
+    'profile access changes do not fence turns without a profile read',
+    () async {
+      final access = ValueNotifier<int>(0);
+      addTearDown(access.dispose);
+      final (host, _, id, _) = await _delegate(
+        memory: memory,
+        rounds: [
+          [
+            ('life_list', {'kind': 'todo'}),
+          ],
+        ],
+        readProfile: (_) async => {'available': false},
+        profileAccessChanged: access,
+        onRound: (round) {
+          if (round == 1) access.value++;
+        },
+      );
+      await host.send(
+        id,
+        'List todos',
+        userAuthored: false,
+        approve: (_) async => true,
+      );
+      expect(host.error, isNull);
+    },
+  );
 
   test(
     'an interrupted round after a personal read stores no reasoning',

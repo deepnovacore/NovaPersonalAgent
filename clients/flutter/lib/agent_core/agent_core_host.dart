@@ -102,6 +102,7 @@ class AgentCoreHost extends ChangeNotifier {
     this.additionalContext,
     this.experienceModel,
     this.experiencePersona = false,
+    this.profileAccessChanged,
     ModelClient Function()? clientFactory,
   }) : clientFactory = clientFactory ?? ModelClient.new;
   final ConversationStore store;
@@ -124,6 +125,10 @@ class AgentCoreHost extends ChangeNotifier {
   final Future<String> Function(ModelConfiguration)? additionalContext;
   final Future<ModelConfiguration> Function()? experienceModel;
   final bool experiencePersona;
+
+  /// Fires when profile processing consent or the source identity changes. A
+  /// turn holding a profile_read result is fenced like a memory forget.
+  final Listenable? profileAccessChanged;
   bool lastTurnCompleted = false;
 
   /// Phone ownership gates destructive UI actions; tools enforce execution locks.
@@ -167,6 +172,7 @@ class AgentCoreHost extends ChangeNotifier {
     ToolRegistry? registry,
     BackgroundExecution? backgroundExecution,
     ModelClient Function()? clientFactory,
+    Listenable? profileAccessChanged,
   }) async {
     if (SpaceStorage.active?.mode == SpaceMode.client) {
       throw StateError('client_runtime_forbidden');
@@ -197,6 +203,7 @@ class AgentCoreHost extends ChangeNotifier {
       experienceModel: experienceModel,
       experiencePersona: experiencePersona,
       clientFactory: clientFactory,
+      profileAccessChanged: profileAccessChanged,
     );
   }
 
@@ -337,6 +344,16 @@ class AgentCoreHost extends ChangeNotifier {
       draft = reasoning = '';
       if (!executingMemoryForget) cancel();
     }
+
+    var profileHeld = false;
+    void fenceProfile() {
+      if (!profileHeld) return;
+      liveArtifacts.clear();
+      draft = reasoning = '';
+      cancel();
+    }
+
+    profileAccessChanged?.addListener(fenceProfile);
 
     var explaining = false;
     String? stoppedError, stoppedDetail;
@@ -718,6 +735,7 @@ class AgentCoreHost extends ChangeNotifier {
           if (isLiveOnlyTool(call['function']['name']) &&
               result['status'] == 'completed') {
             personalExposed = true;
+            if (call['function']['name'] == 'profile_read') profileHeld = true;
           }
           if (personalReads.contains(call['function']['name']) &&
               result['status'] == 'completed') {
@@ -806,6 +824,7 @@ class AgentCoreHost extends ChangeNotifier {
       }
     } finally {
       if (memoryListening) memoryStore?.removeForgetListener(fenceMemory);
+      profileAccessChanged?.removeListener(fenceProfile);
       liveArtifacts.clear();
       if (userWritten) {
         try {
