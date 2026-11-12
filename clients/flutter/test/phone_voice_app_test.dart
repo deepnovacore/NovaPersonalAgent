@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/services.dart';
 import 'package:nova_mobile/personal/life_host.dart';
 import 'dart:convert';
 
@@ -72,6 +74,68 @@ class DelayedStopAudio extends FakeAudio {
 }
 
 void main() {
+  testWidgets(
+    'delegated receipt opens its worker task and keeps the main draft',
+    (tester) async {
+      final root = await tester.runAsync(
+        () => Directory.systemTemp.createTemp('task-app-'),
+      );
+      const paths = MethodChannel('plugins.flutter.io/path_provider');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(paths, (_) async => root!.path);
+      addTearDown(() async {
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(paths, null);
+        await root!.delete(recursive: true);
+      });
+      final fixture = await openChat(tester);
+      await tester.runAsync(pumpEventQueue);
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Live voice'));
+      await tester.pumpAndSettle();
+      final call = tester
+          .widget<PhoneVoicePanel>(find.byType(PhoneVoicePanel))
+          .session;
+      final bridge = call.delegates!;
+      final terminal = bridge.updates.firstWhere((update) => update.terminal);
+      await bridge.start(
+        conversation: ConversationStore.mainId,
+        callId: 'app-task',
+        request: 'Build a game',
+        language: 'en',
+      );
+      await tester.runAsync(() => terminal);
+      await tester.tap(find.byTooltip('Minimize call'));
+      await tester.pumpAndSettle();
+      final child =
+          fixture.host.store.conversations.singleWhere(
+                (row) => row['delegate_origin'] != null,
+              )['id']
+              as String;
+      final mainPanel = tester.widget<LocalChatPanel>(
+        find.byType(LocalChatPanel),
+      );
+      expect(mainPanel.host, same(fixture.host));
+      expect(mainPanel.externalTaskBusy, false);
+      await tester.ensureVisible(find.text('View task').last);
+      await tester.tap(find.text('View task').last);
+      await tester.pumpAndSettle();
+      final taskPanel = tester.widget<LocalChatPanel>(
+        find.byType(LocalChatPanel),
+      );
+      expect(taskPanel.conversationId, child);
+      expect(taskPanel.host, same(bridge.worker));
+      expect(taskPanel.onTaskText, isNotNull);
+      await tester.tap(find.text('Nova').last);
+      await tester.pumpAndSettle();
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller!.text,
+        'Keep this unsent draft',
+      );
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
+
   testWidgets('voice controls do not rebuild the chat shell', (tester) async {
     await openChat(tester);
     await tester.tap(find.byTooltip('Live voice'));
@@ -104,7 +168,6 @@ void main() {
     expect(find.byKey(const ValueKey('voice-fullscreen')), findsNothing);
     await tester.pumpWidget(const SizedBox.shrink());
   });
-
 
   testWidgets('voice progress does not rebuild the hidden chat tree', (
     tester,

@@ -120,7 +120,7 @@ class AgentCoreHost extends ChangeNotifier {
   final bool experiencePersona;
   bool lastTurnCompleted = false;
 
-  /// True while another lane holds the phone task; this lane must not start.
+  /// Phone ownership gates destructive UI actions; tools enforce execution locks.
   bool Function()? deviceHeldByOther;
   final ModelClient Function() clientFactory;
   ModelClient? _active;
@@ -130,7 +130,15 @@ class AgentCoreHost extends ChangeNotifier {
   String draft = '';
   String reasoning = '';
   String pendingUserText = '';
-  String? error;
+  String? _error;
+  String? get error => _error;
+  String? errorConversationId;
+  bool errorInTranscript = false;
+  set error(String? value) {
+    _error = value;
+    errorConversationId = value == null ? null : activeConversationId;
+    errorInTranscript = false;
+  }
 
   /// The specific reason behind a `tool_<status>` [error], such as
   /// `invalid_tool_arguments`, when the tool result named one.
@@ -269,12 +277,6 @@ class AgentCoreHost extends ChangeNotifier {
     Future<void> Function()? prepare,
   }) async {
     if (busy || _disposed || text.trim().isEmpty) return;
-    if (deviceHeldByOther?.call() == true) {
-      error = 'device_busy';
-      errorDetail = null;
-      _changed();
-      return;
-    }
     if (store.conversation(conversationId)['backend'] != 'local') {
       throw const AgentFailure('computer_backend_selected');
     }
@@ -352,7 +354,7 @@ class AgentCoreHost extends ChangeNotifier {
         memoryListening = memoryStore != null;
       }
       if (experience == null) await beforeModel?.call(config);
-      await store.recoverInterruptedCalls();
+      await store.recoverInterruptedCalls(conversationId: conversationId);
       final turnId = requestId();
       await prepare?.call();
       await store.append(conversationId, {
@@ -375,7 +377,7 @@ class AgentCoreHost extends ChangeNotifier {
                     .map((e) => e.wire)
                     .toList() ??
                 [];
-      for (var round = 0; round < 24; round++) {
+      for (var round = 0; round < 128; round++) {
         final storedMessages =
             store.conversation(conversationId)['messages'] as List;
         redactMemoryToolHistory(storedMessages);
@@ -742,6 +744,7 @@ class AgentCoreHost extends ChangeNotifier {
             'interrupted': true,
             'error': error,
           });
+          errorInTranscript = true;
         } catch (_) {
           error = 'conversation_save_failed';
           errorDetail = null;

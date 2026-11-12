@@ -271,7 +271,7 @@ void main() {
   );
 
   test(
-    'follow-up delegates retain same-chat task context without replay or cross-chat leakage',
+    'explicit task follow-ups retain context while independent requests stay separate',
     () async {
       final store = ConversationStore(MemoryPersistence());
       final workerStore = ConversationStore(MemoryPersistence());
@@ -321,7 +321,11 @@ void main() {
       }
 
       await delegate(conversation, 'open', '打开小红书');
-      await delegate(conversation, 'search', '搜索今天天气');
+      final context =
+          (store.conversation(conversation)['messages'] as List)
+                  .first['delegate_context']
+              as String;
+      await bridge.continueTask(context, '搜索今天天气', approve: (_) async => true);
       final followup = model.rounds.last;
       expect(
         followup.where((m) => m['role'] == 'user').map((m) => m['content']),
@@ -335,11 +339,22 @@ void main() {
         reason: 'carrying context must not replay the prior app launch',
       );
       model.summary = '';
-      await delegate(conversation, 'empty', '继续搜索明天天气');
+      await bridge.continueTask(
+        context,
+        '继续搜索明天天气',
+        approve: (_) async => true,
+      );
       final last = (store.conversation(conversation)['messages'] as List).last;
       expect(last['content'], contains('没有可确认的完成结果'));
       expect(last['content'], isNot(contains('小红书已打开')));
       model.summary = '独立查询完成';
+      await delegate(conversation, 'same-chat-independent', '另一个独立任务');
+      expect(
+        model.rounds.last
+            .where((m) => m['role'] == 'user')
+            .map((m) => m['content']),
+        ['另一个独立任务'],
+      );
       await delegate(other, 'other', '独立查询');
       expect(
         model.rounds.last
@@ -348,7 +363,7 @@ void main() {
         ['独立查询'],
       );
       expect(model.rounds.last.where((m) => m['role'] == 'tool'), isEmpty);
-      expect(workerStore.conversations, hasLength(2));
+      expect(workerStore.conversations, hasLength(3));
     },
   );
 
