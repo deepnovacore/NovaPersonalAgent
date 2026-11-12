@@ -43,6 +43,22 @@ class _Summary extends ModelClient {
   }
 }
 
+/// Streams an opening line, then waits until released (a stop lands here).
+class _Midway extends ModelClient {
+  final started = Completer<void>(), release = Completer<void>();
+  @override
+  Stream<Map<String, dynamic>> stream(
+    ModelConfiguration configuration,
+    List<Map<String, dynamic>> messages, {
+    List<Map<String, dynamic>> tools = const [],
+  }) async* {
+    yield {'content': '好的，我正在调整网站布局。'};
+    started.complete();
+    await release.future;
+    yield {'content': '还在改。'};
+  }
+}
+
 class _FailDispatch extends MemoryPersistence {
   bool fail = false;
   @override
@@ -1011,6 +1027,39 @@ void main() {
             .last['delegate_status'],
         'cancelled',
       );
+    },
+  );
+
+  test(
+    'a task stopped midway reports that it stopped, not its opening line',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final origin = await store.ensureMain();
+      final model = _Midway();
+      final primary = AgentCoreHost(store: store, settings: _Settings());
+      final bridge = VoiceDelegateBridge(
+        primary: primary,
+        worker: AgentCoreHost(
+          store: store,
+          settings: primary.settings,
+          allowLocalMemory: false,
+          clientFactory: () => model,
+        ),
+      );
+      addTearDown(bridge.dispose);
+      addTearDown(primary.dispose);
+      final terminal = bridge.updates.firstWhere((u) => u.terminal);
+      await bridge.start(conversation: origin, callId: 'stop', request: '改网站');
+      await model.started.future;
+      bridge.cancel(bridge.id!);
+      model.release.complete();
+      final fact = await terminal;
+      expect(fact.text, contains('任务已停止'));
+      expect(fact.text, isNot(contains('正在调整')));
+      final parent = store.conversation(origin)['messages'] as List;
+      expect(parent.last['delegate_status'], 'cancelled');
+      expect(parent.last['content'], contains('任务已停止'));
     },
   );
 }

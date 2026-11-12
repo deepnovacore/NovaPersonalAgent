@@ -485,11 +485,19 @@ class VoiceDelegateBridge extends ChangeNotifier {
             (m) =>
                 m['role'] == 'assistant' &&
                 m['tool_calls'] == null &&
+                // A draft cut off by a stop or failure is not a result: it
+                // often still reads "I'm working on it".
+                m['interrupted'] != true &&
                 (m['content'] as String).isNotEmpty,
           );
       result = finals.isNotEmpty ? finals.last['content'] as String : '';
       if (cancelledBeforeStart) {
         result = t('任务已停止，未开始执行。', 'Task stopped before execution started.');
+      } else if (worker.error == 'cancelled') {
+        result = t(
+          '任务已停止，没有完成。已经做过的修改会保留，未做完的部分没有继续。',
+          'The task was stopped and did not finish. Changes already made are kept; the rest was not done.',
+        );
       } else if (worker.error != null) {
         final detail = worker.errorDetail;
         final reason = reasonCopy(
