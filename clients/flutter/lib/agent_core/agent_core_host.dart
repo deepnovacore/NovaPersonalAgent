@@ -369,7 +369,7 @@ class AgentCoreHost extends ChangeNotifier {
                     .map((e) => e.wire)
                     .toList() ??
                 [];
-      for (var round = 0; round < 24; round++) {
+      for (var round = 0; round < 128; round++) {
         final storedMessages =
             store.conversation(conversationId)['messages'] as List;
         redactMemoryToolHistory(storedMessages);
