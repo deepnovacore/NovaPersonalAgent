@@ -53,13 +53,20 @@ Future<Map<String, dynamic>> readProfileForModel({
           .keys
           .toSet() ??
       const <String>{};
+  // Retained history of removed or expired sources stays on this phone; a
+  // derived entry is model-visible only while all its evidence is authorized.
+  final available = Set<String>.from(
+    value['available_evidence_ids'] as List? ?? const [],
+  );
   final section = args['section'] as String;
   final query = (args['query'] as String? ?? '').trim().toLowerCase();
   final offset = args['offset'] as int? ?? 0;
   final rows = [
     for (final entry in (value['entries'] as List).whereType<Map>())
       if ((entry['kind'] ?? 'profile') == section &&
-          (entry['explicit'] != true || corrections.contains(entry['key'])))
+          (entry['explicit'] == true
+              ? corrections.contains(entry['key'])
+              : _authorized(entry, available)))
         _project(entry),
   ];
   if (section == 'timeline') {
@@ -87,6 +94,13 @@ Future<Map<String, dynamic>> readProfileForModel({
     'entries': page,
     if (index < matched.length) 'next_offset': index,
   };
+}
+
+bool _authorized(Map entry, Set<String> available) {
+  final refs = entry['evidence_ids'];
+  return refs is List &&
+      refs.isNotEmpty &&
+      refs.every((ref) => ref is String && available.contains(ref));
 }
 
 Map<String, dynamic> _project(Map entry) {

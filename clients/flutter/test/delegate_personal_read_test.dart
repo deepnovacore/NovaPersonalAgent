@@ -482,6 +482,60 @@ void main() {
       expect(jsonEncode(forQ), contains('Says Q only'));
     });
 
+    test('entries from a removed source are withheld from the model', () async {
+      // A second chat backs only the newer timeline entry.
+      final time = DateTime.utc(2026, 11, 10, 8);
+      await sources.select('d', time.subtract(const Duration(days: 1)));
+      await sources.ingestPage(
+        sources.fence('d'),
+        [
+          {
+            'message_id': 'd1',
+            'sender': {'id_type': 'open_id', 'id': 'self'},
+            'create_time': '${time.millisecondsSinceEpoch}',
+            'msg_type': 'text',
+            'body': {'content': '{"text":"synthetic plan d1"}'},
+          },
+        ],
+        nextPage: null,
+        windowEnd: DateTime.utc(2026, 11, 12),
+      );
+      final ref = sources.messages('d').single['evidence_id'];
+      // Selecting a chat changes the sources; grant the model again.
+      await sources.grantProcessing('p', 'profile', true);
+      await profile.publish(
+        jsonEncode([
+          ...published,
+          {
+            'key': 'removed',
+            'kind': 'timeline',
+            'policy_revision': 2,
+            'text': 'removed chat project',
+            'observed_at': time.toIso8601String(),
+            'evidence_ids': [ref],
+          },
+        ]),
+        sourceRevision: sources.revision,
+        consentRevision: sources.processingRevision,
+        provider: 'p',
+      );
+      expect(
+        jsonEncode(await read({'section': 'timeline'})),
+        contains('removed chat project'),
+      );
+      await sources.remove('d');
+      // Removal clears every grant; the remaining chat is granted again
+      // before the profile is regenerated.
+      expect(
+        (await read({'section': 'timeline'}))['reason'],
+        'processing_consent_required',
+      );
+      await sources.grantProcessing('p', 'profile', true);
+      final after = await read({'section': 'timeline'});
+      expect(jsonEncode(after), isNot(contains('removed chat project')));
+      expect([for (final e in after['entries']) e['key']], ['newer', 'older']);
+    });
+
     test('a model without a processing grant reads nothing', () async {
       final result = await read({'section': 'profile'}, provider: 'other');
       expect(result['available'], isFalse);
