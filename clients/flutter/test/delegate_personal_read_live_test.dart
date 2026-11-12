@@ -36,6 +36,45 @@ class _LiveSettings extends ModelSettings {
 }
 
 /// Records tool names the real model chose; never their payloads.
+/// Logs the keywords the model recalled with and the hit count; the
+/// keywords are model-generated and the payload is not logged.
+class _LoggingRegistry extends ToolRegistry {
+  _LoggingRegistry({
+    required super.snapshot,
+    required super.mutate,
+    required super.hasConflict,
+    required super.fetch,
+    super.automaticExecution,
+    super.workspace,
+    super.localMemory,
+    super.spaceMode,
+    super.readProfile,
+  });
+  final queries = <String>[];
+  @override
+  Future<Map<String, dynamic>> execute(
+    ToolDefinition tool,
+    Map<String, dynamic> args,
+    String operationId, {
+    String? userUtterance,
+    String? modelProvider,
+  }) async {
+    final result = await super.execute(
+      tool,
+      args,
+      operationId,
+      userUtterance: userUtterance,
+      modelProvider: modelProvider,
+    );
+    if (tool.name == 'memory.recall') {
+      queries.add(
+        '${args['query']} => ${(result['entries'] as List?)?.length}',
+      );
+    }
+    return result;
+  }
+}
+
 class _Recorder {
   final calls = <List<String>>[];
   final advertisedPerRound = <List<String>>[];
@@ -177,6 +216,27 @@ void main() {
       final journal = ToolJournal(MemoryPersistence());
       await journal.open();
       final model = _Recorder();
+      final registry = _LoggingRegistry(
+        snapshot: () => {
+          'todos': <dynamic>[],
+          'ideas': <dynamic>[],
+          'goals': <dynamic>[],
+          'profile': {'about': '', 'version': 0},
+        },
+        mutate: (_, {required operationId}) async => {},
+        hasConflict: () => false,
+        fetch: (_) async => throw StateError('offline fixture'),
+        automaticExecution: true,
+        workspace: AgentWorkspace(root),
+        localMemory: memory,
+        spaceMode: SpaceMode.standalone,
+        readProfile: (args, receiving) => readProfileForModel(
+          repository: profile,
+          sources: sources,
+          provider: receiving,
+          args: args,
+        ),
+      );
       final host = AgentCoreHost(
         store: store,
         settings: _LiveSettings(config),
@@ -184,34 +244,22 @@ void main() {
         memoryReadOnly: true,
         owner: 'voice:delegate',
         clientFactory: () => _Recording(model),
-        tools: ToolRunner(
-          journal: journal,
-          registry: ToolRegistry(
-            snapshot: () => {
-              'todos': <dynamic>[],
-              'ideas': <dynamic>[],
-              'goals': <dynamic>[],
-              'profile': {'about': '', 'version': 0},
-            },
-            mutate: (_, {required operationId}) async => {},
-            hasConflict: () => false,
-            fetch: (_) async => throw StateError('offline fixture'),
-            automaticExecution: true,
-            workspace: AgentWorkspace(root),
-            localMemory: memory,
-            spaceMode: SpaceMode.standalone,
-            readProfile: (args, receiving) => readProfileForModel(
-              repository: profile,
-              sources: sources,
-              provider: receiving,
-              args: args,
-            ),
-          ),
-        ),
+        tools: ToolRunner(journal: journal, registry: registry),
       );
       addTearDown(host.dispose);
       final summary = <String, dynamic>{'model': config.model, 'turns': []};
+      // This host has no Linux runtime, so shell_execute is not registered.
+      // A stop caused only by the model calling it anyway is a test-host gap;
+      // every content assertion below still applies. Any other error fails.
+      void expectTurnOk() {
+        final last = (summary['turns'] as List).last as Map;
+        if (host.error == null) return;
+        expect(host.error, 'tool_rejected');
+        expect(last['unoffered_calls'], ['shell_execute']);
+      }
+
       Future<String> turn(String request) async {
+        registry.queries.clear();
         model.calls.clear();
         model.advertisedPerRound.clear();
         await host.send(
@@ -233,6 +281,11 @@ void main() {
         );
         (summary['turns'] as List).add({
           'error': host.error,
+          'unoffered_calls': [
+            for (var i = 0; i < rounds.length && i < advertised.length; i++)
+              for (final name in rounds[i])
+                if (!advertised[i].contains(name)) name,
+          ],
           'error_detail': host.errorDetail,
           'tool_rounds': rounds,
           'first_personal_read_round': firstRead,
@@ -242,6 +295,15 @@ void main() {
                   .skip(firstRead + 1)
                   .any((r) => r.contains('web_fetch')),
           'html_chars': html.length,
+          'recall_queries': List<String>.of(registry.queries),
+          'answer':
+              (((store.conversation(id)['messages'] as List).lastWhere(
+                        (m) => m['role'] == 'assistant',
+                        orElse: () => const {},
+                      )
+                      as Map)['content']
+                  as String? ??
+              ''),
         });
         if (evidence != null) {
           await File(
@@ -260,9 +322,17 @@ void main() {
       if (evidence != null) {
         await File('$evidence/site-1.html').writeAsString(first);
       }
-      expect(host.error, isNull);
+      expectTurnOk();
       expect(tools, contains('profile_read'));
       expect(tools, contains('memory_recall'));
+      // The recall must actually find the saved preference, not just run.
+      expect(
+        (firstTurn['recall_queries'] as List).any(
+          (q) => !(q as String).endsWith('=> 0'),
+        ),
+        isTrue,
+        reason: '${firstTurn['recall_queries']}',
+      );
       expect(tools.intersection({'file_write', 'file_edit'}), isNotEmpty);
       expect(first, contains('林澈'));
       expect(first, contains('回声'));
@@ -272,7 +342,14 @@ void main() {
       // Nothing personal is replayable from durable history.
       final durable = jsonEncode(
         (store.conversation(id)['messages'] as List)
-            .where((m) => m['role'] == 'tool')
+            .where(
+              (m) =>
+                  m['role'] == 'tool' &&
+                  const {
+                    'profile_read',
+                    'memory_recall',
+                  }.contains(m['tool_name']),
+            )
             .toList(),
       );
       expect(durable, isNot(contains('不要太密')));
@@ -282,7 +359,7 @@ void main() {
       if (evidence != null) {
         await File('$evidence/site-2.html').writeAsString(second);
       }
-      expect(host.error, isNull);
+      expectTurnOk();
       expect(second, isNot(first));
       expect(second.indexOf('回声'), lessThan(second.indexOf('潮汐记账')));
 
@@ -307,7 +384,7 @@ void main() {
         ).writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
         await File('$evidence/answer-3.txt').writeAsString(answer);
       }
-      expect(host.error, isNull);
+      expectTurnOk();
       // Counts only, never content.
       // ignore: avoid_print
       print(jsonEncode(summary));
