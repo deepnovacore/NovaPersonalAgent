@@ -101,7 +101,11 @@ class _ConversationHomeState extends State<ConversationHome> {
 
   @override
   Widget build(BuildContext context) => ListenableBuilder(
-    listenable: widget.host ?? widget.changes!,
+    listenable: Listenable.merge([
+      ?widget.host,
+      ?widget.host?.store,
+      ?widget.changes,
+    ]),
     builder: (context, _) {
       // Opening a composer is not yet a conversation in the history.
       // Keep empty records intact, including any active in-memory draft.
@@ -317,16 +321,21 @@ class _ConversationHomeState extends State<ConversationHome> {
           size: 19,
         ),
       ),
-      trailing: messages.isEmpty
+      trailing: row['delegate_status'] is String
+          ? Text(switch (row['delegate_status']) {
+              'dispatched' => t('进行中', 'Running'),
+              'returned' => t('已结束', 'Finished'),
+              'cancelled' => t('已停止', 'Stopped'),
+              'process_interrupted_unknown' => t('已中断', 'Interrupted'),
+              _ => t('未完成', 'Incomplete'),
+            }, style: const TextStyle(fontSize: 12, color: Nova.secondary))
+          : messages.isEmpty
           ? null
           : Text(
               _trailingLabel(row),
               style: const TextStyle(fontSize: 12, color: Nova.secondary),
             ),
-      onTap:
-          widget.host?.busy == true && row['id'] != widget.activeConversationId
-          ? null
-          : () => widget.onOpen(row['id'] as String),
+      onTap: () => widget.onOpen(row['id'] as String),
     );
   }
 }

@@ -1890,6 +1890,12 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   @override
   Widget build(BuildContext context) {
     final host = agentCore;
+    final selectedChat = chatId;
+    final selectedHost = host == null || selectedChat == null
+        ? host
+        : voiceDelegates?.hostForConversation(selectedChat) ?? host;
+    final delegatedTask =
+        chatId != null && voiceDelegates?.ownsConversation(chatId!) == true;
     final hasChat = host != null && chatId != null;
     final chatShown = hasChat && (_tab == 0 || (_tab == 1 && _taskOpen));
     final fullCall = _phoneVoiceExpanded && phoneVoice != null;
@@ -2010,6 +2016,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                 if (host != null)
                                   ConversationHome(
                                     host: host,
+                                    changes: voiceDelegates,
                                     activeConversationId: taskChatId,
                                     language: language,
                                     schedules: localSchedules,
@@ -2056,9 +2063,30 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                     voiceSettings: voiceSettings,
                                     externalTaskBusy:
                                         voiceDelegates?.busy == true &&
-                                        phoneVoice?.conversationId == chatId,
-                                    onCancelExternalTask:
-                                        phoneVoice?.cancelDelegate,
+                                        (voiceDelegates?.conversationId ==
+                                                chatId ||
+                                            voiceDelegates
+                                                    ?.taskConversationId ==
+                                                chatId),
+                                    onCancelExternalTask: () {
+                                      final task = voiceDelegates?.id;
+                                      if (task != null) {
+                                        voiceDelegates!.cancel(task);
+                                      }
+                                    },
+                                    onTaskText: delegatedTask
+                                        ? (text, approve) =>
+                                              voiceDelegates!.continueTask(
+                                                selectedChat!,
+                                                text,
+                                                approve: approve,
+                                              )
+                                        : null,
+                                    onOpenTask: (id) => setState(() {
+                                      taskChatId = id;
+                                      _taskOpen = true;
+                                      _tab = 1;
+                                    }),
                                     onVoiceText:
                                         phoneVoice?.active == true &&
                                             phoneVoice?.conversationId == chatId
@@ -2079,7 +2107,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                                             visible: !fullCall,
                                             onStop: _stopPhoneTask,
                                           ),
-                                    host: host,
+                                    host: selectedHost!,
                                     conversationId: chatId!,
                                     language: language,
                                     showProcess: showProcess,
