@@ -368,7 +368,7 @@ void main() {
   );
 
   test('a delegate cannot save memory even when it names the tool', () async {
-    final (host, _, id, _) = await _delegate(
+    final (host, store, id, _) = await _delegate(
       memory: memory,
       rounds: [
         [
@@ -386,7 +386,15 @@ void main() {
       userAuthored: false,
       approve: (_) async => true,
     );
-    expect(host.error, 'tool_rejected');
+    // The hidden tool is rejected (its receipt is redacted); nothing saved.
+    final result = jsonDecode(
+      ((store.conversation(id)['messages'] as List).firstWhere(
+                (m) => m['role'] == 'tool',
+              )
+              as Map)['content']
+          as String,
+    );
+    expect(result['state'], 'rejected');
     expect(memory.recall('x'), isEmpty);
   });
 

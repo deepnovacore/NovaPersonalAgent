@@ -89,6 +89,15 @@ String _deviceSummary(Object? content) {
   return 'Earlier phone task result: $status. It belongs to a previous request and does not apply to the new one.';
 }
 
+/// Some providers (DeepSeek) occasionally write their native tool-call
+/// markup as plain text, for example when no tools are offered. Nothing ran,
+/// so the markup is dropped; any prose before it is kept.
+final _toolCallMarkup = RegExp(r'<\s*/?\s*[|｜]+\s*DSML\s*[|｜]+');
+String stripToolCallMarkup(String text) {
+  final start = _toolCallMarkup.firstMatch(text);
+  return start == null ? text : text.substring(0, start.start).trimRight();
+}
+
 class AgentCoreHost extends ChangeNotifier {
   AgentCoreHost({
     required this.store,
@@ -356,6 +365,7 @@ class AgentCoreHost extends ChangeNotifier {
     profileAccessChanged?.addListener(fenceProfile);
 
     var explaining = false;
+    var unknownToolCorrections = 0;
     String? stoppedError, stoppedDetail;
     final client = _active = clientFactory();
     try {
@@ -617,6 +627,11 @@ class AgentCoreHost extends ChangeNotifier {
             callIds.any((id) => id is! String || id.isEmpty)) {
           throw const AgentFailure('invalid_tool_calls');
         }
+        final visible = stripToolCallMarkup(draft);
+        if (visible.length != draft.length) {
+          debugPrint('[NovaAgent] dropped tool-call markup written as text');
+          draft = visible;
+        }
         final assistantMessage = <String, dynamic>{
           'role': 'assistant',
           'content': draft,
@@ -651,14 +666,28 @@ class AgentCoreHost extends ChangeNotifier {
         var stop = false;
         for (final call in calls.values) {
           Map<String, dynamic> result;
+          var correctable = false;
           try {
+            final offered = requestTools.any(
+              (e) => e['function']['name'] == call['function']['name'],
+            );
+            if (!stop &&
+                !_cancelRequested &&
+                tools != null &&
+                approve != null &&
+                !offered &&
+                unknownToolCorrections < 2) {
+              // A misspelled or invented tool name ran nothing; let the
+              // model pick a listed tool instead of ending the task.
+              unknownToolCorrections++;
+              correctable = true;
+              throw const AgentFailure('unknown_tool');
+            }
             if (stop ||
                 _cancelRequested ||
                 tools == null ||
                 approve == null ||
-                !requestTools.any(
-                  (e) => e['function']['name'] == call['function']['name'],
-                )) {
+                !offered) {
               throw const AgentFailure('tool_not_allowed');
             }
             activeTool = call['function']['name'] as String;
@@ -713,7 +742,19 @@ class AgentCoreHost extends ChangeNotifier {
             debugPrint(
               '[NovaAgent] tool rejected: ${failure is AgentFailure ? failure.code : failure.runtimeType}',
             );
-            result = {'untrusted': true, 'status': 'rejected'};
+            result = correctable
+                ? {
+                    'untrusted': true,
+                    'status': 'rejected',
+                    'error': 'unknown_tool',
+                    'executed': false,
+                    'available_tools': [
+                      for (final tool in requestTools) tool['function']['name'],
+                    ],
+                    'message':
+                        'No tool with this name is available in this step, so nothing ran. Continue the task with one of available_tools.',
+                  }
+                : {'untrusted': true, 'status': 'rejected'};
           } finally {
             executingMemoryForget = false;
             _executingTool = null;
@@ -745,6 +786,10 @@ class AgentCoreHost extends ChangeNotifier {
           }
           await store.append(conversationId, toolMessage);
           _changed();
+          if (correctable) {
+            _changed();
+            continue;
+          }
           if (result['status'] != 'completed') {
             if (!stop) {
               final reason = (result['data'] as Map?)?['reason'];
@@ -810,7 +855,7 @@ class AgentCoreHost extends ChangeNotifier {
         try {
           await store.append(conversationId, {
             'role': 'assistant',
-            'content': draft,
+            'content': stripToolCallMarkup(draft),
             if (reasoning.isNotEmpty && !personalExposed)
               'reasoning_content': reasoning,
             'interrupted': true,

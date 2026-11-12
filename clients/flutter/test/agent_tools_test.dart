@@ -445,7 +445,11 @@ void main() {
         ),
         isEmpty,
       );
-      expect(host.error, 'tool_rejected');
+      // The hidden recall is rejected (receipt redacted) and never runs.
+      expect(
+        jsonEncode(store.conversation(id)),
+        contains(r'\"state\":\"rejected\"'),
+      );
       expect(
         jsonEncode(store.conversation(id)),
         isNot(contains('private tea')),

@@ -248,15 +248,9 @@ void main() {
       );
       addTearDown(host.dispose);
       final summary = <String, dynamic>{'model': config.model, 'turns': []};
-      // This host has no Linux runtime, so shell_execute is not registered.
-      // A stop caused only by the model calling it anyway is a test-host gap;
-      // every content assertion below still applies. Any other error fails.
-      void expectTurnOk() {
-        final last = (summary['turns'] as List).last as Map;
-        if (host.error == null) return;
-        expect(host.error, 'tool_rejected');
-        expect(last['unoffered_calls'], ['shell_execute']);
-      }
+      // This host has no Linux runtime, so shell_execute is not offered; a
+      // call to it (or an invented name) is corrected and the turn goes on.
+      void expectTurnOk() => expect(host.error, isNull);
 
       Future<String> turn(String request) async {
         registry.queries.clear();
