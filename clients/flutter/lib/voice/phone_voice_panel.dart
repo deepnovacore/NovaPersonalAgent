@@ -443,6 +443,10 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                                   '语音配置无效，请检查服务地址、模型和密钥（voice_configuration_invalid）。',
                                   'Invalid voice configuration. Check endpoint, model and key (voice_configuration_invalid).',
                                 ),
+                                'idle_timeout' => t(
+                                  '通话因长时间静音已自动结束，可随时重新开始。',
+                                  'The call ended after a long silence. Start it again any time.',
+                                ),
                                 'provider_invalid_value' => t(
                                   '语音服务拒绝了本次请求，请重试或检查模型配置。',
                                   'The voice service rejected this request. Retry or check the model configuration.',

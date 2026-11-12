@@ -8,8 +8,10 @@ import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/voice/phone_voice_session.dart';
 import 'package:nova_mobile/voice/voice_companion.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
+import 'package:nova_mobile/agent_core/agent_core_host.dart';
+import 'package:nova_mobile/agent_core/model_settings.dart';
 import 'phone_voice_session_test.dart'
-    show VoiceAudio, TestVoiceProvider, settle;
+    show VoiceAudio, TestVoiceProvider, settle, FactBridge;
 
 class FakeCompanion implements VoiceCompanion {
   @override
@@ -133,6 +135,39 @@ void main() {
     expect(session.active, isFalse);
     expect(companion.stops, 1);
     expect(audio.generation, isNull);
+  });
+  test('a running delegated task holds a realtime call open', () async {
+    final previousHttp = HttpOverrides.current;
+    HttpOverrides.global = null;
+    addTearDown(() => HttpOverrides.global = previousHttp);
+    final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+    addTearDown(() => server.close(force: true));
+    server.listen((request) async {
+      request.response.statusCode = 503;
+      await request.response.close();
+    });
+    final realtime = QwenRealtimeVoiceProvider(
+      endpoint: 'ws://127.0.0.1:${server.port}/live',
+      model: 'test-model',
+      apiKey: 'test-key',
+      voice: 'test-voice',
+    );
+    final host = AgentCoreHost(store: session.store, settings: ModelSettings());
+    final bridge = FactBridge(host);
+    addTearDown(() async {
+      bridge.dispose();
+      host.dispose();
+      await bridge.facts.close();
+    });
+    session.attachDelegates(bridge);
+    await session.start(provider: realtime, conversation: conversation);
+    await settle();
+    expect(realtime.holdOpen, isNotNull);
+    expect(realtime.holdOpen!(), isFalse);
+    bridge.id = 'running-task';
+    expect(realtime.holdOpen!(), isTrue);
+    bridge.id = null;
+    expect(realtime.holdOpen!(), isFalse);
   });
   for (final status in [401, 403, 404, 429, 503]) {
     test('HTTP $status survives provider startup and cleanup', () async {

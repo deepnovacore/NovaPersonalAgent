@@ -13,7 +13,8 @@ abstract class RealtimeSocketProvider implements VoiceProvider {
     required this.apiKey,
     required this.voice,
     this.connectTimeout = const Duration(seconds: 20),
-    this.idleTimeout = const Duration(minutes: 2),
+    // Only a muted call goes this long without a frame either way.
+    this.idleTimeout = const Duration(minutes: 10),
   }) {
     _events = StreamController<VoiceEvent>(
       sync: true,
@@ -24,6 +25,10 @@ abstract class RealtimeSocketProvider implements VoiceProvider {
   }
   final String endpoint, model, apiKey, voice;
   final Duration connectTimeout, idleTimeout;
+
+  /// While true, a quiet connection is not closed as idle, for example while
+  /// a delegated task is still due to report back on this call.
+  bool Function()? holdOpen;
   late final StreamController<VoiceEvent> _events;
   WebSocket? _socket;
   HttpClient? _client;
@@ -210,7 +215,14 @@ abstract class RealtimeSocketProvider implements VoiceProvider {
 
   void _touch() {
     _idle?.cancel();
-    _idle = Timer(idleTimeout, () => fail('idle_timeout'));
+    _idle = Timer(idleTimeout, () {
+      if (closed) return;
+      if (holdOpen?.call() == true) {
+        _touch();
+      } else {
+        fail('idle_timeout');
+      }
+    });
   }
 
   void send(Map<String, dynamic> frame) {

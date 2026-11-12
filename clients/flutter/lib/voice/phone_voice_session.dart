@@ -13,6 +13,7 @@ import 'package:nova_audio/nova_audio.dart';
 import '../conversation/local_conversation_store.dart';
 import '../protocol/request_id.dart';
 import '../protocol/wire.dart';
+import 'providers/realtime_socket.dart';
 import 'voice_provider.dart';
 import 'voice_media.dart';
 import 'voice_delegate.dart';
@@ -406,6 +407,10 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     final epoch = ++_epoch;
     final capture = ++_capture;
     _provider = provider;
+    if (provider is RealtimeSocketProvider) {
+      // A running task will still narrate its result on this call.
+      provider.holdOpen = () => delegates?.busy == true;
+    }
     _changed();
     var startupStage = 'microphone';
     try {

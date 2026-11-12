@@ -709,6 +709,20 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           }
         });
       }
+      if (ended && call.error == 'idle_timeout') {
+        // The compact bar is gone with the call; say why it ended.
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 10),
+            content: Text(
+              _t(
+                '通话因长时间静音已自动结束，可随时重新开始。',
+                'The call ended after a long silence. Start it again any time.',
+              ),
+            ),
+          ),
+        );
+      }
       final cleanupError = call?.cleanupError;
       if (cleanupError != null && cleanupError != _reportedCleanupError) {
         ScaffoldMessenger.of(context).showSnackBar(
