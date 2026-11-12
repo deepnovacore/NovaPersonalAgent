@@ -17,9 +17,14 @@ class VoiceDelegateUpdate {
     this.conversationId,
     this.text, {
     required this.terminal,
+    this.taskId,
   });
   final String id, conversationId, text;
   final bool terminal;
+
+  /// The task (worker conversation) this run belongs to; a later
+  /// delegate_task can continue it by this id.
+  final String? taskId;
 }
 
 /// One independent execution lane; its durable conversations live in Tasks.
@@ -268,13 +273,47 @@ class VoiceDelegateBridge extends ChangeNotifier {
     }
   }
 
+  /// The latest tasks started from [origin], newest first, for the front
+  /// brain to pick one to continue. Titles are the user's own words.
+  List<Map<String, String>> recentTasks(String origin, {int limit = 5}) {
+    final rows = worker.store.conversations
+        .where((c) => c['delegate_origin'] == origin)
+        .toList();
+    return [
+      for (final row in rows.reversed.take(limit))
+        {
+          'task_id': row['id'] as String,
+          'title': _clip(row['title'] as String? ?? '', 40),
+          'status': row['delegate_status'] as String? ?? 'unknown',
+        },
+    ];
+  }
+
+  static String _clip(String text, int max) {
+    final runes = text.runes.toList();
+    return runes.length <= max
+        ? text
+        : '${String.fromCharCodes(runes.take(max))}…';
+  }
+
   Future<String> start({
     required String conversation,
     required String callId,
     required String request,
     String language = 'zh',
+    String? taskId,
   }) async {
-    final context = ownsConversation(conversation) ? conversation : null;
+    if (taskId != null &&
+        (!ownsConversation(taskId) ||
+            worker.store.conversation(taskId)['delegate_origin'] !=
+                (ownsConversation(conversation)
+                    ? worker.store.conversation(conversation)['delegate_origin']
+                    : conversation))) {
+      // Only a task started from this conversation can be continued here.
+      throw StateError('delegate_task_missing');
+    }
+    final context =
+        taskId ?? (ownsConversation(conversation) ? conversation : null);
     final origin = context == null
         ? conversation
         : worker.store.conversation(context)['delegate_origin'] as String;
@@ -499,7 +538,13 @@ class VoiceDelegateBridge extends ChangeNotifier {
       _updateConversationId = null;
       if (!_disposed) {
         _updates.add(
-          VoiceDelegateUpdate(task, updateConversation, result, terminal: true),
+          VoiceDelegateUpdate(
+            task,
+            updateConversation,
+            result,
+            terminal: true,
+            taskId: context,
+          ),
         );
         notifyListeners();
       }

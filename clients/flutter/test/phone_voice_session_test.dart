@@ -206,16 +206,18 @@ class FactBridge extends VoiceDelegateBridge {
         worker: AgentCoreHost(store: host.store, settings: host.settings),
       );
   int starts = 0;
-  String? receivedLanguage;
+  String? receivedLanguage, receivedTaskId;
   @override
   Future<String> start({
     required String conversation,
     required String callId,
     required String request,
     String language = 'zh',
+    String? taskId,
   }) async {
     starts++;
     receivedLanguage = language;
+    receivedTaskId = taskId;
     return 'accepted';
   }
 
@@ -1433,6 +1435,46 @@ void main() {
       },
     );
   }
+  for (final (args, dispatched, taskId) in [
+    (<String, dynamic>{'request': '把网站首页改一下', 'task_id': 'site'}, true, 'site'),
+    (<String, dynamic>{'request': '做个记账工具', 'task_id': ''}, true, null),
+    (<String, dynamic>{'request': '改一下', 'parent': 'site'}, false, null),
+    (<String, dynamic>{'request': '改一下', 'task_id': 3}, false, null),
+  ]) {
+    test(
+      'delegate_task arguments ${args.keys.join('+')} -> $dispatched',
+      () async {
+        final host = AgentCoreHost(store: store, settings: ModelSettings());
+        final bridge = FactBridge(host);
+        session.attachDelegates(bridge);
+        await start();
+        await session.submitText('改网站');
+        provider.emit(
+          VoiceEventKind.responseStart,
+          id: 'dispatch',
+          hostOrigin: false,
+        );
+        provider.controller.add(
+          VoiceEvent(
+            VoiceEventKind.toolCall,
+            epoch: provider.epoch,
+            responseId: 'dispatch',
+            callId: 'call',
+            name: 'delegate_task',
+            arguments: args,
+          ),
+        );
+        await settle();
+        expect(bridge.starts, dispatched ? 1 : 0);
+        expect(bridge.receivedTaskId, taskId);
+        await session.stop();
+        bridge.dispose();
+        host.dispose();
+        await bridge.facts.close();
+      },
+    );
+  }
+
   test(
     'terminal queued behind a redundant receipt still narrates exactly once',
     () async {

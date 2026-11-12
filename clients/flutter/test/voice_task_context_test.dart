@@ -231,6 +231,90 @@ void main() {
   );
 
   test(
+    'delegate_task with a task_id continues that task from the origin chat',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final origin = await store.ensureMain();
+      final other = await store.create();
+      final rounds = <List<Map<String, dynamic>>>[];
+      final primary = AgentCoreHost(store: store, settings: _Settings());
+      final worker = AgentCoreHost(
+        store: store,
+        settings: primary.settings,
+        allowLocalMemory: false,
+        clientFactory: () => _Summary(rounds),
+      );
+      final bridge = VoiceDelegateBridge(primary: primary, worker: worker);
+      addTearDown(bridge.dispose);
+      addTearDown(primary.dispose);
+      Future<VoiceDelegateUpdate> run(
+        String call,
+        String request, {
+        String conversation = '',
+        String? taskId,
+      }) async {
+        final terminal = bridge.updates.firstWhere((u) => u.terminal);
+        await bridge.start(
+          conversation: conversation.isEmpty ? origin : conversation,
+          callId: call,
+          request: request,
+          taskId: taskId,
+        );
+        return terminal;
+      }
+
+      final site = (await run('site', '做一个个人网站')).taskId!;
+      final game = (await run('game', '开发俄罗斯方块')).taskId!;
+      expect(bridge.recentTasks(origin).map((t) => t['task_id']), [game, site]);
+      expect(bridge.recentTasks(origin).last['title'], '做一个个人网站');
+
+      final continued = await run('tweak', '把最近的项目放首页', taskId: site);
+      expect(continued.taskId, site);
+      expect(
+        rounds.last.where((m) => m['role'] == 'user').map((m) => m['content']),
+        ['做一个个人网站', '把最近的项目放首页'],
+      );
+      expect(
+        store.conversations.where((c) => c['delegate_origin'] == origin),
+        hasLength(2),
+      );
+      expect(
+        (store.conversation(origin)['messages'] as List)
+            .last['delegate_context'],
+        site,
+      );
+
+      // A task from another chat, or an unknown id, is never continued.
+      await expectLater(
+        bridge.start(
+          conversation: other,
+          callId: 'foreign',
+          request: '改一下',
+          taskId: site,
+        ),
+        throwsA(
+          isA<StateError>().having(
+            (e) => e.message,
+            'message',
+            'delegate_task_missing',
+          ),
+        ),
+      );
+      await expectLater(
+        bridge.start(
+          conversation: origin,
+          callId: 'unknown',
+          request: '改一下',
+          taskId: 'nope',
+        ),
+        throwsA(isA<StateError>()),
+      );
+      expect(bridge.busy, false);
+    },
+  );
+
+  test(
     'creation and terminal projections preserve an unrelated active parent turn',
     () async {
       final store = ConversationStore(MemoryPersistence());

@@ -42,7 +42,7 @@ return { text: document.querySelector('#result').textContent };
 
 首次打开工作区时，旧 `local-artifacts-v1.json` 的 HTML 迁移到 `/workspace/artifacts/<id>/index.html`。已有目标文件不会被覆盖；成功迁移的 ID 记录在工作区外的迁移检查点中，重复启动保留用户后续修改、移动和删除。旧 JSON 留作恢复副本，不再接收写入；旧 `nova-artifact://<id>` 链接继续映射到迁移文件。没有第二套模型可调用的 artifact 工具。
 
-文本对话与语音慢脑使用同一工具注册实现。语音快脑仍只暴露 `delegate_task` / `cancel_delegate`，工具结果通过现有委派回传和播报时机规则处理。计划任务新增显式的工作区授权，默认关闭；已有任务不会自动获得文件或 shell 权限。
+文本对话与语音慢脑使用同一工具注册实现。语音快脑仍只暴露 `delegate_task` / `cancel_delegate`，工具结果通过现有委派回传和播报时机规则处理。`delegate_task` 可带可选的 `task_id`，把追加需求接回本对话里之前的任务，沿用它的历史和工作区文件；快脑提示里会列出本对话最近 5 个任务的 id、标题和状态，不是本对话的任务 id 会被拒绝。计划任务新增显式的工作区授权，默认关闭；已有任务不会自动获得文件或 shell 权限。
 
 ## 构建与验证
 
