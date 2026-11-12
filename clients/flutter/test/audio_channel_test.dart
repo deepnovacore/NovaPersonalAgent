@@ -54,6 +54,34 @@ void main() {
     },
   );
 
+  test(
+    'recording compatibility reaches the Android audio start command',
+    () async {
+      final messenger =
+          TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+      MethodCall? start;
+      messenger.setMockMethodCallHandler(const MethodChannel('nova/audio'), (
+        call,
+      ) async {
+        start = call;
+        return null;
+      });
+      final audio = ChannelAudio();
+      await audio.startRelay(
+        generation: 4,
+        capture: true,
+        threshold: .045,
+        recordingCompatible: true,
+      );
+      expect(start!.arguments['recording_compatible'], true);
+      await audio.disconnect();
+      messenger.setMockMethodCallHandler(
+        const MethodChannel('nova/audio'),
+        null,
+      );
+    },
+  );
+
   test('native commands carry generation and typed PCM frames', () async {
     final calls = <MethodCall>[];
     final messenger =
@@ -71,6 +99,7 @@ void main() {
       'generation': 9,
       'capture': true,
       'threshold': 0.045,
+      'recording_compatible': false,
     });
     expect(calls[1].arguments['generation'], 9);
     await audio.disconnect();

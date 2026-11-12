@@ -3,7 +3,8 @@ import 'dart:convert';
 import '../memory/local_memory_store.dart';
 import '../memory/local_memory_tools.dart';
 import '../space/space_storage.dart';
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'dart:typed_data';
 import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
@@ -222,6 +223,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   VoiceProvider? _provider;
   int _epoch = 0, _capture = 0, _playbackEpoch = 0;
   bool active = false, connecting = false, muted = false, speaker = false;
+  bool recordingCompatible = false;
   bool _disposed = false, _userSpeaking = false, _hostResponsePending = false;
   String? conversationId, error, cleanupError;
   String _language = 'zh';
@@ -358,10 +360,15 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     required String conversation,
     String personalContext = '',
     String language = 'zh',
+    bool recordingCompatible = false,
   }) async {
     await _stopping;
     if (_disposed || active || connecting) return;
     if (delegates?.primary.busy == true) throw StateError('text_turn_running');
+    this.recordingCompatible =
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        recordingCompatible;
     connecting = true;
     _providerInvalidation = null;
     error = null;
@@ -478,6 +485,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
         generation: capture,
         capture: true,
         threshold: 0.045,
+        recordingCompatible: this.recordingCompatible,
       ));
       _startingAudio = null;
       if (epoch != _epoch || _disposed) {
@@ -486,7 +494,8 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       _backgroundReady = companion != null;
       connecting = false;
       active = true;
-      muted = speaker = false;
+      muted = false;
+      speaker = this.recordingCompatible;
       _changed();
     } catch (failure, stack) {
       // Exception messages can contain credentials or conversation text.
@@ -1351,7 +1360,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   Future<void> toggleSpeaker() {
-    if (!active || _disposed) return Future.value();
+    if (!active || _disposed || recordingCompatible) return Future.value();
     if (_switchingSpeaker != null) return _switchingSpeaker!;
     final epoch = _epoch, next = !speaker;
     late final Future<void> operation;

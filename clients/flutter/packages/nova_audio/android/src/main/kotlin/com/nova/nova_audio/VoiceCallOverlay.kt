@@ -363,10 +363,6 @@ internal class VoiceCallOverlay(
     fun setMode(active: Boolean, value: VoicePetTask?, mute: Boolean) {
         val changed = VoicePetControls.needsRebuild(callActive, task, active, value)
         callActive = active; task = value; muted = mute
-        val previousFlags = params.flags
-        params.flags = if (value != null) params.flags or WindowManager.LayoutParams.FLAG_SECURE
-            else params.flags and WindowManager.LayoutParams.FLAG_SECURE.inv()
-        if (previousFlags != params.flags) reposition()
         if (changed) rebuildControls() else update(mute)
     }
 

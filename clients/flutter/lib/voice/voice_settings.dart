@@ -230,6 +230,7 @@ class VoiceServiceConfiguration {
 
 class VoiceConfiguration {
   const VoiceConfiguration({
+    this.recordingCompatible = false,
     this.pipeline = VoicePipeline.integrated,
     this.integratedProfile = IntegratedVoiceService.qwen,
     this.integrated = const VoiceServiceConfiguration(
@@ -251,6 +252,7 @@ class VoiceConfiguration {
     this.fastLlm = const VoiceServiceConfiguration(),
     this.fastLlmProtocol = FastLlmProtocol.chatCompletions,
   });
+  final bool recordingCompatible;
   final VoicePipeline pipeline;
   final FastLlmProtocol fastLlmProtocol;
   final IntegratedVoiceService integratedProfile;
@@ -373,6 +375,7 @@ class VoiceConfiguration {
   }
 
   VoiceConfiguration copyWith({
+    bool? recordingCompatible,
     VoicePipeline? pipeline,
     FastLlmProtocol? fastLlmProtocol,
     IntegratedVoiceService? integratedProfile,
@@ -383,6 +386,7 @@ class VoiceConfiguration {
     VoiceServiceConfiguration? tts,
     VoiceServiceConfiguration? fastLlm,
   }) => VoiceConfiguration(
+    recordingCompatible: recordingCompatible ?? this.recordingCompatible,
     pipeline: pipeline ?? this.pipeline,
     fastLlmProtocol: fastLlmProtocol ?? this.fastLlmProtocol,
     integratedProfile: integratedProfile ?? this.integratedProfile,
@@ -396,6 +400,7 @@ class VoiceConfiguration {
 
   Map<String, dynamic> toJson() => {
     'version': 1,
+    'recordingCompatible': recordingCompatible,
     'pipeline': pipeline.name,
     'fastLlmProtocol': fastLlmProtocol.name,
     'integratedProfile': integratedProfile.name,
@@ -411,6 +416,7 @@ class VoiceConfiguration {
       throw const AgentFailure('invalid_voice_settings');
     }
     return VoiceConfiguration(
+      recordingCompatible: value['recordingCompatible'] as bool? ?? false,
       pipeline: VoicePipeline.values.byName(value['pipeline'] as String),
       fastLlmProtocol: FastLlmProtocol.values.byName(
         value['fastLlmProtocol'] as String? ?? 'chatCompletions',

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 
 import '../agent_core/model_client.dart';
 import '../agent_core/model_presets.dart';
@@ -861,6 +862,26 @@ class _VoiceSettingsSheetState extends State<VoiceSettingsSheet> {
                 ),
               ),
               const SizedBox(height: 16),
+              if (!kIsWeb && defaultTargetPlatform == TargetPlatform.android)
+                SwitchListTile.adaptive(
+                  key: const ValueKey('voice.recordingCompatible'),
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(t('兼容系统录屏', 'Screen recording compatibility')),
+                  subtitle: Text(
+                    t(
+                      '下次通话使用外放。请在系统录屏中选择设备声音和麦克风；部分手机仍无法同时录入。',
+                      'Uses speakerphone on your next call. Select device audio and microphone in the system recorder; some phones cannot capture both.',
+                    ),
+                  ),
+                  value: _draft.recordingCompatible,
+                  onChanged: _saving
+                      ? null
+                      : (value) => setState(
+                          () => _draft = _draft.copyWith(
+                            recordingCompatible: value,
+                          ),
+                        ),
+                ),
               _pipelineTabs(),
               if (_draft.pipeline == VoicePipeline.integrated)
                 ..._integratedFields()

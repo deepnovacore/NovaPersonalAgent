@@ -19,6 +19,7 @@ class DictationAudio extends FakeAudio {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   }) async {
     this.generation = generation;
     expect(capture, true);

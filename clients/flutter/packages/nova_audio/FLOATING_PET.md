@@ -135,10 +135,21 @@ terminal-control state, call-mode changes or explicit expansion. Light/dark them
 widgets use explicit text/surface colours. Task-only configuration changes also
 relayout/clamp the dock using current density and screen dimensions.
 
-The window is non-focusable and non-touch-modal. It has **FLAG_SECURE whenever a
-task is present**, even collapsed: screenshots, casting and screen recording cannot
-capture the preview or the pet card. This restriction is an intentional privacy
-trade-off, not a replacement for filtering secure phone frames.
+The window is non-focusable and non-touch-modal. It allows user screenshots,
+casting and screen recording in both call and task modes, including the preview.
+A secure overlay can cause OEM screenshot tools to refuse the whole screen even
+when the pet is collapsed. Secure/takeover phone frames are still filtered before
+they reach the preview.
+
+Android standalone voice settings offer an opt-in **Screen recording compatibility**
+mode, applied to the next call. It uses normal media routing, capturable speech
+playback and the built-in speaker, retaining voice capture processing/AEC. On
+Android 11+, input is marked non-private to permit supported system recorders to
+share the microphone. The default communication route and privacy policy stay
+unchanged. Select device audio plus microphone in the system recorder. Android
+still forbids two ordinary apps from receiving microphone input concurrently;
+OEM system recorder support and actual AEC behavior require device testing.
+The switch does not start recording and does not configure AOQ SDK audio.
 
 The existing `VoiceCallService` retains microphone FGS ownership and wake lock.
 `VoicePetService` uses `specialUse`, without microphone access or a wake lock, and

@@ -42,6 +42,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
  private val queue=ArrayDeque<Chunk>()
  private var started=false
  private var capture=false
+ private var recordingCompatible=false
  @Volatile private var muted=false
  @Volatile private var captureEpoch=0L
  private var threshold=0.045
@@ -89,12 +90,15 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
   override fun onAudioDevicesRemoved(removed:Array<out AudioDeviceInfo>){if(routeReady && live.get())fail("Audio route changed")}
  }
  val running get()=live.get()
- fun start(capture:Boolean,threshold:Double)=onAudio {
-  stop();this.capture=capture;this.threshold=threshold
+ fun start(capture:Boolean,threshold:Double,recordingCompatible:Boolean=false)=onAudio {
+  stop();this.capture=capture;this.threshold=threshold;this.recordingCompatible=capture && recordingCompatible
   try {
    ownsRouting=true
-   manager.mode=if(capture)AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
-   val attrs=AudioAttributes.Builder().setUsage(if(capture)AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).build()
+   manager.mode=if(capture && !this.recordingCompatible)AudioManager.MODE_IN_COMMUNICATION else AudioManager.MODE_NORMAL
+   // Communication usage is excluded from Android playback capture, even when capture is allowed.
+   val attrs=AudioAttributes.Builder().setUsage(if(capture && !this.recordingCompatible)AudioAttributes.USAGE_VOICE_COMMUNICATION else AudioAttributes.USAGE_MEDIA).setContentType(AudioAttributes.CONTENT_TYPE_SPEECH).apply{
+    if(Build.VERSION.SDK_INT>=29 && this@RelayAudio.recordingCompatible)setAllowedCapturePolicy(AudioAttributes.ALLOW_CAPTURE_BY_ALL)
+   }.build()
    val min=AudioTrack.getMinBufferSize(24000,AudioFormat.CHANNEL_OUT_MONO,AudioFormat.ENCODING_PCM_16BIT)
    require(min>0){"24 kHz playback unsupported"}
    player=AudioTrack.Builder().setAudioAttributes(attrs).setAudioFormat(AudioFormat.Builder().setSampleRate(24000).setChannelMask(AudioFormat.CHANNEL_OUT_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build()).setBufferSizeInBytes(maxOf(min,4800)).setTransferMode(AudioTrack.MODE_STREAM).build()
@@ -103,15 +107,22 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
    // API < 26 gives no handler guarantee; a stale session's callbacks are dropped.
    val listener=AudioManager.OnAudioFocusChangeListener{value -> audioHandler.post{if(session==focusSession)onFocus(value)}}
    focusListener=listener
+   if(this.recordingCompatible){
+    val speaker=manager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).firstOrNull{it.type==AudioDeviceInfo.TYPE_BUILTIN_SPEAKER} ?: error("Speaker unavailable")
+    check(player!!.setPreferredDevice(speaker)){"Speaker unavailable"}
+   }
    val granted=if(Build.VERSION.SDK_INT>=26){
     focus=AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT).setAudioAttributes(attrs).setOnAudioFocusChangeListener(listener,audioHandler).build()
     manager.requestAudioFocus(focus!!)
-   }else{manager.requestAudioFocus(listener,AudioManager.STREAM_VOICE_CALL,AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)}
+   }else{manager.requestAudioFocus(listener,if(this.recordingCompatible)AudioManager.STREAM_MUSIC else AudioManager.STREAM_VOICE_CALL,AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)}
    check(granted==AudioManager.AUDIOFOCUS_REQUEST_GRANTED){"Audio focus unavailable"}
    if(capture){
     val minimum=AudioRecord.getMinBufferSize(16000,AudioFormat.CHANNEL_IN_MONO,AudioFormat.ENCODING_PCM_16BIT)
     require(minimum>0){"16 kHz microphone capture unsupported"}
-    recorder=AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build()).setBufferSizeInBytes(maxOf(minimum,6400)).build()
+    recorder=AudioRecord.Builder().setAudioSource(MediaRecorder.AudioSource.VOICE_COMMUNICATION).setAudioFormat(AudioFormat.Builder().setSampleRate(16000).setChannelMask(AudioFormat.CHANNEL_IN_MONO).setEncoding(AudioFormat.ENCODING_PCM_16BIT).build()).setBufferSizeInBytes(maxOf(minimum,6400)).apply{
+     // Keep voice processing/AEC while permitting supported system recorders to share input.
+     if(Build.VERSION.SDK_INT>=30 && this@RelayAudio.recordingCompatible)setPrivacySensitive(false)
+    }.build()
     check(recorder!!.state==AudioRecord.STATE_INITIALIZED){"Capture initialization failed"}
     aec=AcousticEchoCanceler.create(recorder!!.audioSessionId)
     if(aec?.hasControl()==true)aec?.enabled=true
@@ -204,6 +215,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
  private fun renderMS()=SystemClock.elapsedRealtimeNanos()/1e6
  fun mute(value:Boolean)=onAudio {muted=value;attack=0.0;silence=0.0;speaking=false;emit("level",mapOf("level" to 0.0))}
  fun speaker(enabled:Boolean)=onAudio {
+  if(recordingCompatible){check(enabled){"Recording compatibility requires speakerphone"};return@onAudio}
   if(Build.VERSION.SDK_INT>=31){
    val type=if(enabled)AudioDeviceInfo.TYPE_BUILTIN_SPEAKER else AudioDeviceInfo.TYPE_BUILTIN_EARPIECE
    val device=manager.availableCommunicationDevices.firstOrNull{it.type==type}

@@ -18,6 +18,51 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
+  test(
+    'recording compatibility is opt-in and survives secure settings saves',
+    () async {
+      final legacy = configured().toJson()..remove('recordingCompatible');
+      expect(
+        VoiceConfiguration.fromJson(legacy).toJson()['recordingCompatible'],
+        false,
+      );
+      final enabled = VoiceConfiguration.fromJson({
+        ...legacy,
+        'recordingCompatible': true,
+      });
+      final settings = VoiceSettings();
+      await settings.save(enabled);
+      expect((await settings.read())!.toJson()['recordingCompatible'], true);
+    },
+  );
+
+  testWidgets(
+    'Android voice settings expose a saved recording switch',
+    (tester) async {
+      final settings = VoiceSettings();
+      final initial = await settings.save(configured());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VoiceSettingsSheet(settings: settings, initial: initial),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final toggle = find.byKey(const ValueKey('voice.recordingCompatible'));
+      expect(toggle, findsOneWidget);
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(
+        (await VoiceSettings().read())!.toJson()['recordingCompatible'],
+        true,
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
   test('secure round trip is independent of text settings', () async {
     const storage = FlutterSecureStorage();
     await storage.write(key: ModelSettings.storageKey, value: 'text-config');

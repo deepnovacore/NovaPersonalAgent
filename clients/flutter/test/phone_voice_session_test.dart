@@ -24,6 +24,7 @@ import 'agent_core_test.dart' show MemoryPersistence;
 class VoiceAudio extends FakeAudio {
   int? generation;
   bool failEnqueueOnce = false, failStop = false;
+  bool recordingCompatible = false;
   Completer<void>? stopping, muting, switchingSpeaker;
   final muteRequests = <bool>[], speakerRequests = <bool>[];
   @override
@@ -53,7 +54,9 @@ class VoiceAudio extends FakeAudio {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   }) async {
+    this.recordingCompatible = recordingCompatible;
     this.generation = generation;
     await super.startRelay(
       generation: generation,
@@ -281,6 +284,34 @@ void main() {
     await provider.controller.close();
     await audio.controller.close();
   });
+  test(
+    'recording mode reaches owned audio and keeps speakerphone selected',
+    () async {
+      final owned = OwnedAudioPort(audio, AudioOwner());
+      final call = PhoneVoiceSession(
+        audio: owned,
+        requestMicrophone: () async => true,
+        store: store,
+      );
+      try {
+        await call.start(
+          provider: provider,
+          conversation: conversation,
+          recordingCompatible: true,
+        );
+        expect(audio.recordingCompatible, true);
+        expect(call.speaker, true);
+        await call.toggleSpeaker();
+        expect(call.speaker, true);
+        expect(audio.speakerRequests, isEmpty);
+      } finally {
+        await call.stop();
+        call.dispose();
+        await owned.dispose();
+      }
+    },
+  );
+
   Future<void> start() =>
       session.start(provider: provider, conversation: conversation);
 

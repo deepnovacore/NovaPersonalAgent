@@ -553,12 +553,14 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                   : null,
             ),
             _control(
-              label: t('扬声器', 'Speaker'),
+              label: session.recordingCompatible
+                  ? t('录屏外放', 'Recording speaker')
+                  : t('扬声器', 'Speaker'),
               icon: session.speaker
                   ? CupertinoIcons.speaker_2
                   : CupertinoIcons.ear,
               selected: session.speaker,
-              onPressed: session.active
+              onPressed: session.active && !session.recordingCompatible
                   ? () => unawaited(_action(session.toggleSpeaker))
                   : null,
             ),

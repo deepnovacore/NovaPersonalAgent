@@ -221,7 +221,7 @@ class NovaAudioPlugin:FlutterPlugin,MethodChannel.MethodCallHandler,ActivityAwar
      val threshold=call.argument<Double>("threshold") ?: error("Threshold required")
      require(threshold.isFinite() && threshold in 0.0..1.0)
      aoq?.stop();aoq=null;audio.disconnect();resetHandoff();generation=id
-     audio.start(capture,threshold);result.success(null);return
+     audio.start(capture,threshold,call.argument<Boolean>("recording_compatible")==true);result.success(null);return
     }
     "disconnect"->{aoq?.stop();aoq=null;audio.disconnect();resetHandoff();generation=null;result.success(null);return}
    }

@@ -55,6 +55,7 @@ final class ChannelAudio implements AudioPort, AoqPort {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   }) async {
     _generation = generation;
     try {
@@ -62,6 +63,7 @@ final class ChannelAudio implements AudioPort, AoqPort {
         'generation': generation,
         'capture': capture,
         'threshold': threshold,
+        'recording_compatible': recordingCompatible,
       });
     } catch (_) {
       if (_generation == generation) _generation = null;

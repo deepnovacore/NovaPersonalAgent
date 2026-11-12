@@ -59,7 +59,7 @@ class VoiceCallOverlayTest {
         assertNotNull(stop.parent)
         stop.performClick()
         assertEquals(listOf("task_stop"), actions)
-        assertTrue(params.flags and WindowManager.LayoutParams.FLAG_SECURE != 0)
+        assertEquals(0, params.flags and WindowManager.LayoutParams.FLAG_SECURE)
         val description = orb.contentDescription.toString()
         assertTrue(description.contains("microphone active"))
         assertTrue(description.contains("Step 2") && description.contains("Next"))
@@ -201,5 +201,24 @@ class VoiceCallOverlayTest {
         assertFalse(stop.isEnabled)
         assertTrue(stop.alpha < 1f)
         assertTrue(control("Open Nova").isEnabled)
+    }
+    @Test fun callAndTaskWindowsAllowUserScreenshotsAcrossModeChanges() {
+        ShadowSettings.setCanDrawOverlays(true)
+        val overlay = VoiceCallOverlay(RuntimeEnvironment.getApplication(), {}, {}, {}, {})
+        fun flags() = (VoiceCallOverlay::class.java.getDeclaredField("params").apply { isAccessible = true }.get(overlay) as WindowManager.LayoutParams).flags
+        fun orb() = VoiceCallOverlay::class.java.getDeclaredField("orb").apply { isAccessible = true }.get(overlay) as View
+        val task = VoicePetTask("one", "running", "First", 1)
+        try {
+            overlay.setMode(true, null, false)
+            assertTrue(overlay.show())
+            for (value in listOf(null, task, task.copy(status = "needs_user"), task.copy(status = "done"), null)) {
+                overlay.setMode(true, value, false)
+                assertEquals(0, flags() and WindowManager.LayoutParams.FLAG_SECURE)
+                orb().performClick()
+                assertEquals(0, flags() and WindowManager.LayoutParams.FLAG_SECURE)
+            }
+            overlay.setMode(false, task, false)
+            assertEquals(0, flags() and WindowManager.LayoutParams.FLAG_SECURE)
+        } finally { overlay.hide() }
     }
 }

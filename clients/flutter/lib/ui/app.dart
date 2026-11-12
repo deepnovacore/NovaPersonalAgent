@@ -1005,6 +1005,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
       } catch (_) {}
       await call.start(
         provider: createVoiceProvider(config),
+        recordingCompatible: config.recordingCompatible,
         conversation: id,
         personalContext: personal,
         language: language,
