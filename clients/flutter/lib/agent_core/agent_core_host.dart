@@ -103,11 +103,24 @@ final _leakedCallClose = RegExp(
 String stripToolCallMarkup(String text) {
   final lines = text.split('\n');
   final kept = <String>[];
-  var fenced = false, leaked = false;
+  String? fence;
+  var leaked = false, removed = false;
   for (final line in lines) {
-    if (!leaked && line.trimLeft().startsWith('```')) fenced = !fenced;
-    if (!leaked && !fenced && _leakedCallOpen.hasMatch(line)) leaked = true;
+    if (!leaked) {
+      final marker = RegExp(r'^[ \t]*(`{3,}|~{3,})').firstMatch(line)?[1];
+      if (marker != null) {
+        if (fence == null) {
+          fence = marker;
+        } else if (marker[0] == fence[0] && marker.length >= fence.length) {
+          fence = null;
+        }
+      }
+    }
+    if (!leaked && fence == null && _leakedCallOpen.hasMatch(line)) {
+      leaked = true;
+    }
     if (leaked) {
+      removed = true;
       // A closed block ends here; an unclosed one runs to the end.
       final close = _leakedCallClose.firstMatch(line);
       if (close != null) {
@@ -119,7 +132,7 @@ String stripToolCallMarkup(String text) {
     }
     kept.add(line);
   }
-  return kept.length == lines.length ? text : kept.join('\n').trim();
+  return removed ? kept.join('\n').trim() : text;
 }
 
 class AgentCoreHost extends ChangeNotifier {

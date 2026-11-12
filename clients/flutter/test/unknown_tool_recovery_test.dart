@@ -143,6 +143,13 @@ void main() {
         '前言\n<｜DSML｜function_calls>\n<｜DSML｜invoke name="a">\n'
         '</｜DSML｜invoke>\n</｜DSML｜function_calls>\n结尾说明';
     expect(stripToolCallMarkup(after), '前言\n结尾说明');
+    const tilde =
+        '~~~xml\n<|DSML|function_calls>\n</|DSML|function_calls>\n~~~';
+    expect(stripToolCallMarkup(tilde), tilde);
+    expect(
+      stripToolCallMarkup('<|DSML|function_calls></|DSML|function_calls>Done'),
+      'Done',
+    );
   });
 
   test('a reply that is only leaked markup does not count as done', () async {
