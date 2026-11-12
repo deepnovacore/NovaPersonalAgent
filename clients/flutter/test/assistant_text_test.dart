@@ -8,6 +8,11 @@ void main() {
     '`nova-file:///workspace/counter.html`',
     '打开：nova-file:///workspace/counter.html。',
     '(nova-file:///workspace/counter.html)',
+    '网站已做好：**nova-file:///workspace/counter.html**',
+    '_nova-file:///workspace/counter.html_',
+    '~~nova-file:///workspace/counter.html~~',
+    "'nova-file:///workspace/counter.html'",
+    '是否打开 nova-file:///workspace/counter.html?',
   ]) {
     testWidgets('local HTML preview can be tapped from $text', (tester) async {
       final opened = <String>[];
@@ -26,6 +31,27 @@ void main() {
       expect(opened, ['nova-file:///workspace/counter.html']);
     });
   }
+
+  testWidgets('a bold markdown link opens its preview once', (tester) async {
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssistantText(
+            '**[我的网站](nova-file:///workspace/index.html)**\n'
+            '文件：nova-file:///workspace/my_site.html',
+            onArtifactLink: (value) async => opened.add(value),
+          ),
+        ),
+      ),
+    );
+    // The markdown link itself is tappable, so no duplicate chip appears.
+    expect(find.widgetWithText(TextButton, 'index.html'), findsNothing);
+    expect(find.textContaining('**'), findsNothing);
+    await tester.tap(find.widgetWithText(TextButton, 'my_site.html'));
+    await tester.pump();
+    expect(opened, ['nova-file:///workspace/my_site.html']);
+  });
 
   testWidgets('preview actions preserve encoded names and deduplicate URLs', (
     tester,

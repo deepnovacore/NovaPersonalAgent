@@ -13,9 +13,11 @@ class AssistantText extends StatelessWidget {
   Iterable<Uri> get _previewLinks sync* {
     final seen = <String>{};
     for (final match in RegExp(
-      r'''nova-file:///workspace/[^\s`<>"\[\]，。；：！？、（）]+''',
+      r'''nova-file:///workspace/[^\s`<>"*\[\]，。；：！？、（）]+''',
     ).allMatches(text)) {
-      final url = match[0]!.replaceFirst(RegExp(r'[).,;:!]+$'), '');
+      // Markdown emphasis and quotes may hug a link; `_` stays legal inside
+      // a name and is only trimmed at the end.
+      final url = match[0]!.replaceFirst(RegExp(r"[)_~'.,;:!?]+$"), '');
       if (!seen.add(url)) continue;
       try {
         final uri = Uri.parse(url);
