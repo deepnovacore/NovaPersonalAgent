@@ -1710,21 +1710,51 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                         crossAxisAlignment: CrossAxisAlignment.end,
                         children: [
                           if ((!_experienceDefault || host.experiencePersona) &&
-                              widget.onVoiceText == null &&
                               host.tools?.registry.workspace != null)
-                            IconButton(
-                              tooltip: t(
-                                '添加文件（最多 25 MiB）',
-                                'Attach file (up to 25 MiB)',
-                              ),
-                              onPressed:
-                                  pickingAttachment ||
-                                      host.busy ||
-                                      attachments.length >= 4
-                                  ? null
-                                  : _pickAttachment,
-                              icon: const Icon(Icons.attach_file, size: 22),
-                            ),
+                            widget.onVoiceText != null
+                                // Text typed during a call goes to the call,
+                                // which carries no files: say so on tap.
+                                ? IconButton(
+                                    key: const ValueKey('attach-in-call'),
+                                    tooltip: t(
+                                      '通话中暂不支持附件',
+                                      'Attachments are unavailable during a call',
+                                    ),
+                                    onPressed: () =>
+                                        ScaffoldMessenger.maybeOf(
+                                          context,
+                                        )?.showSnackBar(
+                                          SnackBar(
+                                            content: Text(
+                                              t(
+                                                '通话中暂不支持附件，挂断后可上传。',
+                                                'Attachments are unavailable during a call. Hang up to attach files.',
+                                              ),
+                                            ),
+                                          ),
+                                        ),
+                                    icon: const Icon(
+                                      Icons.attach_file,
+                                      size: 22,
+                                      color: Nova.tertiary,
+                                    ),
+                                  )
+                                : IconButton(
+                                    tooltip: t(
+                                      '添加文件（最多 25 MiB）',
+                                      'Attach file (up to 25 MiB)',
+                                    ),
+                                    onPressed:
+                                        pickingAttachment ||
+                                            host.busy ||
+                                            attachments.length >= 4
+                                        ? null
+                                        : _pickAttachment,
+                                    icon: const Icon(
+                                      Icons.attach_file,
+                                      size: 22,
+                                    ),
+                                  ),
                           Expanded(
                             child: ConstrainedBox(
                               constraints: BoxConstraints(

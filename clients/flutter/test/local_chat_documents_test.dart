@@ -181,4 +181,53 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     host.dispose();
   });
+
+  for (final inCall in [false, true]) {
+    testWidgets('attachment button during a call: $inCall', (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      final host = AgentCoreHost(
+        store: store,
+        settings: FixtureSettings(),
+        tools: ToolRunner(
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            workspace: AgentWorkspace(Directory('/unused')),
+          ),
+          journal: ToolJournal(MemoryPersistence()),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              host: host,
+              conversationId: id,
+              onVoiceText: inCall ? (_) async {} : null,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      // The button stays where it always is; in a call it explains itself.
+      expect(find.byIcon(Icons.attach_file), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('attach-in-call')),
+        inCall ? findsOneWidget : findsNothing,
+      );
+      if (inCall) {
+        await tester.tap(find.byIcon(Icons.attach_file));
+        await tester.pump();
+        expect(find.text('通话中暂不支持附件，挂断后可上传。'), findsOneWidget);
+      } else {
+        expect(find.byTooltip('添加文件（最多 25 MiB）'), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    });
+  }
 }
