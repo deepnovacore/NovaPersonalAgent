@@ -48,7 +48,115 @@ class _MissingSettings extends ModelSettings {
   Future<ModelConfiguration?> read() async => null;
 }
 
+class _TurnSettings extends ModelSettings {
+  bool fail = false;
+  @override
+  Future<ModelConfiguration?> read() async {
+    if (fail) {
+      throw const AgentFailure('network_unavailable');
+    }
+    return ModelConfiguration(
+      endpoint: 'https://example.com',
+      model: 'fixture',
+      key: 'fixture',
+    );
+  }
+}
+
+class _FailedModel extends ModelClient {
+  @override
+  Stream<Map<String, dynamic>> stream(
+    ModelConfiguration configuration,
+    List<Map<String, dynamic>> messages, {
+    List<Map<String, dynamic>> tools = const [],
+  }) async* {
+    throw const AgentFailure('network_unavailable');
+  }
+}
+
 void main() {
+  testWidgets('task error banner belongs to the failed conversation only', (
+    tester,
+  ) async {
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final first = await store.create(), second = await store.create();
+    final host = AgentCoreHost(store: store, settings: _MissingSettings());
+    await host.send(first, 'Fail before storing');
+    expect(host.errorConversationId, first);
+    expect(host.activeConversationId, isNull);
+    Widget panel(String chat, {bool task = true}) => MaterialApp(
+      home: Scaffold(
+        body: LocalChatPanel(
+          host: host,
+          conversationId: chat,
+          onTaskText: task
+              ? (text, approve) => host.send(chat, text, approve: approve)
+              : null,
+        ),
+      ),
+    );
+    await tester.pumpWidget(panel(first));
+    expect(find.text('先选择一个模型，就可以开始对话。'), findsOneWidget);
+    await tester.pumpWidget(panel(second));
+    expect(host.error, 'model_settings_required');
+    expect(find.text('先选择一个模型，就可以开始对话。'), findsNothing);
+    await tester.pumpWidget(panel(second, task: false));
+    expect(find.text('先选择一个模型，就可以开始对话。'), findsOneWidget);
+    host.error = null;
+    expect(host.errorConversationId, isNull);
+    expect(host.errorInTranscript, false);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+  });
+
+  testWidgets(
+    'pre-store failure matching an old interruption still has its own banner',
+    (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final chat = await store.create();
+      final settings = _TurnSettings();
+      final host = AgentCoreHost(
+        store: store,
+        settings: settings,
+        clientFactory: _FailedModel.new,
+      );
+      await host.send(chat, 'First turn');
+      expect(host.error, 'network_unavailable');
+      expect(host.errorInTranscript, true);
+      final previous = store.conversation(chat)['messages'];
+      settings.fail = true;
+      final key = GlobalKey<LocalChatPanelState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              key: key,
+              host: host,
+              conversationId: chat,
+              onTaskText: (text, approve) =>
+                  host.send(chat, text, approve: approve),
+            ),
+          ),
+        ),
+      );
+      expect(find.text('网络暂时不可用，进度已保存。'), findsOneWidget);
+      key.currentState!.input.text = 'Retry';
+      await tester.pump();
+      await tester.tap(find.byTooltip('发送'));
+      await tester.pumpAndSettle();
+      expect(host.error, 'network_unavailable');
+      expect(host.errorConversationId, chat);
+      expect(host.errorInTranscript, false);
+      expect(store.conversation(chat)['messages'], previous);
+      expect(key.currentState!.input.text, 'Retry');
+      expect(find.text('网络暂时不可用，进度已保存。'), findsNWidgets(2));
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
+
   for (final code in [
     'model_http_401',
     'experience_quota_exceeded',
@@ -66,7 +174,11 @@ void main() {
         'interrupted': true,
         'error': code,
       });
-      final host = TopicHost(store)..error = code;
+      final host = TopicHost(store)
+        ..activeConversationId = chat
+        ..error = code
+        ..errorInTranscript = true
+        ..activeConversationId = null;
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
@@ -329,6 +441,7 @@ void main() {
     final key = GlobalKey<LocalChatPanelState>();
     final delivered = <String>[];
     host.error = 'provider_credential_missing';
+    host.errorConversationId = chat;
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(

@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import '../space/space_storage.dart';
 import '../agent_core/agent_core_host.dart';
+import '../agent_core/background_execution.dart';
 import '../agent_core/tool_registry.dart';
 import '../agent_core/tool_owner.dart';
 import '../personal/local_life.dart';
@@ -58,7 +59,9 @@ class VoiceDelegateBridge extends ChangeNotifier {
         experienceModel: primary.experienceModel,
         experiencePersona: primary.experiencePersona,
         additionalContext: primary.additionalContext,
-        backgroundExecution: primary.backgroundExecution,
+        backgroundExecution: primary.backgroundExecution == null
+            ? null
+            : BackgroundExecution(),
         clientFactory: primary.clientFactory,
         allowLocalMemory: false,
         owner: '${ToolOwner.voice}:delegate',
@@ -117,8 +120,12 @@ class VoiceDelegateBridge extends ChangeNotifier {
           Map<String, dynamic>.from(source),
           origin: link.origin,
           task: link.intent['delegate_id'] as String,
-          status: link.intent['delegate_status'] as String? ?? 'returned',
-          language: link.intent['delegate_language'] as String? ?? 'zh',
+          status: link.intent['delegate_status'] is String
+              ? link.intent['delegate_status'] as String
+              : 'returned',
+          language: link.intent['delegate_language'] is String
+              ? link.intent['delegate_language'] as String
+              : 'zh',
         );
       } catch (_) {
         debugPrint('[VoiceDelegate] Skipped invalid legacy context.');
@@ -160,6 +167,12 @@ class VoiceDelegateBridge extends ChangeNotifier {
         (m) => m['delegate_status'] == 'dispatched',
       )) {
         final task = intent['delegate_id'];
+        if (task is! String) {
+          continue;
+        }
+        final language = intent['delegate_language'] is String
+            ? intent['delegate_language'] as String
+            : 'zh';
         if (messages.any(
           (m) =>
               m['delegate_id'] == task && m['delegate_status'] != 'dispatched',
@@ -177,9 +190,11 @@ class VoiceDelegateBridge extends ChangeNotifier {
         final current = context?['delegate_id'] == task;
         final candidates = context?['delegate_id'] != null && !current
             ? <dynamic>[]
-            : current && context?['delegate_start_index'] is int
+            : current &&
+                  context?['delegate_start_index'] is int &&
+                  (context!['delegate_start_index'] as int) >= 0
             ? workerMessages
-                  .skip(context!['delegate_start_index'] as int)
+                  .skip(context['delegate_start_index'] as int)
                   .toList()
             : workerMessages
                   .where(
@@ -200,31 +215,31 @@ class VoiceDelegateBridge extends ChangeNotifier {
                   (last['content'] as String).isNotEmpty
             ? last
             : null;
+        final savedStatus = result?['delegate_status'];
         final status = result == null
             ? 'process_interrupted_unknown'
-            : result['delegate_status'] as String? ?? 'returned';
+            : savedStatus is String
+            ? savedStatus
+            : 'returned';
         final text =
             result?['content'] as String? ??
-            (intent['delegate_language'] == 'en'
+            (language == 'en'
                 ? 'Task execution was interrupted. Its outcome is unknown; it will not be retried automatically.'
                 : '任务执行已中断，操作结果未知；不会自动重试。');
         if (context != null && context['delegate_origin'] != null) {
           await worker.store.delegateStatus(
             context['id'] as String,
-            task as String,
+            task,
             status,
           );
         }
         await primary.store.append(conversation['id'] as String, {
           'role': 'assistant',
-          'content': _summary(
-            text,
-            intent['delegate_language'] as String? ?? 'zh',
-          ),
+          'content': _summary(text, language),
           'delegate_id': task,
           'delegate_context': intent['delegate_context'],
           if (intent['delegate_language'] != null)
-            'delegate_language': intent['delegate_language'],
+            'delegate_language': language,
           'delegate_status': status,
         }, external: true);
       }

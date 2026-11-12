@@ -1531,10 +1531,10 @@ class LocalChatPanelState extends State<LocalChatPanel> {
                 ),
                 if (host.error != null &&
                     (widget.onTaskText == null ||
-                        _modelSetupError(host.error!) ||
-                        host.error!.startsWith('experience_') ||
-                        messages.lastOrNull?['interrupted'] != true ||
-                        messages.lastOrNull?['error'] != host.error))
+                        (host.errorConversationId == widget.conversationId &&
+                            (_modelSetupError(host.error!) ||
+                                host.error!.startsWith('experience_') ||
+                                !host.errorInTranscript))))
                   Padding(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 24,

@@ -130,7 +130,15 @@ class AgentCoreHost extends ChangeNotifier {
   String draft = '';
   String reasoning = '';
   String pendingUserText = '';
-  String? error;
+  String? _error;
+  String? get error => _error;
+  String? errorConversationId;
+  bool errorInTranscript = false;
+  set error(String? value) {
+    _error = value;
+    errorConversationId = value == null ? null : activeConversationId;
+    errorInTranscript = false;
+  }
 
   /// The specific reason behind a `tool_<status>` [error], such as
   /// `invalid_tool_arguments`, when the tool result named one.
@@ -736,6 +744,7 @@ class AgentCoreHost extends ChangeNotifier {
             'interrupted': true,
             'error': error,
           });
+          errorInTranscript = true;
         } catch (_) {
           error = 'conversation_save_failed';
           errorDetail = null;

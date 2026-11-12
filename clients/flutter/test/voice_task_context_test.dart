@@ -140,8 +140,9 @@ void main() {
       expect(bridge.worker.additionalContext, same(primary.additionalContext));
       expect(
         bridge.worker.backgroundExecution,
-        same(primary.backgroundExecution),
+        isNot(same(primary.backgroundExecution)),
       );
+      expect(bridge.worker.backgroundExecution, isA<BackgroundExecution>());
       expect(bridge.worker.clientFactory, same(primary.clientFactory));
       expect(bridge.worker.allowLocalMemory, false);
       expect(bridge.worker.owner, 'voice:delegate');
@@ -158,6 +159,11 @@ void main() {
         (store.conversation(child)['messages'] as List).last['content'],
         'Finished',
       );
+      final foreground = AgentCoreHost(store: store, settings: _Settings());
+      addTearDown(foreground.dispose);
+      final foregroundBridge = await VoiceDelegateBridge.open(foreground);
+      addTearDown(foregroundBridge.dispose);
+      expect(foregroundBridge.worker.backgroundExecution, isNull);
     },
   );
 
@@ -278,7 +284,7 @@ void main() {
   );
 
   test(
-    'legacy import skips invalid and colliding rows while importing valid rows once without rewriting bytes',
+    'legacy import tolerates malformed delegate metadata and imports valid rows once without rewriting bytes',
     () async {
       final root = await Directory.systemTemp.createTemp('voice-task-import-');
       addTearDown(() => root.delete(recursive: true));
@@ -315,7 +321,23 @@ void main() {
           {
             'id': 'old-context',
             'backend': 'local',
+            'delegate_start_index': -1,
             'messages': [
+              {
+                'role': 'assistant',
+                'content': '',
+                'time': '2026-11-12T01:00:00Z',
+                'delegate_id': 42,
+                'delegate_status': 'dispatched',
+              },
+              {
+                'role': 'assistant',
+                'content': '',
+                'time': '2026-11-12T01:00:00Z',
+                'delegate_id': 'nested-run',
+                'delegate_status': 'dispatched',
+                'delegate_language': 42,
+              },
               {
                 'role': 'user',
                 'content': '开发游戏',
@@ -326,7 +348,7 @@ void main() {
                 'content': '旧任务已验证完成',
                 'time': '2026-11-12T01:00:02Z',
                 'delegate_result': 'old-run',
-                'delegate_status': 'returned',
+                'delegate_status': 42,
               },
             ],
           },
@@ -366,6 +388,12 @@ void main() {
         '旧任务已验证完成',
       );
       expect(bridge.busy, false);
+      expect(
+        (store.conversation(origin)['messages'] as List)
+            .last['delegate_status'],
+        'returned',
+      );
+      final recoveredMessages = store.conversation('old-context')['messages'];
       bridge.dispose();
       bridge = await SpaceStorage.runScoped(
         space,
@@ -377,6 +405,7 @@ void main() {
         hasLength(1),
       );
       expect(store.conversation(origin)['messages'], hasLength(4));
+      expect(store.conversation('old-context')['messages'], recoveredMessages);
       expect(
         store.conversations.any((c) => c['id'] == 'invalid-context'),
         false,
