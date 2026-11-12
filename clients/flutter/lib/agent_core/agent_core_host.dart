@@ -95,6 +95,7 @@ class AgentCoreHost extends ChangeNotifier {
     required this.settings,
     this.tools,
     this.allowLocalMemory = true,
+    this.memoryReadOnly = false,
     this.owner = ToolOwner.text,
     this.backgroundExecution,
     this.beforeModel,
@@ -111,8 +112,13 @@ class AgentCoreHost extends ChangeNotifier {
   /// a voice delegate. Cancel only ever stops work this owner started.
   final String owner;
 
-  /// Delegated model-generated requests must not read or write local memory.
+  /// Full local memory (remember, recall, forget and the prompt summary).
   final bool allowLocalMemory;
+
+  /// Without [allowLocalMemory]: memory_recall only, no summary and no saves.
+  /// Delegated requests are model-generated, so they can never authorize a
+  /// save; a recall is fenced and redacted like any other live memory payload.
+  final bool memoryReadOnly;
   final BackgroundExecution? backgroundExecution;
   final Future<void> Function(ModelConfiguration)? beforeModel;
   final Future<String> Function(ModelConfiguration)? additionalContext;
@@ -281,7 +287,7 @@ class AgentCoreHost extends ChangeNotifier {
     Future<ModelConfiguration> Function()? experience;
     var textOnly = false;
     BackgroundExecution? background;
-    final memoryStore = allowLocalMemory
+    final memoryStore = allowLocalMemory || memoryReadOnly
         ? tools?.registry.standaloneMemory
         : null;
     var memoryListening = false;
@@ -368,13 +374,24 @@ class AgentCoreHost extends ChangeNotifier {
         backgroundExpired = true;
         cancel();
       });
-      final advertised = approve == null || textOnly
+      var advertised = approve == null || textOnly
           ? <Map<String, dynamic>>[]
           : tools?.registry.definitions
-                    .where((e) => allowLocalMemory || !isMemoryTool(e.wireName))
+                    .where(
+                      (e) =>
+                          allowLocalMemory ||
+                          !isMemoryTool(e.wireName) ||
+                          (memoryReadOnly && e.wireName == 'memory_recall'),
+                    )
                     .map((e) => e.wire)
                     .toList() ??
                 [];
+      // Personal reads that are new to a lane remove web_fetch for the rest
+      // of the turn, so fetched content cannot carry those payloads out.
+      final personalReads = {
+        'profile_read',
+        if (!allowLocalMemory) 'memory_recall',
+      };
       for (var round = 0; round < 24; round++) {
         final storedMessages =
             store.conversation(conversationId)['messages'] as List;
@@ -450,7 +467,7 @@ class AgentCoreHost extends ChangeNotifier {
               },
             ),
         ];
-        final memory = textOnly ? null : memoryStore;
+        final memory = textOnly || !allowLocalMemory ? null : memoryStore;
         if (memory != null) {
           messages.insert(2, {
             'role': 'system',
@@ -573,7 +590,7 @@ class AgentCoreHost extends ChangeNotifier {
           if (reasoning.isNotEmpty) 'reasoning_content': reasoning,
           '_nova_response_items': ?responseItems,
         };
-        if (calls.values.any((c) => isMemoryTool(c['function']['name']))) {
+        if (calls.values.any((c) => isLiveOnlyTool(c['function']['name']))) {
           liveArtifacts['assistant:${calls.values.first['id']}'] =
               assistantMessage;
         }
@@ -667,8 +684,14 @@ class AgentCoreHost extends ChangeNotifier {
           if (call['function']['name'] == 'memory_forget') {
             // Never replay earlier live recall results after a forget either.
             liveArtifacts.clear();
-          } else if (isMemoryTool(call['function']['name'])) {
+          } else if (isLiveOnlyTool(call['function']['name'])) {
             liveArtifacts['tool:${call['id']}'] = toolMessage;
+          }
+          if (personalReads.contains(call['function']['name']) &&
+              result['status'] == 'completed') {
+            advertised = advertised
+                .where((e) => e['function']['name'] != 'web_fetch')
+                .toList();
           }
           await store.append(conversationId, toolMessage);
           _changed();

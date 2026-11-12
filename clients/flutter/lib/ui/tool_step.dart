@@ -101,6 +101,7 @@ class ToolStep extends StatelessWidget {
       'memory_remember' => t('保存记忆', 'Save memory'),
       'memory_recall' => t('召回记忆', 'Recall memory'),
       'memory_forget' => t('忘记记忆', 'Forget memory'),
+      'profile_read' => t('读取个人资料', 'Read profile'),
       'file_read' => t('读取文件', 'Read file'),
       'file_write' => t('写入文件', 'Write file'),
       'file_edit' => t('修改文件', 'Edit file'),

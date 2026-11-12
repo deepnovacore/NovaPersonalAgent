@@ -15,6 +15,8 @@ import '../context/profile_corrections.dart';
 import '../context/profile_agent.dart';
 import '../context/profile_acceptance_diagnostics.dart';
 import '../context/profile_generation_coordinator.dart';
+import '../context/profile_repository.dart';
+import '../context/profile_tool.dart';
 import '../context/secure_persistence.dart';
 import 'feishu_direct_page.dart';
 import 'local_profile_results.dart';
@@ -427,9 +429,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
             backgroundExecution: iosTasks == null
                 ? null
                 : BackgroundExecution(),
-            clientFactory: iosTasks == null
-                ? null
-                : IosModelClient.new,
+            clientFactory: iosTasks == null ? null : IosModelClient.new,
             registry: _experience
                 ? ToolRegistry(
                     spaceMode: spaceMode,
@@ -462,6 +462,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                     mutate: lifeHost.mutate,
                     hasConflict: () => lifeHost.hasConflict,
                     fetch: SafeWebFetch().fetch,
+                    readProfile: _readProfileForModel,
                     automaticExecution: true,
                     workspace: workspace,
                     shell: workspace == null ? null : WorkspaceShell(workspace),
@@ -972,6 +973,27 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
   Future<void> _voiceSettings() async {
     if (phoneVoice?.active == true || phoneVoice?.connecting == true) return;
     await showVoiceSettings(context, voiceSettings, language: language);
+  }
+
+  /// Read-only profile/timeline for model tools; the registry is shared by the
+  /// text lane and its voice delegate, which run on the same model settings.
+  Future<Map<String, dynamic>> _readProfileForModel(
+    Map<String, dynamic> args,
+  ) async {
+    final connector = feishu ??= FeishuHost();
+    await connector.open();
+    final model = await agentCore?.settings.read();
+    return readProfileForModel(
+      repository: ProfileRepository(
+        SecureContextPersistence('nova.profile.local.v1'),
+        lifeHost.publication,
+        connector.sources,
+        corrections: ProfileCorrections(),
+      ),
+      sources: connector.sources,
+      provider: model == null ? null : '${model.endpoint}|${model.model}',
+      args: args,
+    );
   }
 
   Future<void> _startPhoneVoice() async {

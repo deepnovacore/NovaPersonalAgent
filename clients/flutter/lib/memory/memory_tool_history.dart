@@ -3,13 +3,18 @@ import 'dart:convert';
 bool isMemoryTool(Object? name) =>
     const {'memory_remember', 'memory_recall', 'memory_forget'}.contains(name);
 
+/// Tools whose personal payloads exist only during the live turn: memory and
+/// the confirmed profile/timeline projection. Durable history keeps receipts.
+bool isLiveOnlyTool(Object? name) =>
+    isMemoryTool(name) || name == 'profile_read';
+
 /// Durable memory receipts contain metadata only. Apply to old history too, so
 /// forgotten payloads cannot be revived from legacy tool results on restart.
 void redactMemoryToolHistory(List messages) {
   final callIds = <String>{};
   for (final message in messages.whereType<Map>()) {
     final progress = message['progress'];
-    var memoryCall = progress is Map && isMemoryTool(progress['tool']);
+    var memoryCall = progress is Map && isLiveOnlyTool(progress['tool']);
     if (memoryCall) {
       progress.remove('draft');
       progress.remove('reasoning');
@@ -17,7 +22,7 @@ void redactMemoryToolHistory(List messages) {
     for (final call
         in (message['tool_calls'] as List? ?? []).whereType<Map>()) {
       final function = call['function'];
-      if (function is! Map || !isMemoryTool(function['name'])) continue;
+      if (function is! Map || !isLiveOnlyTool(function['name'])) continue;
       memoryCall = true;
       if (call['id'] is String) callIds.add(call['id'] as String);
       Map args = {};
@@ -46,7 +51,7 @@ void redactMemoryToolHistory(List messages) {
   }
   for (final message in messages.whereType<Map>()) {
     if (message['role'] != 'tool' ||
-        !(isMemoryTool(message['tool_name']) ||
+        !(isLiveOnlyTool(message['tool_name']) ||
             callIds.contains(message['tool_call_id']))) {
       continue;
     }

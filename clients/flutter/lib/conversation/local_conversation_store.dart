@@ -154,7 +154,7 @@ class ConversationStore {
     for (final item in data['conversations'] as List) {
       redactMemoryToolHistory(item['messages'] as List);
       final active = item['active_turn'];
-      if (active is Map && isMemoryTool(active['tool'])) {
+      if (active is Map && isLiveOnlyTool(active['tool'])) {
         active['draft'] = '';
         active['reasoning'] = '';
       }

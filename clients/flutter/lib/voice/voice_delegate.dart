@@ -54,6 +54,8 @@ class VoiceDelegateBridge extends ChangeNotifier {
         settings: primary.settings,
         tools: primary.tools,
         allowLocalMemory: false,
+        // Recall only: a delegated request can never authorize a save.
+        memoryReadOnly: true,
         // Its cancel and device-task ownership stay separate from the text lane.
         owner: '${ToolOwner.voice}:delegate',
         // A separate Dart HTTP client avoids the iOS singleton stream handler.
