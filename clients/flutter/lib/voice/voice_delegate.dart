@@ -260,6 +260,7 @@ class VoiceDelegateBridge extends ChangeNotifier {
         'The task result could not be saved. Check the existing action; it will not be retried automatically.',
       );
     }
+    debugPrint('[NovaVoice] delegate ended: error=${worker.error != null}');
     if (!_disposed) {
       _updates.add(
         VoiceDelegateUpdate(task, conversation, result, terminal: true),

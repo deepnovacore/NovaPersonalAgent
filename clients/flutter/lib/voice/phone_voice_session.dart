@@ -52,6 +52,9 @@ const voiceDelegateTools = <Map<String, dynamic>>[
   },
 ];
 
+String voiceDelegateAccepted(String task) =>
+    'Delegate $task accepted and is now running in the background; its result will arrive later. If you have not spoken yet, say in one short, warm first-person sentence what you are starting now, for example 好的，我来打开小红书看看 or OK, I\'ll open Xiaohongshu for you; do not mention task ids or say it has finished.';
+
 class _VoiceResponse {
   _VoiceResponse(
     this.id,
@@ -1008,10 +1011,18 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   Future<void> _tool(VoiceEvent event) async {
     final response = _responses[event.responseId];
     final call = event.callId;
+    // Fixed gate names only; never tool arguments or ids.
+    void gate(String why) {
+      if (event.name == 'delegate_task') {
+        debugPrint('[NovaVoice] delegate_task gate: $why');
+      }
+    }
+
     if (event.epoch != _epoch ||
         call == null ||
         _called.contains(call) ||
         response == null) {
+      gate(response == null ? 'no_response' : 'stale_or_repeated');
       return;
     }
     final memoryCall =
@@ -1021,11 +1032,19 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
         response.interrupted ||
         (memoryCall && response.turn != _turn) ||
         (!memoryCall && (delegates == null || !supportsVoiceDelegation))) {
+      gate(
+        response.host
+            ? 'host_response'
+            : response.interrupted
+            ? 'interrupted'
+            : 'unavailable',
+      );
       _called.add(call);
       return;
     }
     final userRequest = _userTurns[response.turn];
     if (userRequest == null && !memoryCall) {
+      gate('awaiting_user_text');
       if (_pendingCalls.length < 8 &&
           !_pendingCalls.any((e) => e.callId == call)) {
         _pendingCalls.add(event);
@@ -1058,7 +1077,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
           request:
               'User request: $userRequest\nTask requested by voice front brain (within that scope): ${args['request']}',
         );
-        result = 'Delegate $task was dispatched. Completion is not yet known.';
+        result = voiceDelegateAccepted(task);
         acknowledgementFor = response.id;
       } else if (event.name == 'cancel_delegate' &&
           args.keys.length == 1 &&
@@ -1070,9 +1089,27 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
       } else {
         result = 'Rejected invalid or unavailable tool.';
       }
-    } catch (_) {
+    } catch (error) {
+      if (event.name == 'delegate_task') {
+        gate(
+          error is StateError &&
+                  const {
+                    'delegate_busy',
+                    'delegate_already_dispatched',
+                  }.contains(error.message)
+              ? error.message
+              : error is ArgumentError
+              ? 'invalid_delegate'
+              : 'start_failed',
+        );
+      }
       result =
           'Task was not dispatched: busy, duplicate, or unavailable. Do not retry automatically.';
+    }
+    if (event.name == 'delegate_task') {
+      debugPrint(
+        '[NovaVoice] delegate_task dispatched: ${acknowledgementFor != null}',
+      );
     }
     if (event.epoch != _epoch || memoryGeneration != _memoryGeneration) return;
     final delivered = await _inject(
