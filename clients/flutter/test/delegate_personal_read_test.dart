@@ -26,9 +26,10 @@ Map<String, dynamic> _emptyLife() => {
 
 /// Replays one scripted tool round per request, then answers with text.
 class _ScriptedModel extends ModelClient {
-  _ScriptedModel(this.rounds, {this.reasoning = const {}});
+  _ScriptedModel(this.rounds, {this.reasoning = const {}, this.failAt});
   final List<List<(String, Map<String, dynamic>)>> rounds;
   final Map<int, String> reasoning;
+  final int? failAt;
   final prompts = <List<Map<String, dynamic>>>[];
   final advertised = <List<String>>[];
   @override
@@ -43,6 +44,7 @@ class _ScriptedModel extends ModelClient {
     if (reasoning[round] case final String thought) {
       yield {'reasoning': thought};
     }
+    if (round == failAt) throw const AgentFailure('model_unavailable');
     if (round >= rounds.length) {
       yield {'content': 'Done'};
       return;
@@ -68,13 +70,15 @@ Future<(AgentCoreHost, ConversationStore, String, _ScriptedModel)> _delegate({
   void Function(String?)? onProvider,
   Map<int, String> reasoning = const {},
   List<String>? fetched,
+  int? failAt,
+  MemoryPersistence? persistence,
 }) async {
-  final store = ConversationStore(MemoryPersistence());
+  final store = ConversationStore(persistence ?? MemoryPersistence());
   await store.open();
   final id = await store.create();
   final journal = ToolJournal(MemoryPersistence());
   await journal.open();
-  final model = _ScriptedModel(rounds, reasoning: reasoning);
+  final model = _ScriptedModel(rounds, reasoning: reasoning, failAt: failAt);
   final host = AgentCoreHost(
     store: store,
     settings: FixtureSettings(),
@@ -217,6 +221,42 @@ void main() {
       isNot(contains('minimal dark design')),
     );
   });
+
+  test(
+    'an interrupted round after a personal read stores no reasoning',
+    () async {
+      final persistence = MemoryPersistence();
+      final (host, store, id, _) = await _delegate(
+        memory: memory,
+        persistence: persistence,
+        rounds: [
+          [
+            ('memory_recall', {'query': 'design'}),
+          ],
+        ],
+        reasoning: {1: 'the user prefers a minimal dark design'},
+        failAt: 1,
+        readProfile: (_) async => {'available': false},
+      );
+      await host.send(
+        id,
+        'Build a personal website',
+        userAuthored: false,
+        approve: (_) async => true,
+      );
+      expect(host.error, isNotNull);
+      expect(
+        jsonEncode(store.conversation(id)),
+        isNot(contains('minimal dark design')),
+      );
+      final reopened = ConversationStore(persistence);
+      await reopened.open();
+      expect(
+        jsonEncode(reopened.conversation(id)),
+        isNot(contains('minimal dark design')),
+      );
+    },
+  );
 
   test(
     'a web_fetch batched with a personal read still runs; later rounds lose it',

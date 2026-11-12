@@ -233,6 +233,7 @@ void main() {
         );
         (summary['turns'] as List).add({
           'error': host.error,
+          'error_detail': host.errorDetail,
           'tool_rounds': rounds,
           'first_personal_read_round': firstRead,
           'web_fetch_advertised_after_read':
@@ -242,6 +243,11 @@ void main() {
                   .any((r) => r.contains('web_fetch')),
           'html_chars': html.length,
         });
+        if (evidence != null) {
+          await File(
+            '$evidence/summary.json',
+          ).writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
+        }
         return html;
       }
 
@@ -293,8 +299,8 @@ void main() {
                   as Map)['content']
               as String? ??
           '';
-      summary['third_answer_mentions_dark_preference'] =
-          answer.contains('深色') && answer.contains('偏好');
+      // Judged by reading answer-3.txt: it must not claim a dark preference.
+      summary['third_answer_chars'] = answer.length;
       if (evidence != null) {
         await File(
           '$evidence/summary.json',

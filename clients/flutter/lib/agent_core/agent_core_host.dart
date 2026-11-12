@@ -791,7 +791,8 @@ class AgentCoreHost extends ChangeNotifier {
           await store.append(conversationId, {
             'role': 'assistant',
             'content': draft,
-            if (reasoning.isNotEmpty) 'reasoning_content': reasoning,
+            if (reasoning.isNotEmpty && !personalExposed)
+              'reasoning_content': reasoning,
             'interrupted': true,
             'error': error,
           });
