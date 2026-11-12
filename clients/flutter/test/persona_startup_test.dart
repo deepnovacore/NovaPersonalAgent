@@ -53,8 +53,9 @@ void main() {
           TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
       messenger.setMockMessageHandler('flutter/assets', (message) async {
         final key = utf8.decode(message!.buffer.asUint8List());
-        if (key == 'AssetManifest.bin')
+        if (key == 'AssetManifest.bin') {
           return const StandardMessageCodec().encodeMessage({});
+        }
         final bytes =
             bundle.files[key] ??
             (File(key).existsSync() ? File(key).readAsBytesSync() : null);
@@ -118,8 +119,9 @@ void main() {
           for (final file in Directory(
             '$backup/spaces/${saved['space']}',
           ).listSync().whereType<File>()) {
-            if (file.path.endsWith('.json'))
+            if (file.path.endsWith('.json')) {
               file.copySync('${directory.path}/${file.uri.pathSegments.last}');
+            }
           }
         }
         SpaceStorage.active = space;
