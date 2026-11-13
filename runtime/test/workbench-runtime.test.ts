@@ -716,7 +716,7 @@ test('Build computer observation and verification gates survive calls and preser
  }finally{await f.close()}
 })
 
-test('Build Connect approval is required even when per-input approval is never',{skip:!supported,timeout:10000},async()=>{
+test('自动批准 (never) also approves the Build computer connection',{skip:!supported,timeout:10000},async()=>{
  let connected=false,actions=0
  const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:{text:'done'},
  'never',undefined,options=>({
@@ -727,13 +727,25 @@ test('Build Connect approval is required even when per-input approval is never',
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
-  const id=await f.build()
-  const pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
-  assert.equal(pending!.name,'computer_connect');assert.equal(connected,false)
-  assert.ok(f.frames.some(frame=>frame.type==='computer_use'&&frame.state==='active'))
-  await f.command('build.approve',{id,approval_id:pending!.id,approved:true})
-  await f.host.waitConversation(id);assert.equal(connected,true);assert.equal(actions,1)
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(connected,true);assert.equal(actions,1);assert.equal(buildView(f.host,id).approval,null)
   const frames=f.frames.filter(frame=>frame.type==='computer_use');assert.ok(frames.every(frame=>frame.conversation_id===id));assert.deepEqual(frames.map(frame=>frame.state),['active','acting','active','idle']);assert.deepEqual(frames[1]?.point,{x:0,y:0})
+ }finally{await f.close()}
+})
+
+test('an unverified computer input with confirmed cleanup re-observes instead of pausing Build',{skip:!supported,timeout:10000},async()=>{
+ let observed=0
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:step===2?{call:{name:'computer_screenshot',arguments:{}}}:{text:'done'},
+ 'never',undefined,()=>({
+  observe:()=>{observed++;return Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}))},
+  action:()=>Promise.reject(Error('cleanup_unknown',{cause:Error('worker:libnut click failed')})),close:()=>Promise.resolve(),
+ }))
+ f.host.computerUseState=()=>({enabled:true,direct:true})
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.notEqual(buildView(f.host,id).status,'outcome_unknown');assert.equal(observed,2)
+  const click=(await f.host.workbench.checkpoint(id,0)).calls.find(call=>call.name==='computer_click')!
+  assert.deepEqual({...(click.result as Record<string,unknown>),message:undefined},{status:'failed',code:'outcome_unverified',detail:'worker:libnut click failed',verified:false,message:undefined})
  }finally{await f.close()}
 })
 

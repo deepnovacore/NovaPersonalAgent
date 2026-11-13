@@ -19,7 +19,7 @@ export const computerToolArguments = {
  computer_key: z.object({observationId:z.string().min(1),keys:z.string().min(1).max(100)}).strict(),
 } as const
 export type ComputerToolName = keyof typeof computerToolArguments
-/** Inputs that change the screen. Approval for these follows `local_tool_approval`; they are journaled like shell_execute. */
+/** Inputs that change the screen. Approval for these and for the connection follows `local_tool_approval`; they are journaled like shell_execute. */
 export const COMPUTER_WRITE_TOOLS:readonly ComputerToolName[] = ['computer_click','computer_type','computer_scroll','computer_key']
 /** Tools that need a vision-capable Build model. Without one, no desktop tools are offered. */
 export const COMPUTER_VISION_TOOLS:readonly ComputerToolName[] = ['computer_screenshot',...COMPUTER_WRITE_TOOLS]
@@ -40,9 +40,9 @@ export type ComputerUseState = z.infer<typeof computerUseStateSchema>
 
 /** IPC `build.computer_use` params. Desktop attaches its permission readout (desktop-permissions.mjs). */
 export const computerUseCommandSchema = z.object({conversation_id:z.string().min(1),enabled:z.boolean(),
- permissions:z.object({screen:z.string(),accessibility:z.string(),displayCount:z.number().int().nonnegative().optional()}).strict().optional()}).strict()
+ permissions:z.object({screen:z.string(),accessibility:z.string()}).strict().optional()}).strict()
 /** Preflight items. Missing prerequisites keep desktop tools off; other Build tools remain available. */
-export const COMPUTER_PREFLIGHT_ITEMS = ['platform','configuration','screen_permission','accessibility_permission','vision_model','display_count'] as const
+export const COMPUTER_PREFLIGHT_ITEMS = ['platform','configuration','screen_permission','accessibility_permission','vision_model'] as const
 export type ComputerPreflightItem = typeof COMPUTER_PREFLIGHT_ITEMS[number]
 export interface ComputerUseCommandResult {readonly ok:boolean;readonly state:ComputerUseState;readonly missing:readonly ComputerPreflightItem[];readonly code?:'vision_model_required';readonly message?:string}
 

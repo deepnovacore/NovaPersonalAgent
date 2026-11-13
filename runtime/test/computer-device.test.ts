@@ -112,6 +112,15 @@ for(const scenario of ['foreground_change','window_change','geometry_change','di
 }
 
 
+test('with several displays the default binds the primary one',async()=>{
+ const backend={pid:1,expectEditor:()=>undefined,releaseInput:()=>Promise.resolve(),close:()=>Promise.resolve(true),windowTarget:()=>Promise.resolve({target:'one',width:200,height:300}),listDisplays:()=>Promise.resolve([{id:'5',primary:false},{id:'1',primary:true}]),connect:()=>Promise.resolve(),device:{interfaceType:'computer',size:()=>Promise.resolve({width:200,height:300}),screenshotBase64:()=>Promise.resolve(''),actionSpace:()=>[]}}
+ const approved:unknown[]=[]
+ await connectComputerDevice(backend,{displayId:'primary',lockRoot:'/unused',maxSteps:10,budgetMs:1000},{signal:new AbortController().signal,progress:()=>{ /* no progress UI */ },foreground:()=>Promise.resolve({target:'one',width:200,height:300}),approve:(_name,params)=>{approved.push(params);return Promise.resolve(true)}})
+ assert.deepEqual(approved,[{displayId:'primary',mode:'activated',healthCheck:'moves and restores pointer'}])
+ const configured=connectComputerDevice({...backend,listDisplays:()=>Promise.resolve([{id:'1',primary:true}])},{displayId:'5',lockRoot:'/unused',maxSteps:10,budgetMs:1000},{signal:new AbortController().signal,progress:()=>{ /* no progress UI */ },foreground:()=>Promise.resolve({target:'one',width:200,height:300}),approve:()=>Promise.resolve(true)})
+ await assert.rejects(configured,/screen_changed/)
+})
+
 test('default primary display binds its actual identity before consent and rejects replacement',async()=>{
  let display='7',connects=0
   const backend={pid:1,expectEditor:()=>undefined,releaseInput:()=>Promise.resolve(),close:()=>Promise.resolve(true),windowTarget:()=>Promise.resolve({target:'one',width:200,height:300}),listDisplays:()=>Promise.resolve([{id:display}]),connect:()=>{connects++;return Promise.resolve()},device:{interfaceType:'computer',size:()=>Promise.resolve({width:200,height:300}),screenshotBase64:()=>Promise.resolve(''),actionSpace:()=>[]}}

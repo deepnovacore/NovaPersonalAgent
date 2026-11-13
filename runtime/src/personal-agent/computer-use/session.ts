@@ -45,7 +45,10 @@ export class ComputerSession {
  private targetMetadata:ComputerObservation['target']=null
  private selectedTarget:string|undefined
  private pendingAction:{name:ComputerToolName;point?:{x:number;y:number}}|undefined
+ /** Set only when the worker tree or input release could not be confirmed; then the device stays quarantined. */
  private unknown=false
+ /** An input whose effect is unknown. Build releases the device once the worker is confirmed gone; an external lease keeps its lifecycle quarantine. */
+ private effectUnknown=false
  private closing:Promise<void>|undefined
  constructor(private readonly options:ComputerSessionOptions){
   const {macWindow:_window,macApplication:_application,...config}=options.config??loadComputerDeviceConfig(process.env)
@@ -81,7 +84,8 @@ export class ComputerSession {
     beforeWrite:()=>{options.beforeWrite?.();const action=this.pendingAction;if(action)options.acting(action.name,action.point)},
     progress:event=>options.progress?.({...event,...(event.phase==='action_returned'?{executionMode:this.config.macWindow?'background' as const:'activated' as const}:{})})})
   }catch(error){
-   if(error instanceof Error&&error.message==='cleanup_unknown')this.unknown=true
+   // An uncertain effect is safe once close() confirms the worker tree is gone; only that confirmation decides quarantine.
+   if(error instanceof Error&&error.message==='cleanup_unknown')this.effectUnknown=true
    await this.close()
    throw error
   }
@@ -194,7 +198,7 @@ export class ComputerSession {
   this.pendingAction={name,...(center?{point:{x:center[0]!,y:center[1]!}}:{})}
   const editor=this.observation.ax.editor
   this.backend?.expectEditor?.(name==='computer_type'||name==='computer_key'?editor&&{role:editor.role,value:editor.value}:undefined)
-  try{await action.call(params,context);return {executionMode:this.config.macWindow?'background':'activated'}}catch(error){if(error instanceof Error&&error.message==='cleanup_unknown')this.unknown=true;throw error}
+  try{await action.call(params,context);return {executionMode:this.config.macWindow?'background':'activated'}}catch(error){if(error instanceof Error&&error.message==='cleanup_unknown')this.effectUnknown=true;throw error}
   finally{this.observation=undefined;this.image=undefined;this.pendingAction=undefined}
  }
  close():Promise<void>{return this.closing??=this.cleanup()}
@@ -202,6 +206,7 @@ export class ComputerSession {
   const backend=this.backend;this.backend=undefined;this.guarded=undefined;this.image=undefined;this.observation=undefined
   if(backend){try{if(!await (this.backendClosing??backend.close()))this.unknown=true}catch{this.unknown=true}}
   const lock=this.lock;this.lock=undefined
+  if(this.effectUnknown&&this.options.externalLease)this.unknown=true
   if(this.unknown&&lock){quarantineTaskResources([COMPUTER_RESOURCE]);this.release=undefined;await quarantineDeviceLock(lock,'cleanup_unknown')}
   else{this.release?.();this.release=undefined;if(lock)await releaseDeviceLock(lock)}
   if(this.unknown)throw Error('cleanup_unknown')

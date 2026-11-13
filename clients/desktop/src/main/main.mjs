@@ -2350,7 +2350,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     }
     return applyDesktopSettings(payload, restart)
   })
-  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,screen,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
+  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
   installExperienceIpc({ipcMain,app,windows:()=>[mainWindow,settingsWindow],codec:secretCodec,loadRuntime:loadSpaceHostRuntime,fetcher:(...args)=>net.fetch(...args),complete:async(messages,signal)=>{
     const configuration=await accessCredentials(()=>({settings:{...backendSettings(currentSettings),...(spaceModelsCache?.routes?{modelRoutes:spaceModelsCache.routes}:{})},secrets:decryptSecretsForSpawn(currentSettings,secretCodec),environment:process.env}))
     return completeConfiguredExperience(configuration,messages,signal)

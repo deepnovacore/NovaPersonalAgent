@@ -135,8 +135,8 @@ const pid = Number(app.processIdentifier);
 const windows = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(17, 0)));
 const window = windows.find(w => w.kCGWindowOwnerPID === pid && w.kCGWindowLayer === 0);
 if (!window) throw new Error('no foreground window');
-if (Number($.NSScreen.screens.count) !== 1) throw new Error('multiple displays');
-const frame = $.NSScreen.mainScreen.frame;
+// screens[0] is the primary display (menu bar, origin 0,0); mainScreen follows keyboard focus.
+const frame = $.NSScreen.screens.objectAtIndex(0).frame;
 JSON.stringify({target: [pid, ObjC.unwrap(app.bundleIdentifier), window.kCGWindowNumber, window.kCGWindowBounds],
   width: frame.size.width, height: frame.size.height});`
 
@@ -169,9 +169,7 @@ public static class NovaWindow {
 '@
 if ([NovaWindow]::SetThreadDpiAwarenessContext([IntPtr](-4)) -eq [IntPtr]::Zero) {throw 'dpi_unavailable'}
 Add-Type -AssemblyName System.Windows.Forms
-$screens = [System.Windows.Forms.Screen]::AllScreens
-if ($screens.Count -ne 1) {throw 'screen_changed'}
-$bounds = $screens[0].Bounds
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 if ($bounds.X -ne 0 -or $bounds.Y -ne 0) {throw 'screen_changed'}
 $window = [NovaWindow]::GetForegroundWindow()
 $processId = [uint32]0
@@ -201,9 +199,11 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
   const target = async (): Promise<ComputerTarget> => {
     options.signal.throwIfAborted()
     if (config.macWindow) return {displayId: config.displayId, ...await backend.windowTarget()}
+    // With several displays Nova sees and drives only the primary one (or the configured display).
     const displays = await backend.listDisplays()
-    if (displays.length !== 1 || (config.displayId!=='primary'&&displays[0]?.id !== config.displayId)) throw Error('screen_changed')
-    return {displayId: displays[0]!.id, ...await (options.foreground ?? computerForeground)(options.signal)}
+    const display = config.displayId === 'primary' ? displays.find(item => item.primary) ?? displays[0] : displays.find(item => item.id === config.displayId)
+    if (!display) throw Error('screen_changed')
+    return {displayId: display.id, ...await (options.foreground ?? computerForeground)(options.signal)}
   }
   const baseline = await target()
   if (!await guiApproval(options.approve('Connect', config.macWindow

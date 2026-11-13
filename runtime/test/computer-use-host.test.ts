@@ -11,7 +11,7 @@ import {settingsSchema} from '../src/config/config.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 
 const build={project:'/test',plan_id:'p',plan_version:1,source_conversation_id:'chat:main',status:'paused' as const,reason:null,log_revision:0,approval:null}
-for(const displayCount of [1,2])test(`first Build turn sees preflight for ${displayCount} display(s)`,{skip:process.platform!=='darwin',timeout:10000},async t=>{
+test('first Build turn already has Computer Use with granted permissions, whatever the display count',{skip:process.platform!=='darwin',timeout:10000},async t=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'computer-first-turn-'))
  const host=new PersonalAgentHost({path:join(root,'state.json'),userScope:'test',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null})
  t.after(async()=>{try{await host.close()}finally{await rm(root,{recursive:true,force:true})}})
@@ -25,9 +25,9 @@ for(const displayCount of [1,2])test(`first Build turn sees preflight for ${disp
  }),()=>{/* No notifications in this host fixture. */})
  const command=(method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'})
  await command('presentation.set',{mode:'workbench'})
- const result=await command('build.begin',{text:'Open the app',project:root,computer_permissions:{screen:'granted',accessibility:'granted',displayCount}}) as {ok:boolean}
+ const result=await command('build.begin',{text:'Open the app',project:root,computer_permissions:{screen:'granted',accessibility:'granted'}}) as {ok:boolean}
  assert.equal(result.ok,true,JSON.stringify(result))
- assert.equal(await firstTurn,displayCount===1)
+ assert.equal(await firstTurn,true)
 })
 test('legacy builds remain readable and computer state is strict',()=>{
  assert.equal(localBuildSchema.parse(build).computer_use,undefined)
@@ -57,9 +57,7 @@ test('computer switch requires local selected Build and fails closed without per
  assert.equal(delegated.data.ok,false);assert.equal(delegated.data.state.enabled,false);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'qwen',cascade_llm_model:'qwen3-vl-plus',dashscope_api_key:'test'})})
  for(const key of ['COMPUTER_DISPLAY_ID','EXECUTOR_BASE_URL','EXECUTOR_MODEL','EXECUTOR_MODEL_FAMILY','EXECUTOR_API_KEY'])delete process.env[key]
- const multi=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted',displayCount:2}})
- assert.equal(multi.ok,true);assert.equal(multi.data.ok,false);assert.deepEqual(multi.data.missing,['display_count']);assert.equal(multi.data.state.enabled,false)
- const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted',displayCount:1}})
+ const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
  assert.equal(direct.data.state.direct,true);assert.deepEqual(direct.data.missing,[])
  const badge=()=>host.conversationSnapshot().items.find(value=>value.id===item.id)!.build!.computer_use
  assert.equal(badge().direct,true)

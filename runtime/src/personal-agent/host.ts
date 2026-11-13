@@ -218,7 +218,6 @@ export class PersonalAgentHost {
             if(permissions?.accessibility!=='granted')missing.push('accessibility_permission');
         }
         if(!this.#workbenchModel||!supportsVision(this.#workbenchModel.provider,this.#workbenchModel.model))missing.push('vision_model');
-        if(permissions?.displayCount!==undefined&&permissions.displayCount!==1)missing.push('display_count');
         return missing;
     }
     readonly #admittingBuilds=new Set<string>();

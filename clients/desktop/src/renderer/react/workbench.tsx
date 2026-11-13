@@ -54,7 +54,8 @@ export function Workbench({runtime}:{runtime:WorkbenchRuntime}){
   void api.personal?.sharedIdeas?.(language).then((topics:SharedIdea[])=>{if(current)setIdeaSample({language,topics})}).catch(()=>{})
   return()=>{current=false}
  },[api,ideasVisible,c.presentationMode,language])
- const pageApi=useMemo(()=>c.ordinarySpace?api:{personal:{openArticle:api.personal?.openArticle}},[api,c.ordinarySpace])
+ // Outside the ordinary space only the OS permission state crosses over (Computer Use preflight), never the profile.
+ const pageApi=useMemo(()=>c.ordinarySpace?api:{personal:{openArticle:api.personal?.openArticle},welcome:{get:async()=>({permissions:(await api.welcome?.get?.())?.permissions}),permission:api.welcome?.permission}},[api,c.ordinarySpace])
  useLayoutEffect(()=>{runtime.chat.current?.identity(c.ordinarySpace?runtime.identityValue:{defaultAvatar:runtime.identityValue?.defaultAvatar})},[runtime,c.ordinarySpace,runtime.identityValue,c.experience?.id])
  const lastWorkspacePage=useRef('timeline');if(selected!=='tasks')lastWorkspacePage.current=selected
  const originFocus=useRef<HTMLElement|null>(null),taskHistories=useRef(new Map<string,any>()),viewedCursors=useRef(new Map<string,number>()),opening=useRef(0),initialHome=useRef(false),orbVoiceTried=useRef(false),lastPlan=useRef(''),tabRefs=useRef(new Map<string,HTMLButtonElement>())

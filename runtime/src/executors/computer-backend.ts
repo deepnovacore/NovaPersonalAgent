@@ -53,7 +53,7 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
   let buffer = ''
   const receive = (message: unknown) => {
     if (!message || typeof message !== 'object') return
-    const result = message as {id?: unknown; ok?: unknown; value?: unknown; detail?:unknown}
+    const result = message as {id?: unknown; ok?: unknown; value?: unknown; detail?:unknown; error?:unknown}
     if (typeof result.id !== 'number') return
     const entry = pending.get(result.id)
     if (!entry) return
@@ -62,7 +62,9 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
     else {
       const detail = typeof result.detail==='string'&&/^native_gui:[a-z_]{1,80}$/u.test(result.detail) ? result.detail : undefined
       // The helper raises editor_unavailable only before sending input; the model must observe again.
-      entry.reject(new Error(entry.write ? detail === 'native_gui:editor_unavailable' ? 'screen_changed' : 'cleanup_unknown' : 'action_failed',{cause:detail?new Error(detail):undefined})); stop()
+      // Keep the worker's own message for diagnosis; it never changes the classification.
+      const workerError = typeof result.error === 'string' && result.error ? new Error(`worker:${result.error.slice(0, 300)}`) : undefined
+      entry.reject(new Error(entry.write ? detail === 'native_gui:editor_unavailable' ? 'screen_changed' : 'cleanup_unknown' : 'action_failed',{cause:detail?new Error(detail,{cause:workerError}):workerError})); stop()
     }
   }
   child.stdout.on('data', (chunk: Buffer) => {
@@ -146,6 +148,6 @@ export async function startComputerBackend(displayId: string, signal: AbortSigna
       }}))}
   return {device, pid: child.pid, expectEditor: (editor?: {role: string; value: string}) => {expectedEditor = editor && {role: editor.role, value: editor.value}}, releaseInput: async (pointer: boolean, keyName?: string) => {await request('releaseInput', {pointer, ...(keyName ? {keyName} : {})}, true)}, windowTarget: async () => z.object({target: z.string().min(1), width: z.number().positive(), height: z.number().positive()}).parse(await request('target')), connect: async () => {await request('connect', undefined, true)}, listDisplays: async () => {
     const value = await request('listDisplays')
-    return z.array(z.object({id: z.string()})).parse(value)
+    return z.array(z.object({id: z.string(), primary: z.boolean().optional()})).parse(value)
   }, close}
 }

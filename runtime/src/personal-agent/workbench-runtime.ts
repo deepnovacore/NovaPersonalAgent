@@ -237,7 +237,8 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
           let applicationAuthorized=false
           computer=create({
            signal,approve:async(action,params)=>{
-            if(action!=='Connect'&&(applicationAuthorized||approvalMode()==='never'))return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
+            // 自动批准 (never) covers the connection consent too; ask mode keeps per-application consent.
+            if(approvalMode()==='never'||(action!=='Connect'&&applicationAuthorized))return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)
             const app=action==='Connect'?computerApplicationSchema.safeParse((params as {application?:unknown})?.application):undefined
             if(app?.success&&await store.computerApplicationAllowed(app.data)){applicationAuthorized=true;connectedApp=app.data.bundleId;return !signal.aborted&&computerState().enabled&&host.localBuildAuthorized(conversation.id)}
             const current=currentComputerCall!
@@ -269,10 +270,12 @@ export async function createWorkbenchRuntime(options:{contextConsumer?:string|nu
            call.result={status:'completed',verified:false,...receipt};computerFrame('active',name)
           }
          }catch(error){
-          let code=error instanceof Error?error.message:'action_failed'
-          try{await closeComputer()}catch{code='cleanup_unknown'}
-          let cause:unknown=error,detail:string|undefined;for(let depth=0;depth<4&&cause instanceof Error;depth++){if(/^native_gui:[a-z_]{1,80}$/u.test(cause.message))detail=cause.message;cause=cause.cause}
-          call.result=deniedByUser.get(call)??{code,...(detail?{detail}:{}),status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
+          let code=error instanceof Error?error.message:'action_failed',cleanupConfirmed=true
+          try{await closeComputer()}catch{code='cleanup_unknown';cleanupConfirmed=false}
+          let cause:unknown=error,detail:string|undefined;for(let depth=0;depth<4&&cause instanceof Error;depth++){if(/^native_gui:[a-z_]{1,80}$/u.test(cause.message))detail=cause.message;else if(!detail&&cause.message.startsWith('worker:'))detail=cause.message.slice(0,300);cause=cause.cause}
+          // The worker tree is confirmed gone, so nothing can still act: report the unverified input and let the model re-observe.
+          if(code==='cleanup_unknown'&&cleanupConfirmed&&!signal.aborted)code='outcome_unverified'
+          call.result=deniedByUser.get(call)??{code,...(detail?{detail}:{}),...(code==='outcome_unverified'?{verified:false,message:'This input may or may not have taken effect. Take a fresh computer_screenshot and check before acting again; do not repeat it blindly.'}:{}),status:code==='cleanup_unknown'||(signal.aborted&&computerInputStarted)?'outcome_unknown':signal.aborted?'cancelled_before_execution':'failed'}
           observeRequired=true
          }
          call.state='completed';call.finished_at=new Date().toISOString();await save()

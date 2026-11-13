@@ -30,10 +30,10 @@ const validPid = (value: unknown): value is number => typeof value === 'number' 
  * A lock is reclaimable only when its host is dead, it was never quarantined, and no recorded device
  * process survives. Anything unreadable stays held for manual recovery.
  */
-async function reclaimable(path: string): Promise<string | null> {
+async function reclaimable(path: string, quarantined: 'hold' | 'reclaim_when_dead' = 'hold'): Promise<string | null> {
   try {
     await access(join(path, QUARANTINE))
-    return null
+    if (quarantined === 'hold') return null
   } catch { /* Not quarantined. */ }
   try {
     const raw = await readFile(join(path, OWNER), 'utf8')
@@ -67,18 +67,24 @@ async function create(path: string, taskId: string): Promise<'created' | 'exists
 export async function acquireDeviceLock(lockRoot: string, deviceType: string, deviceId: string, taskId: string):
 Promise<{ok: true; lock: DeviceLock} | {ok: false; reason: 'device_busy' | 'device_lock_failed'}> {
   const path = deviceLockPath(lockRoot, deviceType, deviceId)
+  // The local desktop's input dies with its worker group. Once host and worker are both gone, a quarantined
+  // desktop lock is set aside as `.recovered-*` (the manual recovery convention) instead of blocking forever.
+  const quarantined = deviceType === 'desktop' ? 'reclaim_when_dead' : 'hold'
   for (let attempt = 0; attempt < 2; attempt++) {
     const created = await create(path, taskId)
     if (created === 'created') return {ok: true, lock: {path, taskId}}
     if (created === 'failed') return {ok: false, reason: 'device_lock_failed'}
-    const stale = await reclaimable(path)
+    const stale = await reclaimable(path, quarantined)
     if (stale === null) return {ok: false, reason: 'device_busy'}
     // One reclaimer at a time; a crash while reclaiming leaves the device held for manual recovery.
     const mutex = `${path}.reclaim`
     try { await mkdir(mutex, {mode: 0o700}) } catch { return {ok: false, reason: 'device_busy'} }
     try {
-      if (await reclaimable(path) !== stale) return {ok: false, reason: 'device_busy'}
-      await rm(path, {recursive: true, force: true})
+      if (await reclaimable(path, quarantined) !== stale) return {ok: false, reason: 'device_busy'}
+      if (quarantined === 'reclaim_when_dead' && await access(join(path, QUARANTINE)).then(() => true, () => false)) {
+        const owner = record(JSON.parse(stale))
+        await rename(path, `${path}.recovered-${typeof owner.taskId === 'string' && /^[\w-]{1,80}$/u.test(owner.taskId) ? `${owner.taskId}-` : ''}${randomUUID().slice(0, 8)}`)
+      } else await rm(path, {recursive: true, force: true})
     } finally {
       await rmdir(mutex).catch(() => undefined)
     }

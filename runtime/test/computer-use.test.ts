@@ -85,10 +85,22 @@ test('concurrent close calls retain ownership until the backend is gone',{timeou
   release();await Promise.all([first,second]);assert.equal(f.closed(),1);assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),false)
  }finally{release();await f.dispose()}
 })
-test('ambiguous input remains quarantined even when backend cleanup succeeds',{timeout:5000},async()=>{
+test('ambiguous input releases the desktop once the worker is confirmed gone',{timeout:5000},async()=>{
  const f=await fixture()
  try{
   await f.observe();f.failWrite()
+  await assert.rejects(f.action('computer_click',{x:10,y:10}),/cleanup_unknown/)
+  await f.session.close()
+  assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),false)
+  // A new session can take the desktop again.
+  const next=await fixture(undefined,{config:f.session.config})
+  try{await next.observe()}finally{await next.dispose()}
+ }finally{await f.dispose()}
+})
+test('ambiguous input stays quarantined when the worker cannot be confirmed gone',{timeout:5000},async()=>{
+ const f=await fixture()
+ try{
+  await f.observe();f.failWrite();f.setCleanup(false)
   await assert.rejects(f.action('computer_click',{x:10,y:10}),/cleanup_unknown/)
   await assert.rejects(f.session.close(),/cleanup_unknown/)
   assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true)
@@ -298,8 +310,8 @@ for(const lost of [false,true])test(`cancel mid-action waits for receipt; lost=$
   assert.equal(settled,false);assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true);assert.equal(f.closed(),0)
   if(lost)lose(Error('lost receipt'));else finish()
   await rejected
-  if(lost){await assert.rejects(f.session.close(),/cleanup_unknown/);assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),true)}
-  else{await f.session.close();assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),false)}
+  // A lost receipt is safe to release once close() confirms the worker tree is gone.
+  await f.session.close();assert.equal(taskResourcesBusy([COMPUTER_RESOURCE]),false)
   assert.equal(f.writes.length,1)
  }finally{finish();await f.dispose()}
 })

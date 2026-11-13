@@ -97,7 +97,7 @@ input.on('line', (line: string) => {
         await action.call(request.op === 'Input' ? {...request.params as {value: string}, mode: (request.params as {mode?:string}).mode==='replace'?'replace':'typeOnly'} : request.params)
       }
       process.stdout.write(JSON.stringify({id: request.id, ok: true, value}) + '\n')
-    } catch(error) {process.stdout.write(JSON.stringify({id: request.id, ok: false,...(error instanceof Error&&/^native_gui:[a-z_]{1,80}$/u.test(error.message)?{detail:error.message}:{})}) + '\n')}
+    } catch(error) {process.stdout.write(JSON.stringify({id: request.id, ok: false,...(error instanceof Error&&/^native_gui:[a-z_]{1,80}$/u.test(error.message)?{detail:error.message}:{}),...(error instanceof Error?{error:error.message.replace(/\s+/gu,' ').slice(0,300)}:{})}) + '\n')}
   }).catch(() => {process.exitCode = 1; process.exit(1)})
 })
 input.on('close', () => process.exit())
