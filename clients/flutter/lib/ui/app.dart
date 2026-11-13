@@ -404,6 +404,22 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
               widget.agentCore != null
           ? null
           : await AgentWorkspace.open();
+      // Android phone tasks, shared by persona and personal Spaces.
+      final listDeviceApps = iosTasks != null
+          ? null
+          : () async => {'apps': await const NativeLocalAgent().call('apps')};
+      final readDeviceTasks = iosTasks != null
+          ? null
+          : () async => await const NativeLocalAgent().call('tasks') as List;
+      final requestDeviceTask = iosTasks != null
+          ? null
+          : (Map<String, dynamic> input, String id) async {
+              try {
+                return await nativeTasks.run(input, id);
+              } finally {
+                phoneRun?.markEnded(id);
+              }
+            };
       final host =
           widget.agentCore ??
           await AgentCoreHost.open(
@@ -445,20 +461,13 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                     fetch: (_) => throw StateError('tool_not_allowed'),
                     workspace: workspace,
                     readEvidence: (args) async => _personaSources!.read(args),
-                    allowedNames: const {
-                      'source.read',
-                      'memory.remember',
-                      'memory.recall',
-                      'memory.forget',
-                      'life.list',
-                      'life.get',
-                      'life.create',
-                      'life.update',
-                      'file.read',
-                      'file.write',
-                      'file.edit',
-                      'file.inspect_html',
-                    },
+                    runChatTask: iosTasks?.run,
+                    cancelChatTask: nativeTasks.cancel,
+                    deviceReadiness: _phoneReadiness,
+                    listDeviceApps: listDeviceApps,
+                    readDeviceTasks: readDeviceTasks,
+                    requestDeviceTask: requestDeviceTask,
+                    allowedNames: experiencePersonaToolNames,
                   )
                 : ToolRegistry(
                     spaceMode: spaceMode,
@@ -480,25 +489,9 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                     runChatTask: iosTasks?.run,
                     cancelChatTask: nativeTasks.cancel,
                     deviceReadiness: _phoneReadiness,
-                    listDeviceApps: iosTasks != null
-                        ? null
-                        : () async => {
-                            'apps': await const NativeLocalAgent().call('apps'),
-                          },
-                    readDeviceTasks: iosTasks != null
-                        ? null
-                        : () async =>
-                              await const NativeLocalAgent().call('tasks')
-                                  as List,
-                    requestDeviceTask: iosTasks != null
-                        ? null
-                        : (input, id) async {
-                            try {
-                              return await nativeTasks.run(input, id);
-                            } finally {
-                              phoneRun?.markEnded(id);
-                            }
-                          },
+                    listDeviceApps: listDeviceApps,
+                    readDeviceTasks: readDeviceTasks,
+                    requestDeviceTask: requestDeviceTask,
                   ),
           );
       host.deviceHeldByOther ??= () =>

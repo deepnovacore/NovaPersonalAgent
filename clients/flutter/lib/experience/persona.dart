@@ -11,6 +11,26 @@ import '../ui/timeline_page.dart';
 import '../ui/timeline_briefs.dart';
 import 'persona_sources.dart';
 
+/// Tools a persona Space's agent may use: the persona's own sources, local
+/// memory and life, workspace files, and phone tasks on this device. No web,
+/// shell or the phone owner's profile.
+const experiencePersonaToolNames = {
+  'source.read',
+  'memory.remember',
+  'memory.recall',
+  'memory.forget',
+  'life.list',
+  'life.get',
+  'life.create',
+  'life.update',
+  'file.read',
+  'file.write',
+  'file.edit',
+  'file.inspect_html',
+  'device.list_apps',
+  'device.run_task',
+};
+
 class ExperiencePersona {
   const ExperiencePersona._(
     this.id,

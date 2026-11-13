@@ -715,4 +715,42 @@ void main() {
       );
     },
   );
+
+  test(
+    'persona Spaces can run phone tasks but not web, shell or profile',
+    () async {
+      final requests = <Map<String, dynamic>>[];
+      final tools = ToolRegistry(
+        snapshot: () => <String, dynamic>{},
+        mutate: (_, {required operationId}) async => <String, dynamic>{},
+        hasConflict: () => false,
+        fetch: (_) async => {'status': 'completed'},
+        readProfile: (_, _) async => {'available': true},
+        listDeviceApps: () async => {'apps': <Object>[]},
+        requestDeviceTask: (input, id) async {
+          requests.add(input);
+          return {'status': 'completed', 'task_id': id};
+        },
+        allowedNames: experiencePersonaToolNames,
+      );
+      final names = tools.definitions.map((e) => e.wireName).toSet();
+      expect(names, containsAll(['device_run_task', 'device_list_apps']));
+      expect(
+        names.intersection({'web_fetch', 'shell_execute', 'profile_read'}),
+        isEmpty,
+      );
+      final args = {
+        'goal': 'Open Meituan Waimai',
+        'app_name': '美团外卖',
+        'acceptance': 'Meituan Waimai home page is shown',
+      };
+      final definition = tools.resolve('device_run_task', args);
+      expect(tools.needsApproval(definition, args), isFalse);
+      expect(
+        (await tools.execute(definition, args, 'p-1'))['status'],
+        'completed',
+      );
+      expect(requests.single['app_name'], '美团外卖');
+    },
+  );
 }
