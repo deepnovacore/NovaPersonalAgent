@@ -40,6 +40,19 @@ for (const scenario of ['allowed', 'declined', 'cancelled', 'target_changed', 'g
   })
 }
 
+for (const name of ['Input', 'KeyboardPress'] as const) test(`${name} is refused while the focused window is outside the captured display`, async () => {
+  let writes = 0, approvals = 0
+  const raw = {interfaceType: 'computer', size: () => Promise.resolve({width: 200, height: 300}),
+    screenshotBase64: () => Promise.resolve('image'), actionSpace: () => [{name, call: () => {writes++; return Promise.resolve()}}]}
+  const guarded = await guardComputerDevice(raw, () => Promise.resolve({displayId: '1', width: 200, height: 300, target: 'same', visible: false}),
+    {displayId: '1', signal: new AbortController().signal, maxSteps: 3, budgetMs: 1000,
+      approve: () => {approvals++; return Promise.resolve(true)}, progress: () => undefined})
+  await guarded.device.screenshotBase64(); guarded.planning()
+  const action = guarded.device.actionSpace()[0]!
+  await assert.rejects(async () => {await action.call(name === 'Input' ? {value: 'secret'} : {keyName: 'Meta+w'})}, /needs_user_action/u)
+  assert.equal(writes, 0); assert.equal(approvals, 0)
+})
+
 test('unknown write is terminal even if Midscene catches the error and retries', async () => {
   let writes = 0, approvals = 0
   const raw = {interfaceType: 'computer', size: () => Promise.resolve({width: 200, height: 300}),
@@ -117,7 +130,7 @@ test('with several displays the default binds the primary one',async()=>{
  const approved:unknown[]=[]
  await connectComputerDevice(backend,{displayId:'primary',lockRoot:'/unused',maxSteps:10,budgetMs:1000},{signal:new AbortController().signal,progress:()=>{ /* no progress UI */ },foreground:()=>Promise.resolve({target:'one',width:200,height:300}),approve:(_name,params)=>{approved.push(params);return Promise.resolve(true)}})
  assert.deepEqual(approved,[{displayId:'primary',mode:'activated',healthCheck:'moves and restores pointer'}])
- const configured=connectComputerDevice({...backend,listDisplays:()=>Promise.resolve([{id:'1',primary:true}])},{displayId:'5',lockRoot:'/unused',maxSteps:10,budgetMs:1000},{signal:new AbortController().signal,progress:()=>{ /* no progress UI */ },foreground:()=>Promise.resolve({target:'one',width:200,height:300}),approve:()=>Promise.resolve(true)})
+ const configured=connectComputerDevice(backend,{displayId:'5',lockRoot:'/unused',maxSteps:10,budgetMs:1000},{signal:new AbortController().signal,progress:()=>{ /* no progress UI */ },foreground:()=>Promise.resolve({target:'one',width:200,height:300}),approve:()=>Promise.resolve(true)})
  await assert.rejects(configured,/screen_changed/)
 })
 
