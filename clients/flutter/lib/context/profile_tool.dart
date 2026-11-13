@@ -59,8 +59,6 @@ Future<Map<String, dynamic>> readProfileForModel({
     value['available_evidence_ids'] as List? ?? const [],
   );
   final section = args['section'] as String;
-  final query = (args['query'] as String? ?? '').trim().toLowerCase();
-  final offset = args['offset'] as int? ?? 0;
   final rows = [
     for (final entry in (value['entries'] as List).whereType<Map>())
       if ((entry['kind'] ?? 'profile') == section &&
@@ -69,6 +67,57 @@ Future<Map<String, dynamic>> readProfileForModel({
               : _authorized(entry, available)))
         _project(entry),
   ];
+  return {..._page(rows, args), 'historical': value['historical'] == true};
+}
+
+/// Projects a persona Space's fictional profile/timeline snapshot. It holds
+/// only packaged example material, so no processing grant applies.
+Map<String, dynamic> readPersonaProfileForModel(
+  Map<String, dynamic>? snapshot,
+  Map<String, dynamic> args,
+) {
+  final section = args['section'] as String;
+  final source = snapshot?[section];
+  if (source is! List) {
+    return {
+      'available': false,
+      'reason': 'no_persona_profile',
+      'entries': const <Object>[],
+    };
+  }
+  final rows = <Map<String, dynamic>>[];
+  for (final (index, row) in source.whereType<Map>().indexed) {
+    final time = row['time'];
+    final date = _date(time, null);
+    final facts = row['facts'];
+    rows.add({
+      'key': '$section-$index',
+      if (row['title'] is String) 'title': row['title'],
+      'text': _clip(row[section == 'profile' ? 'text' : 'summary']),
+      'date': ?date,
+      if (time is Map && time['kind'] is String) 'time_kind': time['kind'],
+      if (row['status_label'] is String) 'status': row['status_label'],
+      if (facts is List)
+        'facts': [
+          for (final fact in facts)
+            if (fact is String)
+              _clip(fact)
+            else if (fact is Map && fact['text'] is String)
+              _clip(fact['text']),
+        ],
+    });
+  }
+  return {..._page(rows, args), 'fictional_example': true};
+}
+
+/// Filters, orders and pages projected rows within [profileReadCharBudget].
+Map<String, dynamic> _page(
+  List<Map<String, dynamic>> rows,
+  Map<String, dynamic> args,
+) {
+  final section = args['section'] as String;
+  final query = (args['query'] as String? ?? '').trim().toLowerCase();
+  final offset = args['offset'] as int? ?? 0;
   if (section == 'timeline') {
     rows.sort((a, b) => '${b['date'] ?? ''}'.compareTo('${a['date'] ?? ''}'));
   }
@@ -89,11 +138,28 @@ Future<Map<String, dynamic>> readProfileForModel({
   return {
     'available': true,
     'section': section,
-    'historical': value['historical'] == true,
     'total': matched.length,
     'entries': page,
     if (index < matched.length) 'next_offset': index,
   };
+}
+
+String? _date(Object? time, Object? observed) {
+  String? date;
+  if (time is Map) {
+    date =
+        (time['anchor_date'] ??
+                time['occurred_on'] ??
+                time['started_on'] ??
+                time['last_reported_on'] ??
+                time['as_of'] ??
+                time['evidence_to'])
+            as String?;
+  }
+  if (date == null && observed is String && observed.length >= 10) {
+    date = observed.substring(0, 10);
+  }
+  return date;
 }
 
 bool _authorized(Map entry, Set<String> available) {
@@ -106,21 +172,7 @@ bool _authorized(Map entry, Set<String> available) {
 Map<String, dynamic> _project(Map entry) {
   final brief = entry['brief'];
   final time = entry['time'];
-  String? date;
-  if (time is Map) {
-    date =
-        (time['anchor_date'] ??
-                time['occurred_on'] ??
-                time['started_on'] ??
-                time['last_reported_on'] ??
-                time['as_of'] ??
-                time['evidence_to'])
-            as String?;
-  }
-  final observed = entry['observed_at'];
-  if (date == null && observed is String && observed.length >= 10) {
-    date = observed.substring(0, 10);
-  }
+  final date = _date(time, entry['observed_at']);
   return {
     'key': entry['key'],
     if (brief is Map && brief['title'] is String) 'title': brief['title'],

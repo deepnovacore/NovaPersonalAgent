@@ -12,10 +12,11 @@ import '../ui/timeline_briefs.dart';
 import 'persona_sources.dart';
 
 /// Tools a persona Space's agent may use: the persona's own sources, local
-/// memory and life, workspace files, and phone tasks on this device. No web,
-/// shell or the phone owner's profile.
+/// memory and life, its fictional profile/timeline snapshot, workspace files,
+/// and phone tasks on this device. No web or shell.
 const experiencePersonaToolNames = {
   'source.read',
+  'profile.read',
   'memory.remember',
   'memory.recall',
   'memory.forget',

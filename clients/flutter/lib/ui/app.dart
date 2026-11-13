@@ -461,6 +461,11 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
                     fetch: (_) => throw StateError('tool_not_allowed'),
                     workspace: workspace,
                     readEvidence: (args) async => _personaSources!.read(args),
+                    // The persona's own snapshot, never the owner's profile.
+                    readProfile: (args, _) async => readPersonaProfileForModel(
+                      _personaSources?.snapshot.value,
+                      args,
+                    ),
                     runChatTask: iosTasks?.run,
                     cancelChatTask: nativeTasks.cancel,
                     deviceReadiness: _phoneReadiness,

@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
+import 'package:nova_mobile/context/profile_tool.dart';
 import 'package:nova_mobile/experience/persona.dart';
 import 'package:nova_mobile/experience/persona_sources.dart';
 import 'package:nova_mobile/experience/experience_session.dart';
@@ -716,41 +717,115 @@ void main() {
     },
   );
 
-  test(
-    'persona Spaces can run phone tasks but not web, shell or profile',
-    () async {
-      final requests = <Map<String, dynamic>>[];
-      final tools = ToolRegistry(
-        snapshot: () => <String, dynamic>{},
-        mutate: (_, {required operationId}) async => <String, dynamic>{},
-        hasConflict: () => false,
-        fetch: (_) async => {'status': 'completed'},
-        readProfile: (_, _) async => {'available': true},
-        listDeviceApps: () async => {'apps': <Object>[]},
-        requestDeviceTask: (input, id) async {
-          requests.add(input);
-          return {'status': 'completed', 'task_id': id};
+  test('persona Spaces can run phone tasks but not web or shell', () async {
+    final requests = <Map<String, dynamic>>[];
+    final tools = ToolRegistry(
+      snapshot: () => <String, dynamic>{},
+      mutate: (_, {required operationId}) async => <String, dynamic>{},
+      hasConflict: () => false,
+      fetch: (_) async => {'status': 'completed'},
+      readProfile: (_, _) async => {'available': true},
+      listDeviceApps: () async => {'apps': <Object>[]},
+      requestDeviceTask: (input, id) async {
+        requests.add(input);
+        return {'status': 'completed', 'task_id': id};
+      },
+      allowedNames: experiencePersonaToolNames,
+    );
+    final names = tools.definitions.map((e) => e.wireName).toSet();
+    expect(
+      names,
+      containsAll(['device_run_task', 'device_list_apps', 'profile_read']),
+    );
+    expect(names.intersection({'web_fetch', 'shell_execute'}), isEmpty);
+    final args = {
+      'goal': 'Open Meituan Waimai',
+      'app_name': '美团外卖',
+      'acceptance': 'Meituan Waimai home page is shown',
+    };
+    final definition = tools.resolve('device_run_task', args);
+    expect(tools.needsApproval(definition, args), isFalse);
+    expect(
+      (await tools.execute(definition, args, 'p-1'))['status'],
+      'completed',
+    );
+    expect(requests.single['app_name'], '美团外卖');
+  });
+
+  test('persona profile_read pages the persona snapshot, newest first', () {
+    final snapshot = {
+      'profile': [
+        {
+          'title': '关于我',
+          'text': '独立设计师，周二周四夜骑',
+          'refs': ['r1'],
         },
-        allowedNames: experiencePersonaToolNames,
-      );
-      final names = tools.definitions.map((e) => e.wireName).toSet();
-      expect(names, containsAll(['device_run_task', 'device_list_apps']));
-      expect(
-        names.intersection({'web_fetch', 'shell_execute', 'profile_read'}),
-        isEmpty,
-      );
-      final args = {
-        'goal': 'Open Meituan Waimai',
-        'app_name': '美团外卖',
-        'acceptance': 'Meituan Waimai home page is shown',
-      };
-      final definition = tools.resolve('device_run_task', args);
-      expect(tools.needsApproval(definition, args), isFalse);
-      expect(
-        (await tools.execute(definition, args, 'p-1'))['status'],
-        'completed',
-      );
-      expect(requests.single['app_name'], '美团外卖');
-    },
-  );
+        {
+          'title': '目前在做的事',
+          'text': '作品集网站改版',
+          'refs': ['r2'],
+        },
+      ],
+      'timeline': [
+        {
+          'title': '旧事',
+          'summary': '十月的签核',
+          'refs': ['r3'],
+          'time': {'kind': 'event', 'anchor_date': '2026-10-01'},
+        },
+        {
+          'title': '新事',
+          'summary': '导视物料交接',
+          'refs': ['r4'],
+          'time': {'kind': 'deadline', 'anchor_date': '2026-11-06'},
+          'status_label': '已签核',
+          'facts': [
+            '周砚确认',
+            {'text': '晚上8点交接'},
+          ],
+        },
+      ],
+    };
+    final profile = readPersonaProfileForModel(snapshot, {
+      'section': 'profile',
+    });
+    expect(profile['available'], isTrue);
+    expect(profile['fictional_example'], isTrue);
+    expect([for (final e in profile['entries']) e['title']], ['关于我', '目前在做的事']);
+    expect(profile['entries'][0]['text'], '独立设计师，周二周四夜骑');
+    expect(profile['entries'][0], isNot(contains('refs')));
+
+    final timeline = readPersonaProfileForModel(snapshot, {
+      'section': 'timeline',
+    });
+    expect([for (final e in timeline['entries']) e['title']], ['新事', '旧事']);
+    expect(timeline['entries'][0], {
+      'key': 'timeline-1',
+      'title': '新事',
+      'text': '导视物料交接',
+      'date': '2026-11-06',
+      'time_kind': 'deadline',
+      'status': '已签核',
+      'facts': ['周砚确认', '晚上8点交接'],
+    });
+
+    final filtered = readPersonaProfileForModel(snapshot, {
+      'section': 'timeline',
+      'query': '十月',
+    });
+    expect(filtered['total'], 1);
+    expect(filtered['entries'].single['title'], '旧事');
+
+    final paged = readPersonaProfileForModel(snapshot, {
+      'section': 'profile',
+      'offset': 1,
+    });
+    expect(paged['entries'].single['title'], '目前在做的事');
+    expect(paged, isNot(contains('next_offset')));
+
+    expect(
+      readPersonaProfileForModel(null, {'section': 'profile'})['available'],
+      isFalse,
+    );
+  });
 }

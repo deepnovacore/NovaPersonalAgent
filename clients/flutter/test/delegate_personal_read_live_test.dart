@@ -22,6 +22,7 @@ import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/profile_tool.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/conversation/local_conversation_store.dart';
+import 'package:nova_mobile/experience/persona.dart';
 import 'package:nova_mobile/memory/local_memory_store.dart';
 import 'package:nova_mobile/space/space_storage.dart';
 
@@ -385,6 +386,121 @@ void main() {
     },
     skip: configPath == null ? 'set NOVA_AGENT_LIVE_CONFIG' : false,
     timeout: const Timeout(Duration(minutes: 15)),
+  );
+
+  test(
+    'live persona Space builds a website from the persona snapshot',
+    () async {
+      final raw =
+          jsonDecode(await File(configPath!).readAsString())
+              as Map<String, dynamic>;
+      final config = ModelConfiguration(
+        endpoint: raw['endpoint'] as String,
+        model: raw['model'] as String,
+        key: raw['key'] as String,
+      );
+      final evidence = Platform.environment['NOVA_EVIDENCE_DIR'];
+      // Synthetic persona snapshot, shaped like experience-profile-v1.json.
+      final snapshot = {
+        'profile': [
+          {
+            'title': '关于我',
+            'text': '我叫沈栖，在成都做独立插画师，主要画儿童绘本和城市速写。',
+            'refs': ['p1'],
+          },
+          {
+            'title': '生活节奏',
+            'text': '每周三去菜市场写生，周末带速写本去茶馆。',
+            'refs': ['p2'],
+          },
+        ],
+        'timeline': [
+          {
+            'title': '绘本交稿',
+            'summary': '《云朵邮局》绘本终稿已交给出版社，等待印前校色。',
+            'refs': ['t1'],
+            'time': {'kind': 'event', 'anchor_date': '2026-10-20'},
+          },
+          {
+            'title': '城市速写展',
+            'summary': '正在筹备「街角三十六景」速写小展，下月在社区书店开展。',
+            'refs': ['t2'],
+            'time': {'kind': 'plan', 'anchor_date': '2026-11-08'},
+          },
+        ],
+      };
+      final root = await Directory.systemTemp.createTemp('nova-live-persona-');
+      addTearDown(() => root.delete(recursive: true));
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      final model = _Recorder();
+      final registry = ToolRegistry(
+        snapshot: () => {
+          'todos': <dynamic>[],
+          'ideas': <dynamic>[],
+          'goals': <dynamic>[],
+          'profile': {'about': '', 'version': 0},
+        },
+        mutate: (_, {required operationId}) async => {},
+        hasConflict: () => false,
+        fetch: (_) async => throw StateError('offline fixture'),
+        automaticExecution: true,
+        workspace: AgentWorkspace(root),
+        spaceMode: SpaceMode.standalone,
+        readProfile: (args, _) async =>
+            readPersonaProfileForModel(snapshot, args),
+        allowedNames: experiencePersonaToolNames,
+      );
+      final host = AgentCoreHost(
+        store: store,
+        settings: _LiveSettings(config),
+        allowLocalMemory: false,
+        memoryReadOnly: true,
+        owner: 'voice:delegate',
+        clientFactory: () => _Recording(model),
+        tools: ToolRunner(journal: journal, registry: registry),
+      );
+      addTearDown(host.dispose);
+      await host.send(
+        id,
+        '结合我的个人画像和最近的经历，做一个适合手机浏览的个人网站，保存为 /workspace/index.html。',
+        userAuthored: false,
+        language: 'zh',
+        approve: (_) async => true,
+      );
+      final html = await _readSite(root);
+      final tools = model.calls.expand((r) => r).toSet();
+      final summary = {
+        'model': config.model,
+        'error': host.error,
+        'tool_rounds': model.calls,
+        'advertised_first_round': model.advertisedPerRound.firstOrNull,
+        'html_chars': html.length,
+      };
+      if (evidence != null) {
+        await File('$evidence/persona-site.html').writeAsString(html);
+        await File(
+          '$evidence/persona-summary.json',
+        ).writeAsString(const JsonEncoder.withIndent('  ').convert(summary));
+      }
+      // ignore: avoid_print
+      print(jsonEncode(summary));
+      expect(host.error, isNull);
+      expect(model.advertisedPerRound.first, contains('profile_read'));
+      expect(
+        model.advertisedPerRound.first,
+        isNot(anyOf(contains('web_fetch'), contains('shell_execute'))),
+      );
+      expect(tools, contains('profile_read'));
+      expect(html, contains('沈栖'));
+      expect(html, contains('云朵邮局'));
+      expect(html, contains('街角三十六景'));
+    },
+    skip: configPath == null ? 'set NOVA_AGENT_LIVE_CONFIG' : false,
+    timeout: const Timeout(Duration(minutes: 10)),
   );
 }
 
