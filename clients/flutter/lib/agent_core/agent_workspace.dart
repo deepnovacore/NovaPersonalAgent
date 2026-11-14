@@ -437,7 +437,8 @@ class AgentWorkspace {
         !uri.hasFragment) {
       final decoded = Uri.decodeComponent(uri.path);
       if (Uri.decodeComponent(
-        pathOrUrl,
+        // Preserve raw escapes/dot segments while encoding Unicode.
+        Uri.encodeFull(pathOrUrl).replaceAll('%25', '%'),
       ).split('/').any((p) => p == '..' || p == '.')) {
         throw const AgentFailure('invalid_preview_url');
       }

@@ -4,6 +4,49 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/ui/assistant_text.dart';
 
 void main() {
+  testWidgets('raw Chinese DOCX links expose an encoded file action', (
+    tester,
+  ) async {
+    final opened = <String>[];
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: AssistantText(
+            '预览与下载：nova-file:///workspace/outputs/工作文档.docx',
+            onArtifactLink: (value) async => opened.add(value),
+          ),
+        ),
+      ),
+    );
+    expect(tester.takeException(), isNull);
+    await tester.tap(find.widgetWithText(TextButton, '工作文档.docx'));
+    expect(opened, [
+      'nova-file:///workspace/outputs/%E5%B7%A5%E4%BD%9C%E6%96%87%E6%A1%A3.docx',
+    ]);
+  });
+
+  testWidgets('streamed DOCX URLs tolerate incomplete percent encoding', (
+    tester,
+  ) async {
+    const url = 'nova-file:///workspace/outputs/%E9%98%85%E8%AF%BB100%25.docx';
+    final opened = <String>[];
+    for (var length = 1; length <= url.length; length++) {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: AssistantText(
+              url.substring(0, length),
+              onArtifactLink: (value) async => opened.add(value),
+            ),
+          ),
+        ),
+      );
+      expect(tester.takeException(), isNull, reason: url.substring(0, length));
+    }
+    await tester.tap(find.widgetWithText(TextButton, '阅读100%.docx'));
+    expect(opened, [url]);
+  });
+
   for (final text in [
     '`nova-file:///workspace/counter.html`',
     '打开：nova-file:///workspace/counter.html。',
@@ -93,6 +136,7 @@ void main() {
             '`nova-file:///outside/game.html`\n'
             '`nova-file:///workspace/../../outside.html`\n'
             '`nova-file:///workspace/%2e%2e/outside.html`\n'
+            '`nova-file:///workspace/outputs/子目录/../报告.docx`\n'
             '`nova-file:///workspace/game.html?remote=1`\n'
             '`nova-file:///workspace/game.html#remote`',
             onArtifactLink: (_) async => fail('unexpected preview'),

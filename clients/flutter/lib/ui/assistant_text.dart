@@ -27,7 +27,8 @@ class AssistantText extends StatelessWidget {
             uri.path.startsWith('/workspace/') &&
             !Uri.decodeComponent(uri.path).contains('\u0000') &&
             !Uri.decodeComponent(
-              url,
+              // Preserve raw escapes/dot segments while encoding Unicode.
+              Uri.encodeFull(url).replaceAll('%25', '%'),
             ).split('/').any((part) => part == '..' || part == '.')) {
           final html = RegExp(
             r'\.html?$',
@@ -43,6 +44,8 @@ class AssistantText extends StatelessWidget {
         }
       } on FormatException {
         // Malformed model output stays visible as text.
+      } on ArgumentError {
+        // Streaming may end in an incomplete percent escape or UTF-8 sequence.
       }
     }
   }

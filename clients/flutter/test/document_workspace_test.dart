@@ -132,6 +132,8 @@ void main() {
         '/workspace/.nova/private.txt',
         '/workspace/outputs/%252e%252e/private.txt',
         'nova-file:///workspace/outputs/%252e%252e/private.txt',
+        'nova-file:///workspace/outputs/子目录/../ok.txt',
+        'nova-file:///workspace/outputs/子目录%2F..%2Fok.txt',
         '/workspace',
       ]) {
         await expectLater(
@@ -153,6 +155,16 @@ void main() {
         101,
       ]);
     }
+  });
+
+  test('documentSnapshot accepts a raw Chinese DOCX URL', () async {
+    await workspace.write('outputs/工作文档.docx', 'safe');
+    expect(
+      await workspace.documentSnapshot(
+        'nova-file:///workspace/outputs/工作文档.docx',
+      ),
+      [115, 97, 102, 101],
+    );
   });
 
   test(
