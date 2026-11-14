@@ -2,6 +2,7 @@ package com.nova.nova_mobile
 
 import android.app.Activity
 import android.app.Dialog
+import android.content.ActivityNotFoundException
 import android.content.Intent
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
@@ -81,12 +82,13 @@ internal class ArtifactWebHost(private val activity: Activity, messenger: Binary
                         clipData = android.content.ClipData.newRawUri(name, uri)
                         addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                     }
-                    // The chooser always offers sharing, even without a viewer.
-                    val chooser = Intent.createChooser(send, name).apply {
-                        putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(view))
-                        addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                    try {
+                        activity.startActivity(view)
+                    } catch (_: ActivityNotFoundException) {
+                        activity.startActivity(Intent.createChooser(send, name).apply {
+                            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                        })
                     }
-                    activity.startActivity(chooser)
                     reply.success(null)
                 } catch (_: Exception) { reply.error("document_share_failed", null, null) }
                 return@setMethodCallHandler

@@ -85,8 +85,8 @@ return { text: document.querySelector('#result').textContent };
    timeout，并按页/块拆分；60 秒是默认值，不是文档任务的性能保证。
 4. 输出写入 `/workspace/outputs`，返回例如
    `nova-file:///workspace/outputs/summary.pdf`。非 HTML 链接显示文件 chip：
-   iOS 走系统分享表单（可选系统预览/存储/分享），Android chooser 提供
-   ACTION_VIEW 与 ACTION_SEND；需要设备有对应文件查看器。
+   iOS 走系统分享表单（可选系统预览/存储/分享），Android 优先通过 ACTION_VIEW
+   交给手机应用打开；没有查看器时回退到 ACTION_SEND 分享。
    保留原有 HTML 交互预览行为。URL 中空格、Unicode、百分号需正确编码。
 5. 新烘焙镜像通过系统 `sitecustomize.py` 将 ReportLab 默认 Helvetica 四个名字
    自动指向 `/usr/share/fonts/nova/NovaDocumentSansSC-Regular.ttf`；无需注册或下载字体，
