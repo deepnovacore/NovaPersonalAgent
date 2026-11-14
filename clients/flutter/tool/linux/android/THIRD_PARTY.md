@@ -15,7 +15,8 @@ corresponding Alpine source/build recipes for included copyleft components when
 distributing; the lock is not a substitute for source-distribution obligations.
 The added wheel distributions retain their upstream `.dist-info` notices in
 `/usr/lib/python3.12/site-packages/` (openpyxl/et_xmlfile MIT; pypdf BSD-3-Clause;
-ReportLab BSD; Pillow HPND; charset-normalizer MIT). Review the actual notices,
+ReportLab BSD; Pillow HPND; charset-normalizer/python-docx MIT; lxml BSD with
+bundled libxml2/libxslt notices; typing_extensions PSF-2.0). Review the actual notices,
 including Pillow's bundled native dependencies, with the release artifact.
 
 Nova Document Sans SC Regular derives from Noto Sans SC 2.004-H2 under SIL OFL

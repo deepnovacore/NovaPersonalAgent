@@ -27,6 +27,10 @@ the Alpine package pulls in pandas/numpy/openblas/lxml and about 60 packages;
 the upstream wheel only needs et_xmlfile. Pillow and charset-normalizer use the
 validated CPython 3.12 musllinux aarch64 wheels, not host macOS wheels. fontTools
 is a build-only pure Python wheel, never installed in the shipped rootfs.
+DOCX support includes python-docx 1.2.0 plus typing_extensions 4.15.0 and
+the CPython 3.12 musllinux aarch64 wheel of lxml 6.1.3. The offline smoke
+extracts Chinese PDF text, saves it with a heading and table in DOCX, then
+reopens the file and checks its paragraph/table contents.
 All pip installs use `--require-hashes --only-binary=:all: --no-deps`; the whole
 closure is explicit. No network package resolution occurs during installation.
 

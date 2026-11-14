@@ -71,7 +71,7 @@ return { text: document.querySelector('#result').textContent };
 推荐流程：
 
 1. 用 `shell_execute` 检查 `python3`、库导入和字体是否存在。**新镜像预装**
-   Python 3.12.16、`openpyxl==3.1.5 pypdf==6.1.1 reportlab==4.4.4` 及其固定依赖，
+   Python 3.12.16、`openpyxl==3.1.5 pypdf==6.1.1 reportlab==4.4.4 python-docx==1.2.0` 及其固定依赖，
    不需在手机上 pip/apk 下载。标记 `/usr/share/nova/document-base.json` 在工作区外。
    已有安装升级后不替换旧 rootfs；没有标记/库时如实告知用户，仍可经授权联网安装
    `python3 py3-pip` 并在 venv 安装上述版本，不关闭 TLS/签名验证。
@@ -79,6 +79,7 @@ return { text: document.querySelector('#result').textContent };
 2. XLSX 先看 sheet 名和尺寸，`load_workbook(path, read_only=True, data_only=True)`
    分批迭代行。`data_only` 读取已有公式缓存，不计算公式，缓存缺失时要说明。
    PDF 用 `PdfReader` 先查页数，按页提取文本；保持页码作为解释依据。
+   DOCX 用 `from docx import Document` 读写，保存后重新打开核对段落和表格。
 3. 将脚本保存后执行，只打印统计摘要、少量样例和输出路径。不要把整本工作簿或
    整篇论文塞入模型上下文；`file_read` 单次仍最多 64 KiB。重脚本显式指定更长
    timeout，并按页/块拆分；60 秒是默认值，不是文档任务的性能保证。

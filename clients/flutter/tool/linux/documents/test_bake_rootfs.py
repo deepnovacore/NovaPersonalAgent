@@ -76,7 +76,8 @@ class BakeRootfsTest(unittest.TestCase):
     def test_locks_pin_complete_validated_wheel_set_and_apks(self):
         wheels = bake_rootfs.load_lock('wheels')['wheels']
         self.assertEqual({item['name'] for item in wheels if not item['build_only']},
-                         {'openpyxl', 'et_xmlfile', 'pypdf', 'reportlab', 'pillow', 'charset-normalizer'})
+                         {'openpyxl', 'et_xmlfile', 'pypdf', 'reportlab', 'pillow', 'charset-normalizer',
+                          'python-docx', 'lxml', 'typing_extensions'})
         for platform in ['ios', 'android']:
             lock = bake_rootfs.load_lock(platform)
             self.assertIn('@sha256:', lock['container'])

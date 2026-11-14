@@ -58,7 +58,9 @@ adding or statically validating this workflow does not prove an iOS build passed
 ## Baked document base set
 
 New installations include Python 3.12.16, py3-pip, openpyxl 3.1.5, pypdf 6.1.1,
-ReportLab 4.4.4, Pillow 13.0.0, charset-normalizer 3.5.2 and et_xmlfile 2.0.0.
+ReportLab 4.4.4, Pillow 13.0.0, charset-normalizer 3.5.2, et_xmlfile 2.0.0,
+python-docx 1.2.0, lxml 6.1.3 and typing_extensions 4.15.0. DOCX creation/readback
+is checked with Chinese text extracted from a PDF, without network access.
 The owner-approved static-400 common-character TrueType font is at
 `/usr/share/fonts/nova/NovaDocumentSansSC-Regular.ttf`; OFL text/copyright remain
 beside it, under `/usr/share/licenses/nova-document-font/`, and in the Flutter

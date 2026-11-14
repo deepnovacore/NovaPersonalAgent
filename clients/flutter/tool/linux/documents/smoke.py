@@ -82,6 +82,7 @@ def main():
     args = parser.parse_args()
     start = time.monotonic()
     defaults = None if args.skip_default_font else default_font_smoke()
+    from docx import Document
     import openpyxl
     import pypdf
     import reportlab
@@ -91,9 +92,11 @@ def main():
 
     imported = time.monotonic()
     versions = {name: importlib.metadata.version(name) for name in
-                ['openpyxl', 'et_xmlfile', 'pypdf', 'reportlab', 'pillow', 'charset-normalizer']}
+                ['openpyxl', 'et_xmlfile', 'pypdf', 'reportlab', 'pillow', 'charset-normalizer',
+                 'python-docx', 'lxml', 'typing_extensions']}
     assert versions == {'openpyxl': '3.1.5', 'et_xmlfile': '2.0.0', 'pypdf': '6.1.1',
-                        'reportlab': '4.4.4', 'pillow': '13.0.0', 'charset-normalizer': '3.5.2'}, versions
+                        'reportlab': '4.4.4', 'pillow': '13.0.0', 'charset-normalizer': '3.5.2',
+                        'python-docx': '1.2.0', 'lxml': '6.1.3', 'typing_extensions': '4.15.0'}, versions
     with tempfile.TemporaryDirectory() as directory:
         root = Path(directory)
         # Fixture creation is not a promise of XLSX writing support in the product.
@@ -125,6 +128,17 @@ def main():
         pdf.save()
         extracted = pypdf.PdfReader(root / 'summary.pdf').pages[0].extract_text()
         assert text in extracted, extracted
+        cjk_done = time.monotonic()
+        document = Document()
+        document.add_heading('PDF → DOCX', level=1)
+        document.add_paragraph(extracted.strip())
+        table = document.add_table(rows=1, cols=2)
+        table.cell(0, 0).text = '总和'
+        table.cell(0, 1).text = str(total)
+        document.save(root / 'summary.docx')
+        document = Document(root / 'summary.docx')
+        assert document.paragraphs[1].text == text, document.paragraphs[1].text
+        assert [cell.text for cell in document.tables[0].rows[0].cells] == ['总和', '1001000']
     finished = time.monotonic()
     try:
         maxrss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss or None
@@ -132,8 +146,10 @@ def main():
         maxrss = None  # iSH may not implement getrusage; unavailable is not zero.
     print(json.dumps({'passed': True, 'versions': versions, 'xlsx_total': total,
                       'pdf_pages': 20, 'cjk_text': text, 'default_fonts': defaults,
+                      'docx_text': document.paragraphs[1].text,
                       'seconds': {'import': imported - start, 'xlsx': xlsx_done - imported,
-                                  'pdf': pdf_done - xlsx_done, 'cjk': finished - pdf_done,
+                                  'pdf': pdf_done - xlsx_done, 'cjk': cjk_done - pdf_done,
+                                  'docx': finished - cjk_done,
                                   'total': finished - start},
                       'maxrss_kib': maxrss},
                      ensure_ascii=False, sort_keys=True))
