@@ -1,0 +1,83 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="434" viewBox="0 0 960 434" role="img" aria-label="Nova Personal Agent Architecture">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#14b8a6"/>
+    </marker>
+  </defs>
+  <rect width="960" height="434" rx="20" fill="#ffffff"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'>
+    
+    <text x="40" y="44" font-size="20" font-weight="700" fill="#0f172a" text-anchor="start">Nova Personal Agent Architecture</text>
+
+    <!-- Left: Clients -->
+    <rect x="40" y="74" width="210" height="320" rx="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+    <text x="60" y="102" font-size="11.5" font-weight="700" fill="#64748b" text-anchor="start">CLIENTS</text>
+
+    <rect x="56" y="120" width="178" height="116" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="145" y="168" font-size="16" font-weight="700" fill="#1e3a8a" text-anchor="middle">Desktop App</text>
+    <text x="145" y="192" font-size="12" font-weight="500" fill="#475569" text-anchor="middle">Electron · React</text>
+
+    <rect x="56" y="256" width="178" height="120" rx="14" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="145" y="304" font-size="16" font-weight="700" fill="#1e3a8a" text-anchor="middle">NovaCore</text>
+    <text x="145" y="328" font-size="12" font-weight="500" fill="#475569" text-anchor="middle">Flutter · iOS / Android</text>
+
+    <!-- Center: Authoritative Host -->
+    <rect x="320" y="74" width="360" height="320" rx="16" fill="#f8fafc" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="340" y="102" font-size="11.5" font-weight="700" fill="#134e4a" text-anchor="start">AUTHORITATIVE HOST (runtime)</text>
+    
+    <rect x="562" y="84" width="100" height="24" rx="12" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="612" y="100.5" font-size="11.5" font-weight="600" fill="#134e4a" text-anchor="middle">Local Authority</text>
+  
+
+    <rect x="338" y="122" width="154" height="84" rx="12" fill="#ffffff" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="415" y="158" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Front Brain</text>
+    <text x="415" y="180" font-size="12" font-weight="400" fill="#475569" text-anchor="middle">Voice · Text · Floor</text>
+
+    <rect x="508" y="122" width="154" height="84" rx="12" fill="#ffffff" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="585" y="158" font-size="15" font-weight="700" fill="#0f172a" text-anchor="middle">Back Brain</text>
+    <text x="585" y="180" font-size="12" font-weight="400" fill="#475569" text-anchor="middle">Task Loop · Verify</text>
+
+    <rect x="338" y="222" width="324" height="72" rx="12" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="500" y="252" font-size="15" font-weight="700" fill="#134e4a" text-anchor="middle">Memory &amp; Knowledge</text>
+    <text x="500" y="274" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">Blackboard · Memory Ledger · Knowledge</text>
+
+    <rect x="338" y="308" width="324" height="70" rx="12" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+    <text x="500" y="338" font-size="15" font-weight="700" fill="#78350f" text-anchor="middle">Approval Gate &amp; Executors</text>
+    <text x="500" y="360" font-size="12" font-weight="400" fill="#0f172a" text-anchor="middle">Coding · Computer Use · Mobile · Camera</text>
+
+    <!-- Right: Relay & External -->
+    <rect x="740" y="74" width="180" height="154" rx="16" fill="#f8fafc" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="758" y="102" font-size="11.5" font-weight="700" fill="#4c1d95" text-anchor="start">RELAY &amp; PUSH (OPT)</text>
+
+    <rect x="756" y="118" width="148" height="44" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="830" y="145" font-size="13" font-weight="700" fill="#4c1d95" text-anchor="middle">E2EE Relay</text>
+
+    <rect x="756" y="172" width="148" height="44" rx="10" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="830" y="199" font-size="13" font-weight="700" fill="#4c1d95" text-anchor="middle">Push Gateway</text>
+
+    <rect x="740" y="246" width="180" height="148" rx="16" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1.5"/>
+    <text x="758" y="274" font-size="11.5" font-weight="700" fill="#64748b" text-anchor="start">EXTERNAL</text>
+    <rect x="756" y="290" width="148" height="42" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="830" y="316" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">Model Providers</text>
+    <rect x="756" y="342" width="148" height="42" rx="10" fill="#ffffff" stroke="#94a3b8" stroke-width="1.5"/>
+    <text x="830" y="368" font-size="13" font-weight="600" fill="#0f172a" text-anchor="middle">MCP &amp; Connectors</text>
+
+    <!-- Arrows -->
+    <line x1="250" y1="178" x2="318" y2="178" stroke="#64748b" stroke-width="1.75" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+    <text x="284" y="168" font-size="11" font-weight="600" fill="#475569" text-anchor="middle">IPC / WS</text>
+
+    <path d="M 250 356 L 284 356 L 284 414 L 830 414 L 830 164" fill="none" stroke="#8b5cf6" stroke-width="1.75" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+    <text x="550" y="406" font-size="11" font-weight="600" fill="#4c1d95" text-anchor="middle">E2EE Ciphertext</text>
+
+    <line x1="738" y1="140" x2="682" y2="140" stroke="#8b5cf6" stroke-width="1.75" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+    <line x1="682" y1="194" x2="738" y2="194" stroke="#64748b" stroke-width="1.75" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+    <line x1="682" y1="342" x2="738" y2="342" stroke="#f59e0b" stroke-width="1.75" marker-end="url(#arrow-amber)" marker-start="url(#arrow-amber)"/>
+  
+  </g>
+</svg>

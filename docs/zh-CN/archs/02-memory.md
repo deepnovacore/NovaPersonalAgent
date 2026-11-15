@@ -8,6 +8,11 @@ Nova 的记忆分为若干层，分别承担会话状态恢复、跨对话记忆
 
 ## 分层
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../assets/architecture/memory-layers.zh-CN.dark.svg">
+  <img src="../../../assets/architecture/memory-layers.zh-CN.light.svg" alt="三层记忆架构与权限隔离" width="100%">
+</picture>
+
 <a id="layers"></a>
 
 - **L0——会话运行状态。** `Memory` 频道、已分派的执行任务、已接受的交接，以及绑定当前需求修订号的收集状态，共同构成会话的当前状态，以运行时状态为准。宿主的授权与项目确认状态机属于宿主自身的状态，模型不能把它们当作可写的规划状态。黑板条目会记录时间、信任级别、优先级、结果和证据引用，状态按事件顺序更新，响应只能基于已生效的事件。当前任务和执行器状态只能由运行时更新。
@@ -36,7 +41,7 @@ L0 黑板由专用 SQLite Worker 持久化（`runtime/src/memory/blackboard-sess
 
 旧独立 mem0 和远程记忆不迁移统一账本；新的 `MEMORY_RECALL_ENGINE=mem0|voicemem` 会从现有账本回填 SDK 派生索引。旧 VoiceMem 的只读迁入是独立路径。
 
-`MEMORY_EXTRACTORS=ledger,voicemem` 可选开启情绪/特质抽取，仅保存在 SDK 中，不写账本事实。特质至少需要三个不同且仍获授权的用户会话来源；背景从最早证据起最多保留十分钟，每次使用前重新校验。纠正、删除、撤回同意与清除通过事务代际 outbox 驱动幂等 SDK 对账，带租约、外部写锁和重启重试。引擎结果始终重新解析为账本 ID、版本和来源；项目/general 内容可显式读取并携带权威 scope 标签，但不进入自动用户背景召回。复用现有 embedding 与 fast 模型路由，无新增记忆专属密钥。详见[生产组合说明](../../design-notes/2026-11-03-memory-backend-composition.md)。
+`MEMORY_EXTRACTORS=ledger,voicemem` 可选开启情绪/特质抽取，仅保存在 SDK 中，不写账本事实。特质至少需要三个不同且仍获授权的用户会话来源；背景从最早证据起最多保留十分钟，每次使用前重新校验。纠正、删除、撤回同意与清除通过事务代际 outbox 驱动幂等 SDK 对账，带租约、外部写锁和重启重试。引擎结果始终重新解析为账本 ID、版本和来源；项目/general 内容可显式读取并携带权威 scope 标签，但不进入自动用户背景召回。复用现有 embedding 与 fast 模型路由，无新增记忆专属密钥。同意校验、有效期与持久重试机制见[个人记忆](../personal-memory.md)。
 
 ## 独立的文档知识（K）
 

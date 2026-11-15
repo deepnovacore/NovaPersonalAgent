@@ -2,6 +2,13 @@
 
 一个 Space 有且只有一个固定 Host。桌面 Host 保存权威数据、调用模型和运行后台任务；手机 Client 保存展示缓存与待提交意图。独立手机 Space 使用本机运行时，不能原地变成 Client。新建或切换 Space 不迁移旧数据。Host 丢失后没有云端恢复或自动接管。
 
+## 配对与端到端加密通信流程
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/space-e2ee-flow.zh-CN.dark.svg">
+  <img src="../../assets/architecture/space-e2ee-flow.zh-CN.light.svg" alt="Space / Host / Client 配对与端到端加密流程" width="100%">
+</picture>
+
 ## 构建和本地验证
 
 Node.js 至少 22.13。先安装仓库依赖，再选择已存在、当前任务独占的输出根目录：
@@ -89,4 +96,4 @@ Client 的系统工具只执行 Host 明确下发的动作，并检查前台状�
 
 ## 验收边界
 
-自动测试可以证明密文协议互通、幂等重试、冲突与 ID 重映射、真实网络补拉、配对与撤销、推送厂商边界前的处理。iOS NSE 与系统权限、Android Doze/force-stop、小米锁屏与隔夜到达必须在有签名和厂商账号的真机验收。缺少这些证据不能宣称 M0/M5/M6 真机验收完成。验收矩阵见 [设计里程碑](../design-notes/2026-10-23-space-host-client-milestones.md)。
+自动测试可以证明密文协议互通、幂等重试、冲突与 ID 重映射、真实网络补拉、配对与撤销、推送厂商边界前的处理。iOS NSE 与系统权限、Android Doze/force-stop、小米锁屏与隔夜到达必须在有签名和厂商账号的真机验收。缺少这些证据不能宣称真机推送验收完成。

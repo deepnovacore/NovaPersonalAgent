@@ -1,0 +1,47 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="290" viewBox="0 0 920 290" role="img" aria-label="双模式语音管线">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#7d8590"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#d29922"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#2dd4bf"/>
+    </marker>
+  </defs>
+  <rect width="920" height="290" rx="20" fill="#0d1117"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'>
+    
+    <text x="40" y="44" font-size="20" font-weight="700" fill="#e6edf3" text-anchor="start">双模式语音管线</text>
+
+    <rect x="40" y="116" width="136" height="98" rx="14" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+    <text x="108" y="160" font-size="15" font-weight="700" fill="#e6edf3" text-anchor="middle">音频输入</text>
+    <text x="108" y="182" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="middle">唤醒词 / 声纹</text>
+
+    <rect x="232" y="78" width="468" height="72" rx="14" fill="#122136" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="254" y="108" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="start">Integrated 集成模式（默认）</text>
+    <text x="254" y="130" font-size="12" font-weight="400" fill="#e6edf3" text-anchor="start">Qwen Realtime · OpenAI Realtime · Gemini Live · StepFun</text>
+
+    <rect x="232" y="168" width="468" height="92" rx="14" fill="#102624" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="254" y="196" font-size="14" font-weight="700" fill="#99f6e4" text-anchor="start">Cascaded 级联模式（云端 / 自托管混编）</text>
+    <rect x="254" y="210" width="120" height="36" rx="9" fill="#1c2128" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="314" y="233" font-size="12.5" font-weight="700" fill="#e6edf3" text-anchor="middle">ASR</text>
+    <line x1="374" y1="228" x2="402" y2="228" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+    <rect x="404" y="210" width="124" height="36" rx="9" fill="#1c2128" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="466" y="233" font-size="12.5" font-weight="700" fill="#e6edf3" text-anchor="middle">LLM (+ Vision)</text>
+    <line x1="528" y1="228" x2="556" y2="228" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+    <rect x="558" y="210" width="120" height="36" rx="9" fill="#1c2128" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="618" y="233" font-size="12.5" font-weight="700" fill="#e6edf3" text-anchor="middle">TTS</text>
+
+    <rect x="754" y="116" width="126" height="98" rx="14" fill="#271e0f" stroke="#d29922" stroke-width="1.5"/>
+    <text x="817" y="160" font-size="15" font-weight="700" fill="#fde68a" text-anchor="middle">Floor</text>
+    <text x="817" y="182" font-size="11.5" font-weight="400" fill="#e6edf3" text-anchor="middle">打断与播报</text>
+
+    <line x1="176" y1="150" x2="230" y2="114" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="176" y1="180" x2="230" y2="214" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="700" y1="114" x2="752" y2="150" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="700" y1="214" x2="752" y2="180" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+  
+  </g>
+</svg>

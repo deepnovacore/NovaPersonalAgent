@@ -1,0 +1,53 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="326" viewBox="0 0 920 326" role="img" aria-label="Three-Tier Memory Architecture">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#7d8590"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#d29922"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#2dd4bf"/>
+    </marker>
+  </defs>
+  <rect width="920" height="326" rx="20" fill="#0d1117"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'>
+    
+    <text x="40" y="44" font-size="20" font-weight="700" fill="#e6edf3" text-anchor="start">Three-Tier Memory Architecture</text>
+
+    <rect x="40" y="84" width="184" height="96" rx="14" fill="#122136" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="132" y="126" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="middle">Turns &amp; Sources</text>
+    <text x="132" y="148" font-size="12" font-weight="600" fill="#fde68a" text-anchor="middle">Explicit Consent</text>
+
+    <rect x="40" y="204" width="184" height="86" rx="14" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+    <text x="132" y="244" font-size="14.5" font-weight="700" fill="#e6edf3" text-anchor="middle">Imported Files</text>
+    <text x="132" y="266" font-size="12" font-weight="400" fill="#9ea7b3" text-anchor="middle">Opt-in Corpus</text>
+
+    <rect x="284" y="72" width="330" height="64" rx="12" fill="#1c2128" stroke="#484f58" stroke-width="1.5"/>
+    <text x="304" y="100" font-size="14.5" font-weight="700" fill="#e6edf3" text-anchor="start">L0 Runtime Blackboard</text>
+    <text x="304" y="120" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="start">blackboard.sqlite · 7d / 1000 items / 8 MB</text>
+
+    <rect x="284" y="150" width="330" height="74" rx="12" fill="#102624" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="304" y="180" font-size="14.5" font-weight="700" fill="#99f6e4" text-anchor="start">Personal Memory Ledger</text>
+    <text x="304" y="202" font-size="11.5" font-weight="400" fill="#e6edf3" text-anchor="start">workspace-graph.sqlite · Trace / Forget / Purge</text>
+
+    <rect x="284" y="238" width="330" height="62" rx="12" fill="#1c2128" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="304" y="266" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="start">Document Knowledge</text>
+    <text x="304" y="286" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="start">knowledge.sqlite · FTS5 + Embeddings</text>
+
+    <rect x="674" y="114" width="206" height="74" rx="12" fill="#1e1930" stroke="#a371f7" stroke-width="1.5"/>
+    <text x="777" y="146" font-size="14" font-weight="700" fill="#d2a8ff" text-anchor="middle">mem0 / VoiceMem</text>
+    <text x="777" y="168" font-size="12" font-weight="400" fill="#9ea7b3" text-anchor="middle">Derived Recall Index</text>
+
+    <rect x="674" y="212" width="206" height="74" rx="12" fill="#21262d" stroke="#484f58" stroke-width="1.5" stroke-dasharray="5 4"/>
+    <text x="777" y="244" font-size="14" font-weight="700" fill="#e6edf3" text-anchor="middle">Markdown Copies</text>
+    <text x="777" y="266" font-size="12" font-weight="400" fill="#8b949e" text-anchor="middle">One-way Read-Only</text>
+
+    <line x1="224" y1="118" x2="282" y2="104" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="224" y1="146" x2="282" y2="186" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+    <line x1="224" y1="248" x2="282" y2="268" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="614" y1="174" x2="672" y2="152" stroke="#a371f7" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="614" y1="202" x2="672" y2="244" stroke="#7d8590" stroke-width="1.75" stroke-dasharray="5 4" marker-end="url(#arrow)"/>
+  
+  </g>
+</svg>

@@ -79,5 +79,4 @@ explicitly. Only the ledger extractor is implemented. `MEMORY_PROVIDER` is depre
 legacy `voicemem` keeps ledger migration and legacy `mem0` keeps standalone mode.
 Do not combine legacy and new variables or use new variables with a remote connection.
 Explicit recall-engine selections are not silently substituted or enabled by default.
-There is no engine picker. See [configuration](configuration.md) for supported selections.
-See [the staged composition contract](../design-notes/2026-11-03-memory-backend-composition.md).
+There is no engine picker. See [configuration](configuration.md) for supported selections and [memory architecture](archs/02-memory.md) for design details.

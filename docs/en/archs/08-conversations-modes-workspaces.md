@@ -45,8 +45,19 @@ transcript is written back to the same conversation.
 
 ## The four modes
 
-The runtime contract lives in
-[the modes design note](../../design-notes/2026-10-26-modes-runtime-contract.md). The four routes are:
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#eff6ff', 'primaryBorderColor': '#3b82f6', 'primaryTextColor': '#0f172a', 'lineColor': '#64748b', 'fontFamily': '-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif'}}}%%
+stateDiagram-v2
+  [*] --> Chat: Default conversation
+  Chat --> Plan: User selects Plan
+  Plan --> Build: build.start (approved plan)
+  Chat --> Build: build.begin (direct)
+  Plan --> Delegate: plans.delegate (executor)
+  Build --> Chat: finish_build / clear
+  Delegate --> TaskLoop: Hand off to background executor
+```
+
+The four routes are:
 
 | Mode | What it does | Entry and result |
 |---|---|---|

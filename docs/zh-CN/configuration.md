@@ -92,4 +92,4 @@ OpenAI 与 Gemini 的模型选项、独立密钥、级联配置和协议限制�
 
 ### 记忆引擎服务要求
 
-账本权威的 SDK 召回可用 `MEMORY_RECALL_ENGINE=mem0` 或 `voicemem`；可选 `MEMORY_EXTRACTORS=ledger,voicemem` 增加短期回复风格抽取。请勿同时设置 `MEMORY_PROVIDER`；没有 `MEMORY_BACKEND` 别名。复用现有 embedding 与 fast/抽取路由的凭据及 OpenAI 兼容 `/embeddings`、`/chat/completions` 端点；DashScope 默认复用 `DASHSCOPE_API_KEY`，无需 Mem0 云密钥。默认仍是纯账本。处理同意、有效期、持久重试及评估限制见[生产组合说明](../design-notes/2026-11-03-memory-backend-composition.md)。
+账本权威的 SDK 召回可用 `MEMORY_RECALL_ENGINE=mem0` 或 `voicemem`；可选 `MEMORY_EXTRACTORS=ledger,voicemem` 增加短期回复风格抽取。请勿同时设置 `MEMORY_PROVIDER`；没有 `MEMORY_BACKEND` 别名。复用现有 embedding 与 fast/抽取路由的凭据及 OpenAI 兼容 `/embeddings`、`/chat/completions` 端点；DashScope 默认复用 `DASHSCOPE_API_KEY`，无需 Mem0 云密钥。默认仍是纯账本。同意校验、有效期与持久重试机制见[记忆架构](archs/02-memory.md)。

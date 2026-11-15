@@ -5,6 +5,11 @@ of prompt text.
 
 ## Layers
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../assets/architecture/memory-layers.en.dark.svg">
+  <img src="../../../assets/architecture/memory-layers.en.light.svg" alt="Three-Tier Memory & Authority Boundaries" width="100%">
+</picture>
+
 - **L0 — causal runtime blackboard.** `Memory` channels, active delegates, accepted handoffs, and
   revision-bound intake slots are the live session truth. Host authorization and project-confirmation
   FSMs are separate host state, never model-writable planning state. Entries carry time, trust,
@@ -51,7 +56,7 @@ loopback, and responses are size-capped.
 
 Legacy standalone mem0 and remote memory do not migrate unified-ledger data. New `MEMORY_RECALL_ENGINE=mem0|voicemem` instead backfills derived SDK indexes from that ledger. The legacy VoiceMem read-only import is a separate migration path.
 
-`MEMORY_EXTRACTORS=ledger,voicemem` adds opt-in VoiceMem emotion/trait extraction. Styles stay in the SDK store, never ledger facts; at least three distinct authorized user-conversation sources are required for a trait. Context expires within ten minutes of its earliest evidence and is revalidated at consumption. Corrections, forget, consent changes and purge enqueue transactional generation jobs; workers reconcile SDK state idempotently, with leased claims, external-write locks and restart retries. Engine candidates are always hydrated to canonical ledger IDs/revisions/evidence. General/project memories remain explicitly readable with canonical scope labels, but are excluded from automatic user-only recall. Engines reuse existing embedding and fast-model routes, not new memory-specific keys. See [production composition](../../design-notes/2026-11-03-memory-backend-composition.md) for provider requirements, failure handling and quality limits.
+`MEMORY_EXTRACTORS=ledger,voicemem` adds opt-in VoiceMem emotion/trait extraction. Styles stay in the SDK store, never ledger facts; at least three distinct authorized user-conversation sources are required for a trait. Context expires within ten minutes of its earliest evidence and is revalidated at consumption. Corrections, forget, consent changes and purge enqueue transactional generation jobs; workers reconcile SDK state idempotently, with leased claims, external-write locks and restart retries. Engine candidates are always hydrated to canonical ledger IDs/revisions/evidence. General/project memories remain explicitly readable with canonical scope labels, but are excluded from automatic user-only recall. Engines reuse existing embedding and fast-model routes, not new memory-specific keys. See [personal memory](../personal-memory.md) for consent, TTL, and durable retry behavior.
 
 ## Separate document knowledge (K)
 

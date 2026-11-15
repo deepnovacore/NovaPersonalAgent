@@ -10,8 +10,9 @@
 5. [执行器](05-executors.md)
 6. [本地开发](06-verification.md)
 7. [设计约束](07-decision-record.md)
-8. [路线图](09-roadmap.md)
-9. [执行器接入](10-executor-onboarding.md)
-10. [原生视觉与独立监控](11-vision.md)
+8. [会话、模式与工作区](08-conversations-modes-workspaces.md)
+9. [路线图](09-roadmap.md)
+10. [执行器接入](10-executor-onboarding.md)
+11. [原生视觉与独立监控](11-vision.md)
 
 开发新能力时，需要明确谁管理任务状态、谁决定提醒时机，以及谁负责向用户回复。各章围绕这些职责划分展开。
