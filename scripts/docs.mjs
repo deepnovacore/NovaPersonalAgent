@@ -96,6 +96,10 @@ export function generateDocs() {
   for (const lang of ['en', 'zh-CN']) {
     const relative = `assets/architecture/nova-personal-agent.${lang}.png`;
     assets.set(relative, path.join(repoRoot, relative));
+    for (const theme of ['light', 'dark']) {
+      const svg = `assets/architecture/nova-overview.${lang}.${theme}.svg`;
+      assets.set(svg, path.join(repoRoot, svg));
+    }
   }
   const assetRoot = path.join(site, 'public/doc-assets');
   fs.rmSync(assetRoot, { recursive: true, force: true });
