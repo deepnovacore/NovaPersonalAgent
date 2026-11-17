@@ -22,7 +22,7 @@ export function Exchange({ lines, en }: { lines: Line[]; en: boolean }) {
 }
 
 // Plays muted while on screen, pauses off screen; static under reduced motion.
-export function ClipPlayer({ clip, en }: { clip: Clip; en: boolean }) {
+export function ClipPlayer({ clip, label }: { clip: Clip; label: string }) {
   const ref = useRef<HTMLVideoElement>(null);
   useEffect(() => {
     const video = ref.current;
@@ -39,7 +39,7 @@ export function ClipPlayer({ clip, en }: { clip: Clip; en: boolean }) {
     return () => io.disconnect();
   }, []);
   return (
-    <figure className={`clip clip-${clip.device}`}>
+    <div className={`clip clip-${clip.device}`}>
       <DeviceFrame kind={clip.device} width={clip.width} height={clip.height}>
         <video
           ref={ref}
@@ -49,7 +49,7 @@ export function ClipPlayer({ clip, en }: { clip: Clip; en: boolean }) {
           controls
           preload="none"
           poster={sitePath(`/media/clips/${clip.name}.webp`)}
-          aria-label={en ? clip.en : clip.zh}
+          aria-label={label}
         >
           <source
             src={sitePath(`/media/clips/${clip.name}.mp4`)}
@@ -57,7 +57,6 @@ export function ClipPlayer({ clip, en }: { clip: Clip; en: boolean }) {
           />
         </video>
       </DeviceFrame>
-      <figcaption>{en ? clip.en : clip.zh}</figcaption>
-    </figure>
+    </div>
   );
 }

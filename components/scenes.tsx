@@ -2,15 +2,15 @@
 import Image from 'next/image';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { galleryItems, mediaUrl } from '../lib/gallery';
-import { scenes } from '../lib/scenes';
+import { groups } from '../lib/scenes';
 import { sitePath } from '../lib/site-path';
 import { ClipPlayer, Exchange } from './exchange';
 
 const stillById = new Map(
   galleryItems.filter((i) => i.kind === 'still').map((i) => [i.id, i]),
 );
-const allStills = scenes
-  .flatMap((s) => s.stills)
+const allStills = groups
+  .flatMap((g) => g.stills)
   .map((id) => stillById.get(id)!)
   .filter(Boolean);
 
@@ -51,28 +51,51 @@ export function Scenes({ en = false }: { en?: boolean }) {
 
   return (
     <div className="scenes" id="gallery">
-      {scenes.map((scene) => (
+      {groups.map((group) => (
         <section
-          key={scene.id}
-          className="scene wrap"
-          id={scene.id}
-          aria-labelledby={`${scene.id}-title`}
+          key={group.id}
+          className="group wrap"
+          id={group.id}
+          aria-labelledby={`${group.id}-title`}
         >
-          <div className="scene-words">
-            <h2 id={`${scene.id}-title`}>
-              {en ? scene.title.en : scene.title.zh}
-            </h2>
-            <Exchange lines={scene.lines} en={en} />
-            <p className="scene-note">{en ? scene.note.en : scene.note.zh}</p>
+          <h2 id={`${group.id}-title`}>
+            {en ? group.title.en : group.title.zh}
+          </h2>
+          <div className="demos">
+            {group.demos.map((demo) => {
+              const label = en ? demo.label.en : demo.label.zh;
+              const kind = demo.clips.some((c) => c.device === 'mac')
+                ? 'wide'
+                : 'narrow';
+              return (
+                <figure
+                  key={demo.id}
+                  className={`demo demo-${kind}`}
+                  id={demo.id}
+                >
+                  <div className="demo-media">
+                    {demo.clips.map((clip) => (
+                      <ClipPlayer key={clip.name} clip={clip} label={label} />
+                    ))}
+                  </div>
+                  <figcaption>
+                    <span className="demo-label">{label}</span>
+                    {demo.lines.length > 0 && (
+                      <details>
+                        <summary>
+                          {en ? 'Read the conversation' : '看完整对话'}
+                        </summary>
+                        <Exchange lines={demo.lines} en={en} />
+                      </details>
+                    )}
+                  </figcaption>
+                </figure>
+              );
+            })}
           </div>
-          <div className={`scene-media count-${scene.clips.length}`}>
-            {scene.clips.map((clip) => (
-              <ClipPlayer key={clip.name} clip={clip} en={en} />
-            ))}
-          </div>
-          {scene.stills.length > 0 && (
+          {group.stills.length > 0 && (
             <ul className="thumbs" aria-label={en ? 'Screenshots' : '截图'}>
-              {scene.stills.map((id) => {
+              {group.stills.map((id) => {
                 const item = stillById.get(id);
                 if (!item) return null;
                 return (
@@ -102,8 +125,8 @@ export function Scenes({ en = false }: { en?: boolean }) {
       ))}
       <p className="scenes-source wrap">
         {en
-          ? 'All conversations above come from real screen recordings on test accounts. They were recorded in Chinese and are translated here.'
-          : '以上对话都来自真实录屏，用的是测试账号。'}
+          ? 'Every clip above is a real screen recording on a test account. Conversations were recorded in Chinese and are translated here.'
+          : '以上都是真实录屏，用的是测试账号。'}
       </p>
 
       <dialog

@@ -87,8 +87,15 @@ export function NovaMark({
       const g = geometry(p, t);
       const svg = svgRef.current;
       if (!svg) return;
-      const q = (k: string) => svg.querySelector<SVGElement>(`[data-part="${k}"]`);
-      const r = { corona: q('corona'), light: q('light'), disk: q('disk'), dot: q('dot'), arc: q('arc') };
+      const q = (k: string) =>
+        svg.querySelector<SVGElement>(`[data-part="${k}"]`);
+      const r = {
+        corona: q('corona'),
+        light: q('light'),
+        disk: q('disk'),
+        dot: q('dot'),
+        arc: q('arc'),
+      };
       r.corona?.setAttribute('cx', `${g.lcx}`);
       r.corona?.setAttribute('cy', `${g.lcy}`);
       r.corona?.setAttribute('r', `${g.corona}`);

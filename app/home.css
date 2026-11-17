@@ -1,7 +1,6 @@
-/* Homepage. The page is built from what people said to Nova and what it
-   said back, so spoken words get their own serif voice; everything else
-   uses the product's UI stack. Palette comes from the film and the
-   architecture diagram. */
+/* Homepage. Video carries each capability; text is one short label, with the
+   recorded conversation folded underneath for anyone who wants it. Palette
+   comes from the launch film and the architecture diagram. */
 :root {
   --paper: #f5f6fa;
   --ink: #1d2636;
@@ -20,7 +19,7 @@
 }
 body:has(#overview) { background: var(--paper); color: var(--ink); }
 main .wrap { width: min(1200px, 100% - 64px); margin-inline: auto; }
-main h2 { margin: 0; font-size: 30px; font-weight: 600; line-height: 1.3; letter-spacing: -0.01em; color: var(--ink); }
+main h1, main h2 { margin: 0; color: var(--ink); }
 main p { text-wrap: pretty; }
 main section { scroll-margin-top: 88px; }
 
@@ -30,29 +29,18 @@ main section { scroll-margin-top: 88px; }
 .btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--paper)); }
 .link { color: var(--nova); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
 .link:hover { text-decoration-thickness: 2px; }
-main a:focus-visible, main button:focus-visible { outline: 2px solid var(--nova); outline-offset: 3px; border-radius: 4px; }
+main a:focus-visible, main button:focus-visible, main summary:focus-visible { outline: 2px solid var(--nova); outline-offset: 3px; border-radius: 4px; }
 
-/* The exchange: the person's words are big and quoted, Nova's are smaller
-   and led by its mark. No bubbles. */
-.exchange { list-style: none; margin: 0; padding: 0; display: grid; gap: 22px; }
-.turn { display: grid; gap: 6px; }
-.who { font-size: 13px; font-weight: 600; letter-spacing: 0.02em; color: var(--nova); }
-.said { font-family: var(--speech); quotes: '“' '”'; }
-.turn-you .said { font-size: 30px; font-weight: 600; line-height: 1.45; color: var(--ink); text-wrap: balance; }
-.turn-nova .said { quotes: none; font-size: 19px; font-weight: 500; line-height: 1.75; color: var(--muted); }
-html[lang='en'] .turn-you .said { font-size: 28px; line-height: 1.35; }
-
-/* Hero */
-.hero { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); grid-template-areas: 'words clip' 'foot clip'; column-gap: 64px; row-gap: 40px; align-items: start; padding-block: 140px 120px; }
-.hero-words { grid-area: words; }
-.hero-mark { margin-bottom: 32px; }
-.hero .exchange { gap: 26px; }
-.hero .turn-you .said { font-size: 44px; line-height: 1.3; letter-spacing: -0.01em; }
-html[lang='en'] .hero .turn-you .said { font-size: 42px; line-height: 1.2; }
-.hero > .clip { grid-area: clip; align-self: center; }
-.hero-foot { grid-area: foot; }
-.hero-foot p { margin: 0; max-width: 30em; font-size: 17px; line-height: 1.75; color: var(--muted); }
-.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 24px; }
+/* Hero: name, one line, two buttons, then the film as the main visual. */
+.hero { padding-block: 128px 112px; }
+.hero-head { display: flex; align-items: center; gap: 24px; }
+.hero-head .nova-mark-svg { flex: none; }
+.hero h1 { font-size: clamp(36px, 5vw, 64px); font-weight: 650; line-height: 1.05; letter-spacing: -0.035em; }
+.hero-head p { margin: 12px 0 0; font-size: clamp(17px, 1.6vw, 21px); line-height: 1.6; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.hero-film { margin: 56px 0 0; }
+.hero-film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 14px; background: var(--tile); }
+.hero-film figcaption { margin-top: 12px; font-size: 14px; color: var(--muted); }
 
 /* Device bodies */
 .device { position: relative; }
@@ -64,26 +52,40 @@ html[lang='en'] .hero .turn-you .said { font-size: 42px; line-height: 1.2; }
 .device-phone { padding: 8px; border-radius: 40px; background: var(--tile); }
 .device-phone .device-screen { border-radius: 32px; }
 .device-phone::before { content: ''; position: absolute; z-index: 2; top: 16px; left: 50%; width: 26%; height: 3.2%; border-radius: 99px; background: #000; transform: translateX(-50%); pointer-events: none; }
-.clip { margin: 0; }
-.clip figcaption { margin-top: 18px; font-size: 14px; color: var(--muted); }
-.clip-phone { width: min(300px, 100%); }
 
-/* Scenes: the gallery. Words on the left, recordings on the right. */
-.scene { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); column-gap: 64px; row-gap: 32px; padding-block: 96px; border-top: 1px solid var(--rule); }
-.scene-words h2 { margin-bottom: 36px; }
-.scene-note { margin: 32px 0 0; max-width: 30em; font-size: 15px; line-height: 1.75; color: var(--muted); }
-.scene-media { display: flex; gap: 32px; align-items: flex-end; justify-content: flex-start; }
-.scene-media .clip-mac { flex: 1 1 0; min-width: 0; }
-.scene-media.count-1 .clip-phone { margin-inline: auto; }
-.scene-media.count-3 { flex-wrap: wrap; }
-.scene-media.count-3 .clip-mac { flex: 1 1 calc(50% - 16px); }
-.scene-media.count-3 .clip-phone { width: 200px; }
-.scene-media.count-2 .clip-phone { width: 230px; flex: none; }
-.scene-media.count-2 .clip-phone + .clip-phone { width: min(280px, 46%); }
-.thumbs { grid-column: 2; display: flex; gap: 12px; margin: 0; padding: 0; list-style: none; overflow-x: auto; }
+/* Capability groups. The group title is the claim; each demo is a recording
+   with a one-line label underneath. */
+.group { padding-block: 104px; border-top: 1px solid var(--rule); }
+.group > h2 { margin-bottom: 56px; font-family: var(--speech); font-size: 48px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+html[lang='en'] .group > h2 { font-size: 44px; }
+.demos { display: flex; flex-wrap: wrap; gap: 56px 40px; align-items: flex-start; }
+.demo { margin: 0; min-width: 0; }
+.demo-wide { flex: 1 1 520px; max-width: calc(50% - 20px); }
+.demo-narrow { flex: 0 0 240px; }
+.demo-media { display: flex; gap: 20px; align-items: flex-end; }
+.demo-media .clip-mac { flex: 1 1 auto; min-width: 0; }
+.demo-media .clip-phone { flex: 0 0 auto; width: 100%; max-width: 240px; }
+.demo-wide .demo-media .clip-phone { width: 30%; min-width: 150px; }
+.demo figcaption { margin-top: 22px; }
+.demo-label { display: block; font-size: 18px; font-weight: 600; line-height: 1.4; }
+
+/* The recorded conversation, folded by default. */
+.demo details { margin-top: 8px; }
+.demo summary { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; list-style: none; font-size: 14px; color: var(--nova); cursor: pointer; }
+.demo summary::-webkit-details-marker { display: none; }
+.demo summary::before { content: '▸'; font-size: 11px; transition: transform 0.15s; }
+.demo details[open] summary::before { transform: rotate(90deg); }
+.exchange { list-style: none; margin: 14px 0 0; padding: 14px 0 0; display: grid; gap: 14px; border-top: 1px solid var(--rule); max-width: 34em; }
+.turn { display: grid; gap: 2px; }
+.who { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--nova); }
+.said { font-family: var(--speech); quotes: '“' '”'; }
+.turn-you .said { font-size: 18px; font-weight: 600; line-height: 1.55; color: var(--ink); }
+.turn-nova .said { quotes: none; font-size: 15px; line-height: 1.75; color: var(--muted); }
+
+.thumbs { display: flex; gap: 12px; margin: 56px 0 0; padding: 0; list-style: none; overflow-x: auto; }
 .thumbs li { flex: none; }
 .thumbs button { display: block; padding: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); cursor: zoom-in; overflow: hidden; }
-.thumbs img { display: block; height: 96px; width: auto; }
+.thumbs img { display: block; height: 88px; width: auto; }
 .scenes-source { margin: 0 auto; padding: 28px 0 0; border-top: 1px solid var(--rule); font-size: 14px; color: var(--muted); }
 
 .lightbox { padding: 0; border: 0; background: transparent; max-width: min(1100px, 94vw); max-height: 94vh; overflow: visible; margin: auto; color: #e6e9ee; }
@@ -95,27 +97,20 @@ html[lang='en'] .hero .turn-you .said { font-size: 42px; line-height: 1.2; }
 .lightbox-controls button:hover { background: rgba(255, 255, 255, 0.1); }
 .lightbox-controls button:focus-visible { outline: 2px solid #8fb4ff; outline-offset: 2px; }
 
-/* Film */
-.film { padding-block: 120px 96px; }
-.film h2 { margin-bottom: 28px; }
-.film figure { margin: 0; }
-.film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 12px; background: var(--tile); }
-.film figcaption { margin-top: 14px; font-size: 14px; color: var(--muted); }
-
-/* Release */
-.release { padding-block: 96px; border-top: 1px solid var(--rule); }
-.release h2 { margin-bottom: 28px; }
-.release ul { margin: 0; padding: 0 0 0 1.1em; max-width: 46em; display: grid; gap: 14px; font-size: 17px; line-height: 1.75; }
-.release li::marker { color: var(--muted); }
+/* What's new and architecture */
+.release { padding-block: 104px 96px; }
+.release h2, .get h2 { margin-bottom: 28px; font-size: 30px; font-weight: 600; line-height: 1.3; }
+.release ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; font-size: 19px; line-height: 1.5; }
+.release li::before { content: '—'; margin-right: 12px; color: var(--muted); }
 .arch { margin: 64px 0 20px; }
 .arch img { width: 100%; height: auto; }
+.release-links { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
 .only-dark { display: none; }
 [data-theme='dark'] .only-light { display: none; }
 [data-theme='dark'] .only-dark { display: block; }
 
 /* Download */
 .get { padding-block: 96px 128px; border-top: 1px solid var(--rule); }
-.get h2 { margin-bottom: 28px; }
 .get table { width: 100%; max-width: 720px; border-collapse: collapse; }
 .get th, .get td { padding: 15px 0; border-bottom: 1px solid var(--rule); text-align: left; font-size: 16px; font-weight: 400; vertical-align: baseline; }
 .get th { width: 46%; padding-right: 16px; }
@@ -126,30 +121,29 @@ html[lang='en'] .hero .turn-you .said { font-size: 42px; line-height: 1.2; }
 .get .small { margin: 14px 0 0; font-size: 14px; line-height: 1.7; color: var(--muted); }
 .get-links { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 32px 0 0; }
 
-@media (max-width: 960px) {
-  .hero, .scene { grid-template-columns: 1fr; }
-  .hero { grid-template-areas: 'words' 'clip' 'foot'; padding-block: 112px 72px; }
-  .thumbs { grid-column: 1; }
-}
 @media (max-width: 640px) {
   main .wrap { width: calc(100% - 40px); }
-  main h2 { font-size: 24px; }
-  .hero { padding-block: 96px 56px; row-gap: 32px; }
-  .hero-mark { margin-bottom: 24px; }
-  .hero .turn-you .said { font-size: 32px; }
-  html[lang='en'] .hero .turn-you .said { font-size: 30px; }
-  .turn-you .said { font-size: 22px; }
-  html[lang='en'] .turn-you .said { font-size: 21px; }
-  .turn-nova .said { font-size: 17px; }
-  .scene { padding-block: 64px; }
-  .scene-words h2 { margin-bottom: 28px; }
-  .scene-media { flex-wrap: wrap; gap: 24px; justify-content: center; }
-  .scene-media .clip-mac { flex: 1 1 100%; }
-  .scene-media .clip-phone, .scene-media.count-3 .clip-phone { width: min(72vw, 280px); }
-  .thumbs img { height: 80px; }
-  .film, .release { padding-block: 64px; }
+  .hero { padding-block: 96px 64px; }
+  .hero-head { gap: 16px; }
+  .hero-head .nova-mark-svg { width: 48px; height: 48px; }
+  .hero-film { margin-top: 36px; }
+  .hero-film video { border-radius: 10px; }
+  .actions .btn { flex: 1 1 auto; justify-content: center; }
+  .group { padding-block: 64px; }
+  .group > h2, html[lang='en'] .group > h2 { margin-bottom: 36px; font-size: 30px; }
+  .demos { gap: 48px; }
+  .demo-wide, .demo-narrow { flex: 1 1 100%; max-width: none; }
+  .demo-narrow .demo-media { justify-content: center; }
+  .demo-narrow .clip-phone { width: min(68vw, 260px); }
+  .demo-wide .demo-media .clip-phone { width: 34%; min-width: 0; }
+  .thumbs { margin-top: 40px; }
+  .thumbs img { height: 76px; }
+  .release { padding-block: 64px; }
+  .release ul { font-size: 17px; }
   .get { padding-block: 64px 96px; }
   .get th { width: auto; display: block; padding-bottom: 4px; border-bottom: 0; }
   .get td { display: block; padding-top: 0; }
-  .actions .btn { flex: 1 1 auto; justify-content: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo summary::before { transition: none; }
 }

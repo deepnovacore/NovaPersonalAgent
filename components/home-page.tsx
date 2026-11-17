@@ -1,11 +1,9 @@
 /* oxlint-disable jsx-a11y/media-has-caption -- The film is a supplied cut; its caption sits beside the player. */
 import Image from 'next/image';
 import { sitePath } from '../lib/site-path';
-import { heroClip, heroLines } from '../lib/scenes';
 import { Header, Footer, repo } from './site-header';
 import { InstallCommand } from './install-command';
 import { NovaMark } from './nova-mark';
-import { ClipPlayer, Exchange } from './exchange';
 import { Scenes } from './scenes';
 import '../app/home.css';
 
@@ -21,18 +19,18 @@ export function HomePage({ en = false }: { en?: boolean }) {
 
   const release = en
     ? [
-        'Space, Host and Client. Your data lives on a computer you control; phones and other computers connect to it over an end-to-end encrypted relay or Tailscale.',
-        'One app for iOS and Android, with the timeline, profile and documents. Pair it with your computer or run it on its own.',
-        'A rebuilt desktop workbench: timeline, ideas, goals, feeds, tasks and profile next to the conversation.',
-        'More ways to act: coding agents, computer use, supervised phone use and camera watching, all under the same approvals.',
-        'Memory you can check: a local record with sources, separate consent for reading and for model processing, and real deletion.',
+        'Your data lives on your own computer',
+        'One app for iOS and Android',
+        'A rebuilt desktop workbench',
+        'Coding, computer and phone under one set of approvals',
+        'Memory with sources, and deletion that really deletes',
       ]
     : [
-        'Space、Host 和 Client。数据放在你自己掌握的电脑上，手机和其他电脑通过端到端加密的 relay 或 Tailscale 连进来。',
-        'iOS 和 Android 用同一个 App，带时间线、个人资料和文档。可以连你的电脑，也可以单独用。',
-        '重做的桌面工作台：时间线、想法、目标、资讯、任务和个人资料，都在对话旁边。',
-        '能动手的地方更多了：编码代理、操作电脑、受监督地操作手机、看摄像头，都走同一套审批。',
-        '记忆可以核对：本地记录带出处，读取资料和交给模型处理分开授权，删除就是真删除。',
+        '数据放在自己的电脑上',
+        'iOS、Android 同一个 App',
+        '重做的桌面工作台',
+        '编码、电脑、手机，同一套审批',
+        '记忆带出处，删了就是真删',
       ];
 
   const downloads: [string, [string, string][]][] = [
@@ -68,38 +66,26 @@ export function HomePage({ en = false }: { en?: boolean }) {
           id="overview"
           aria-labelledby="hero-title"
         >
-          <div className="hero-words">
-            <div className="hero-mark">
-              <NovaMark size={56} animate label="Nova" />
-            </div>
-            <h1 id="hero-title" className="sr-only">
-              {en ? 'Nova Personal Agent' : 'Nova 个人 Agent'}
-            </h1>
-            <Exchange lines={heroLines} en={en} />
-          </div>
-          <ClipPlayer clip={heroClip} en={en} />
-          <div className="hero-foot">
-            <p>
-              {en
-                ? 'Nova is an open-source personal agent for your computer and your phone. Tell it what you need, by voice or by typing.'
-                : 'Nova 是一个开源的个人 Agent，装在电脑和手机上，用说话或打字交代事情。'}
-            </p>
-            <div className="actions">
-              <a className="btn btn-primary" href="#get">
-                {en ? 'Download v1.0.0' : '下载 v1.0.0'}
-              </a>
-              <a className="btn" href={repo} target="_blank" rel="noreferrer">
-                {en ? 'View on GitHub' : '在 GitHub 查看'}
-              </a>
+          <div className="hero-head">
+            <NovaMark size={64} animate label="Nova" />
+            <div>
+              <h1 id="hero-title">Nova Personal Agent</h1>
+              <p>
+                {en
+                  ? 'An open-source personal agent for your computer and phone.'
+                  : '开源的个人 Agent，装在你的电脑和手机上。'}
+              </p>
             </div>
           </div>
-        </section>
-
-        <Scenes en={en} />
-
-        <section className="film wrap" id="film" aria-labelledby="film-title">
-          <h2 id="film-title">{en ? 'The launch film' : '宣传片'}</h2>
-          <figure>
+          <div className="actions">
+            <a className="btn btn-primary" href="#get">
+              {en ? 'Download v1.0.0' : '下载 v1.0.0'}
+            </a>
+            <a className="btn" href={repo} target="_blank" rel="noreferrer">
+              {en ? 'View on GitHub' : '在 GitHub 查看'}
+            </a>
+          </div>
+          <figure className="hero-film" id="film">
             <video
               controls
               playsInline
@@ -113,20 +99,20 @@ export function HomePage({ en = false }: { en?: boolean }) {
             </video>
             <figcaption>
               {en
-                ? 'Two minutes, in Chinese. The people are fictional; the screen recordings are real.'
-                : '时长约两分钟。人物是虚构的，屏幕录制是真实的。'}
+                ? 'Launch film, about two minutes, in Chinese.'
+                : '宣传片，约两分钟。'}
             </figcaption>
           </figure>
         </section>
+
+        <Scenes en={en} />
 
         <section
           className="release wrap"
           id="whats-new"
           aria-labelledby="release-title"
         >
-          <h2 id="release-title">
-            {en ? 'In version 1.0' : '1.0 版本里有什么'}
-          </h2>
+          <h2 id="release-title">{en ? 'New in 1.0' : '1.0 有什么'}</h2>
           <ul>
             {release.map((item) => (
               <li key={item}>{item}</li>
@@ -155,9 +141,14 @@ export function HomePage({ en = false }: { en?: boolean }) {
               height={992}
             />
           </figure>
-          <a className="link" href={`${doc}/architecture/`}>
-            {en ? 'Read the architecture notes' : '阅读架构说明'}
-          </a>
+          <p className="release-links">
+            <a className="link" href={`${repo}/releases/tag/v1.0.0`}>
+              {en ? 'Full release notes' : '完整发布说明'}
+            </a>
+            <a className="link" href={`${doc}/architecture/`}>
+              {en ? 'Architecture' : '架构说明'}
+            </a>
+          </p>
         </section>
 
         <section className="get wrap" id="get" aria-labelledby="get-title">
