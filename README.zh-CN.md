@@ -25,7 +25,7 @@ Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)**
 
-[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [使用案例](#23-使用案例) · [画廊](#24-画廊) · [路线图](#5-路线图)
+[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [Nova 能做什么](#21-nova-能做什么) · [画廊](#22-画廊) · [路线图](#5-路线图)
 
 </div>
 
@@ -33,7 +33,7 @@ Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如
 
 [![看剧时 Nova 主动开口，起草回复但不代发](assets/gallery/stills/pc-proactive-invite.webp)](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)
 
-<sub>真实录屏，使用人设账号。查看[画廊与短片](#24-画廊)，或观看[宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)。</sub>
+<sub>真实录屏，使用人设账号。查看[画廊与短片](#22-画廊)，或观看[宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)。</sub>
 
 ## News
 
@@ -82,100 +82,16 @@ v1.0.0 还包括：
 
 ## 2. 和 Nova 一起做事
 
-### 2.1 你的个人 Agent，理解广泛、非结构化的上下文
+### 2.1 Nova 能做什么
 
-接入你选择的文件夹、邮件、日历和对话。个人记忆与导入的文档知识帮助 Nova 理解你的工作；读取资料和允许模型处理内容，仍是两项独立授权。
+- **操作你的电脑。** 搜索、打开并点赞一个视频，或者写代码、跑测试，审批由你掌握，随时可以叫停。
+- **在手机上办事。** 在虚拟屏幕里，受监督地浏览应用。只浏览，不下单。
+- **边干活边聊天。** 交代完任务接着聊。用语音描述一个网站，或者让它读篇论文、交回一份文档。
+- **越聊越懂你。** 时间线和个人资料随对话慢慢完整，每个回答都有出处，可以改、可以忘。
+- **主动开口。** 有事值得你看，它会告诉你并起草回复，但不会替你发。
+- **跨设备接力。** 在 Mac 上交代，在 iPhone 上看结果，数据在你自己的 Space 里。
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>你的个人工作台</h3>
-      <p>把零散上下文整理成有出处的想法与目标建议。选好下一步，再和 Nova 接着做。</p>
-      <a href="assets/features/workbench-original.png"><img src="assets/features/workbench-original.png" alt="Nova 工作台中的有出处的建议和对话" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>关于你，也由你来改</h3>
-      <p>Nova 根据近期工作和兴趣形成个人概览。个人记忆可以追溯来源、纠正、忘记或彻底删除。</p>
-      <a href="assets/features/profile-original.png"><img src="assets/features/profile-original.png" alt="Nova 关于我页面中的个人概览与近期项目" width="100%"></a>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>把想法变成方向</h3>
-      <p>记下想法，设定目标，准备好后再转成目标。Nova 的建议由你决定是否采纳。</p>
-      <a href="assets/features/ideas-goals-original.png"><img src="assets/features/ideas-goals-original.png" alt="Nova 想法与目标页面中的建议和采纳入口" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>围绕兴趣发现资讯</h3>
-      <p>根据 Profile 为公开资讯排序。收藏感兴趣的内容，也能转成自己的想法、待办或目标。</p>
-      <a href="assets/features/feeds-original.png"><img src="assets/features/feeds-original.png" alt="Nova 按兴趣排序的资讯及收藏、转为个人事项入口" width="100%"></a>
-    </td>
-  </tr>
-</table>
-
-### 2.2 你的语音助手，主动有分寸
-
-前脑负责交流，后脑负责做事。任务进展与相机观察帮助 Nova 判断是否值得提醒，发言时机另行协调。
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>理解意图，问清再做</h3>
-      <p>自然描述目标，Nova 问清缺失信息后再开始任务。后台继续执行，前台随时补充约束或调整方向。</p>
-      <a href="assets/features/conversation-polished.png"><img src="assets/features/conversation-polished.png" alt="Nova 语音悬浮球在执行前澄清需求" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>任务有边界，主动有分寸</h3>
-      <p>Nova 协调任务，按你的标准核对结果。权限由你确认，执行可以接管；值得提醒的进展才在合适时机开口。</p>
-      <a href="assets/features/permission-polished.png"><img src="assets/features/permission-polished.png" alt="Nova 请求任务所需的网络访问权限" width="100%"></a>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>语音管理工作区</h3>
-      <p>用语音创建、切换工作区和会话；新建工作区前，先等你确认。</p>
-      <a href="assets/features/workspace-polished.png"><img src="assets/features/workspace-polished.png" alt="Nova 等待你确认创建工作区" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>接入工具与知识</h3>
-      <p>自由配置 ASR / LLM / TTS 和 MCP，基于自己的资料问答。</p>
-      <a href="assets/features/knowledge-polished.png"><img src="assets/features/knowledge-polished.png" alt="基于 CN-27 演示资料的知识库回答" width="100%"></a>
-    </td>
-  </tr>
-</table>
-
-### 2.3 使用案例
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>用语音 Vibe Coding</h3>
-      <p>说出你想做的东西，让 coding agent 编写和测试，再通过对话不断调整。</p>
-      <a href="assets/features/coding.svg"><img src="assets/features/coding.svg" alt="语音需求交给后台编码 Agent 执行" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>帮你留意画面变化</h3>
-      <p>让 Nova 留意指定情况，发生时再提醒你。相机观察独立运行，不占用编码任务。</p>
-      <a href="assets/features/vision-camera.png"><img src="assets/features/vision-camera.png" alt="相机观察沙发上的猫" width="100%"></a>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>一起整理周报</h3>
-      <p>让 Nova 回顾近期工作，帮你整理周报。直接观看手机端的真实演示。</p>
-      <a href="assets/demos/weekly-report/weekly-report.mp4"><img src="assets/demos/weekly-report/poster.png" alt="手机端回顾近期工作与整理周报的原始演示" width="225"></a>
-      <p><a href="assets/demos/weekly-report/weekly-report.mp4">▶ 播放演示</a></p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>把 Nova 带在身边</h3>
-      <p>创建独立运行的 Space，或通过加密 relay 将手机 Client 绑定桌面 Host。Host 运行 Agent，Client 展示结果并回传操作；每个 Space 的 Host 角色固定。</p>
-      <p>指南：<a href="docs/zh-CN/space-host-client.md">Space / Host / Client</a>。推送到真机需要签名构建。</p>
-      <a href="assets/features/iphone.png"><img src="assets/features/iphone.png" alt="Nova iPhone 客户端与连接设置" width="100%"></a>
-    </td>
-  </tr>
-</table>
-
-### 2.4 画廊
+### 2.2 画廊
 
 均为真实录屏，使用人设账号。短片与宣传片见[官网画廊](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)。
 
@@ -250,7 +166,7 @@ node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
 
-客户端提供麦克风、摄像头、声音、设置和外部 MCP 控件。试试把鼠标悬在桌面 orb 上，会有惊喜）
+客户端提供麦克风、摄像头、声音、设置和外部 MCP 控件。
 
 ### 3.3 支持矩阵
 

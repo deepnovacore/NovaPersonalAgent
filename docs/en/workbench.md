@@ -4,8 +4,6 @@ Workbench is Nova's main window. It opens a wide, persistent Nova conversation o
 
 ## Layout
 
-[![Nova Workbench and suggested next steps](../../assets/features/workbench-original.en.png)](../../assets/features/workbench-original.en.png)
-
 | Workspace tab | Holds |
 |---|---|
 | Nova | Persistent main conversation with proactive reminders and task receipts |
@@ -83,8 +81,6 @@ Opening a conversation from a card supplies its references to ordinary chat. Con
 Articles ranked to your interests, split into "For you" and "Saved". Nova-mined, unconfirmed interests may rank this page (sending those interests and public article excerpts to the ranking provider), but never become personal facts or authorize push notifications. Fresh, source-diverse articles fill weak matches; without scores the page falls back to a timeline. A compact Interests row lets you add or remove words without opening settings. Each article shows why it was recommended. From an article you can read the original, save it, or convert it into a Todo, Idea or Goal — none of that authorizes Nova to act on it, it only records it. You can also tell Nova to show more or less of a given interest.
 
 ## Profile
-
-[![Nova Profile overview and recent projects](../../assets/features/profile-original.en.png)](../../assets/features/profile-original.en.png)
 
 A short free-text description of you, edited directly or filled in gradually as Nova proposes additions from conversation. The page shows what you confirmed plus the current draft; when no current draft is available it asks for an update rather than showing an earlier result.
 

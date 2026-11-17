@@ -30,8 +30,6 @@ At the start of a new text turn, shared authorized retrieval may inject a few re
 
 ## View memories
 
-[![Nova Profile in the main window](../../assets/features/profile-original.en.png)](../../assets/features/profile-original.en.png)
-
 Use the main window’s memory view to inspect, correct or forget ledger entries. With mem0 selected, right-click the orb, open the memory panel, and select personal memory. You can search your original wording, view learned facts and their sources, and browse earlier records.
 
 Search matches original text. Long entries show an excerpt. Inspection currently supports local mem0; the panel does not offer editing or deletion.

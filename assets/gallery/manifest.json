@@ -52,7 +52,7 @@
       "feature": "proactive",
       "device": "mac",
       "src": "stills/pc-proactive-invite.webp",
-      "width": 1600,
+      "width": 1444,
       "height": 1000,
       "title": {
         "zh-CN": "主动开口",
@@ -69,7 +69,7 @@
       "feature": "proactive",
       "device": "mac",
       "src": "stills/pc-draft-unsent.webp",
-      "width": 1600,
+      "width": 1444,
       "height": 1000,
       "title": {
         "zh-CN": "只起草，不替你发",
@@ -86,7 +86,7 @@
       "feature": "computer-use",
       "device": "mac",
       "src": "stills/pc-computer-use.webp",
-      "width": 1600,
+      "width": 1444,
       "height": 1000,
       "title": {
         "zh-CN": "操作电脑",
@@ -103,7 +103,7 @@
       "feature": "learns-you",
       "device": "mac",
       "src": "stills/pc-timeline-cited.webp",
-      "width": 1600,
+      "width": 1444,
       "height": 1000,
       "title": {
         "zh-CN": "回答带着出处",
@@ -120,7 +120,7 @@
       "feature": "chat-while-working",
       "device": "mac",
       "src": "stills/pc-build-receipt.webp",
-      "width": 1600,
+      "width": 1444,
       "height": 1000,
       "title": {
         "zh-CN": "写代码，交回执",
@@ -137,7 +137,7 @@
       "feature": "proactive",
       "device": "mac",
       "src": "stills/pc-morning-brief.webp",
-      "width": 1600,
+      "width": 1444,
       "height": 1000,
       "title": {
         "zh-CN": "电脑晨报",
@@ -154,8 +154,8 @@
       "feature": "chat-while-working",
       "device": "phone",
       "src": "stills/phone-voice-site.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "一句话做网站",
         "en": "A site from one sentence"
@@ -171,8 +171,8 @@
       "feature": "chat-while-working",
       "device": "phone",
       "src": "stills/phone-site-file.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "文件直接交付",
         "en": "Files delivered"
@@ -188,8 +188,8 @@
       "feature": "chat-while-working",
       "device": "phone",
       "src": "stills/phone-site-result.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "真实成品",
         "en": "The real result"
@@ -205,8 +205,8 @@
       "feature": "chat-while-working",
       "device": "phone",
       "src": "stills/phone-site-dark.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "换个风格",
         "en": "Another style"
@@ -222,8 +222,8 @@
       "feature": "mobile-use",
       "device": "phone",
       "src": "stills/phone-mobile-result.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "挑好了，等你拍板",
         "en": "Picked, your call"
@@ -239,8 +239,8 @@
       "feature": "chat-while-working",
       "device": "phone",
       "src": "stills/phone-docx.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "读论文，出文档",
         "en": "Paper to doc"
@@ -256,8 +256,8 @@
       "feature": "chat-while-working",
       "device": "phone",
       "src": "stills/phone-dual-brain.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 449,
+      "height": 948,
       "title": {
         "zh-CN": "手机上的前后脑",
         "en": "Dual brain on phone"
@@ -273,8 +273,8 @@
       "feature": "proactive",
       "device": "phone",
       "src": "stills/iphone-feed.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 460,
+      "height": 948,
       "title": {
         "zh-CN": "值得看的才推",
         "en": "Only what matters"
@@ -290,8 +290,8 @@
       "feature": "proactive",
       "device": "phone",
       "src": "stills/iphone-morning.webp",
-      "width": 1600,
-      "height": 1000,
+      "width": 485,
+      "height": 948,
       "title": {
         "zh-CN": "手机晨报",
         "en": "Morning on iPhone"

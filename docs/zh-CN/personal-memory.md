@@ -32,8 +32,6 @@ Plan 和 Build 的文字会话可以使用当前后端支持的记忆检索工�
 
 ## 查看记忆
 
-[![主窗口中的个人概览](../../assets/features/profile-original.png)](../../assets/features/profile-original.png)
-
 默认账本可在主窗口的记忆视图中查看、纠正和忘记条目。以下面板说明仅适用于旧独立 mem0 配置；该独立模式不启用依赖账本的来源连接器。
 
 右键点击悬浮球，打开「记忆面板」，选择个人记忆。这里可以：

@@ -25,7 +25,7 @@ Nova draws on your context and private memory to understand what matters to you.
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://deepnovacore.github.io/NovaPersonalAgent/#film)**
 
-[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Use cases](#23-use-cases) · [Gallery](#24-gallery) · [Roadmap](#5-roadmap)
+[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [What Nova does](#21-what-nova-does) · [Gallery](#22-gallery) · [Roadmap](#5-roadmap)
 
 </div>
 
@@ -33,7 +33,7 @@ Nova draws on your context and private memory to understand what matters to you.
 
 [![Nova speaks up while you watch, then drafts a reply without sending it](assets/gallery/stills/pc-proactive-invite.webp)](https://deepnovacore.github.io/NovaPersonalAgent/#gallery)
 
-<sub>Real recording, persona account. Browse the [gallery and clips](#24-gallery) or watch [the film](https://deepnovacore.github.io/NovaPersonalAgent/#film).</sub>
+<sub>Real recording, persona account. Browse the [gallery and clips](#22-gallery) or watch [the film](https://deepnovacore.github.io/NovaPersonalAgent/#film).</sub>
 
 ## News
 
@@ -82,100 +82,16 @@ Also in v1.0.0:
 
 ## 2. Work with Nova
 
-### 2.1 Your personal agent, with wide and unstructured context
+### 2.1 What Nova does
 
-Connect the sources you choose: folders, mail, calendars and conversations. Personal memory and imported document knowledge help Nova understand your work; reading sources and model processing remain separate permissions.
+- **Works your computer.** Searches, opens and likes a video, or builds and tests code, with approvals you control. You can stop it at any point.
+- **Works your phone.** Browses apps on a virtual screen under supervision. It browses; it does not order.
+- **Chats while it works.** Hand over a task and keep talking. Describe a website by voice, or ask it to read a paper and return a document.
+- **Learns you over time.** A Timeline and Profile that grow as you talk, with sources on every answer and controls to edit or forget.
+- **Speaks up first.** Tells you when something deserves attention and drafts a reply. It never sends without you.
+- **Moves across devices.** Start on the Mac and see the result on your iPhone through your own Space.
 
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Your personal workbench</h3>
-      <p>Turn scattered context into source-backed suggestions for ideas and goals. Choose what to do next, then continue with Nova.</p>
-      <a href="assets/features/workbench-original.en.png"><img src="assets/features/workbench-original.en.png" alt="Nova workbench with source-backed suggestions and conversation" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>Profile and personal memory</h3>
-      <p>Nova builds an editable picture of your work and interests. Trace personal memories to their sources, correct them or remove them.</p>
-      <a href="assets/features/profile-original.en.png"><img src="assets/features/profile-original.en.png" alt="Nova Profile showing a personal overview and recent projects" width="100%"></a>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Ideas and goals</h3>
-      <p>Keep an idea, choose a direction, and turn it into a goal when you are ready. Suggestions wait for you to adopt them.</p>
-      <a href="assets/features/ideas-goals-original.en.png"><img src="assets/features/ideas-goals-original.en.png" alt="Nova Ideas and Goals with actual suggestions and adoption controls" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>Feeds that follow your interests</h3>
-      <p>Review public news ranked by your Profile. Save a story or turn it into an idea, todo or goal.</p>
-      <a href="assets/features/feeds-original.en.png"><img src="assets/features/feeds-original.en.png" alt="Nova interest-ranked news feed with save and personal-item controls" width="100%"></a>
-    </td>
-  </tr>
-</table>
-
-### 2.2 Your voice assistant with restrained proactivity
-
-The front brain handles conversation; the back brain does the work. Task events and camera observations inform optional updates, while speaking has its own timing.
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Understands what you mean</h3>
-      <p>Describe your goal naturally. Nova asks for missing details before starting a task; keep talking and refining it while the back brain works.</p>
-      <a href="assets/features/conversation-polished.en.png"><img src="assets/features/conversation-polished.en.png" alt="Nova voice orb asking a clarifying question before starting a task" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>You set the boundaries</h3>
-      <p>Nova coordinates tasks and checks results against your criteria. Review permissions, take over when needed, and hear updates when they matter.</p>
-      <a href="assets/features/permission-polished.en.png"><img src="assets/features/permission-polished.en.png" alt="Nova asking for permission to access the network for a task" width="100%"></a>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Voice-run workspaces</h3>
-      <p>Create and switch workspaces and sessions by voice. A new workspace waits for your confirmation.</p>
-      <a href="assets/features/workspace-polished.en.png"><img src="assets/features/workspace-polished.en.png" alt="Nova waits for approval to create a workspace" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>Bring your tools and knowledge</h3>
-      <p>Configure ASR / LLM / TTS and MCP; ask questions across your documents.</p>
-      <a href="assets/features/knowledge-polished.en.png"><img src="assets/features/knowledge-polished.en.png" alt="Knowledge-base answer using the CN-27 demo documents" width="100%"></a>
-    </td>
-  </tr>
-</table>
-
-### 2.3 Use cases
-
-<table>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Voice Vibe Coding</h3>
-      <p>Describe what you want, let a coding agent build and test it, and refine the work through conversation.</p>
-      <a href="assets/features/coding.en.svg"><img src="assets/features/coding.en.svg" alt="Voice requests delegated to a background coding agent" width="100%"></a>
-    </td>
-    <td width="50%" valign="top">
-      <h3>Camera Monitoring</h3>
-      <p>Ask Nova to watch for a condition and tell you when it happens. Observation runs independently of coding tasks.</p>
-      <a href="assets/features/vision-camera.png"><img src="assets/features/vision-camera.png" alt="Camera monitoring a cat on a sofa" width="100%"></a>
-    </td>
-  </tr>
-  <tr>
-    <td width="50%" valign="top">
-      <h3>Weekly Report</h3>
-      <p>Ask Nova to recall recent work and help organize a weekly report. Watch the original phone demo.</p>
-      <a href="assets/demos/weekly-report/weekly-report.mp4"><img src="assets/demos/weekly-report/poster.en.png" alt="Original phone demo of a conversation about recent work and a weekly report" width="225"></a>
-      <p><a href="assets/demos/weekly-report/weekly-report.mp4">▶ Watch the demo</a></p>
-    </td>
-    <td width="50%" valign="top">
-      <h3>Take Nova with you</h3>
-      <p>Create an independent Space, or pair a mobile Client to a desktop Host through an encrypted relay. The Host runs your agent; the Client shows results and sends actions. Host roles stay fixed for each Space.</p>
-      <p>Guide: <a href="docs/en/space-host-client.md">Space / Host / Client</a>. Push delivery to a real device requires a signed build.</p>
-      <a href="assets/features/iphone.en.png"><img src="assets/features/iphone.en.png" alt="Nova iPhone client and connection settings" width="100%"></a>
-    </td>
-  </tr>
-</table>
-
-### 2.4 Gallery
+### 2.2 Gallery
 
 Real recordings on persona accounts. Clips and the film are on the [website gallery](https://deepnovacore.github.io/NovaPersonalAgent/#gallery).
 
@@ -247,7 +163,7 @@ node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
 
-The client includes microphone, camera, sound, settings and external MCP controls. Try hovering over the desktop orb for a surprise :)
+The client includes microphone, camera, sound, settings and external MCP controls. 
 
 ### 3.3 Support matrix
 

@@ -9,8 +9,6 @@ The mobile companion app **NovaCore** (`clients/flutter`) supports both **iOS an
 
 ## Pair a Client Space to your desktop Host
 
-[![Nova iPhone client and connection settings](../../assets/features/iphone.en.png)](../../assets/features/iphone.en.png)
-
 1. On the desktop, open **Settings → Space & phones** and create a Space (either with **Tailscale automatic setup** or an existing self-hosted [relay](../../relay/README.md)).
 2. Generate a one-time pairing QR code on the desktop.
 3. In NovaCore on iOS or Android, choose **Client** and scan the QR code.

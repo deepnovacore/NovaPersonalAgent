@@ -9,8 +9,6 @@
 
 ## 将手机配对到桌面 Host
 
-[![Nova iPhone 客户端与连接设置](../../assets/features/iphone.png)](../../assets/features/iphone.png)
-
 1. 在桌面端打开 **设置 → Space 与手机** 并创建空间（支持 **Tailscale 自动配置** 或填入自托管 [Relay](../../relay/README.md) 地址）。
 2. 在桌面端生成一次性配对二维码。
 3. 在 iOS 或 Android 的 NovaCore 中选择 **Client** 并扫描二维码。
