@@ -7,7 +7,9 @@ import { Moon, Sun } from 'lucide-react';
 // the server snapshot matches what the markup renders, so hydration is clean.
 function subscribe(onChange: () => void) {
   const observer = new MutationObserver(onChange);
-  observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+  observer.observe(document.documentElement, {
+    attributeFilter: ['data-theme'],
+  });
   return () => observer.disconnect();
 }
 const isLight = () => document.documentElement.dataset.theme === 'light';
@@ -34,8 +36,16 @@ export function ThemeToggle({ en = false }: { en?: boolean }) {
     >
       {/* Both icons ship; CSS picks one off data-theme, so first paint is
           already correct and the markup never differs from the server. */}
-      <Sun className="theme-icon theme-icon-light" size={15} aria-hidden="true" />
-      <Moon className="theme-icon theme-icon-dark" size={15} aria-hidden="true" />
+      <Sun
+        className="theme-icon theme-icon-light"
+        size={15}
+        aria-hidden="true"
+      />
+      <Moon
+        className="theme-icon theme-icon-dark"
+        size={15}
+        aria-hidden="true"
+      />
     </button>
   );
 }

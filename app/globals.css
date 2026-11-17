@@ -50,7 +50,7 @@
 }
 :root {
   --font-sans:
-    var(--font-latin), 'Inter', 'Helvetica Neue', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+    'Inter', 'Helvetica Neue', 'PingFang SC', 'Noto Sans SC', 'Microsoft YaHei', sans-serif;
 }
 /* Light theme. Only `<html>` ever carries data-theme, so a `.theme-dark`
    subtree keeps the dark values above regardless of what this sets. */

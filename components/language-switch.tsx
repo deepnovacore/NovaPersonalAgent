@@ -9,7 +9,9 @@ export function LanguageSwitch({
   docs?: boolean;
   alternate?: string;
 }) {
-  const target = sitePath(alternate ?? (docs ? (en ? '/docs' : '/en/docs') : (en ? '/zh' : '/')));
+  const target = sitePath(
+    alternate ?? (docs ? (en ? '/docs' : '/en/docs') : en ? '/zh' : '/'),
+  );
   function follow(e: React.MouseEvent<HTMLAnchorElement>) {
     if (e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
     e.preventDefault();

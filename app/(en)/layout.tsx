@@ -1,9 +1,7 @@
 import { sitePath } from '../../lib/site-path';
 import type { Metadata } from 'next';
 import { ThemeScript } from '../../components/theme-script';
-import { Schibsted_Grotesk } from 'next/font/google';
 import '../globals.css';
-const latin = Schibsted_Grotesk({ subsets: ['latin'], variable: '--font-latin', display: 'swap' });
 export const metadata: Metadata = {
   title: 'Nova Personal Agent — Your Personal Agent and Voice Assistant',
   description: 'Your personal agent and voice assistant: todos, ideas and goals on one workbench, memory you can trace, and tasks checked against evidence.',
@@ -12,7 +10,7 @@ export const metadata: Metadata = {
 };
 export default function Layout({ children }: { children: React.ReactNode }) {
   return (
-    <html suppressHydrationWarning className={latin.variable} lang="en">
+    <html suppressHydrationWarning lang="en">
       <body>
         <ThemeScript />
         {children}
