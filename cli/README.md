@@ -6,7 +6,7 @@
 
 ![Nova personal agent architecture](https://raw.githubusercontent.com/deepnovacore/NovaPersonalAgent/main/assets/architecture/nova-personal-agent.en.png)
 
-## New in 0.4.0
+## New in 1.0.0
 
 - **Persistent conversation and Timeline.** Stay with Nova beside a tabbed workspace and return to context, evidence and task results.
 - **Scheduled Agent Tasks.** Run work once, daily or weekly; manage schedules on desktop or mobile and receive reports in the main conversation.
@@ -38,7 +38,7 @@ npm uninstall --global nova-audio-agent
 npm install --global nova-personal-agent@latest
 ```
 
-`novaaudio` remains a command alias. The old `nova-audio-agent` npm entry also provides the same 0.4.0 launcher for existing installations; install only one package name. Pin this release with `nova-personal-agent@0.4.0`. Back up Nova data before downgrading; an older executable does not roll back data changes.
+`novaaudio` remains a command alias. The old `nova-audio-agent` npm entry also provides the same 1.0.0 launcher for existing installations; install only one package name. Pin this release with `nova-personal-agent@1.0.0`. Back up Nova data before downgrading; an older executable does not roll back data changes.
 
 ## Commands
 
@@ -53,4 +53,4 @@ npm install --global nova-personal-agent@latest
 
 Downloads remain under `~/.nova-audio-agent/cli/releases/`; the product rename does not move user data.
 
-[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [GPL-3.0-or-later license](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)
+[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [GPL-3.0-or-later license](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)
