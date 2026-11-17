@@ -8,11 +8,11 @@
 
 ## New in 1.0.0
 
-- **Persistent conversation and Timeline.** Stay with Nova beside a tabbed workspace and return to context, evidence and task results.
-- **Scheduled Agent Tasks.** Run work once, daily or weekly; manage schedules on desktop or mobile and receive reports in the main conversation.
-- **Incremental understanding.** Authorized sources sync incrementally. Resumable processing builds an editable, source-backed Profile over time.
-- **Your choice of coding agent.** Use Codex, OpenCode, CodeBuddy, Pi or DeepSeek Harness; existing sessions keep their backend.
-- **Guarded execution.** Browser, computer and phone executors share approval, cancellation and evidence-based result checks. GUI/device support remains experimental.
+- **Space / Host / Client.** Your Space lives on a Host you control; desktop, iOS and Android join it over an end-to-end encrypted relay or Tailscale.
+- **A unified mobile companion.** iOS and Android with Timeline, Profile and documents, paired to a Host or running standalone.
+- **A rebuilt Workbench.** Timeline, Ideas, Goals, Feeds, Tasks and Profile beside Chat, Plan, Build and Delegate conversations.
+- **More executors.** Coding agents, computer use, supervised mobile use and loop-camera monitoring share approvals, cancellation and evidence checks.
+- **Auditable memory.** A local ledger with optional mem0 or voicemem recall and separate consent for reading and model processing.
 
 Model-written profiles can be wrong; review their references. The default message scope is your own messages and direct mentions. ACP agents have different permission controls from Codex and do not support live steering. Read the [coding support matrix](https://deepnovacore.github.io/NovaPersonalAgent/en/docs/executors/coding/).
 
