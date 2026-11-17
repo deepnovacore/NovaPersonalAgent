@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 novapersonal
 ```
 
-To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@0.4.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
+To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
 
 When switching from `nova-audio-agent`, first run `npm uninstall --global nova-audio-agent` to avoid command-link collisions, then install the new package. This preserves your local data and settings.
 
@@ -54,7 +54,7 @@ npm run start:client
 
 When running from source, the project `.env` takes precedence over matching shell variables. Restart the desktop after editing it.
 
-Desktop source launch commands currently provide no hot reload or file watching. `start:client` and `start:workbench` build before launching. With an existing build, `npm run start:built --workspace @nova-personal-agent/desktop` skips building for a faster launch. Changes to main, preload or runtime require quitting and restarting; runtime source changes also require rebuilding. Keep development builds and caches in an isolated directory on the selected mounted external disk.
+Desktop source launch commands currently provide no hot reload or file watching. `start:client` and `start:workbench` build before launching. With an existing build, `npm run start:built --workspace @nova-personal-agent/desktop` skips building for a faster launch. Changes to main, preload or runtime require quitting and restarting; runtime source changes also require rebuilding. Keep isolated build outputs and compiler caches on internal storage, namespaced per worktree and run (for example via `npm run build:space -- --output-root <dir> --run-id <id>`). Run `npm run check` and `npm test` to verify runtime, desktop, CLI, and env contracts.
 
 ## 3. Give Nova a task
 

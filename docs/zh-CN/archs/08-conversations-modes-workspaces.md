@@ -22,7 +22,19 @@
 
 ## 四种模式
 
-运行时契约见[模式设计说明](../../design-notes/2026-10-26-modes-runtime-contract.md)。四条路线是：
+```mermaid
+%%{init: {'theme': 'base', 'themeVariables': {'primaryColor': '#eff6ff', 'primaryBorderColor': '#3b82f6', 'primaryTextColor': '#0f172a', 'lineColor': '#64748b', 'fontFamily': '-apple-system, BlinkMacSystemFont, Segoe UI, PingFang SC, sans-serif'}}}%%
+stateDiagram-v2
+  [*] --> Chat: 默认普通会话
+  Chat --> Plan: 用户切换至 Plan
+  Plan --> Build: build.start（已确认计划）
+  Chat --> Build: build.begin（直接进入）
+  Plan --> Delegate: plans.delegate（委派执行器）
+  Build --> Chat: finish_build / 清空会话
+  Delegate --> TaskLoop: 移交后台执行器与任务循环
+```
+
+四条路线是：
 
 | 模式 | 做什么 | 入口与结果 |
 |---|---|---|

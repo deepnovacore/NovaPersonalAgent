@@ -4,6 +4,13 @@ Nova connects conversation, authorized context and background execution. The Wor
 
 [![Nova personal agent architecture: interaction, context, coordination, execution and expression](../../assets/architecture/nova-personal-agent.en.png)](../../assets/architecture/nova-personal-agent.en.png)
 
+## System & Monorepo Overview
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/system-overview.en.dark.svg">
+  <img src="../../assets/architecture/system-overview.en.light.svg" alt="Nova Personal Agent System & Monorepo Architecture" width="100%">
+</picture>
+
 ## Workbench and context
 
 Timeline, Ideas, Goals, Feeds, Tasks and Profile share one window with voice and text conversation. You can switch to the orb or hide the window in background mode: the desktop microphone turns off while tasks keep running.
@@ -30,7 +37,7 @@ Creating or switching projects requires confirmation. Permission requests belong
 
 ## Projects and sessions
 
-A **project** is a working directory. A **session** is a Codex conversation within that project. Project files and session records let you resume work later.
+A **project** is a working directory. A **session** is a coding-agent conversation (Codex or ACP agents such as OpenCode, CodeBuddy, Pi, and DeepSeek Harness) within that project. Project files and session records let you resume work later.
 
 Requests to change a running task are kept separate from new tasks. Cancelling work does not delete its project or conversation history. Disconnecting a phone does not cancel computer-side work.
 
@@ -62,7 +69,7 @@ Camera monitoring and direct tool calls have their own lifecycles; they do not a
 
 ## Desktop and phone
 
-The computer runs models, memory and task execution. The iPhone client handles input, playback, messages and approval controls, connecting to the computer's service.
+The computer runs models, memory and task execution as the Space Host. The mobile client (iOS & Android) handles input, playback, messages and approval controls, connecting to the Host through the encrypted relay (or running as a standalone Space).
 
 Settings separate **Save** from **Restart**. Service changes take effect after restarting the backend; appearance and wake settings apply after saving. See the [setup guide](getting-started.md) and [phone connection guide](iphone.md).
 

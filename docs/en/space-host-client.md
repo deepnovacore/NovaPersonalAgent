@@ -2,6 +2,13 @@
 
 A Space has exactly one fixed Host. The Host keeps authoritative data, calls models and runs background tasks; the phone Client keeps a display cache and pending intents. A standalone phone Space uses the on-device runtime and cannot become a Client in place. Creating or switching a Space never migrates old data. There is no cloud recovery or automatic takeover if the Host is lost.
 
+## Pairing & E2EE communication flow
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/space-e2ee-flow.en.dark.svg">
+  <img src="../../assets/architecture/space-e2ee-flow.en.light.svg" alt="Space / Host / Client Pairing & E2EE Flow" width="100%">
+</picture>
+
 ## Build and local verification
 
 Node.js 22.13 or newer. Install the repository dependencies, then pick an existing output root that this task owns exclusively:
@@ -89,4 +96,4 @@ If a temporary network failure prevents the Host from verifying an existing logi
 
 ## Acceptance boundary
 
-Automated tests can prove ciphertext protocol interop, idempotent retry, conflicts and id remapping, real-network catch-up, pairing and revocation, and handling up to the push vendor boundary. iOS NSE and system permissions, Android Doze/force-stop, Xiaomi lock screen and overnight arrival need real devices with signing and vendor accounts. Without that evidence do not claim M0/M5/M6 device acceptance. The matrix is in the [design milestones](../design-notes/2026-10-23-space-host-client-milestones.md).
+Automated tests can prove ciphertext protocol interop, idempotent retry, conflicts and id remapping, real-network catch-up, pairing and revocation, and handling up to the push vendor boundary. iOS NSE and system permissions, Android Doze/force-stop, Xiaomi lock screen and overnight arrival need real devices with signing and vendor accounts. Without that evidence do not claim real-device push acceptance.

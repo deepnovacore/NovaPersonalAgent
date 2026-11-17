@@ -1,6 +1,6 @@
 # Public and internal development
 
-- `v0.2.0dev` and release branches are public. Company pilots belong only on `internal`; never merge or cherry-pick pilot integrations into a public branch.
+- `v1.0.0dev` and release branches are public. Company pilots belong only on `internal`; never merge or cherry-pick pilot integrations into a public branch.
 - Never push `internal` or private recovery refs/bundles to the public remote. Public fixes may flow into `internal`, not the reverse.
 - Public clients may expose a generic, deployment-configured Feishu login module. Do not embed organization domains, employee data, tenant identifiers, internal endpoints, deployment files, work-record/weekly-report pages, or pilot service integrations.
 - Before removing or rewriting history, preserve complete private recovery data and verify it. Audit both the final tree and all history reachable from the public refs before publishing.
@@ -10,6 +10,6 @@
 
 # Build isolation
 
-- Place build outputs and compiler caches on internal storage. The external disk is no longer used; do not write to it or depend on it being mounted.
+- Place build outputs and compiler caches on local internal storage, namespaced per worktree.
 - Namespace output directories by canonical worktree path and chat ID. Concurrent chats in the same checkout must not share mutable build outputs.
 - Clean only the current chat's output directory. Avoid build commands that clean shared `runtime/dist` or desktop build directories while other chats are using them.

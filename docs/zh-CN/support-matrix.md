@@ -4,6 +4,11 @@
 
 ## 语音管线
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/voice-pipeline.zh-CN.dark.svg">
+  <img src="../../assets/architecture/voice-pipeline.zh-CN.light.svg" alt="双模式语音管线（集成 vs 级联）" width="100%">
+</picture>
+
 | 能力 | 集成管线 Integrated | 级联管线 Cascaded |
 |---|---|---|
 | 处理方式 | 一个实时模型直接处理语音 | 语音识别 → 语言模型 → 语音合成 |

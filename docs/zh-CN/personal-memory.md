@@ -1,6 +1,6 @@
 # 个人记忆
 
-主动发现、动态、时间线、简报和画像依赖 Nova ledger 权威底座；底座上的召回引擎可选 ledger、mem0 或 VoiceMem。旧独立 mem0 与远程资源不因此获得账本产品能力。本次配置、使用与验收边界见[记忆后端交付与使用](memory-backends-delivery.md)。
+主动发现、动态、时间线、简报和画像依赖 Nova ledger 权威底座；底座上的召回引擎可选 ledger、mem0 或 VoiceMem。旧独立 mem0 与远程资源不因此获得账本产品能力。配置与回退说明见[配置指南](configuration.md)。
 
 启用非账本产品记忆资源（如旧独立 mem0 或 remote）时创建的任务结果动态，会持久保存 `memory_origin: 'non_product'` 标记。它们仍可在本地查看，但不会进入发送给模型的主动发现、简报、时间线、建议选择或语音播报；重启或切换到账本后也不例外。完全未配置记忆资源时，新任务结果不带此标记，仍可用；不带标记的旧任务结果也不受当前记忆后端限制。依赖记忆的动态必须通过产品底座；未启用产品底座时，仅引用证据的动态须由非记忆来源独立解析证据。App 记录引用（如待办、目标和任务）不要求记忆后端；所有发送给模型的用途都会重新校验其当前版本与目标访问权限。关闭记忆不会让无法解析的记忆证据变得可用。
 
@@ -84,5 +84,4 @@ mem0 列表每页扫描 SDK 存储一次（O(n) 读取、O(n log n) 排序），
 也可选择 `MEMORY_RECALL_ENGINE=mem0|voicemem`，并以 `MEMORY_EXTRACTORS=ledger,voicemem` 显式增加短期风格抽取；它不写成账本事实，默认不开启。`MEMORY_PROVIDER` 已弃用：旧 voicemem 保留账本迁移，
 旧 mem0 保留独立模式。新旧变量不能共用，新变量不能覆盖远程连接的引擎。
 显式选择的召回引擎不会被静默替换，也不会默认启用。设置界面没有引擎选择器。
-支持的选择方式见[配置指南](configuration.md)。
-详见[分阶段组合契约](../design-notes/2026-11-03-memory-backend-composition.md)。
+支持的选择方式见[配置指南](configuration.md)与[记忆架构](archs/02-memory.md)。

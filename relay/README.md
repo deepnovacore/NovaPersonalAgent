@@ -1,6 +1,6 @@
 # Self-hosted Space relay
 
-This package provides an HTTP/WebSocket service, outbound Host/Client SDK, SQLite opaque mailbox, signed identity and pairing controls, and endpoint-only JOSE helpers. It never runs a model, decrypts business content or owns Life data. Node >=22.13 is required. The exact signed wire and endpoint key-delivery requirements are in [Space wire v1](../docs/design-notes/2026-10-23-space-host-client-wire.md).
+This package provides an HTTP/WebSocket service, outbound Host/Client SDK, SQLite opaque mailbox, signed identity and pairing controls, and endpoint-only JOSE helpers. It never runs a model, decrypts business content or owns Life data. Node >=22.13 is required. The exact signed wire and endpoint key-delivery requirements are in [Space Host and Client guide](../docs/en/space-host-client.md) and [security model](../docs/en/security.md).
 
 Create a deployment JSON file outside the repository:
 
