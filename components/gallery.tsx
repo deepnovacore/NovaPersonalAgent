@@ -1,45 +1,90 @@
 'use client';
-/* oxlint-disable jsx-a11y/media-has-caption -- Silent product recordings; each carries a visible caption. */
 import Image from 'next/image';
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowLeft, ArrowRight, ArrowUpRight, X } from 'lucide-react';
-import {
-  galleryFeatures,
-  galleryItems,
-  mediaUrl,
-  type GalleryItem,
-} from '../lib/gallery';
+import { ArrowLeft, ArrowRight, X } from 'lucide-react';
+import { galleryFeatures, galleryItems, mediaUrl, type GalleryItem } from '../lib/gallery';
 import { sitePath } from '../lib/site-path';
+import { DeviceFrame } from './device-frame';
 
-type Tab = 'still' | 'clip' | 'film';
+const stills = galleryItems.filter((i) => i.kind === 'still');
+const macStills = stills.filter((i) => i.device === 'mac');
+const phoneStills = stills.filter((i) => i.device !== 'mac');
+// The lightbox walks the wall in on-screen order.
+const wall = [...macStills, ...phoneStills];
+
+function itemsFor(feature: string) {
+  const own = galleryItems.filter((i) => i.feature === feature && i.kind !== 'film');
+  return [...own.filter((i) => i.kind === 'clip'), ...own.filter((i) => i.kind === 'still')];
+}
+
+function Stage({ item, lang }: { item: GalleryItem; lang: 'en' | 'zh-CN' }) {
+  const ref = useRef<HTMLVideoElement>(null);
+  const reduce = useRef(false);
+  useEffect(() => {
+    reduce.current = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (item.kind === 'clip' && !reduce.current) ref.current?.play().catch(() => {});
+  }, [item]);
+  if (item.kind === 'still') {
+    return (
+      <Image
+        className={`stage-still stage-still-${item.device === 'mac' ? 'mac' : 'phone'}`}
+        src={sitePath(mediaUrl(item))}
+        alt={item.caption[lang]}
+        width={item.width}
+        height={item.height}
+        unoptimized
+      />
+    );
+  }
+  const kind = item.device === 'mac' ? 'mac' : 'phone';
+  return (
+    <DeviceFrame kind={kind} width={item.width} height={item.height}>
+      <video
+        key={item.id}
+        ref={ref}
+        muted
+        loop
+        playsInline
+        controls
+        preload="metadata"
+        poster={sitePath(mediaUrl(item, 'poster'))}
+        aria-label={item.title[lang]}
+      >
+        <source src={sitePath(mediaUrl(item))} type="video/mp4" />
+      </video>
+    </DeviceFrame>
+  );
+}
 
 export function Gallery({ en = false }: { en?: boolean }) {
   const lang = en ? 'en' : 'zh-CN';
   const uid = useId();
-  const [tab, setTab] = useState<Tab>('still');
-  const [feature, setFeature] = useState('all');
+  const [feature, setFeature] = useState(galleryFeatures[0].id);
+  const [index, setIndex] = useState(0);
   const [open, setOpen] = useState<number | null>(null);
   const dialogRef = useRef<HTMLDialogElement>(null);
   const returnFocus = useRef<HTMLElement | null>(null);
 
-  const tabs: [Tab, string][] = [
-    ['still', en ? 'Stills' : '静帧'],
-    ['clip', en ? 'Clips' : '短片'],
-    ['film', en ? 'Film' : '完整片'],
-  ];
-  const features = galleryFeatures.filter((f) =>
-    galleryItems.some((i) => i.kind === tab && i.feature === f.id),
-  );
-  const items = galleryItems.filter(
-    (i) =>
-      i.kind === tab &&
-      (tab === 'film' || feature === 'all' || i.feature === feature),
-  );
+  const list = itemsFor(feature);
+  const current = list[index] ?? list[0];
+  const featureTitle = galleryFeatures.find((f) => f.id === feature)?.title[lang];
 
-  const close = useCallback(() => dialogRef.current?.close(), []);
-  const show = (index: number, el: HTMLElement) => {
+  const pick = (id: string) => {
+    setFeature(id);
+    setIndex(0);
+  };
+  const onRailKey = (e: React.KeyboardEvent, i: number) => {
+    const move = e.key === 'ArrowDown' || e.key === 'ArrowRight' ? 1 : e.key === 'ArrowUp' || e.key === 'ArrowLeft' ? -1 : 0;
+    if (!move) return;
+    e.preventDefault();
+    const next = galleryFeatures[(i + move + galleryFeatures.length) % galleryFeatures.length];
+    pick(next.id);
+    document.getElementById(`${uid}-rail-${next.id}`)?.focus();
+  };
+
+  const show = (i: number, el: HTMLElement) => {
     returnFocus.current = el;
-    setOpen(index);
+    setOpen(i);
   };
   useEffect(() => {
     const d = dialogRef.current;
@@ -52,13 +97,7 @@ export function Gallery({ en = false }: { en?: boolean }) {
     d.addEventListener('click', onClick);
     return () => d.removeEventListener('click', onClick);
   }, []);
-  const step = useCallback(
-    (dir: number) =>
-      setOpen((o) =>
-        o === null ? o : (o + dir + items.length) % items.length,
-      ),
-    [items.length],
-  );
+  const step = useCallback((dir: number) => setOpen((o) => (o === null ? o : (o + dir + wall.length) % wall.length)), []);
   useEffect(() => {
     if (open === null) return;
     const onKey = (e: KeyboardEvent) => {
@@ -68,180 +107,107 @@ export function Gallery({ en = false }: { en?: boolean }) {
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [open, step]);
-  const current: GalleryItem | undefined =
-    open === null ? undefined : items[open];
+  const shown = open === null ? undefined : wall[open];
 
-  const onTabKey = (e: React.KeyboardEvent, index: number) => {
-    const next =
-      e.key === 'ArrowRight'
-        ? index + 1
-        : e.key === 'ArrowLeft'
-          ? index - 1
-          : null;
-    if (next === null) return;
-    e.preventDefault();
-    const target = tabs[(next + tabs.length) % tabs.length][0];
-    setTab(target);
-    setFeature('all');
-    document.getElementById(`${uid}-tab-${target}`)?.focus();
-  };
+  const wallButton = (item: GalleryItem) => (
+    <button
+      key={item.id}
+      className={`wall-item wall-${item.device === 'mac' ? 'mac' : 'phone'}`}
+      onClick={(e) => show(wall.indexOf(item), e.currentTarget)}
+      aria-label={`${item.title[lang]}, ${en ? 'enlarge' : '放大'}`}
+    >
+      <Image src={sitePath(mediaUrl(item))} alt={item.caption[lang]} width={item.width} height={item.height} loading="lazy" unoptimized />
+      <span>{item.title[lang]}</span>
+    </button>
+  );
 
   return (
-    <section
-      className="gallery wrap"
-      id="gallery"
-      aria-labelledby={`${uid}-title`}
-    >
-      <div className="main-features-heading">
-        <p className="section-label">{en ? 'Gallery' : '画廊'}</p>
-        <h2 id={`${uid}-title`}>
-          {en ? 'See it work, on real devices.' : '在真实设备上，看它做事。'}
-        </h2>
-        <p className="lead">
-          {en
-            ? 'Every still and clip is a real recording of persona accounts. Nothing is spliced into a fake success.'
-            : '所有静帧与短片均为真实录屏，使用虚构人设账号，不拼接假成功。'}
-        </p>
-      </div>
+    <section className="gallery theme-dark" id="gallery" aria-labelledby={`${uid}-title`}>
+      <div className="wrap">
+        <header className="gallery-head">
+          <h2 id={`${uid}-title`}>{en ? 'See it work' : '看它干活'}</h2>
+          <p>{en ? 'Real recordings on test accounts. Nothing is edited into a success.' : '都是真实录屏，用的是测试账号，没有剪出来的“成功”。'}</p>
+        </header>
 
-      <div
-        className="gallery-tabs"
-        role="tablist"
-        aria-label={en ? 'Media type' : '媒体类型'}
-      >
-        {tabs.map(([id, label], i) => (
-          <button
-            key={id}
-            role="tab"
-            id={`${uid}-tab-${id}`}
-            aria-selected={tab === id}
-            aria-controls={`${uid}-panel`}
-            tabIndex={tab === id ? 0 : -1}
-            onKeyDown={(e) => onTabKey(e, i)}
-            onClick={() => {
-              setTab(id);
-              setFeature('all');
-            }}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {tab !== 'film' && (
-        <fieldset className="gallery-filters">
-          <legend className="sr-only">
-            {en ? 'Filter by capability' : '按能力筛选'}
-          </legend>
-          {[
-            { id: 'all', title: { en: 'All', 'zh-CN': '全部' } },
-            ...features,
-          ].map((f) => (
-            <button
-              key={f.id}
-              aria-pressed={feature === f.id}
-              onClick={() => setFeature(f.id)}
-            >
-              {f.title[lang]}
-            </button>
-          ))}
-        </fieldset>
-      )}
-
-      <div
-        className={`gallery-grid gallery-${tab}`}
-        role="tabpanel"
-        id={`${uid}-panel`}
-        aria-labelledby={`${uid}-tab-${tab}`}
-      >
-        {items.map((item, index) => (
-          <figure className="gallery-card" key={item.id}>
-            {item.kind === 'still' ? (
-              <button
-                className="gallery-media"
-                onClick={(e) => show(index, e.currentTarget)}
-                aria-label={`${item.title[lang]} — ${en ? 'enlarge' : '放大'}`}
-              >
-                <Image
-                  src={sitePath(mediaUrl(item))}
-                  alt={item.caption[lang]}
-                  loading="lazy"
-                  width={item.width}
-                  height={item.height}
-                />
-              </button>
-            ) : (
-              <div className={`gallery-media gallery-video-${item.kind}`}>
-                <video
-                  controls
-                  playsInline
-                  loop={item.kind === 'clip'}
-                  preload="none"
-                  poster={sitePath(mediaUrl(item, 'poster'))}
-                  aria-label={item.title[lang]}
+        <div className="stage">
+          <div className="stage-side">
+            <div className="rail" role="tablist" aria-orientation="vertical" aria-label={en ? 'What Nova can do' : 'Nova 能做什么'}>
+              {galleryFeatures.map((f, i) => (
+                <button
+                  key={f.id}
+                  role="tab"
+                  id={`${uid}-rail-${f.id}`}
+                  aria-selected={feature === f.id}
+                  aria-controls={`${uid}-stage`}
+                  tabIndex={feature === f.id ? 0 : -1}
+                  onClick={() => pick(f.id)}
+                  onKeyDown={(e) => onRailKey(e, i)}
                 >
-                  <source src={sitePath(mediaUrl(item))} type="video/mp4" />
-                </video>
+                  {f.title[lang]}
+                </button>
+              ))}
+            </div>
+            {current && (
+              <div className="stage-caption" aria-live="polite">
+                <strong>{current.title[lang]}</strong>
+                <span>{current.caption[lang]}</span>
               </div>
             )}
-            <figcaption>
-              <strong>{item.title[lang]}</strong>
-              <span>{item.caption[lang]}</span>
-              {item.kind === 'film' && (
-                <em>
-                  {item.externalUrl ? (
-                    <a href={item.externalUrl} target="_blank" rel="noreferrer">
-                      {en ? 'Watch the full film' : '观看完整片'}{' '}
-                      <ArrowUpRight size={13} aria-hidden="true" />
-                    </a>
-                  ) : en ? (
-                    '720p preview. Full-length link coming soon.'
-                  ) : (
-                    '720p 预览版，完整版链接即将补充。'
-                  )}
-                </em>
-              )}
-            </figcaption>
-          </figure>
-        ))}
+          </div>
+
+          <div className="stage-main" role="tabpanel" id={`${uid}-stage`} aria-label={featureTitle}>
+            <div className="stage-view">{current && <Stage item={current} lang={lang} />}</div>
+            {list.length > 1 && (
+              <ul className="strip" aria-label={en ? 'More from this capability' : '同类内容'}>
+                {list.map((item, i) => (
+                  <li key={item.id}>
+                    <button
+                      aria-current={i === index}
+                      aria-label={`${item.title[lang]}${item.kind === 'clip' ? (en ? ', clip' : '，短片') : ''}`}
+                      onClick={() => setIndex(i)}
+                    >
+                      <Image
+                        src={sitePath(mediaUrl(item, item.kind === 'clip' ? 'poster' : 'src'))}
+                        alt=""
+                        width={item.kind === 'clip' ? 320 : item.width}
+                        height={item.kind === 'clip' ? Math.round((320 * item.height) / item.width) : item.height}
+                                                unoptimized
+                      />
+                      {item.kind === 'clip' && <i aria-hidden="true">▶</i>}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        </div>
+
+        <div className="wall">
+          <h3>{en ? 'Screenshots' : '截图'}</h3>
+          <div className="wall-mac">{macStills.map(wallButton)}</div>
+          <div className="wall-phones">{phoneStills.map(wallButton)}</div>
+        </div>
       </div>
 
       <dialog
         ref={dialogRef}
         className="lightbox"
-        aria-label={current?.title[lang] ?? (en ? 'Image viewer' : '图片查看')}
+        aria-label={shown?.title[lang] ?? (en ? 'Image viewer' : '图片查看')}
         onClose={() => {
           setOpen(null);
           returnFocus.current?.focus();
         }}
       >
-        {current && (
+        {shown && (
           <>
-            <Image
-              src={sitePath(mediaUrl(current))}
-              alt={current.caption[lang]}
-              width={current.width}
-              height={current.height}
-            />
+            <Image src={sitePath(mediaUrl(shown))} alt={shown.caption[lang]} width={shown.width} height={shown.height} unoptimized />
             <p>
-              <strong>{current.title[lang]}</strong> {current.caption[lang]}
+              <strong>{shown.title[lang]}</strong> {shown.caption[lang]}
             </p>
             <div className="lightbox-controls">
-              <button
-                onClick={() => step(-1)}
-                aria-label={en ? 'Previous' : '上一张'}
-              >
-                <ArrowLeft size={18} />
-              </button>
-              <button
-                onClick={() => step(1)}
-                aria-label={en ? 'Next' : '下一张'}
-              >
-                <ArrowRight size={18} />
-              </button>
-              <button onClick={close} aria-label={en ? 'Close' : '关闭'}>
-                <X size={18} />
-              </button>
+              <button onClick={() => step(-1)} aria-label={en ? 'Previous' : '上一张'}><ArrowLeft size={18} /></button>
+              <button onClick={() => step(1)} aria-label={en ? 'Next' : '下一张'}><ArrowRight size={18} /></button>
+              <button onClick={() => dialogRef.current?.close()} aria-label={en ? 'Close' : '关闭'}><X size={18} /></button>
             </div>
           </>
         )}

@@ -83,19 +83,7 @@ export function generateDocs() {
   const { userSlugs } = JSON.parse(fs.readFileSync(path.join(site, 'lib/doc-slugs.json'), 'utf8'));
   const index = pages.map(p => ({ title: p.title, url: p.url, lang: p.lang, section: userSlugs.includes(p.slug) ? 'users' : 'developers', headings: p.toc.map(h => h.title).join(' '), text: plain(p.html) }));
   fs.writeFileSync(path.join(site, 'generated/search.json'), JSON.stringify(index));
-  // Copy the media actually referenced by the bilingual homepage cards.
-  const featureSource = fs.readFileSync(path.join(site, 'lib/home-features.ts'), 'utf8');
-  const media = [...featureSource.matchAll(/"(?:image|video)":\s*"\/doc-assets\/([^"\n]+)"/g)];
-  if (!media.length) throw new Error('No homepage media found in home-features.ts');
-  for (const match of media) {
-    const relative = match[1];
-    const source = path.join(repoRoot, relative);
-    if (!fs.existsSync(source)) throw new Error(`Missing homepage media: ${relative}`);
-    assets.set(relative, source);
-  }
   for (const lang of ['en', 'zh-CN']) {
-    const relative = `assets/architecture/nova-personal-agent.${lang}.png`;
-    assets.set(relative, path.join(repoRoot, relative));
     for (const theme of ['light', 'dark']) {
       const svg = `assets/architecture/nova-overview.${lang}.${theme}.svg`;
       assets.set(svg, path.join(repoRoot, svg));
