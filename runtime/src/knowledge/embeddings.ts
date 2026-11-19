@@ -2,6 +2,7 @@ import {beginModelUsage} from '../usage/model-call.js'
 import type {UsageReporter} from '../realtime/usage.js'
 import {SensitiveContentPolicy, SensitivePathPolicy} from '../memory/sensitivity.js'
 
+import {rotatedCredential} from '../config/credential-rotation.js'
 const MAX_BATCH = 10
 const MAX_INPUTS = 1_000
 const MAX_INPUT_CODE_POINTS = 32_768
@@ -101,7 +102,7 @@ export class DashScopeEmbeddingProvider implements EmbeddingProvider {
     try {
       response = await this.#fetch(this.#endpoint, {
         method: 'POST',
-        headers: {Authorization: `Bearer ${this.#apiKey}`, 'Content-Type': 'application/json'},
+        headers: {Authorization: `Bearer ${rotatedCredential(this.#apiKey)}`, 'Content-Type': 'application/json'},
         body,
         redirect: 'manual',
         signal: combined,

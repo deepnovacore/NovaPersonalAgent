@@ -2,16 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/ui/local_profile_results.dart';
 import 'package:nova_mobile/ui/theme.dart';
+import 'package:nova_mobile/ui/timeline_briefs.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 import 'local_profile_results_test.dart' show ReadyHost;
 
 class _PublishedProfile extends ProfileRepository {
   _PublishedProfile(
     super.persistence,
-    super.authority,
+    super.publication,
     super.sources,
     this.saved,
   );
@@ -67,16 +68,158 @@ Map<String, dynamic> _entry({bool steps = true}) => {
   },
 };
 
+List<Map<String, dynamic>> _futureActivities() => [
+  for (final item in [
+    ('schedule', 'scheduled', '2026-12-11', '2026-10-28'),
+    ('deadline', 'deadline', '2026-11-24', '2026-10-27'),
+  ])
+    {
+      ..._entry(steps: false),
+      'key': item.$1,
+      'time': {
+        'anchor_date': item.$3,
+        'anchor_basis': item.$2,
+        item.$2 == 'deadline' ? 'due_on' : 'scheduled_on': item.$3,
+        'last_reported_on': item.$4,
+        'as_of': '2026-11-02',
+      },
+    },
+];
+
 void main() {
+  test(
+    'shared and local profile today counts use effective report placement',
+    () {
+      final entries = _futureActivities();
+      final sources = SourceStore(MemoryLifePersistence());
+      final host = ReadyHost(sources);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      final profile = _PublishedProfile(
+        MemoryLifePersistence(),
+        publication,
+        sources,
+        {'entries': entries},
+      );
+      final local = LocalProfileResults(
+        host: host,
+        publication: publication,
+        repository: profile,
+        kind: 'timeline',
+      );
+      final shared = TimelineBriefs(entries: entries);
+      for (final count in [local.todayBriefCount, shared.todayBriefCount]) {
+        expect(count(DateTime(2026, 10, 28)), 1);
+        expect(count(DateTime(2026, 10, 27)), 1);
+        expect(count(DateTime(2026, 12, 11)), 0);
+        expect(count(DateTime(2026, 11, 24)), 0);
+      }
+      host.dispose();
+      publication.dispose();
+    },
+  );
+
+  for (final language in ['zh', 'en']) {
+    testWidgets(
+      'future activities group by reports and show compact dates in $language',
+      (tester) async {
+        tester.view.physicalSize = const Size(320, 740);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: MediaQuery(
+                data: const MediaQueryData(textScaler: TextScaler.linear(2)),
+                child: SingleChildScrollView(
+                  child: TimelineBriefs(
+                    entries: _futureActivities(),
+                    language: language,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        for (final day in ['2026-10-28', '2026-10-27']) {
+          expect(
+            find.byKey(ValueKey('brief-timeline-date-${day}T00:00:00.000')),
+            findsOneWidget,
+          );
+        }
+        for (final day in ['2026-12-11', '2026-11-24']) {
+          expect(
+            find.byKey(ValueKey('brief-timeline-date-${day}T00:00:00.000')),
+            findsNothing,
+          );
+        }
+        expect(
+          find.text(
+            language == 'zh' ? '安排于 12月11日' : 'Scheduled for 2026-12-11',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(language == 'zh' ? '截止 11月24日' : 'Due 2026-11-24'),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            language == 'zh' ? '最近记录 10月28日' : 'Last recorded 2026-10-28',
+          ),
+          findsOneWidget,
+        );
+        expect(
+          find.text(
+            language == 'zh' ? '最近记录 10月27日' : 'Last recorded 2026-10-27',
+          ),
+          findsOneWidget,
+        );
+        final now = DateTime.now();
+        final days = DateTime.utc(
+          2026,
+          11,
+          24,
+        ).difference(DateTime.utc(now.year, now.month, now.day)).inDays;
+        expect(
+          find.text(
+            days > 0
+                ? (language == 'zh' ? '距截止 $days 天' : 'Due in $days days')
+                : days == 0
+                ? (language == 'zh' ? '今天截止' : 'Due today')
+                : (language == 'zh'
+                      ? '原截止已过 ${-days} 天，结果以最新记录为准'
+                      : '${-days} days past the original deadline; check the latest record'),
+          ),
+          findsOneWidget,
+        );
+        expect(
+          tester
+              .getTopLeft(find.byKey(const ValueKey('timeline-card-schedule')))
+              .dy,
+          lessThan(
+            tester
+                .getTopLeft(
+                  find.byKey(const ValueKey('timeline-card-deadline')),
+                )
+                .dy,
+          ),
+        );
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets('expired history settles without repeatedly scheduling expiry', (
     tester,
   ) async {
     final sources = _ExpiredSourceView();
     final host = ReadyHost(sources);
-    final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+    final publication = LocalPublicationContext(MemoryLifePersistence());
     final profile = _PublishedProfile(
       MemoryLifePersistence(),
-      authority,
+      publication,
       sources,
       {
         'entries': [_entry(steps: false)],
@@ -90,7 +233,7 @@ void main() {
           body: SingleChildScrollView(
             child: LocalProfileResults(
               host: host,
-              authority: authority,
+              publication: publication,
               repository: profile,
               kind: 'timeline',
             ),
@@ -104,7 +247,7 @@ void main() {
       const Duration(seconds: 1),
     );
     expect(find.text('项目验收还差环境复核'), findsOneWidget);
-    expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsOneWidget);
+    expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsNothing);
     final settledReads = profile.reads;
     await tester.pump(const Duration(minutes: 1));
     await tester.pumpAndSettle(
@@ -121,7 +264,7 @@ void main() {
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
     host.dispose();
-    authority.dispose();
+    publication.dispose();
   });
   for (final width in [320.0, 360.0]) {
     testWidgets(
@@ -133,7 +276,7 @@ void main() {
         addTearDown(tester.view.resetDevicePixelRatio);
         final sources = SourceStore(MemoryLifePersistence());
         final host = ReadyHost(sources);
-        final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+        final publication = LocalPublicationContext(MemoryLifePersistence());
         final saved = <String, dynamic>{
           'entries': [
             _entry(),
@@ -163,7 +306,7 @@ void main() {
         };
         final profile = _PublishedProfile(
           MemoryLifePersistence(),
-          authority,
+          publication,
           sources,
           saved,
         );
@@ -176,7 +319,7 @@ void main() {
                 child: SingleChildScrollView(
                   child: LocalProfileResults(
                     host: host,
-                    authority: authority,
+                    publication: publication,
                     repository: profile,
                     kind: 'timeline',
                   ),
@@ -239,7 +382,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         host.dispose();
-        authority.dispose();
+        publication.dispose();
       },
     );
   }
@@ -249,10 +392,10 @@ void main() {
     (tester) async {
       final sources = SourceStore(MemoryLifePersistence());
       final host = ReadyHost(sources);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+      final publication = LocalPublicationContext(MemoryLifePersistence());
       final profile = _PublishedProfile(
         MemoryLifePersistence(),
-        authority,
+        publication,
         sources,
         {
           'entries': [_entry(steps: false)],
@@ -265,7 +408,7 @@ void main() {
             body: SingleChildScrollView(
               child: LocalProfileResults(
                 host: host,
-                authority: authority,
+                publication: publication,
                 repository: profile,
                 kind: 'timeline',
               ),
@@ -275,18 +418,18 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('下一步'), findsNothing);
-      expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsOneWidget);
+      expect(find.text('原始来源已不可用 · 保留此前整理内容'), findsNothing);
       await tester.ensureVisible(find.text('查看 1 条原文 ›'));
       await tester.tap(find.text('查看 1 条原文 ›'));
       await tester.pumpAndSettle();
-      expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsOneWidget);
+      expect(find.text('原始来源已不可用，仍保留此前整理的内容。'), findsNothing);
       expect(find.byType(SelectableText), findsNothing);
       await tester.tap(find.text('关闭'));
       await tester.pumpAndSettle();
       expect(find.text('项目验收还差环境复核'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       host.dispose();
-      authority.dispose();
+      publication.dispose();
     },
   );
 }

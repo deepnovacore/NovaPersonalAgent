@@ -31,3 +31,9 @@ test('changing search resets the cursor and discards an older search response', 
   assert.equal(next.hidden, true)
   assert.equal(status.textContent, '请点击搜索')
 })
+
+test('inspection engine labels are allowlisted and missing metadata stays generic', async () => {
+  const {memoryEngineLabel} = await import('../src/renderer/memory-engine-label.mjs')
+  for (const engine of ['ledger', 'voicemem', 'mem0']) assert.equal(memoryEngineLabel({engine}), engine)
+  for (const value of [null, {}, {engine: 'https://private.invalid?token=secret'}]) assert.equal(memoryEngineLabel(value), '本机记忆')
+})

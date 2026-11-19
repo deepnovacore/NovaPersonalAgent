@@ -588,6 +588,9 @@ export class CoreRuntime {
         this.#applyCompressDone(event)
         break
       case 'discovery_tick':
+        if (this.suggestions.all().some(suggestion => isSuggestionAvailable(suggestion,event.ts))) {
+          target = {slot:'surrogate.watch',reason:wakeReasonSchema.parse({kind:event.kind,priority:40})}
+        }
         break
       case 'assistant_spoken':
         this.#appendMemory(CONVERSATION_CHANNEL, {

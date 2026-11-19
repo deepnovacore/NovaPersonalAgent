@@ -1,3 +1,16 @@
+import {conversationToolBridge} from '../src/personal-agent/conversation-tool-bridge.js'
+import {buildAssembly} from '../src/composition/assembly.js'
+import {buildRealtimeAssembly,configuredMemoryConsumer} from '../src/composition/realtime-assembly.js'
+import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
+import {memoryDocuments} from '../src/memory-substrate/memory-documents.js'
+import type {EntryRevision} from '../src/memory-substrate/store.js'
+import {FULL_MEMORY_TOOLS, NO_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
+import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import type {RealtimeProvider} from '../src/realtime/protocol.js'
+import {retrievalPrerecall} from '../src/memory/prerecall-port.js'
+import {UnifiedRetrieval} from '../src/memory/retrieval.js'
+import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises'
@@ -22,13 +35,13 @@ import {loadSettings,settingsSchema} from '../src/config/config.js'
 
 function observation(image:ToolImage):ComputerObservation{return {id:'test-observation',captured_at:image.captured_at,image,space:{logical_width:image.width,logical_height:image.height,scale:1},target:null,focus:null,foreground:true,ax:{status:image.native_ui?'truncated':'unavailable',...(image.native_ui?{summary:image.native_ui}:{}),...(image.native_editor?{editor:image.native_editor}:{})}}}
 type Request=Parameters<CascadedLlmSession['stream']>[0]
-interface Reply {text?:string;reasoning?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[]}
+interface Reply {text?:string;reasoning?:string;call?:{name:string;arguments:Record<string,JsonValue>;id?:string};calls?:{name:string;arguments:Record<string,JsonValue>;id:string}[];failure?:{code:string;detail?:string}}
 function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
  const requests:Request[]=[],restores:JsonValue[]=[]
  const factory:CascadedLlmFactory={open:()=>{
   let step=0
   return {setHistoryLimits:()=>{ /* scripted model has no trimming */ },checkpoint:()=>({step}),restoreCheckpoint:value=>{restores.push(value);step=(value as {step:number}).step},
-   async *stream(request){requests.push(request);const next=await reply(request,step);request.signal.throwIfAborted();if(next.reasoning!==undefined)yield {kind:'reasoning_delta',text:next.reasoning};yield {kind:'response_started',response_id:'r'+step};const calls=next.calls??(next.call?[{...next.call,id:next.call.id??'c'+step}]:[]);for(const call of calls)yield {kind:'tool_call',item_id:'i'+step+':'+call.id,call_id:call.id,name:call.name,arguments:call.arguments};if(!calls.length)yield {kind:'text_delta',text:next.text??'done'};step++;yield {kind:'response_completed',response_id:'r'+(step-1)}},
+   async *stream(request){requests.push(request);const next=await reply(request,step);request.signal.throwIfAborted();if(next.reasoning!==undefined)yield {kind:'reasoning_delta',text:next.reasoning};yield {kind:'response_started',response_id:'r'+step};if(next.failure){if(next.text!==undefined&&next.text!=='')yield {kind:'text_delta',text:next.text};step++;yield {kind:'response_failed',response_id:'r'+(step-1),code:next.failure.code,...(next.failure.detail?{detail:next.failure.detail}:{})};return}const calls=next.calls??(next.call?[{...next.call,id:next.call.id??'c'+step}]:[]);for(const call of calls)yield {kind:'tool_call',item_id:'i'+step+':'+call.id,call_id:call.id,name:call.name,arguments:call.arguments};if(!calls.length)yield {kind:'text_delta',text:next.text??'done'};step++;yield {kind:'response_completed',response_id:'r'+(step-1)}},
    abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),
   }
  }}
@@ -37,12 +50,12 @@ function scripted(reply:(request:Request,step:number)=>Reply|Promise<Reply>){
 async function until<T>(read:()=>T,predicate:(value:T)=>boolean):Promise<T>{
  for(let count=0;count<500;count++){const value=read();if(predicate(value))return value;await new Promise(resolve=>setTimeout(resolve,10))}throw Error('state wait expired')
 }
-async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean){
+async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>,approval:'ask'|'never'='ask',factory?:CascadedLlmFactory,computerSession?:Parameters<typeof createWorkbenchRuntime>[0]['computerSession'],reasoning?:boolean,telemetry?:Parameters<typeof createWorkbenchRuntime>[0]['telemetry']){
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-loop-')),script=scripted(reply),invocations:{name:string;arguments:Record<string,JsonValue>}[]=[],frames:Record<string,unknown>[]=[]
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[{name:'monitor',parameters:{type:'object'}},{name:'dispatch',parameters:{type:'object',properties:{executor:{enum:['codex']}}}}],readonlyNames:['monitor'],origin:()=>Promise.resolve('memory:test-user'),invoke:(_text,call,_signal,grant)=>{invocations.push(call);if(call.name!=='dispatch'||!grant)return Promise.resolve({accepted:true});const delegate_id='fixture-work-'+invocations.length;return host.tasks.bindWork(grant.fence,delegate_id).then(()=>({accepted:true,delegate_id}))}}
  const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
- const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
+ const runtime=()=>host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>conversation.kind==='build'||conversation.mode==='plan'?createWorkbenchRuntime({...(telemetry?{telemetry}:{}),conversation,host,factory:factory??script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>host.localToolApproval??approval,...(computerSession?{computerSession}:{}),...(reasoning===undefined?{}:{reasoning})}):plain,frame=>frames.push(frame))
  let request=0
  const raw=(method:string,params:Record<string,unknown>={},local=true)=>host.command({type:'personal.command',request_id:'r'+request++,method,params},{client_id:local?'desktop:local':'remote:test'}) as Promise<{ok:boolean;error?:string;data:unknown}>
  const command=async(method:string,params:Record<string,unknown>={})=>{const result=await raw(method,params);if(!result.ok)throw Error(result.error);return result.data}
@@ -52,6 +65,7 @@ async function fixture(reply:(request:Request,step:number)=>Reply|Promise<Reply>
  return {root,host,script,frames,invocations,bridge,plain,command,raw,plan,build,runtime,close:async()=>{await host.close();await rm(root,{recursive:true,force:true})}}
 }
 const buildView=(host:PersonalAgentHost,id:string)=>host.conversationSnapshot().items.find(item=>item.id===id)!.build!
+const toolOutputs=(request:Request)=>request.inputs.flatMap(input=>input.kind==='tool_result'?[input.output as unknown as {status:string;message?:string}]:[])
 const supported=['darwin','win32'].includes(process.platform)
 
 test('production Plan factory admits batched wire calls through the real conversation tool bridge',async context=>{
@@ -221,21 +235,6 @@ test('Plan exposes read-only tools, refuses forged local/dispatch calls and publ
  }finally{await f.close()}
 })
 
-test('an explicit Chat tool request changes to Plan only after its reply settles and creates no task',{skip:!supported},async()=>{
- const f=await fixture(()=>({text:'Chat reply'}))
- try{
-  f.plain.runTurn=async()=>{
-   assert.equal(f.host.conversationSnapshot().items[0]!.mode??'chat','chat')
-   await f.host.requestPlanModeFromTool('chat:main',0,'enter-plan-call','conversation:origin',()=>true)
-   return {assistant:'已切换到 Plan 模式。'}
-  }
-  await f.host.submitConversationText('chat:main','我们先进入 plan 梳理需求。');await f.host.waitConversation('chat:main')
-  await until(()=>f.host.conversationSnapshot().items[0]!.mode==='plan',Boolean)
-  assert.equal(f.host.tasks.list().length,0)
-  assert.equal(f.host.conversationSnapshot().messages.at(-1)?.text,'已切换到 Plan 模式。')
- }finally{await f.close()}
-})
-
 test('Build requires approval before side effects, stops on denial and does not create task or Todo',{skip:!supported},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'new.txt',content:'批准后写入'}}}:{text:'已完成'})
  try{
@@ -253,10 +252,13 @@ test('Build requires approval before side effects, stops on denial and does not 
   assert.equal(f.host.conversationSnapshot().selected_id,id)
   await assert.rejects(f.host.submitConversationText(id,'double',undefined,undefined,{local_desktop:true}),/conversation_busy/)
   await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
-  assert.equal(buildView(f.host,id).reason,'approval_denied');await f.command('build.resume',{id});await f.host.waitConversation(id)
-  await assert.rejects(readFile(join(f.root,'new.txt')));assert.equal(f.script.requests.length,1)
+  // A denial is a tool result, not a pause: the model carries on without the declined action.
+  assert.equal(buildView(f.host,id).status,'completed');assert.equal(buildView(f.host,id).reason,null)
+  await assert.rejects(readFile(join(f.root,'new.txt')));assert.equal(f.script.requests.length,2)
+  const denied=toolOutputs(f.script.requests[1]!)[0]!
+  assert.equal(denied.status,'denied');assert.match(denied.message!,/declined/);assert.match(denied.message!,/Do not retry/)
   await f.host.submitConversationText(id,'请重新写入',undefined,undefined,{local_desktop:true});await f.host.waitConversation(id)
-  assert.deepEqual(f.script.requests[1]!.inputs.filter(input=>input.kind==='user_text').map(input=>input.text),['请重新写入'])
+  assert.deepEqual(f.script.requests[2]!.inputs.filter(input=>input.kind==='user_text').map(input=>input.text),['请重新写入'])
   assert.equal(f.host.tasks.list().length,0);assert.equal(f.host.life.snapshot().todos.length,0)
  }finally{await f.close()}
 })
@@ -264,6 +266,7 @@ test('Build requires approval before side effects, stops on denial and does not 
 test('switching the local tool approval at runtime applies to the next call without a restart',{skip:!supported},async()=>{
  const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'live.txt',content:'无需确认'}}}:{text:'已完成'})
  try{
+  assert.equal((await f.raw('settings.local_tool_approval',{mode:'never'},false)).error,'local_workbench_required')
   assert.deepEqual(await f.command('settings.local_tool_approval',{mode:'never'}),{mode:'never'})
   const id=await f.build();await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).status==='awaiting_approval',false)
@@ -289,8 +292,40 @@ test('Build asks before a read leaves the project and stops on denial',{skip:!su
   const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
   assert.ok(view.approval)
   await f.command('build.approve',{id,approval_id:view.approval.id,approved:false});await f.host.waitConversation(id)
-  assert.equal(buildView(f.host,id).reason,'approval_denied');assert.equal(f.script.requests.length,1)
+  assert.equal(buildView(f.host,id).status,'completed');assert.equal(f.script.requests.length,2)
+  assert.equal(toolOutputs(f.script.requests[1]!)[0]!.status,'denied')
  }finally{await f.close();await rm(outside,{recursive:true,force:true})}
+})
+
+test('a denial skips the rest of its batch and the model hears about both',{skip:!supported},async()=>{
+  const f=await fixture((_request,step)=>step===0?{calls:[{name:'file_write',arguments:{path:'a.txt',content:'a'},id:'call-a'},{name:'file_write',arguments:{path:'b.txt',content:'b'},id:'call-b'}]}:{text:'done'})
+  try{
+    const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
+    await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+    assert.equal(buildView(f.host,id).status,'completed');assert.equal(f.script.requests.length,2)
+    assert.deepEqual(toolOutputs(f.script.requests[1]!).map(output=>output.status),['denied','cancelled_before_execution'])
+    await assert.rejects(readFile(join(f.root,'a.txt')));await assert.rejects(readFile(join(f.root,'b.txt')))
+  }finally{await f.close()}
+})
+
+test('a denied class is refused without asking again, two denials pause with an explanation and Resume continues',{skip:!supported},async()=>{
+  const f=await fixture((_request,step)=>step<2?{call:{name:'file_write',arguments:{path:'x.txt',content:'x'},id:'call-'+step}}:{text:'carried on'})
+  try{
+    const id=await f.build(),view=await until(()=>buildView(f.host,id),view=>view.status==='awaiting_approval')
+    await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+    const paused=buildView(f.host,id)
+    assert.equal(paused.status,'paused');assert.equal(paused.reason,'approval_denied');assert.equal(paused.approval,null)
+    assert.match(paused.reason_detail!,/x\.txt/);assert.equal(f.script.requests.length,2)
+    assert.deepEqual(toolOutputs(f.script.requests[1]!).map(output=>output.status),['denied'])
+    const text=f.host.conversationSnapshot().messages.at(-1)!.text
+    assert.match(text,/你拒绝了/);assert.match(text,/x\.txt/);assert.match(text,/点|回复「继续」/);assert.doesNotMatch(text,/Build 已暂停。$/)
+    await f.command('build.resume',{id});await f.host.waitConversation(id)
+    assert.equal(f.script.requests.length,3)
+    assert.deepEqual(toolOutputs(f.script.requests[2]!).map(output=>output.status),['denied_previously'])
+    assert.ok(f.script.requests[2]!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('denial_resume')))
+    const done=buildView(f.host,id);assert.equal(done.status,'completed');assert.equal(done.reason,null);assert.equal(done.reason_detail??null,null)
+    await assert.rejects(readFile(join(f.root,'x.txt')))
+  }finally{await f.close()}
 })
 
 test('approval is scoped to exact call, native Build stays separate and local authority is rechecked',{skip:!supported},async()=>{
@@ -323,10 +358,12 @@ for(const reason of ['model_timeout','model_overflow'])test(`Build pauses with a
   const id=await f.build();await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).status,'paused');assert.equal(buildView(f.host,id).reason,reason)
   const messages=f.host.conversationSnapshot().messages
-  assert.equal(messages.find(message=>message.role==='user')?.generation_status,'completed');assert.match(messages.at(-1)!.text,/Resume/);assert.match(messages.at(-1)!.text,new RegExp(reason))
+  assert.equal(messages.find(message=>message.role==='user')?.generation_status,'completed');assert.match(messages.at(-1)!.text,/点「继续」/);assert.doesNotMatch(messages.at(-1)!.text,/Resume|model_/);assert.equal(buildView(f.host,id).reason_detail,reason==='model_timeout'?'模型等待数据超时':'模型回复超出流容量限制')
   await writeFile(join(f.root,'once.txt'),'user change')
   await f.command('build.resume',{id});await f.host.waitConversation(id)
   assert.equal(await readFile(join(f.root,'once.txt'),'utf8'),'user change');assert.equal(buildView(f.host,id).status,'completed')
+  assert.equal(f.host.conversationSnapshot().messages.filter(message=>message.role==='user').length,1)
+  assert.equal(f.host.conversationSnapshot().messages.some(message=>message.text==='Resume'),false)
   assert.equal((await f.host.workbench.checkpoint(id,0)).calls.length,1);assert.equal(f.host.tasks.list().length,0)
  }finally{await f.close()}
 })
@@ -436,12 +473,13 @@ test('build.details steps merges thinking and tool steps chronologically',{skip:
  }finally{await f.close()}
 })
 
-test('NOVA_BUILD_REASONING is a boolean settings override with a false default',()=>{
- assert.equal(settingsSchema.parse({executors:[]}).build_reasoning,false)
- assert.equal(loadSettings({}).build_reasoning,false)
+test('NOVA_BUILD_REASONING is a boolean settings override enabled by default',()=>{
+ assert.equal(settingsSchema.parse({executors:[]}).build_reasoning,true)
+ assert.equal(loadSettings({}).build_reasoning,true)
  assert.equal(loadSettings({NOVA_BUILD_REASONING:'1'}).build_reasoning,true)
  assert.equal(loadSettings({NOVA_BUILD_REASONING:'true'}).build_reasoning,true)
  assert.equal(loadSettings({NOVA_BUILD_REASONING:'off'}).build_reasoning,false)
+ assert.equal(loadSettings({NOVA_BUILD_REASONING:'0'}).build_reasoning,false)
 })
 
 test('batched calls require separate approvals showing the actual pending arguments',{skip:!supported},async()=>{
@@ -466,6 +504,11 @@ test('Stop during model streaming pauses; explicit Resume restores context and i
   await f.command('presentation.set',{mode:'orb'});assert.equal((await f.raw('build.resume',{id})).error,'local_workbench_required');block=false
   await f.command('presentation.set',{mode:'workbench'});await f.command('build.resume',{id});await f.host.waitConversation(id)
   assert.equal(buildView(f.host,id).status,'completed');assert.equal(f.host.tasks.list().length,0)
+  // Resume is a control action: no literal user bubble and no synthesized user turn reaches the model.
+  const messages=f.host.conversationSnapshot().messages
+  assert.equal(messages.filter(message=>message.role==='user').length,1)
+  assert.equal(messages.some(message=>message.text==='Resume'),false)
+  assert.equal(f.script.requests.at(-1)!.inputs.some(input=>input.kind==='user_text'&&input.text==='Resume'),false)
  }finally{await f.close()}
 })
 
@@ -673,7 +716,7 @@ test('Build computer observation and verification gates survive calls and preser
  }finally{await f.close()}
 })
 
-test('Build Connect approval is required even when per-input approval is never',{skip:!supported,timeout:10000},async()=>{
+test('自动批准 (never) also approves the Build computer connection',{skip:!supported,timeout:10000},async()=>{
  let connected=false,actions=0
  const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:{text:'done'},
  'never',undefined,options=>({
@@ -684,13 +727,25 @@ test('Build Connect approval is required even when per-input approval is never',
  }))
  f.host.computerUseState=()=>({enabled:true,direct:true})
  try{
-  const id=await f.build()
-  const pending=await until(()=>buildView(f.host,id).approval,value=>!!value)
-  assert.equal(pending!.name,'computer_connect');assert.equal(connected,false)
-  assert.ok(f.frames.some(frame=>frame.type==='computer_use'&&frame.state==='active'))
-  await f.command('build.approve',{id,approval_id:pending!.id,approved:true})
-  await f.host.waitConversation(id);assert.equal(connected,true);assert.equal(actions,1)
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(connected,true);assert.equal(actions,1);assert.equal(buildView(f.host,id).approval,null)
   const frames=f.frames.filter(frame=>frame.type==='computer_use');assert.ok(frames.every(frame=>frame.conversation_id===id));assert.deepEqual(frames.map(frame=>frame.state),['active','acting','active','idle']);assert.deepEqual(frames[1]?.point,{x:0,y:0})
+ }finally{await f.close()}
+})
+
+test('an unverified computer input with confirmed cleanup re-observes instead of pausing Build',{skip:!supported,timeout:10000},async()=>{
+ let observed=0
+ const f=await fixture((_request,step)=>step===0?{call:{name:'computer_screenshot',arguments:{}}}:step===1?{call:{name:'computer_click',arguments:{observationId:'test-observation',x:0,y:0}}}:step===2?{call:{name:'computer_screenshot',arguments:{}}}:{text:'done'},
+ 'never',undefined,()=>({
+  observe:()=>{observed++;return Promise.resolve(observation({media_type:'image/png',data_base64:'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aS00AAAAASUVORK5CYII=',width:1,height:1,captured_at:new Date().toISOString()}))},
+  action:()=>Promise.reject(Error('cleanup_unknown',{cause:Error('worker:libnut click failed')})),close:()=>Promise.resolve(),
+ }))
+ f.host.computerUseState=()=>({enabled:true,direct:true})
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.notEqual(buildView(f.host,id).status,'outcome_unknown');assert.equal(observed,2)
+  const click=(await f.host.workbench.checkpoint(id,0)).calls.find(call=>call.name==='computer_click')!
+  assert.deepEqual({...(click.result as Record<string,unknown>),message:undefined},{status:'failed',code:'outcome_unverified',detail:'worker:libnut click failed',verified:false,message:undefined})
  }finally{await f.close()}
 })
 
@@ -1047,7 +1102,7 @@ test('direct Build instructions skip planning but retain approval and completion
  assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
 
-test('Plan and Build previews grow, retract at tool calls and persist only authoritative text', async () => {
+test('Workbench previews grow and Build records narration before tools', async () => {
  for(const mode of ['plan','build'] as const){
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
@@ -1061,16 +1116,22 @@ test('Plan and Build previews grow, retract at tool calls and persist only autho
    if(mode==='build')id=await f.build()
    else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
    await f.host.waitConversation(id)
-   const captions=f.frames.filter(x=>x.type==='caption')
-   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['',true],['final ',false],['final answer',false],['final answer',false]])
-   assert.equal(captions[0]!.turn_id,captions[2]!.turn_id);assert.notEqual(captions[2]!.turn_id,captions[3]!.turn_id)
+   const captions=f.frames.filter(x=>x.type==='caption'),merged=mode==='build'?'final answer':'discard me\n\nfinal answer'
+   if(mode==='build'){
+    const checkpoint=await f.host.workbench.checkpoint(id,0)
+    assert.equal(checkpoint.calls[0]?.narration,'discard me')
+    assert.equal(checkpoint.thoughts?.length,0)
+    assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['',true],['final ',false],['final answer',false],['final answer',false]])
+   }else assert.deepEqual(captions.map(x=>[x.text,x.final]),[['discard',false],['discard me',false],['discard me\n\nfinal ',false],['discard me\n\nfinal answer',false],['discard me\n\nfinal answer',false]])
+   // The turn identity survives the tool round; every caption belongs to the same reply.
+   assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
    const message=f.host.conversationSnapshot().messages.at(-1)!
-   assert.equal(message.text,'final answer');assert.equal(message.turn_id,captions.at(-1)!.turn_id)
+   assert.equal(message.text,merged);assert.equal(message.turn_id,captions.at(-1)!.turn_id)
   }finally{await f.close()}
  }
 })
 
-test('Plan and Build withdraw authoritative narration before a tool call', async () => {
+test('Plan and Build keep authoritative narration before a tool call', async () => {
  for(const mode of ['plan','build'] as const){
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
@@ -1083,12 +1144,116 @@ test('Plan and Build withdraw authoritative narration before a tool call', async
    if(mode==='build')id=await f.build()
    else{await f.command('conversations.mode',{id:'chat:main',mode:'plan'});id='chat:main';await f.host.submitConversationText(id,'test')}
    await f.host.waitConversation(id)
-   const captions=f.frames.filter(x=>x.type==='caption')
-   assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],['',true],['final answer',false]])
+   const captions=f.frames.filter(x=>x.type==='caption'),merged=mode==='build'?'final answer':'narration before the tool\n\nfinal answer'
+   if(mode==='build'){
+    const page=await f.command('build.details',{id,view:'steps'}) as {items:{narration?:string}[]}
+    assert.equal(page.items[0]?.narration,'narration before the tool')
+    assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],['',true],[merged,false]])
+   }else assert.deepEqual(captions.map(x=>[x.text,x.final]),[['narration before the tool',false],[merged,false]])
+   assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
    assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
-   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'final answer')
+   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,merged)
   }finally{await f.close()}
  }
+})
+
+test('a model output limit continues the reply twice and keeps one turn identity', async () => {
+ let attempts=0
+ const f=await fixture((request)=>{
+  attempts++
+  const continuations=request.inputs.filter(input=>input.kind==='host_context'&&input.content.includes('output_limit_continuation')).length
+  if(attempts===1)return {text:'第一段',failure:{code:'output_limit',detail:'length'}}
+  if(attempts===2){assert.equal(continuations,1);return {text:'第二段',failure:{code:'output_limit',detail:'length'}}}
+  assert.equal(continuations,2)
+  return {text:'完成'}
+ })
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','写一份很长的计划');await f.host.waitConversation('chat:main')
+  assert.equal(attempts,3)
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.equal(message.text,'第一段\n\n第二段\n\n完成')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  assert.equal(checkpoint.status,'completed');assert.equal(checkpoint.model_failure,undefined)
+  const captions=f.frames.filter(x=>x.type==='caption')
+  assert.ok(captions.length>0);assert.equal(new Set(captions.map(x=>x.turn_id)).size,1)
+  assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('exhausted output-limit continuations pause with a readable label', async () => {
+ let attempts=0
+ const f=await fixture(()=>{attempts++;return {text:'仍被截断',failure:{code:'output_limit',detail:'length'}}})
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','写一份很长的计划');await f.host.waitConversation('chat:main')
+  assert.equal(attempts,3)
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  assert.equal(checkpoint.status,'paused');assert.equal(checkpoint.reason,'model_output_limit')
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/发送新消息/u);assert.doesNotMatch(message.text,/Resume/u)
+  assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('truncated tool-call JSON is never executed and retries once with split-write guidance',{skip:!supported},async()=>{
+ let attempts=0
+ const f=await fixture((request)=>{
+  attempts++
+  if(attempts===1)return {failure:{code:'output_limit',detail:'tool_arguments'}}
+  if(attempts===2){
+   assert.ok(request.inputs.some(input=>input.kind==='host_context'&&input.content.includes('output_limit_tool_split')))
+   return {call:{name:'file_write',arguments:{path:'big.txt',content:'完整内容'}}}
+  }
+  return {text:'写入完成'}
+ },'never')
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(attempts,3)
+  assert.equal(await readFile(join(f.root,'big.txt'),'utf8'),'完整内容')
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal(checkpoint.status,'completed');assert.deepEqual(checkpoint.calls.map(call=>call.name),['file_write'])
+  assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'写入完成')
+  assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('a second truncated tool-call JSON pauses without executing or retrying again',{skip:!supported},async()=>{
+ let attempts=0
+ const f=await fixture((request)=>{
+  attempts++
+  if(attempts===2)assert.ok(request.inputs.some(input=>input.kind==='host_context'&&input.content.includes('output_limit_tool_split')))
+  return {failure:{code:'output_limit',detail:'tool_arguments'}}
+ },'never')
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  assert.equal(attempts,2)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal(checkpoint.status,'paused');assert.equal(checkpoint.reason,'model_output_limit')
+  assert.deepEqual(checkpoint.calls,[])
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.match(message.text,/未执行/u)
+  assert.equal(f.frames.some(frame=>frame.type==='conversation.error'),false)
+ }finally{await f.close()}
+})
+
+test('Plan captions keep the head of a long reply instead of its tail', async () => {
+ const opening='开头：'+'内容😀'.repeat(1600)
+ const script=scripted(()=>({text:opening}))
+ const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();return {...base,async *stream(request){
+  for await(const event of base.stream(request)){yield event;if(event.kind==='response_started')yield {kind:'text_preview' as const,text:opening}}
+ }}}}
+ const f=await fixture(()=>({}),'ask',factory)
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','给我一份长计划');await f.host.waitConversation('chat:main')
+  const captions=f.frames.filter(x=>x.type==='caption')
+  const full=String(captions.at(-1)!.full_text)
+  assert.ok([...full].length===4001);assert.ok(full.startsWith('开头：'));assert.ok(full.endsWith('…'))
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.ok(message.text.startsWith('开头：'));assert.ok(message.text.includes('😀'))
+  assert.equal(message.text,opening)
+ }finally{await f.close()}
 })
 
 test('managed workspace commands validate names, hide paths and resolve Build defaults and IDs', {skip:!supported},async()=>{
@@ -1180,7 +1345,656 @@ test('restart repairs a previously overwritten pause reason from its durable che
   await f.host.updateLocalBuild(id,0,{status:'paused',reason:'restart_requires_resume',approval:null});await f.host.close()
   const reopened=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
   try{await reopened.open();assert.equal(buildView(reopened,id).reason,'approval_denied');assert.equal(buildView(reopened,id).status,'paused');assert.equal(reopened.localBuildAuthorized(id),false)}finally{await reopened.close()}
-  assert.equal(f.script.requests.length,1)
+  assert.equal(f.script.requests.length,2)
   await assert.rejects(readFile(join(f.root,'denied.txt')), {code:'ENOENT'})
+ }finally{await f.close()}
+})
+
+
+test('Chat uses a restricted runtime while host plan dispatch is awaiting admission',async()=>{
+ const f=await fixture(()=>({text:'unused'})),used:string[]=[],closed:string[]=[]
+ let release!:()=>void,entered!:()=>void
+ const blocked=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ let delegation:Promise<unknown>|undefined
+ try{
+  const plan=await f.plan(),invoke=f.bridge.invoke
+  f.bridge.invoke=async(...args)=>{entered();await blocked;return invoke(...args)}
+  f.host.setConversationRuntime((_c,_e,_m,_l,_r,_x,overrides)=>{
+   const kind=overrides?.chat===false?'host-only':'chat'
+   return Promise.resolve({...f.plain,runTurn:()=>{used.push(kind);return Promise.resolve({assistant:'race reply'})},close:()=>{closed.push(kind);return Promise.resolve()}})
+  },()=>{ /* no renderer */ })
+  delegation=f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  await started
+  assert.equal(f.host.conversationSnapshot().items[0]!.mode,'chat')
+  await f.host.submitConversationText('chat:main','ordinary Chat turn');await f.host.waitConversation('chat:main')
+  assert.deepEqual(used,['chat'])
+  release();await delegation
+  assert.deepEqual(closed,['host-only'],'dispatch cleanup must leave the foreground Chat runtime open')
+  await f.host.submitConversationText('chat:main','another Chat turn');await f.host.waitConversation('chat:main')
+  assert.deepEqual(used,['chat','chat'])
+ }finally{release();await delegation?.catch(()=>undefined);await f.close()}
+})
+
+test('exhausted long output retains full text and a visible pause notice', {skip:!supported},async()=>{
+ let attempts=0
+ const f=await fixture(()=>({text:String(++attempts).repeat(17000),failure:{code:'output_limit',detail:'length'}}))
+ try{
+  const id=await f.build();await f.host.waitConversation(id)
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.equal(attempts,3);assert.equal(message.full_text_ref,true)
+  const page=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:16000}) as {text:string}
+  assert.ok(page.text.length>0,'paused output must be durably readable')
+  assert.match(message.text,/输出长度上限/u);assert.match(message.text,/点「继续」/u);assert.doesNotMatch(message.text,/Resume/u)
+  const first=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:0}) as {text:string}
+  assert.ok(first.text.startsWith('1'.repeat(17000)))
+  const last=await f.command('build.details',{id,view:'reply',message_id:message.turn_id,offset:51000}) as {text:string}
+  assert.match(last.text,/点「继续」/u)
+ }finally{await f.close()}
+})
+
+
+test('refused plan dispatch preserves a concurrent user Chat turn and its restricted runtime',async()=>{
+ const f=await fixture(()=>({text:'unused'})),used:string[]=[],closed:string[]=[]
+ let release!:()=>void,entered!:()=>void
+ const blocked=new Promise<void>(resolve=>{release=resolve}),started=new Promise<void>(resolve=>{entered=resolve})
+ let delegation:Promise<unknown>|undefined
+ try{
+  const plan=await f.plan()
+  f.bridge.invoke=async()=>{entered();await blocked;return {accepted:false,delegate_id:null}}
+  f.host.setConversationRuntime((_c,_e,_m,_l,_r,_x,overrides)=>{
+   const kind=overrides?.chat===false?'host-only':'chat'
+   return Promise.resolve({...f.plain,runTurn:()=>{used.push(kind);return Promise.resolve({assistant:'Chat reply'})},close:()=>{closed.push(kind);return Promise.resolve()}})
+  },()=>{ /* no renderer */ })
+  delegation=f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  await started
+  await f.host.submitConversationText('chat:main','I am continuing in Chat');await f.host.waitConversation('chat:main')
+  release();await assert.rejects(delegation,/plan_delegation_refused/u)
+  assert.equal(f.host.conversationSnapshot().items[0]!.mode,'chat','a refused older command must not undo the user continuing in Chat')
+  assert.deepEqual(closed,['host-only'])
+  await f.host.submitConversationText('chat:main','another Chat instruction');await f.host.waitConversation('chat:main')
+  assert.deepEqual(used,['chat','chat'])
+ }finally{release();await delegation?.catch(()=>undefined);await f.close()}
+})
+
+
+test('a long paused Plan keeps full output and directs the user to send another message',async()=>{
+ let attempts=0,limited=true
+ const f=await fixture(()=>limited?{text:String(++attempts).repeat(17000),failure:{code:'output_limit',detail:'length'}}:{text:'Plan continued'})
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','a long plan');await f.host.waitConversation('chat:main')
+  const message=f.host.conversationSnapshot().messages.at(-1)!
+  assert.match(message.text,/发送新消息/u);assert.doesNotMatch(message.text,/Resume/u)
+  const first=await f.host.workbench.reply('chat:main',0,message.turn_id!,0)
+  assert.ok(first.text.startsWith('1'.repeat(17000)))
+  const last=await f.host.workbench.reply('chat:main',0,message.turn_id!,51000)
+  assert.match(last.text,/发送新消息/u)
+  limited=false;await f.host.submitConversationText('chat:main','continue the plan');await f.host.waitConversation('chat:main')
+  assert.ok(f.host.conversationSnapshot().messages.at(-1)!.text.endsWith('Plan continued'))
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).status,'completed')
+ }finally{await f.close()}
+})
+
+async function memoryBridgeFixture(f: Awaited<ReturnType<typeof fixture>>, full = true) {
+ const gateway={complete:()=>Promise.reject(Error('automatic learning is forbidden')),async *stream(){await Promise.reject(Error('automatic learning is forbidden'))}}
+ const client=new MemoryLedgerClient(join(f.root,'memory.sqlite'))
+ const memory=new SubstrateMemoryResource({client,userId:'workbench-test',model:'fixture',gateway,inputConsent:true,conversationProviders:['workbench-model']})
+ await memory.open({deferBackground:true})
+ const core=buildAssembly({settings:settingsSchema.parse({executors:[]}),gateway,memoryTools:full?FULL_MEMORY_TOOLS:{...NO_MEMORY_TOOLS,recall:true,engine:'mem0'},blackboard:{path:join(f.root,'board.sqlite'),ownerId:'fixture'},capabilities:parseCapabilityRegistry({version:1,modules:{search:{enabled:false},camera:{enabled:false},coding:{enabled:false},knowledge:{enabled:false}}})})
+ const provider:RealtimeProvider={connect:()=>Promise.resolve({epoch:1,provider_session_id:'workbench'}),sendAudio:()=>Promise.resolve(),replaceResponseAdaptation:()=>Promise.resolve(),injectHostItem:item=>Promise.resolve({session_epoch:1,host_item_id:item.host_item_id,provider_item_id:item.host_item_id}),createResponse:()=>Promise.resolve(),cancelResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}
+ const graph=buildRealtimeAssembly({core,provider,createPersonalMemory:()=>memory,memoryConsumerFingerprint:'workbench-model',memoryReadMode:'text',onDiagnostic:()=>undefined})
+ await graph.start()
+ const tools=conversationToolBridge(core,graph,{memoryConsumer:'workbench-model'})
+ f.plain.toolBridge=tools
+ f.plain.close=async()=>{await graph.stop();await core.stop()}
+ return {memory,client,tools}
+}
+
+for(const mode of ['plan','build'] as const)for(const full of [true,false])test(`${mode} exposes only supported memory host tools (${full?'ledger':'recall-only'})`,{skip:mode==='build'&&!supported},async()=>{
+ const f=await fixture(()=>({text:'done'}))
+ try{
+  await memoryBridgeFixture(f,full)
+  if(mode==='build')await f.command('build.begin',{text:'Discuss constraints',project:f.root})
+  else {await f.command('conversations.mode',{id:'chat:main',mode:'plan'});await f.host.submitConversationText('chat:main','Discuss constraints')}
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  const names=f.script.requests[0]!.tools.map(tool=>tool.name)
+  for(const name of ['memory__remember','memory__lookup'])assert.equal(names.includes(name),full)
+  assert.ok(names.includes('memory__recall'))
+  assert.equal(names.includes('file_write'),mode==='build')
+  assert.ok(!f.script.requests[0]!.inputs.some(input=>input.kind==='host_context'&&input.content.includes('memory_scope')))
+ }finally{await f.close()}
+})
+
+for(const mode of ['plan','build'] as const)test(`${mode} quotes only typed user text through the real service; general memory is not user background`,{skip:mode==='build'&&!supported},async()=>{
+ const project='Use strict TypeScript in this repository',user='I prefer concise answers',legacy='I prefer examples',toolQuote='I love durian'
+ const userText=`Remember: ${project}; ${user}; ${legacy}`
+ const writes=[{scope:'general',text:project},{scope:'user',text:user},{text:legacy}]
+ const f=await fixture((_request,step)=>{
+  if(step===0)return {call:{name:'monitor',arguments:{}}}
+  if(step===1)return {call:{name:'memory__remember',arguments:{action:'set',kind:'preference',scope:'user',text:toolQuote,quote:toolQuote}}}
+  if(step===2)return {call:{name:'memory__remember',arguments:{action:'set',kind:'fact',scope:'user',text:'voice-only secret',quote:'voice-only secret'}}}
+  const write=writes[step-3]
+  if(write)return {call:{name:'memory__remember',arguments:{action:'set',kind:'preference',...write,quote:write.text}}}
+  if(step===6)return {call:{name:'memory__lookup',arguments:{}}}
+  return {text:'done'}
+ })
+ try{
+  const {memory,client,tools}=await memoryBridgeFixture(f)
+  const seen:string[]=[]
+  f.plain.toolBridge={...tools,tools:[...tools.tools,{name:'monitor',parameters:{type:'object'}}],readonlyNames:[...tools.readonlyNames,'monitor'],invoke:(text,call,signal)=>{
+   seen.push(text)
+   return call.name==='monitor'?Promise.resolve({text:toolQuote}):tools.invoke(text,call,signal)
+  }}
+  // Voice is host context, never part of the typed-user authorization snapshot.
+  f.host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation:{...conversation,messages:[...conversation.messages,{id:'voice-only',conversation_id:conversation.id,role:'user',input_mode:'voice',text:'voice-only secret',created_at:new Date().toISOString()}]},host:f.host,factory:f.script.factory,createBridge:()=>Promise.resolve(f.plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:'never'}),frame=>f.frames.push(frame))
+  if(mode==='build')await f.command('build.begin',{text:userText,project:f.root})
+  else {await f.command('conversations.mode',{id:'chat:main',mode:'plan'});await f.host.submitConversationText('chat:main',userText)}
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  const state=await f.host.workbench.checkpoint(id,0)
+  assert.equal(state.status,'completed',JSON.stringify(state))
+  assert.equal(state.last_user,userText)
+  assert.ok(seen.length>0);assert.ok(seen.every(text=>text===userText))
+  const results=state.calls.map(call=>call.result as {code?:string;result?:{state?:string;entries?:{text:string}[]}})
+  assert.equal(results[1]?.code,'invalid_source_quote');assert.equal(results[2]?.code,'invalid_source_quote')
+  for(const result of results.slice(3,6))assert.equal(result.result?.state,'committed','same-invoke userTurn must pass superseded check')
+  const saved=await memory.lookupExplicit({},'workbench-model')
+  assert.deepEqual(saved.entries.map(entry=>entry.text).sort(),[project,user,legacy].sort())
+  assert.ok(results[6]?.result?.entries?.some(entry=>entry.text===project),'lookup keeps general facts readable')
+  assert.ok((await memory.recall('strict TypeScript',{scope:'any'})).hits.some(hit=>hit.text===project),'recall keeps general facts readable')
+  const rows=await client.memory('conversation_snapshot',{entry_prefix:memory.prefix,consumer:'workbench-model'}) as EntryRevision[]
+  const docs=memoryDocuments(rows)
+  assert.doesNotMatch(docs.get('USER.md')!,/strict TypeScript/)
+  assert.match(docs.get('MEMORY.md')!,/strict TypeScript/)
+  assert.match(docs.get('USER.md')!,/concise answers/);assert.match(docs.get('USER.md')!,/prefer examples/)
+  for(const adaptation of [memory.responseAdaptation(),await memory.prepareResponseAdaptation('workbench-model')]){
+   assert.doesNotMatch(adaptation.memoryContext!.voice,/strict TypeScript/)
+   assert.match(adaptation.memoryContext!.voice,/concise answers/);assert.match(adaptation.memoryContext!.voice,/prefer examples/)
+   assert.deepEqual(adaptation.replyPreferences.map(entry=>entry.text).sort(),[user,legacy].sort())
+   const [userContext,directory]=adaptation.memoryContext!.text.split('Memory directory')
+   assert.doesNotMatch(userContext!,/strict TypeScript/);assert.match(directory!,/strict TypeScript/)
+  }
+  const sources=JSON.stringify(await memory.lookupExplicit({},'workbench-model'))
+  assert.ok(!sources.includes(toolQuote));assert.ok(!sources.includes('voice-only secret'))
+ }finally{await f.close()}
+})
+
+for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async()=>{
+ const events:{kind:string;payload:Readonly<Record<string,JsonValue>>}[]=[]
+ const f=await fixture(()=>({text:'done'}),'ask',undefined,undefined,undefined,{record:(kind,payload)=>events.push({kind,payload}),close:()=>undefined})
+ try{
+  let allowed=true,recalls=0,authorizationChecks=0,recallSignal:AbortSignal|undefined
+  const text=outcome==='irrelevant'?'unrelated tea':'TypeScript project constraints'
+  const resource:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:(_query,options)=>{
+   recalls++;recallSignal=options?.signal
+   if(outcome==='timeout')return new Promise(()=>{ /* ignores cancellation to exercise the outer budget */ })
+   if(outcome==='failure')return Promise.reject(Error('unavailable'))
+   return Promise.resolve({source:'personal',state:'ok',scope:'any',degraded:false,hits:[{memoryId:'project',text,revision:1,evidenceIds:['source'],score:1}]})
+  },get:()=>Promise.resolve({memory_scope:'user',id:'project',version:1,status:'active',kind:'fact',origin:'stated',content:text,source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_ref,consumer)=>{authorizationChecks++;assert.equal(consumer,'configured-text-model');return Promise.resolve(allowed)}}
+  const retrieval=new UnifiedRetrieval({memory:()=>resource})
+  const prepare=retrievalPrerecall(()=>retrieval,()=> 'configured-text-model')
+  f.plain.toolBridge={...f.bridge,prerecall:async(query,signal)=>{
+   const prepared=await prepare(query,signal)
+   if(outcome==='revoked')allowed=false
+   return prepared
+  }}
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const start=performance.now()
+  await f.host.submitConversationText('chat:main','TypeScript project constraints');await f.host.waitConversation('chat:main')
+  assert.ok(performance.now()-start<2000)
+  assert.equal(recalls,1)
+  const inputs=f.script.requests[0]!.inputs,index=inputs.findIndex(input=>input.kind==='host_context'&&input.content.includes('possible_memory'))
+  assert.equal(index>=0,outcome==='relevant')
+  if(index>=0){assert.ok(index<inputs.findIndex(input=>input.kind==='user_text'));assert.match(JSON.stringify(inputs[index]),/untrusted_external/)}
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).last_user,'TypeScript project constraints')
+  assert.deepEqual(events,[{kind:'workbench.memory.injected',payload:{injected:outcome==='relevant'}}])
+  if(outcome==='timeout')assert.equal(recallSignal?.aborted,true)
+  if(['relevant','revoked'].includes(outcome))assert.ok(authorizationChecks>=2,'authorization is rechecked at consumption')
+ }finally{await f.close()}
+})
+
+for(const mode of ['chat','plan','build'] as const)test(`production ${mode} text memory capture and Workbench authorized retrieval with prerecall flag off`,{skip:mode==='build'&&!supported},async context=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-workbench-memory-'))
+ const settings=settingsSchema.parse({executors:[],camera_module_enabled:false,pipeline_mode:'cascaded',cascade_llm_provider:'deepseek',cascade_llm_model:'deepseek-flash',deepseek_api_key:'test',memory_prerecall_enabled:false})
+ const consumer=configuredMemoryConsumer(settings,'text'),text='TypeScript project constraints',requests:Record<string,unknown>[]=[],consumers:string[]=[]
+ let rememberCalls=0,observedSources=0
+ const memory:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'ok',scope:'any',hits:[{memoryId:'project',revision:1,text,evidenceIds:['source'],score:1}],degraded:false}),get:()=>Promise.resolve({memory_scope:'user',id:'project',version:1,content:text,kind:'fact',origin:'stated',source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',status:'active',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_id,recipient)=>{consumers.push(recipient);return Promise.resolve(recipient===consumer)},remember:()=>{rememberCalls++;return Promise.resolve({sourceId:'text',state:'stored'})},observeSource:()=>{observedSources++;return Promise.resolve(null)}}
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ context.mock.method(globalThis,'fetch',(_url:unknown,init?:RequestInit)=>{
+  requests.push(JSON.parse(init!.body as string) as Record<string,unknown>)
+  return Promise.resolve(new Response('data: '+JSON.stringify({id:'response',choices:[{delta:{content:'done'},finish_reason:'stop'}]})+'\n\n',{headers:{'content-type':'text/event-stream'}}))
+ })
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>memory,settings,gateway:{complete:()=>Promise.reject(Error('automatic learning forbidden')),async *stream(){await Promise.reject(Error('automatic learning forbidden'))}},onDiagnostic:()=>undefined}),()=>undefined)
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:mode==='chat'?'chat':'plan'}]] as const){const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(result.ok,true)}
+  if(mode==='build'){
+   const result=await host.command({type:'personal.command',request_id:'build',method:'build.begin',params:{text,project:root}},{client_id:'desktop:local'}) as {ok:boolean}
+   assert.equal(result.ok,true)
+  }else await host.submitConversationText('chat:main',text)
+  await host.waitConversation(host.conversationSnapshot().selected_id)
+  assert.equal(requests.length,1)
+  if(mode!=='chat'){
+   assert.match(JSON.stringify(requests[0]!.messages),/possible_memory/)
+   assert.ok(consumers.length>=2);assert.ok(consumers.every(value=>value===consumer))
+   const messages=requests[0]!.messages as {role:string;content:string}[]
+   assert.equal(messages[0]!.role,'system')
+   assert.match(messages[0]!.content,/scope=general.*scope=user/u)
+  }
+  assert.equal(rememberCalls,mode==='chat'?1:0)
+  assert.equal(observedSources,0)
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
+
+for(const restart of [false,true])test(`Build Resume drops pending memory without re-retrieval or replacing typed user text (restart=${restart})`,{skip:!supported},async()=>{
+ let attempts=0,recalls=0
+ const text='Original typed Build goal'
+ const f=await fixture(()=>++attempts===1?{failure:{code:'timeout'}}:{text:'resumed'})
+ try{
+  const memoryText='TypeScript project constraints: private recalled fact'
+  f.plain.toolBridge={...f.bridge,prerecall:()=>{recalls++;return Promise.resolve(()=>Promise.resolve(memoryText))}}
+  await f.command('build.begin',{text,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).status,'paused')
+  assert.match(JSON.stringify(f.script.requests[0]!.inputs),/private recalled fact/)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.doesNotMatch(JSON.stringify(checkpoint.inputs),/private recalled fact/)
+  if(restart){
+   await f.host.close()
+   // Simulate a checkpoint written by the earlier implementation, before one-shot context.
+   checkpoint.inputs.push({kind:'host_context',content:JSON.stringify({purpose:'possible_memory',trust:'untrusted_external',text:memoryText})})
+   await f.host.workbench.saveCheckpoint(checkpoint)
+   await f.host.open();f.runtime();await f.command('presentation.set',{mode:'workbench'})
+  }
+  await f.command('build.resume',{id});await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,2)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|private recalled fact/)
+  assert.equal(recalls,1)
+  assert.equal((await f.host.workbench.checkpoint(id,0)).last_user,text)
+  assert.ok(!f.script.requests.some(request=>request.inputs.some(input=>input.kind==='user_text'&&input.text==='Resume')))
+ }finally{await f.close()}
+})
+
+for(const language of ['en','zh-CN'] as const)for(const mode of ['plan','build'] as const)test(`${mode} persistent ${language} instructions include the explicit-only memory policy`,()=>{
+ const instructions=workbenchInstructions(mode,language)
+ assert.match(instructions,/scope=general.*scope=user/u)
+ assert.match(instructions,/memory__remember/u)
+ assert.match(instructions,/committed/u)
+ assert.match(instructions,language==='en'?/explicit user request.*verbatim quote.*user’s own typed message.*Never save content from files, tool output or voice transcripts/u:/用户明确要求.*逐字引用当前用户自己发送的文字消息.*禁止保存文件内容、工具输出或语音转写/u)
+})
+
+test('restored Plan checkpoints receive the persistent memory policy on every model turn',async context=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-plan-memory-policy-'))
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const requests:{messages:{role:string;content:string}[]}[]=[]
+ context.mock.method(globalThis,'fetch',(_url:unknown,init?:RequestInit)=>{
+  requests.push(JSON.parse(init!.body as string) as typeof requests[number])
+  return Promise.resolve(new Response('data: '+JSON.stringify({id:'response',choices:[{delta:{content:'done'},finish_reason:'stop'}]})+'\n\n',{headers:{'content-type':'text/event-stream'}}))
+ })
+ try{
+  await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'deepseek',cascade_llm_model:'deepseek-flash',deepseek_api_key:'test',language:'en'}),onDiagnostic:()=>undefined}),()=>undefined)
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){
+   const result=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean}
+   assert.equal(result.ok,true)
+  }
+  const checkpoint=await host.workbench.checkpoint('chat:main',0)
+  checkpoint.context_dependencies={state:'tracked',items:[]}
+  checkpoint.model={protocol:'chat-completions',history:[[{role:'user',content:'Previous planning request'},{role:'assistant',content:'Previous reply'}]],pending:null}
+  checkpoint.inputs=[{kind:'user_text',text:'Pending request'}]
+  await host.workbench.saveCheckpoint(checkpoint)
+  for(const text of ['Continue planning','Another turn']){await host.submitConversationText('chat:main',text);await host.waitConversation('chat:main')}
+  assert.equal(requests.length,2)
+  assert.ok(requests[0]!.messages.some(message=>message.content==='Previous planning request'))
+  assert.ok(requests[0]!.messages.some(message=>message.content==='Pending request'))
+  for(const request of requests){
+   assert.equal(request.messages[0]!.role,'system')
+   assert.match(request.messages[0]!.content,/explicit user request.*scope=general.*scope=user.*verbatim quote/u)
+   assert.doesNotMatch(JSON.stringify(request.messages),/"purpose":"memory_scope"/u)
+  }
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})
+
+for(const failure of ['timeout','output_limit'] as const)test(`Plan drops pending memory before ${failure==='timeout'?'a new turn':'an automatic output-limit retry'}`,async()=>{
+ let attempts=0,recalls=0
+ const f=await fixture(()=>++attempts===1?{failure:{code:failure}}:{text:'done'})
+ try{
+  f.plain.toolBridge={...f.bridge,prerecall:()=>Promise.resolve(++recalls===1?()=>Promise.resolve('one-shot recalled secret'):null)}
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Plan the project');await f.host.waitConversation('chat:main')
+  if(failure==='timeout'){await f.host.submitConversationText('chat:main','Continue');await f.host.waitConversation('chat:main')}
+  assert.equal(f.script.requests.length,2)
+  assert.match(JSON.stringify(f.script.requests[0]!.inputs),/one-shot recalled secret/)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]!.inputs),/possible_memory|one-shot recalled secret/)
+  assert.equal(recalls,failure==='timeout'?2:1)
+ }finally{await f.close()}
+})
+
+for(const legacy of [false,true])test(`app-informed Workbench checkpoint persists dependencies and rejects revoked model reuse (${legacy?'legacy':'tracked'})`,async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-workbench-deps-')),path=join(directory,'personal.json'),secret='Synthetic checkpoint app fact L-917'
+ const make=()=>new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let host=make(),runtime:ConversationRuntime|undefined
+ const first=scripted(()=>({text:secret})),next=scripted(()=>({text:'Current valid answer'})),rejected=scripted(()=>({text:'Must not run'}))
+ const bridge:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:''}),close:()=>Promise.resolve(),toolBridge:{tools:[],readonlyNames:[],origin:()=>Promise.resolve('conversation:1'),invoke:()=>Promise.reject(Error('must not replay tools'))}}
+ try{
+  await host.open();await host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const row=host.life.snapshot().todos[0]!,at=new Date().toISOString(),conversation={id:'chat:main',kind:'chat' as const,mode:'plan' as const,title:'Plan',subject_key:null,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[{id:'user',conversation_id:'chat:main',role:'user' as const,text:'Previous question',created_at:at},{id:'answer',conversation_id:'chat:main',role:'assistant' as const,text:secret,context_dependencies:{state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]},created_at:at}],feed_ids:[],prepared:null,read_through_id:null}
+  const open=(factory:CascadedLlmFactory)=>createWorkbenchRuntime({conversation,host,factory,contextConsumer:null,createBridge:()=>Promise.resolve(bridge),emit:()=>{/* local */},lifetime:new AbortController().signal,language:'en',approval:'never'})
+  runtime=await open(first.factory);const result=await runtime.runTurn('Plan from report',new AbortController().signal)
+  assert.equal(result.assistant,secret);assert.ok(JSON.stringify(first.requests).includes(secret))
+  const checkpoint=await host.workbench.checkpoint(conversation.id,0)
+  assert.deepEqual(checkpoint.context_dependencies,result.context_dependencies)
+  await runtime.close();runtime=undefined;await host.close();host=make();await host.open()
+  runtime=await open(next.factory);await runtime.runTurn('Continue authorized plan',new AbortController().signal)
+  assert.equal(next.restores.length,1,'valid model state survives restart')
+  assert.equal(next.requests.length,1)
+  await runtime.close();runtime=undefined
+  const saved=await host.workbench.checkpoint(conversation.id,0)
+  saved.calls.push({id:'already-executed',name:'file_write',arguments:{path:'evidence.txt'},state:'completed',result:{status:'ok'}})
+  saved.pending_calls=[saved.calls.at(-1)!]
+  if(legacy)delete saved.context_dependencies
+  await host.workbench.saveCheckpoint(saved)
+  await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed app authority'},'revoke')
+  await host.close();host=make();await host.open();runtime=await open(rejected.factory)
+  await assert.rejects(runtime.runTurn('Resume old plan',new AbortController().signal),/context_authorization_changed/)
+  assert.equal(rejected.restores.length,0);assert.equal(rejected.requests.length,0,'no revoked model/inputs reach the actual model port')
+  const withheld=await host.workbench.checkpoint(conversation.id,0)
+  assert.equal(withheld.reason,'context_authorization_changed')
+  assert.deepEqual(withheld.calls,saved.calls);assert.deepEqual(withheld.pending_calls,saved.pending_calls,'tool receipts survive invalidation without replay/reset')
+  assert.deepEqual(withheld.model,saved.model,'private model checkpoint remains locally preserved')
+ }finally{await runtime?.close();await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('owned legacy no-app Workbench checkpoint remains resumable without dependency fields',async()=>{
+ const f=await fixture(()=>({text:'Independent plan reply'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Independent planning request','legacy-user');await f.host.waitConversation('chat:main')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  delete checkpoint.context_dependencies;await f.host.workbench.saveCheckpoint(checkpoint)
+  await f.host.close();await f.host.open();f.runtime()
+  await f.host.submitConversationText('chat:main','Continue unrelated plan','legacy-resume');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests.length,2)
+  assert.equal(f.script.restores.length,1)
+  assert.deepEqual((await f.host.workbench.checkpoint('chat:main',0)).context_dependencies,{state:'tracked',items:[]})
+ }finally{await f.close()}
+})
+
+test('unverifiable legacy Workbench model text is not treated as an empty dependency set',async()=>{
+ const f=await fixture(()=>({text:'Independent planning reply'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Owned planning request','first');await f.host.waitConversation('chat:main')
+  const checkpoint=await f.host.workbench.checkpoint('chat:main',0)
+  delete checkpoint.context_dependencies;checkpoint.model={unknown_history:'Unattributed synthetic app fact'}
+  await f.host.workbench.saveCheckpoint(checkpoint);await f.host.close();await f.host.open();f.runtime()
+  await f.host.submitConversationText('chat:main','Do not reconstruct unknown text','next');await f.host.waitConversation('chat:main')
+  assert.equal(f.script.requests.length,1);assert.equal(f.script.restores.length,0)
+  assert.equal((await f.host.workbench.checkpoint('chat:main',0)).reason,'context_authorization_changed')
+ }finally{await f.close()}
+})
+
+for(const scenario of ['revoked','valid','no-app','legacy'] as const)test(`confirmed Plan provenance follows a fresh empty-history Build (${scenario})`,{skip:!supported},async()=>{
+ const secret='Synthetic confirmed app plan L-917'
+ const f=await fixture((request,step)=>request.tools.some(tool=>tool.name==='finish_build')?{text:'Build checked current context'}:step===0?{call:{name:'publish_plan',arguments:{title:'Versioned plan',content:secret}}}:{text:'Plan ready'},'never')
+ try{
+  await f.host.life.mutate({op:'create',kind:'todo',title:secret},'source')
+  const row=f.host.life.snapshot().todos[0]!
+  if(scenario!=='no-app'){
+   await f.host.close()
+   const {PersonalStore}=await import('../src/personal-agent/store.js'),store=new PersonalStore(join(f.root,'personal.json')),state=await store.read(),at=new Date().toISOString()
+   state.conversations.items[0]!.messages=[{id:'report-user',conversation_id:'chat:main',role:'user',text:'Review app source',created_at:at},{id:'report-answer',conversation_id:'chat:main',role:'assistant',text:secret,context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:at}]
+   await store.write(state);await f.host.open();f.runtime()
+  }
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main',scenario==='no-app'?'Publish the complete plan: '+secret:'Publish the complete plan','plan');await f.host.waitConversation('chat:main')
+  const reference=f.host.conversationSnapshot().items.find(item=>item.id==='chat:main')!.plan!
+  let plan=await f.host.workbench.plan(reference.id,reference.version)
+  assert.deepEqual(plan.context_dependencies,scenario==='no-app'?{state:'tracked',items:[]}:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  assert.ok(JSON.stringify(f.script.requests).includes(secret),'actual Plan request/publication chain carries synthetic plan text')
+  if(scenario==='valid'){const firstVersion=plan.version;const edited=await f.host.publishPlan('chat:main',0,plan.title,plan.content+'\nUser clarification');assert.equal(edited.id,plan.id);assert.equal(edited.version,firstVersion+1);assert.deepEqual(edited.context_dependencies,plan.context_dependencies);assert.deepEqual((await f.host.workbench.plan(plan.id,firstVersion)).context_dependencies,plan.context_dependencies);plan=edited}
+  if(scenario==='legacy'){
+   delete plan.context_dependencies;await f.host.workbench.savePlan(plan)
+   const checkpoint=await f.host.workbench.checkpoint('chat:main',0);delete checkpoint.context_dependencies;await f.host.workbench.saveCheckpoint(checkpoint)
+  }
+  if(scenario==='revoked'||scenario==='legacy')await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed source'},'revoke')
+  const count=f.script.requests.length
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id;assert.notEqual(id,'chat:main');await f.host.waitConversation(id)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.ok(!f.host.conversationSnapshot().messages.some(message=>message.id==='report-answer'),'fresh Build contains no source transcript')
+  if(scenario==='valid'||scenario==='no-app'){
+   assert.equal(f.script.requests.length,count+1)
+   assert.ok(f.script.requests.at(-1)!.workspaceContext?.includes(secret),'actual Build model input receives the authorized confirmed plan')
+   assert.deepEqual(checkpoint.context_dependencies,plan.context_dependencies)
+  }else{
+   assert.equal(f.script.requests.length,count,'no revoked plan reaches any fresh Build model request')
+   assert.equal(checkpoint.reason,'context_authorization_changed')
+  }
+  const retained=await f.host.workbench.plan(plan.id,plan.version)
+  assert.equal(retained.content,plan.content);assert.equal(retained.id,plan.id);assert.equal(retained.version,plan.version)
+ }finally{await f.close()}
+})
+
+for(const scenario of ['manual','no-app','source-backed','revoked-during-preparation','revoked-after-reservation'] as const)test(`external confirmed plan revalidates canonical dependencies before bridge invocation (${scenario})`,async()=>{
+ const f=await fixture(()=>({text:'unused'}),'never')
+ try{
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const row=scenario==='source-backed'?await f.host.life.mutate({op:'from_suggestion',kind:'todo',suggestion_id:'source',title:'Private source record',note:'Private plan fact',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'source'):await f.host.life.mutate({op:'create',kind:'todo',title:'Manual plan record'},'manual')
+  const dependencies=scenario==='no-app'?{state:'tracked' as const,items:[]}:{state:'tracked' as const,items:[{kind:'app_record' as const,section:'todos' as const,id:row.id,version:row.version}]}
+  const plan=await f.host.publishPlan('chat:main',0,'Delegation plan','Complete local plan text',undefined,dependencies)
+  if(scenario==='revoked-during-preparation')f.bridge.origin=async()=>{await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed while preparing'},'change');return 'memory:test-user'}
+  if(scenario==='revoked-after-reservation'){const mark=f.host.tasks.markEffectDispatching.bind(f.host.tasks);f.host.tasks.markEffectDispatching=async id=>{await mark(id);await f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed after reservation'},'change-reservation')}}
+  const result=await f.raw('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  if(scenario==='source-backed'||scenario==='revoked-during-preparation'||scenario==='revoked-after-reservation'){
+   assert.equal(result.ok,false);assert.equal(result.error,'context_authorization_changed');assert.equal(f.invocations.length,0)
+   assert.equal(f.host.conversationSnapshot().items[0]!.mode,'plan')
+   assert.ok(f.host.tasks.list().every(task=>!task.work_ids.length),'authorization denial cannot claim external delivery')
+   if(scenario==='revoked-after-reservation')for(const task of f.host.tasks.list()){assert.equal(task.waiting_reason,'plan_delegation_refused');assert.equal(f.host.tasks.pendingEffect(task.id),null)}
+  }else{
+   assert.equal(result.ok,true);assert.equal(f.invocations.length,1)
+   assert.ok(f.host.tasks.list().some(task=>task.work_ids.length===1))
+   assert.ok(!JSON.stringify(f.invocations).includes('context_dependencies'),'executor tool arguments contain no provenance/guard callback')
+  }
+  assert.equal((await f.host.workbench.plan(plan.id,plan.version)).content,plan.content)
+ }finally{await f.close()}
+})
+
+for(const receiver of ['build-a','build-b'])test(`confirmed source-backed plan uses the actual Build recipient (${receiver})`,{skip:!supported},async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-build-recipient-')),script=scripted(()=>({text:'Current Build result'}))
+ const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),canReadConversationEvidence:(_ref:string,consumer:string)=>Promise.resolve(consumer==='build-a')} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:''}),close:()=>Promise.resolve(),toolBridge:{tools:[],readonlyNames:[],origin:()=>Promise.resolve('conversation:1'),invoke:()=>Promise.reject(Error('unused'))}}
+ try{
+  await host.open()
+  host.setConversationRuntime((conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,contextConsumer:receiver,factory:script.factory,createBridge:()=>Promise.resolve(bridge),emit,lifetime:lifetime??new AbortController().signal,language:'en',approval:'never'}),()=>{/* local */})
+  for(const [method,params] of [['presentation.set',{mode:'workbench'}],['conversations.mode',{id:'chat:main',mode:'plan'}]] as const){const ack=await host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(ack.ok,true)}
+  const row=await host.life.mutate({op:'from_suggestion',kind:'todo',suggestion_id:'source',title:'Receiver-scoped app plan fact',note:'Private source',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'source')
+  const plan=await host.publishPlan('chat:main',0,'Scoped plan','Receiver-scoped app plan fact',undefined,{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  const ack=await host.command({type:'personal.command',request_id:'confirm',method:'build.start',params:{id:'chat:main',plan_id:plan.id,version:plan.version,project:directory}},{client_id:'desktop:local'}) as {ok:boolean}
+  assert.equal(ack.ok,true);const id=host.conversationSnapshot().selected_id;await host.waitConversation(id)
+  assert.equal(script.requests.length,receiver==='build-a'?1:0)
+  if(receiver==='build-a')assert.ok(script.requests[0]!.workspaceContext?.includes(plan.content))
+  else assert.equal((await host.workbench.checkpoint(id,0)).reason,'context_authorization_changed')
+ }finally{await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
+test('a direct Build with no references never reads global context authorization',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'file_write',arguments:{path:'work.txt',content:'done'}}}:{text:'Verified'},'never')
+ try{
+  let checks=0
+  f.host.contextAuthorizationRevision=()=>{checks++;return Promise.resolve(String(checks))}
+  await f.command('build.begin',{text:'Write work.txt',project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(checks,0)
+  assert.equal(buildView(f.host,id).status,'completed')
+  assert.equal(await readFile(join(f.root,'work.txt'),'utf8'),'done')
+ }finally{await f.close()}
+})
+
+test('a running Build drops invalidated plan context and continues with durable tool receipts',{skip:!supported},async()=>{
+ const secret='Synthetic revoked plan content L-918'
+ const f=await fixture(async(request,step)=>{
+  if(step===0&&request.workspaceContext?.includes(secret)){
+   await revoke()
+   return {call:{name:'file_write',arguments:{path:'work.txt',content:'done'},id:'write-once'}}
+  }
+  return {text:'Continued with available context'}
+ },'never')
+ let revoke:()=>Promise<unknown>
+ try{
+  const row=await f.host.life.mutate({op:'create',kind:'todo',title:secret},'create')
+  revoke=()=>f.host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed context'},'change')
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  const plan=await f.host.publishPlan('chat:main',0,'Context-bound plan',secret,undefined,{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]})
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const id=f.host.conversationSnapshot().selected_id
+  await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,2)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[1]),/L-918|work\.txt/)
+  assert.equal(f.script.restores.length,0)
+  const checkpoint=await f.host.workbench.checkpoint(id,0)
+  assert.equal(checkpoint.status,'completed')
+  assert.deepEqual(checkpoint.calls.map(call=>call.id),['write-once'])
+  assert.equal(await readFile(join(f.root,'work.txt'),'utf8'),'done')
+  await f.host.close();await f.host.open();f.runtime()
+  await f.command('build.resume',{id});await f.host.waitConversation(id)
+  assert.equal(f.script.requests.length,3)
+  assert.doesNotMatch(JSON.stringify(f.script.requests[2]),/L-918/)
+  assert.deepEqual((await f.host.workbench.checkpoint(id,0)).calls.map(call=>call.id),['write-once'])
+ }finally{await f.close()}
+})
+
+test('excluded non-product report does not taint an independent Plan publication, fresh Build or delegation',{skip:!supported},async()=>{
+ const excluded='Synthetic retained non-product scheduled report L-917',content='Independent no-app plan: inspect the local project'
+ const f=await fixture((request,step)=>request.tools.some(tool=>tool.name==='finish_build')?{text:'Independent Build reply'}:step===0?{call:{name:'publish_plan',arguments:{title:'Independent plan',content}}}:{text:'Independent plan ready'},'never')
+ try{
+  const context={todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}
+  const schedule=await f.host.schedules.create('create',{title:'Retained report',goal:'Review todos',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context},{user_scope:'local-test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context})
+  const run=await f.host.schedules.runNow('run',schedule.id,1),task=await f.host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await f.host.schedules.bindTask(run.run_id,task.id);await f.host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  const page=await f.host.readAppContext('todos',null,f.host.scheduledRunGrant(run.run_id,new AbortController().signal,null))
+  await f.host.tasks.recordDelivery(fence,'report',excluded);await f.host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:report'],criteria:[{index:0,evidence_refs:['task-delivery:report']}]})
+  await f.host.schedules.markFinished(run.run_id,{memory_origin:'non_product',outcome:'completed',text:excluded,evidence_refs:page.evidence_refs,consumer:null,published:false})
+  await f.host.publishScheduledResult(run.run_id)
+  assert.equal(await f.host.scheduledResultAuthorized(run.run_id),false)
+  const report=f.host.conversationSnapshot().messages.find(message=>message.schedule_ref?.run_id===run.run_id)!
+  assert.equal(report.memory_origin,'non_product');assert.ok(report.text.includes(excluded))
+  await f.command('conversations.mode',{id:'chat:main',mode:'plan'})
+  await f.host.submitConversationText('chat:main','Publish an independent no-app plan','independent');await f.host.waitConversation('chat:main')
+  const reference=f.host.conversationSnapshot().items.find(item=>item.id==='chat:main')!.plan!
+  const published=await f.host.workbench.plan(reference.id,reference.version)
+  assert.deepEqual(published.context_dependencies,{state:'tracked',items:[]},'host publication preserves actual filtered-input provenance')
+  const plan=await f.host.publishPlan('chat:main',0,published.title,published.content+'\nUser clarification')
+  assert.equal(plan.version,published.version+1);assert.deepEqual(plan.context_dependencies,published.context_dependencies,'host-only edit fallback also excludes non-product history')
+  const count=f.script.requests.length
+  await f.command('build.start',{id:'chat:main',plan_id:plan.id,version:plan.version,project:f.root})
+  const build=f.host.conversationSnapshot().selected_id;await f.host.waitConversation(build)
+  assert.equal(f.script.requests.length,count+1);assert.equal((JSON.parse(f.script.requests.at(-1)!.workspaceContext!) as {confirmed_plan:{content:string}}).confirmed_plan.content,plan.content,'actual fresh Build receives the independent confirmed plan')
+  assert.deepEqual((await f.host.workbench.checkpoint(build,0)).context_dependencies,{state:'tracked',items:[]})
+  await f.command('plans.delegate',{id:'chat:main',plan_id:plan.id,version:plan.version,executor:'codex'})
+  assert.equal(f.invocations.length,1)
+  const delegated=f.host.tasks.list().find(task=>task.approved_plan?.id===plan.id)!
+  assert.equal(delegated.approved_plan!.content,plan.content);assert.equal(delegated.work_ids.length,1);assert.equal(f.host.tasks.pendingEffect(delegated.id),null)
+  const executorInput=approvedPlanWorkOrder({workOrder:'Execute confirmed plan',approvedPlan:delegated.approved_plan!})
+  assert.ok(executorInput.includes(plan.content))
+  assert.ok(!JSON.stringify(f.script.requests).includes(excluded),'neither actual Plan nor Build model inputs contain the excluded report')
+  assert.ok(!JSON.stringify(f.invocations).includes(excluded)&&!executorInput.includes(excluded),'executor inputs contain no excluded report')
+  await f.command('conversations.select',{id:'chat:main'})
+  assert.ok(f.host.conversationSnapshot().messages.some(message=>message.id===report.id&&message.text.includes(excluded)),'original report remains locally visible')
+ }finally{await f.close()}
+})
+
+/** Reopens the fixture's host with a Build runtime whose shell process probe is injected. */
+async function reopenWithLeftover(f:Awaited<ReturnType<typeof fixture>>,id:string,state:()=>'gone'|'alive'|'unknown',platform:'darwin'|'win32'=process.platform==='win32'?'win32':'darwin'){
+ const checkpoint=await f.host.workbench.checkpoint(id,0)
+ checkpoint.calls.push({id:'shell-left',name:'shell_execute',arguments:{command:'sleep 1'},state:'completed',result:{status:'completed',exit_code:0,cleanup_confirmed:false},process:{platform,pid:2**30}})
+ await f.host.workbench.saveCheckpoint(checkpoint);await f.host.close()
+ const host=new PersonalAgentHost({path:join(f.root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const bridge:NonNullable<ConversationRuntime['toolBridge']>={tools:[],readonlyNames:[],origin:()=>Promise.resolve('memory:test-user'),invoke:()=>Promise.resolve(null)}
+ const plain:ConversationRuntime={runTurn:()=>Promise.resolve({assistant:'chat'}),close:()=>Promise.resolve(),toolBridge:bridge}
+ host.setConversationRuntime(async(conversation,emit,_mode,lifetime)=>createWorkbenchRuntime({conversation,host,factory:f.script.factory,createBridge:()=>Promise.resolve(plain),emit,lifetime:lifetime??new AbortController().signal,language:'zh-CN',approval:()=>'never',shell:{processState:state}}),()=>{ /* no renderer */ })
+ await host.open();host.setWorkbenchExecutors(['codex'])
+ const shown=await host.command({type:'personal.command',request_id:'reopen-workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'}) as {ok:boolean};assert.equal(shown.ok,true)
+ return host
+}
+
+test('a leftover that cannot be verified pauses plainly, and Resume is the acknowledgement that releases it',{skip:!supported},async()=>{
+ let calls=0
+ const f=await fixture(()=>{calls++;return calls===1?{text:'done'}:calls===2?{call:{name:'file_write',arguments:{path:'after.txt',content:'ok'}}}:{text:'carried on'}},'never')
+ const id=await f.build();await f.host.waitConversation(id)
+ const host=await reopenWithLeftover(f,id,()=>'unknown')
+ try{
+  await host.submitConversationText(id,'再改一处',undefined,undefined,{local_desktop:true});await host.waitConversation(id)
+  const paused=buildView(host,id)
+  assert.equal(paused.status,'paused');assert.equal(paused.reason,'cleanup_unconfirmed');assert.match(paused.reason_detail!,/没法确认「sleep 1」/)
+  assert.match(host.conversationSnapshot().messages.at(-1)!.text,/Nova 没法确认「sleep 1」留下的进程是否已退出。你确认没问题后点「继续」，Nova 会接着做。/)
+  await assert.rejects(readFile(join(f.root,'after.txt')),{code:'ENOENT'})
+  const result=await host.command({type:'personal.command',request_id:'ack',method:'build.resume',params:{id}},{client_id:'desktop:local'}) as {ok:boolean;error?:string};assert.equal(result.ok,true,result.error)
+  await host.waitConversation(id)
+  assert.equal(buildView(host,id).status,'completed');assert.equal(await readFile(join(f.root,'after.txt'),'utf8'),'ok')
+  const left=(await host.workbench.checkpoint(id,0)).calls.find(call=>call.id==='shell-left')!.result as {cleanup_confirmed:boolean;cleanup_acknowledged?:boolean}
+  assert.equal(left.cleanup_confirmed,true);assert.equal(left.cleanup_acknowledged,true)
+ }finally{await host.close();await f.close()}
+})
+
+test('a leftover that is provably alive is never released by Resume',{skip:!supported},async()=>{
+ let calls=0
+ const f=await fixture(()=>{calls++;return calls===1?{text:'done'}:{call:{name:'file_write',arguments:{path:'after.txt',content:'ok'},id:'w'+calls}}},'never')
+ const id=await f.build();await f.host.waitConversation(id)
+ const host=await reopenWithLeftover(f,id,()=>'alive')
+ try{
+  await host.submitConversationText(id,'再改一处',undefined,undefined,{local_desktop:true});await host.waitConversation(id)
+  assert.equal(buildView(host,id).reason,'cleanup_unconfirmed');assert.match(host.conversationSnapshot().messages.at(-1)!.text,/还有进程没确认退出/)
+  await host.command({type:'personal.command',request_id:'again',method:'build.resume',params:{id}},{client_id:'desktop:local'});await host.waitConversation(id)
+  assert.equal(buildView(host,id).reason,'cleanup_unconfirmed');await assert.rejects(readFile(join(f.root,'after.txt')),{code:'ENOENT'})
+ }finally{await host.close();await f.close()}
+})
+
+test('parallel reads that reacquire the project share one acquisition instead of failing with project_busy',{skip:!supported},async()=>{
+ let calls=0,gone=false
+ const f=await fixture(()=>{calls++;if(calls===1)return {text:'done'};if(calls===2){gone=true;return {calls:[{name:'file_read',arguments:{path:'a.txt'},id:'ra'},{name:'file_read',arguments:{path:'b.txt'},id:'rb'}]}};return {text:'both read'}},'never')
+ await writeFile(join(f.root,'a.txt'),'A');await writeFile(join(f.root,'b.txt'),'B')
+ const id=await f.build();await f.host.waitConversation(id)
+ const host=await reopenWithLeftover(f,id,()=>gone?'gone':'alive')
+ try{
+  await host.submitConversationText(id,'读两个文件',undefined,undefined,{local_desktop:true});await host.waitConversation(id)
+  const state=await host.workbench.checkpoint(id,0)
+  assert.equal(buildView(host,id).status,'completed',JSON.stringify({reason:state.reason}))
+  assert.deepEqual(state.calls.filter(call=>call.name==='file_read').map(call=>(call.result as {code?:string}).code),[undefined,undefined])
+ }finally{await host.close();await f.close()}
+})
+
+test('a denied compound shell command also denies a respelling of its destructive part, and a new message starts clean',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step===0?{call:{name:'shell_execute',arguments:{command:'echo x; rm target.txt'},id:'c0'}}:step===1?{call:{name:'shell_execute',arguments:{command:"sh -c 'rm ./target.txt'",cwd:'.'},id:'c1'}}:step===2?{call:{name:'shell_execute',arguments:{command:'rm target.txt'},id:'c2'}}:{text:'ok'})
+ try{
+  const id=await f.build(),view=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+  const paused=await f.host.workbench.checkpoint(id,0)
+  assert.equal(paused.reason,'approval_denied');assert.deepEqual(paused.calls.map(call=>(call.result as {status:string}).status),['denied','denied_previously'])
+  assert.ok(paused.denied_classes!.some(klass=>klass.startsWith('shell:rm@rel:target.txt')))
+  // a new typed message is a new authorization turn: the old denials are not restored
+  await f.host.submitConversationText(id,'再试一次',undefined,undefined,{local_desktop:true})
+  const asked=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  assert.ok(asked.approval)
+  await f.command('build.approve',{id,approval_id:asked.approval!.id,approved:false});await f.host.waitConversation(id)
+ }finally{await f.close()}
+})
+
+test('Resume restores only the denials of the current authorization turn',{skip:!supported},async()=>{
+ const f=await fixture((_request,step)=>step<2?{call:{name:'file_write',arguments:{path:'x.txt',content:'x'},id:'w'+step}}:step===2?{call:{name:'file_write',arguments:{path:'y.txt',content:'y'},id:'w2'}}:{text:'ok'})
+ try{
+  const id=await f.build(),view=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  await f.command('build.approve',{id,approval_id:view.approval!.id,approved:false});await f.host.waitConversation(id)
+  assert.equal(buildView(f.host,id).reason,'approval_denied')
+  const stored=(await f.host.workbench.checkpoint(id,0)).denied_classes!
+  assert.equal(stored.length,1);assert.ok(stored[0]!.endsWith('x.txt'))
+  await f.command('build.resume',{id})
+  const next=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
+  await f.command('build.approve',{id,approval_id:next.approval!.id,approved:true});await f.host.waitConversation(id)
+  assert.equal(await readFile(join(f.root,'y.txt'),'utf8'),'y');await assert.rejects(readFile(join(f.root,'x.txt')))
  }finally{await f.close()}
 })

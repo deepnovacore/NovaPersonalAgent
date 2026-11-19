@@ -17,7 +17,7 @@ test('external result excludes internal task context and synchronous result does
 })
 test('speech selection of an admitted Feed notification does not publish another notice',()=>{
  const received:ProactiveNotice[]=[];const {service,queued}=realtimeServiceHarness('projection',{proactiveRouting:{local:()=>true,publish:n=>{received.push(n);return Promise.resolve()}}});
- service.onSuggestionSelected(new SuggestionPool().add({origin:'surrogate',kind:'notify',content:{summary:'Already admitted',personal_feed_id:'feed-1'},evidence_refs:[],salience:40,expires_at:999999}),{priority:40,origin:null} as Parameters<typeof service.onSuggestionSelected>[1]);assert.equal(received.length,0);assert.equal(queued().length,1)
+ service.onSuggestionSelected(new SuggestionPool().add({origin:'surrogate',kind:'notify',content:{summary:'Already admitted',personal_feed_id:'feed-1'},evidence_refs:[],salience:40,expires_at:999999}),{priority:40,origin:null} as Parameters<typeof service.onSuggestionSelected>[1],{authorizeBeforeInject:()=>Promise.resolve(true)});assert.equal(received.length,0);assert.equal(queued().length,1)
 })
 
 test('deferred progress retains its work lifecycle guard',()=>{

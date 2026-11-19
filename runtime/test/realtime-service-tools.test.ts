@@ -452,26 +452,6 @@ test('no-intake dispatch stays controller-owned while preserving the delegated a
   await service.close()
 })
 
-test('enter_plan_mode is a user-origin-bound inline host action and is unavailable outside Chat registrations',async()=>{
- const calls:{call_id:string;origin_ref:string;still_wanted:boolean}[]=[]
- const fixture=realtimeServiceHarness('pipeline',{includeEnterPlanMode:true,requestPlanMode:(callId,originRef,stillWanted)=>{
-  calls.push({call_id:callId,origin_ref:originRef,still_wanted:stillWanted()});return Promise.resolve({scheduled:true})
- }})
- await fixture.service.connect()
- const acceptance=await dispatchTurn(fixture.service,'enter_plan_mode',{})
- assert.equal(acceptance.accepted,true);assert.equal(acceptance.inline_fulfilled,true);assert.equal(acceptance.delegate_id,null)
- assert.deepEqual(calls,[{call_id:'call-origin',origin_ref:'conversation:1',still_wanted:true}])
- assert.deepEqual(JSON.parse(acceptance.host_item.content),{accepted:true,mode:'plan',scheduled:true})
- assert.equal(fixture.runtimeDispatches(),0)
- await fixture.service.close()
-
- const ordinary=realtimeServiceHarness('pipeline')
- await ordinary.service.connect()
- const refused=await dispatchTurn(ordinary.service,'enter_plan_mode',{})
- assert.equal(refused.accepted,false);assert.equal(refused.code,'unsupported_tool')
- await ordinary.service.close()
-})
-
 test('a local supersession before no-intake controller dispatch starts no runtime delegate', async () => {
   const serviceRef: {current: RealtimeService | undefined} = {current: undefined}
   const fixture = realtimeServiceHarness('pipeline', {
@@ -992,6 +972,31 @@ test('a terminal for a different response does not close the bound batch', async
   assert.deepEqual(service.deliveryState().continuationOrder, [], 'closed by its own terminal')
 })
 
+test('automatic recall continues when the response finishes before the user transcript', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const {service, actions, injectedItems} = realtimeServiceHarness('pipeline', {
+    userResponseMode: 'automatic', includeRecall: true,
+    personalMemory: {recall: async () => {
+      await gate
+      return {source: 'personal', state: 'empty', scope: 'recent', degraded: false, hits: [], contextHits: []}
+    }},
+  })
+  await service.connect()
+  try {
+    await service.handleEvent({kind:'user_speech_started',session_epoch:1,speech_id:'speech',provider_item_id:'user'})
+    await service.handleEvent({kind:'user_speech_ended',session_epoch:1,speech_id:'speech',provider_item_id:'user'})
+    await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'recall'})
+    await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'recall',item_id:'tool',call_id:'call',name:'memory__recall',arguments:{query:'invitation',source:'personal',scope:'any'}})
+    await service.handleEvent({kind:'response_terminal',session_epoch:1,response_id:'recall',status:'completed',reason:''})
+    await service.handleEvent({kind:'user_transcript_final',session_epoch:1,item_id:'user',text:'Decline the invitation and save a draft.'})
+    release()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(injectedItems.filter(item => item.call_id === 'call').length, 1)
+    assert.equal(actions.filter(action => action === 'create_response:tool_result').length, 1)
+  } finally { release(); await service.close() }
+})
+
 test('personal recall resolves through the ordinary tool-output continuation ledger', async () => {
   const {service, actions, injectedItems} = realtimeServiceHarness('pipeline', {
     includeRecall: true,
@@ -1450,3 +1455,9 @@ test('revoked scheduled context is never injected or continued through the provi
  assert.equal(reads,1);assert.equal(injectedItems.some(item=>item.content.includes('revoked context')),false);assert.equal(actions.slice(before).some(action=>action.startsWith('response')),false)
  }finally{await service.close()}
 })
+
+test('Space mobile host tool is origin-bound and returns its exact action receipt',async()=>{
+ let calls=0;
+ const {service}=realtimeServiceHarness('pipeline',{spaceMobile:{invoke:(raw,context)=>{calls++;assert.deepEqual(raw,{operation:'action',device:'phone',action:{tool:'reminder.create',args:{title:'Test',due:'2026-10-24T00:00:00.000Z'}}});assert.ok(context.request_id.startsWith('conversation:1:'));assert.equal(context.stillWanted(),true);return Promise.resolve({action_id:'host-action',status:'pending'})}}});
+ await service.connect();try{const receipt=await dispatchTurn(service,'mobile__action',{operation:'action',device:'phone',action:{tool:'reminder.create',args:{title:'Test',due:'2026-10-24T00:00:00.000Z'}},origin_ref:'conversation:1'});assert.equal(receipt.accepted,true);assert.equal(calls,1);assert.match(receipt.host_item.content,/host-action/);await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'unrelated-mobile',origin:{kind:'unknown'}});await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'unrelated-mobile',item_id:'wrong',call_id:'wrong',name:'mobile__action',arguments:{operation:'list',origin_ref:'conversation:1'}});assert.equal(calls,1)}finally{await service.close()}
+});

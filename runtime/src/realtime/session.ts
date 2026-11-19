@@ -663,6 +663,7 @@ export class RealtimeSession {
     intent: HostResponseIntent,
     options: {
       readonly responseAllowed?: () => boolean
+      readonly authorizeBeforeInject?:()=>Promise<boolean>
       readonly asUserActivation?: boolean
     } = {},
   ): Promise<HostResponseDelivery> {
@@ -671,6 +672,7 @@ export class RealtimeSession {
       confirmationTimeout: null,
       asUserActivation: options.asUserActivation ?? false,
       ...(options.responseAllowed === undefined ? {} : {responseAllowed: options.responseAllowed}),
+      ...(options.authorizeBeforeInject?{authorizeBeforeInject:options.authorizeBeforeInject}:{}),
     })
   }
 
@@ -686,6 +688,7 @@ export class RealtimeSession {
     options: {
       readonly confirmationTimeout?: number | null
       readonly responseAllowed?: () => boolean
+      readonly authorizeBeforeInject?:()=>Promise<boolean>
       readonly asUserActivation?: boolean
     } = {},
   ): Promise<HostResponseDelivery> {
@@ -694,6 +697,7 @@ export class RealtimeSession {
       confirmationTimeout: options.confirmationTimeout ?? null,
       asUserActivation: options.asUserActivation ?? false,
       ...(options.responseAllowed === undefined ? {} : {responseAllowed: options.responseAllowed}),
+      ...(options.authorizeBeforeInject?{authorizeBeforeInject:options.authorizeBeforeInject}:{}),
     })
   }
 
@@ -703,10 +707,12 @@ export class RealtimeSession {
       readonly allowPlaybackOverlap: boolean
       readonly confirmationTimeout: number | null
       readonly responseAllowed?: () => boolean
+      readonly authorizeBeforeInject?:()=>Promise<boolean>
       readonly asUserActivation: boolean
     },
   ): Promise<HostResponseDelivery> {
     const item = intent.item
+    const deliveryEpoch=this.sessionEpoch,replacementRevision=this.#providerReplacementRevision
     if (this.#state.hostEventIsDeduplicated(item.event_id)) {
       return {accepted: false, injectionEpoch: null}
     }
@@ -726,12 +732,15 @@ export class RealtimeSession {
     } else if (injectionEpoch !== null && injectionEpoch !== this.sessionEpoch) {
       return {accepted: false, injectionEpoch}
     } else if (injectionEpoch === null) {
-      await this.#injectHostItem(item, {
+      const injected=await this.#injectHostItem(item, {
         confirmationTimeout: options.confirmationTimeout,
         asUserActivation: options.asUserActivation,
+        ...(options.authorizeBeforeInject?{authorizeBeforeInject:async()=>await options.authorizeBeforeInject!()&&(options.allowPlaybackOverlap?this.providerIdle:this.foregroundIdle&&this.floor.state==='idle')}:{}),
       })
+      if(!injected)return {accepted:false,injectionEpoch:null}
       injectionEpoch = this.#state.injectedEventEpoch(item.event_id) ?? null
     }
+    if(options.authorizeBeforeInject&&(!await options.authorizeBeforeInject()||deliveryEpoch!==this.sessionEpoch||replacementRevision!==this.#providerReplacementRevision))return {accepted:false,injectionEpoch}
     if (options.responseAllowed !== undefined && !options.responseAllowed()) {
       return {accepted: false, injectionEpoch}
     }
@@ -746,14 +755,14 @@ export class RealtimeSession {
     return this.#injectHostItem(item, {confirmationTimeout: null, asUserActivation: false})
   }
 
-  async injectHostContext(item: HostContextItem): Promise<boolean> {
+  async injectHostContext(item: HostContextItem,authorization:{readonly authorizeBeforeInject?:()=>Promise<boolean>}={}): Promise<boolean> {
     if (item.kind === 'tool_output') {
       throw new TypeError('tool output requires injectToolOutput')
     }
     if (item.kind === 'workspace_context') {
       throw new TypeError('workspace context requires its dedicated delivery path')
     }
-    return this.#injectHostItem(item, {confirmationTimeout: null, asUserActivation: false})
+    return this.#injectHostItem(item, {confirmationTimeout: null, asUserActivation: false,...authorization})
   }
 
   /** Delivery passes may only start a queued input once; explicit approval retries use the port below. */
@@ -837,7 +846,7 @@ export class RealtimeSession {
 
   async #injectHostItem(
     item: HostContextItem,
-    options: {readonly confirmationTimeout: number | null; readonly asUserActivation: boolean},
+    options: {readonly confirmationTimeout: number | null; readonly asUserActivation: boolean;readonly authorizeBeforeInject?:()=>Promise<boolean>},
   ): Promise<boolean> {
     if (this.#replacementEpoch !== undefined && this.#replacementEpoch !== this.sessionEpoch) {
       throw new RealtimeDeliveryError('provider session replacement is pending')
@@ -845,6 +854,10 @@ export class RealtimeSession {
     const replacementRevision = this.#providerReplacementRevision
     const epoch = this.sessionEpoch
     if (this.#state.injectedEventEpoch(item.event_id) !== undefined) return false
+    if(options.authorizeBeforeInject){
+      if(!await options.authorizeBeforeInject())return false
+      if(replacementRevision!==this.#providerReplacementRevision||epoch!==this.sessionEpoch||this.#state.injectedEventEpoch(item.event_id)!==undefined)return false
+    }
     let identity: {
       readonly session_epoch: number
       readonly host_item_id: string
@@ -1676,9 +1689,13 @@ export class RealtimeSession {
     }
     const answered = this.#responseQuestions.get(this.#turnKey(completion.response_id, completion.session_epoch))
     if (answered && this.#latestQuestion?.id === answered.id) this.#latestQuestion = null
-    this.#finishResponseAuthority(completion.response_id, completion.session_epoch)
-    this.#onSpoken(completion.text)
-    this.#reportDelivery(completion)
+    // Delivery observers need the host event ids to mark a proactive reminder as heard.
+    try {
+      this.#onSpoken(completion.text)
+      this.#reportDelivery(completion)
+    } finally {
+      this.#finishResponseAuthority(completion.response_id, completion.session_epoch)
+    }
     this.#floor = this.#floor.onSpeakEnd(utteranceId)
     this.#state.advanceSnapshot()
     return completion

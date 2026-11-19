@@ -266,7 +266,7 @@ async function runCapabilityStatus() {
       let finishExit
       const exited = new Promise(resolveExit => {finishExit = resolveExit})
       const environment = {PATH: process.env.PATH, HOME: root, USERPROFILE: root, TMPDIR: smokeTmp,
-        MODEL_API_KEY: 'dummy-model-key', MODEL_BASE_URL: `https://127.0.0.1:${port}`,
+        DASHSCOPE_MODEL_BASE_URL: `https://127.0.0.1:${port}`,
         DASHSCOPE_API_KEY: 'dummy-dashscope-key', QWEN_REALTIME_URL: `wss://127.0.0.1:${port}/qwen`,
         BLACKBOARD_PATH: resolve(root, 'blackboard.sqlite'), BLACKBOARD_OWNER_ID: 'utility-smoke',
         NODE_EXTRA_CA_CERTS: certificate}
@@ -280,7 +280,7 @@ async function runCapabilityStatus() {
         tray: null, resetTrayUnreadForBackend, backendEverConnected: false, publishStartup: () => {}, startup: null,
         frontendUsage: {add: () => false}, settingsWindow: null,
         process: {env: environment, cwd: () => root}, app: {isPackaged: false, getAppPath: () => packageRoot, getPreferredSystemLanguages: () => ['en']}, packageRoot,
-        currentSettings: {capabilitiesConfigPath: path, pipelineMode: 'integrated', cascadedLlmProvider: 'qwen'}, desktopConfig: {workspace: root, modelBaseUrl: `https://127.0.0.1:${port}`}, codexStatus: {status: 'ready'},
+        currentSettings: {capabilitiesConfigPath: path, pipelineMode: 'integrated', cascadedLlmProvider: 'qwen'}, desktopConfig: {workspace: root}, codexStatus: {status: 'ready'},
         settingsGeneration: 9, launchGeneration: 0, runtimeCapabilities: null, backendControl: null, backend: null, backendGeneration: 0,
         mainWindow: null, computerOverlay: null, secretCodec: {}, decryptSecretsForSpawn: () => ({}), nodeRuntimeEntry: () => resolve(packageRoot, '../../runtime/dist/src/desktop-entry.js'),
         backendKind: 'node', smokeChannel: null, settingsApplyStatus: 'idle', backendStatus: {state: 'stopped', connection: null}, backendSupervisor: null,

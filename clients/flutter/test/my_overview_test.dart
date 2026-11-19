@@ -39,7 +39,6 @@ void main() {
               draft: const {'about': 'Stale draft'},
               language: 'en',
               onOpen: (id) => opened = id,
-              onSettings: () {},
             ),
           ),
         ),
@@ -53,6 +52,10 @@ void main() {
       expect(find.text('Archived thought'), findsNothing);
       await tester.tap(find.text('Latest thought'));
       expect(opened, 3);
+      await tester.scrollUntilVisible(find.text('Feeds'), 150);
+      await tester.tap(find.text('Feeds'));
+      expect(opened, 1);
+      expect(find.text('Briefs and recommendations'), findsOneWidget);
       expect(
         tester.getTopLeft(find.text('Latest thought')).dy,
         lessThan(tester.getTopLeft(find.text('Older thought')).dy),
@@ -78,7 +81,6 @@ void main() {
             draft: const {'about': 'Stale draft'},
             generatedProfile: const Text('Generated profile'),
             onOpen: (_) {},
-            onSettings: () {},
           ),
         ),
       ),

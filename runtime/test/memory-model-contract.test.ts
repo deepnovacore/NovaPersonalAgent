@@ -64,6 +64,8 @@ test('editing USER updates the same fact immediately and survives a fresh resour
  try{
   const turn=await f.turn('one','请记住叫我 kant')
   const saved=await f.memory.writeExplicit(turn,'name',{action:'set',kind:'preference',slot:'preferred_name',text:'kant',quote:'叫我 kant'},'chat')
+  // Explicit writes now commit before mirror publication; edit the published document.
+  await f.memory.options.client.memory('flush_files',{})
   const path=join(f.path+'.memory','USER.md');await writeFile(path,(await readFile(path,'utf8')).replace('kant','kay'))
   const context=JSON.stringify(await f.memory.prepareResponseAdaptation('chat'));assert.match(context,/kay/);assert.doesNotMatch(context,/kant/)
   const row=(await f.memory.lookupExplicit({slot:'preferred_name'},'chat')).entries[0]!;assert.equal(row.id,saved.id);assert.equal(row.version,2)

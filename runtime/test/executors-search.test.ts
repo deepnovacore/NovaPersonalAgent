@@ -396,7 +396,12 @@ test('the default transport uses HTTPS_PROXY for the Tavily tunnel', async () =>
   const previous = {
     HTTPS_PROXY: process.env.HTTPS_PROXY,
     NO_PROXY: process.env.NO_PROXY,
+    https_proxy: process.env.https_proxy,
+    no_proxy: process.env.no_proxy,
   }
+  // undici prefers lowercase proxy variables; isolate both spellings from the runner.
+  delete process.env.https_proxy
+  delete process.env.no_proxy
   process.env.HTTPS_PROXY = `http://127.0.0.1:${address.port}`
   process.env.NO_PROXY = ''
   try {
@@ -408,6 +413,10 @@ test('the default transport uses HTTPS_PROXY for the Tavily tunnel', async () =>
     else process.env.HTTPS_PROXY = previous.HTTPS_PROXY
     if (previous.NO_PROXY === undefined) delete process.env.NO_PROXY
     else process.env.NO_PROXY = previous.NO_PROXY
+    if (previous.https_proxy === undefined) delete process.env.https_proxy
+    else process.env.https_proxy = previous.https_proxy
+    if (previous.no_proxy === undefined) delete process.env.no_proxy
+    else process.env.no_proxy = previous.no_proxy
     await new Promise<void>((accept, reject) => proxy.close(error => error ? reject(error) : accept()))
   }
 })

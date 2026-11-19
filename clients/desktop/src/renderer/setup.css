@@ -88,3 +88,21 @@ footer { display: flex; align-items: center; justify-content: space-between; gap
 #status[data-tone="ok"] { color: var(--ok); }
 
 @media (max-width: 560px) { .paths { grid-template-columns: 1fr; } }
+
+/* Keep the legacy page surfaces aligned with the system-driven React theme. */
+@media (prefers-color-scheme: dark) {
+  :root {
+    color-scheme: dark;
+    --plate: #191c20;
+    --surface: #22262c;
+    --line: rgba(235, 240, 248, .12);
+    --line-strong: rgba(235, 240, 248, .25);
+    --ink: #eef1f5;
+    --ink-dim: #b0b8c5;
+    --accent: #efa866;
+    --accent-strong: #ffc18b;
+    --accent-wash: rgba(239, 168, 102, .12);
+    --warn: #ffb4ab;
+    --ok: #8dd9a5;
+  }
+}

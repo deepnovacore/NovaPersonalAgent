@@ -8,6 +8,44 @@ import {classifyBackendFailure, createBackendSupervisor, createBackendDiagnostic
 import {codingBackendStatus} from '../src/main/coding-settings.mjs'
 const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
+test('startup stage diagnostics log one safe marker per real stage change', () => {
+  const body = source.slice(
+    source.indexOf('const STARTUP_DIAGNOSTIC_STAGES'),
+    source.indexOf('async function paintStartup('),
+  )
+  const logs = [], orb = [], settings = []
+  const context = vm.createContext({
+    startup: {stage: 'configuration', code: null},
+    backendStatus: {state: 'starting'},
+    sendToOrb: (channel, payload) => orb.push([channel, payload]),
+    sendToSettings: (channel, payload) => settings.push([channel, payload]),
+    settingsView: () => ({view: true}),
+    console: {error: message => logs.push(message)},
+  })
+  vm.runInContext(body, context)
+  context.publishStartup('configuration')
+  assert.deepEqual(logs, [])
+  context.publishStartup('ready')
+  context.publishStartup('ready')
+  assert.deepEqual(logs, ['[desktop-diagnostic] startup_stage=ready'])
+  context.publishStartup('failed', '/Users/example/token=secret')
+  assert.deepEqual(logs, [
+    '[desktop-diagnostic] startup_stage=ready',
+    '[desktop-diagnostic] startup_stage=failed',
+  ])
+  context.publishStartup('token=secret')
+  assert.equal(logs.length, 2)
+  assert.doesNotMatch(logs.join('\n'), /Users|token|secret/u)
+  assert.equal(context.startup.stage, 'token=secret')
+  assert.equal(context.startup.code, null)
+  assert.equal(orb.length, 5)
+  assert.equal(settings.length, 5)
+  assert.deepEqual(JSON.parse(JSON.stringify(orb.at(-1))), [
+    'nova:backend-status',
+    {state: 'starting', startup: {stage: 'token=secret', code: null}},
+  ])
+})
+
 test('the first paint fence accepts a visible same-stage spinner and requires credential prose',async()=>{
   const body=source.slice(source.indexOf('async function paintStartup('),source.indexOf('async function accessCredentials('))
   const node=(stage,visible)=>({dataset:{stage},visible,getClientRects(){return this.visible?[{}]:[]}})
@@ -31,13 +69,32 @@ test('the first paint fence accepts a visible same-stage spinner and requires cr
   await assert.rejects(context.paintStartup('credentials'),error=>error.code==='startup_presentation_required')
 })
 
+test('closing settings releases recording and clears UI ownership after phone migration', () => {
+  const open = source.indexOf('function openSettingsWindow(')
+  const begin = source.indexOf("window.on('closed', () => {", open)
+  const body = source.slice(begin, source.indexOf('\n  })', begin) + 5)
+  const handlers = new Map()
+  let released = 0
+  const context = vm.createContext({
+    window: {on: (event, callback) => handlers.set(event, callback)},
+    endVoiceprintRecording: () => { released++ },
+    settingsWindow: {}, pendingSettingsCategory: 'connections',
+  })
+  vm.runInContext(body, context)
+  assert.equal(typeof handlers.get('closed'), 'function')
+  assert.doesNotThrow(() => handlers.get('closed')())
+  assert.equal(released, 1)
+  assert.equal(context.settingsWindow, null)
+  assert.equal(context.pendingSettingsCategory, null)
+})
+
 test('settings public projection never opens the keychain or capability files', () => {
   const body = source.slice(source.indexOf('function settingsView()'), source.indexOf('async function loadMemoryBoardExport()'))
   const touched = () => {throw Error('keychain/file access')}
-  const context = vm.createContext({capabilityEditorCache:null, skillsCache:[], runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
+  const context = vm.createContext({configuredSpaceModelsPath: () => null, settingsRestartPending: false, capabilityEditorCache:null, skillsCache:[], runtimeCapabilities:null, settingsWindow:{}, settingsGeneration:1, currentSettings:{},
     secretCodec:{available:touched}, capabilityDocumentRevision:touched, decryptSecretsForSpawn:touched,
     readCapabilityDocument:touched, resolveSecretConfiguration:()=>({secretsPresent:{},secretSources:{}}),process:{env:{}},developmentEnv:{},
-    secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],backendStatus:{state:'stopped'},
+    secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],MODEL_CATALOG:{},backendStatus:{state:'stopped'},
     settingsApplyStatus:'idle',settingsRecoveryAvailable:false,managedWorkspacesView:()=>({}),microphoneStatus:'unknown',wakeWord:null,desktopConfig:null,
     hasPlaintextSecret:()=>false,keyringAvailable:null,startup:{stage:'configuration',code:null},
     // Executable presence only: never reads the keychain, credentials or capability files.
@@ -214,18 +271,16 @@ test('generic assembly failure still schedules automatic recovery', async () => 
 })
 
 
-test('configuration commits start phone independently and keep its failures out of backend status', async () => {
+test('configuration commits keep startup readiness independent of unrelated device services', async () => {
   const body=source.slice(source.indexOf('async function commitDesktopConfiguration('),source.indexOf('async function discardDesktopConfiguration('))
-  let starts=0
-  const context=vm.createContext({managedWorkspaceMaintenance:null,refreshManagedWorkspaceCapabilities:async()=>{},configurationReady:false,settingsReady:true,
-    acceptance:null,currentSettings:{phoneConnectionEnabled:true},managedPhone:{start:async()=>{starts++;throw Error('private phone detail')}},
+  const {publicManagedWorkspaceCapabilities}=await import('../src/main/workspace-actions.mjs')
+  const context=vm.createContext({managedWorkspaceMaintenance:null,readManagedWorkspaceCapabilities:async()=>publicManagedWorkspaceCapabilities(),managedWorkspaceBackendRecovery:{observe:async()=>{}},managedWorkspaceCapabilities:publicManagedWorkspaceCapabilities(),projectNativeAuthorityPresent:false,closeMaintenanceBounded:async()=>{},configurationReady:false,settingsReady:true,desktopConfig:null,codexStatus:null,
     startup:{stage:'ready'},backendStatus:{state:'connected'}})
   vm.runInContext(body,context)
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})
-  await new Promise(resolve=>setImmediate(resolve));assert.equal(starts,1);assert.equal(context.startup.stage,'ready')
+  await new Promise(resolve=>setImmediate(resolve));assert.equal(context.startup.stage,'ready')
   context.backendStatus={state:'unavailable'}
   await context.commitDesktopConfiguration({maintenance:null,config:{},codexStatus:{}})
-  assert.equal(starts,2)
   const prepare=source.slice(source.indexOf('async function prepareDesktopConfiguration('),source.indexOf('async function commitDesktopConfiguration('))
   assert.doesNotMatch(prepare,/paintStartup|requestPresentation|showInactive/)
 })
@@ -297,4 +352,34 @@ test('window show fence follows the active Windows shell and observes an early c
   const closed = vm.runInContext(`${source.slice(start,end)};windowShown`,closedContext)
   closing.emit('closed')
   await assert.rejects(closed,/startup_window_closed/)
+})
+
+test('startup notice displays fixed actionable memory configuration hints, never raw fields', async () => {
+  const {startupMessage} = await import('../src/renderer/startup-notice.mjs')
+  const privateDetail = 'Bearer short https://private.invalid?token=secret consumer:private'
+  for (const [code, variables, hint] of [
+    ['memory_provider_conflict', ['MEMORY_PROVIDER', 'MEMORY_RECALL_ENGINE'], /请移除旧的 MEMORY_PROVIDER/u],
+    ['memory_configuration_invalid', ['MEMORY_EXTRACTORS', 'MEMORY_CONNECTION'], /格式与连接模式/u],
+  ]) {
+    const message = startupMessage({stage: 'failed', message: privateDetail,
+      startupConfiguration: {code, variables, hint: privateDetail}})
+    assert.ok(message.includes(code))
+    for (const name of variables) assert.ok(message.includes(name))
+    assert.match(message, hint)
+    assert.doesNotMatch(message, /Bearer|private|secret|consumer/u)
+  }
+  for (const configuration of [{code: privateDetail, variables: ['MEMORY_PROVIDER']},
+    {code: 'memory_configuration_invalid', variables: [privateDetail]}]) {
+    assert.equal(startupMessage({stage: 'failed', startupConfiguration: configuration}), '后台启动失败，请打开设置检查配置后重试。')
+  }
+})
+
+test('main publishes structured startup configuration from supervisor without adding raw diagnostics', () => {
+  assert.match(source, /publishStartup\('failed', status\.diagnostic, status\.startupConfiguration\)/u)
+  const body = source.slice(source.indexOf('const STARTUP_DIAGNOSTIC_STAGES'), source.indexOf('async function paintStartup('))
+  const context = vm.createContext({startup: {stage: 'backend'}, backendStatus: {}, sendToOrb: () => {}, sendToSettings: () => {}, settingsView: () => ({}), console: {error: () => {}}})
+  vm.runInContext(body, context)
+  const configuration = {code: 'memory_configuration_invalid', variables: ['MEMORY_RECALL_ENGINE']}
+  context.publishStartup('failed', 'configuration_required', configuration)
+  assert.deepEqual(JSON.parse(JSON.stringify(context.startup.startupConfiguration)), configuration)
 })

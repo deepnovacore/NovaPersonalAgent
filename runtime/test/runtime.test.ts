@@ -445,6 +445,20 @@ function runtimeWithCalls(options: {
   return {runtime, calls}
 }
 
+test('a discovery tick offers newly admitted suggestions to Surrogate before any speech', () => {
+  const {runtime,calls}=runtimeWithCalls({manifest:testManifest({wake:'none'}),slots:['surrogate.watch']})
+  const selected:string[]=[]
+  runtime.bindSuggestionSelected(s=>selected.push(s.id))
+  const tick=()=>{runtime.post({kind:'discovery_tick',payload:{local_date:'2026-11-13',weekday:'Friday',timezone:'UTC'}},1);runtime.apply(runtime.queue.popReady(1)!)}
+  tick();assert.equal(calls.length,0,'no candidate means no model request')
+  const suggestion=runtime.suggestions.add({origin:'surrogate',kind:'question',content:{summary:'Invitation needs a reply',personal_feed_id:'feed'},salience:40,expires_at:100})
+  tick();assert.equal(calls.length,1);assert.equal(calls[0]?.slot,'surrogate.watch')
+  assert.deepEqual(selected,[],'admission is not speech permission')
+  runtime.completeModelCall(calls[0]!.job_id,{speak:true,suggestion_id:suggestion.id,progress_class:null,reason:'Reply deadline is near'},1)
+  runtime.apply(runtime.queue.popReady(1)!)
+  assert.deepEqual(selected,[suggestion.id])
+})
+
 test('model calls project channel updates through the configured fresh window', () => {
   const updateRefs = (freshWindow: number): string[] => {
     const calls: ModelCall[] = []

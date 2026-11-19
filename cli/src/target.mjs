@@ -1,7 +1,7 @@
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 
-export const PRODUCT_VERSION = '0.4.0'
+export const PRODUCT_VERSION = '1.0.0'
 export const RELEASE_REPOSITORY = 'deepnovacore/NovaPersonalAgent'
 
 export function resolveTarget(platform = process.platform, arch = process.arch, version = PRODUCT_VERSION) {

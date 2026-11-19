@@ -3,7 +3,7 @@ import {join} from 'node:path'
 import {test} from 'node:test'
 import {ESLint} from 'eslint'
 
-const repositoryRoot = join(import.meta.dirname, '../../..')
+const repositoryRoot = process.env.NOVA_TEST_REPOSITORY_ROOT ?? join(import.meta.dirname, '../../..')
 const CORE_PROBE = 'runtime/src/boundary-negative-probe.ts'
 const EXECUTOR_PROBE = 'runtime/src/executors/codex/eslint-boundary-negative.ts'
 /** Probes are linted in memory and never written under `runtime/src`. */

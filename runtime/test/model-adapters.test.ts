@@ -192,13 +192,31 @@ test('compressor selects verified source records without accepting generated fac
 })
 
 test('discovery uses bounded Proactive gateway without speech or execution', async () => {
-  const gateway=new ScriptedGateway([],JSON.stringify({proposal:null}))
+  const gateway=new ScriptedGateway([],JSON.stringify({proposals:[]}))
   const proactive=new GatewayProactivity({gateway,model:'same-model',proactivityPreset:'balanced'})
   const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:[],recent_delivery:[]}
-  assert.equal(await proactive.discover(snapshot,new AbortController().signal),null)
+  assert.deepEqual(await proactive.discover(snapshot,new AbortController().signal),[])
   assert.match(gateway.completions[0]!.system,/json/i,'JSON mode requires an explicit JSON instruction even when source text has no JSON keyword')
   const conflicted=new GatewayProactivity({gateway:new ScriptedGateway([],JSON.stringify({speak:true,suggestion_id:'s-1',progress_class:null,reason:'bad',proposal:{kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}})),model:'same-model',proactivityPreset:'balanced'})
   await assert.rejects(conflicted.select(emptyView),/契约/)
+})
+
+test('discovery treats unusable proposals as silence instead of failing the caller, and still returns valid ones',async()=>{
+ // Discovery is optional: a model that returns string memory_refs, an over-long summary or non-JSON text must not
+ // throw into the source pipeline that awaits it. A well-formed proposal is returned unchanged.
+ const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
+ const discover=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discover(snapshot,new AbortController().signal)
+ const base={kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,memory_refs:['entry-1']}]})),[base],'an invalid memory ref does not discard valid mail evidence')
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,summary:'x'.repeat(201)}]})),[])
+ assert.deepEqual(await discover('not json at all'),[])
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,extra:true}]})),[])
+ assert.deepEqual(await discover(JSON.stringify({proposal:base})),[],'the single-proposal shape is gone')
+ assert.deepEqual(await discover(JSON.stringify({proposals:[base]})),[base])
+ const other={...base,summary:'R'}
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,extra:true},other]})),[other],'one unusable item does not cost the valid ones')
+ const four=['A','B','C','D'].map(summary=>({...base,summary}))
+ assert.deepEqual((await discover(JSON.stringify({proposals:four}))).map(p=>p.summary),['A','B','C'],'at most three per window')
 })
 
 test('read-only preparation makes one completion and rejects invented or stale snapshot references',async()=>{
@@ -502,6 +520,55 @@ test('Profile restores exact original references and keeps review notes out of n
  assert.deepEqual(result.about?.refs,[{entry_id:original.id,version:original.version}]);assert.equal(result.about?.text,'你在设计语音助手。');assert(!prompt.includes(original.id));assert(!prompt.includes(original.version))
 })
 
+test('a profile review that comes back empty under reasoning is retried without reasoning and starts with room for an answer',async()=>{
+ // Providers without a thinking budget (DeepSeek) count reasoning against max_tokens, so an exhausted allowance
+ // returns an empty answer. Repeating the same request fails the same way, so the retry must change the cause.
+ const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+ const gateway={complete:(request:CompleteRequest)=>{
+  if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+  reviews.push(request)
+  return Promise.resolve({text:reviews.length===1&&request.reasoning==='enabled'?'':JSON.stringify({review_notes:[]})})
+ }} as unknown as ModelGateway
+ const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+ assert.equal(result.about?.text,'你在设计语音助手。')
+ assert.equal(reviews.length,2);assert.equal(reviews[0]!.reasoning,'enabled');assert.equal(reviews[1]!.reasoning,'disabled')
+ assert.ok((reviews[0]!.maxTokens??0)>=8192,'the first review leaves room for an answer after its reasoning')
+})
+
+test('a profile reply cut off anywhere is retried without reasoning, not treated as a malformed answer',async()=>{
+ // JSON.parse wording depends on V8 and on where the token cap stopped the text, so the cut is detected from the
+ // answer's shape rather than a message prefix: mid-string, after a comma, and mid-array are all the same cause.
+ for(const cut of ['{"review_notes":["尚未完成','{"review_notes":["已核对标题",','{"review_notes":[']){
+  const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+  const gateway={complete:(request:CompleteRequest)=>{
+   if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+   reviews.push(request)
+   return Promise.resolve({text:reviews.length===1&&request.reasoning==='enabled'?cut:JSON.stringify({review_notes:[]})})
+  }} as unknown as ModelGateway
+  const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+  const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+  assert.equal(result.about?.text,'你在设计语音助手。',cut)
+  assert.equal(reviews.length,2,cut);assert.equal(reviews[1]!.reasoning,'disabled',cut)
+ }
+})
+
+test('a profile reply stopped at the token cap is retried without reasoning even when the surviving text still parses',async()=>{
+ // A length stop is authoritative even when the fragment happens to be valid JSON of the wrong shape.
+ const reviews:CompleteRequest[]=[];const inner=profileFixtureGateway(()=>profileProse('你在设计语音助手。',['e0']))
+ const gateway={complete:(request:CompleteRequest)=>{
+  if(!request.system.includes('独立审查整份画像草稿'))return inner.complete(request)
+  reviews.push(request)
+  return Promise.resolve(reviews.length===1
+   ?{text:JSON.stringify({review_notes:'被截断的一半'}),finish_reason:'length'}
+   :{text:JSON.stringify({review_notes:[]}),finish_reason:'stop'})
+ }} as unknown as ModelGateway
+ const original={id:'source:'+('a'.repeat(64)),version:'b'.repeat(64),content:'我在设计语音助手',origin:'stated' as const}
+ const result=await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([original],new AbortController().signal)
+ assert.equal(result.about?.text,'你在设计语音助手。')
+ assert.equal(reviews.length,2);assert.equal(reviews[1]!.reasoning,'disabled')
+})
+
 test('Profile carries time, author, recipients and reply links while screening explicit credentials',async()=>{
  const requests:CompleteRequest[]=[];const gateway=profileFixtureGateway(request=>{requests.push(request);return profileProse('你考虑请同事协助部署。',['e0'])},request=>{requests.push(request);return (JSON.parse(request.prompt) as {profile:ProfileProse}).profile})
  await new GatewayPersonalWriter({gateway,model:'m'}).generateProfile([{id:'msg',version:1,origin:'inferred',content:'@Alex请协助部署。 password=test-only-secret',observed_at:'2026-10-10T00:00:00Z',source:{kind:'im',project:'IM',document:'消息',sender_id:'self',sender_name:'Self',relation:'self',thread_id:'thread',message_id:'message',parent_id:'outside',mention_ids:['alex']}}],new AbortController().signal)
@@ -752,6 +819,16 @@ test('timeline normalizes array and double encoded wrappers without changing car
  }
 })
 
+test('timeline keeps at most one next step per card and tells the model what is too small to suggest',async()=>{
+ const step=(title:string)=>({title,detail:'确认后再处理'})
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered',why_now:'The latest report records recovery',facts:[{text:'Alert recovered',quote:'Alert recovered',ref:'e0'}],next_steps:[step('核对一'),step('检查二'),step('查看三')],uncertainty:'',actions:[],refs:['e0']}
+ const gateway=new ScriptedGateway([],JSON.stringify({cards:[card]}))
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline([{id:'a',version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.cards[0]!.next_steps!.length,1)
+ const system=gateway.completions[0]!.system??''
+ assert.match(system,/next_steps最多1条/);assert.match(system,/不输出文件路径/)
+})
+
 test('timeline prose does not expose evidence keys while exact quotes and references survive',async()=>{
  const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Alert recovered (e0)',why_now:'The latest report (e0/e1) records recovery',facts:[{text:'Alert recovered (e0/e1)',quote:'Alert recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0','e1']}
  const result=await new GatewayPersonalWriter({gateway:new ScriptedGateway([],JSON.stringify({cards:[card]})),model:'fixture'}).generateTimeline(['a','b'].map(id=>({id,version:'1',kind:'im',text:'Alert recovered',observed_at:'2026-10-17T00:00:00Z'})),{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
@@ -826,4 +903,88 @@ test('timeline review retains the user request even when the draft cites only th
  }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
  const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-18',timezone:'Asia/Shanghai'},new AbortController().signal)
  assert.equal(reviewed,true);assert.equal(result.cards.length,1)
+})
+
+test('timeline incremental synthesis carries prior card ids only in composition and preserves revisions',async()=>{
+ const requests:{system:string;prompt:string}[]=[]
+ const prior={id:'card-1',title:'Previous node check',category:'Storage',why_now:'Earlier view',anchor_date:'2026-10-10'}
+ const card={temporal:{kind:'event',dates:[]},category:'Storage',title:'Node recovered',why_now:'A recovery was reported',facts:[{text:'The node recovered',quote:'node recovered',ref:'e0'}],uncertainty:'',actions:[],refs:['e0'],prior_id:'card-1'}
+ const gateway={complete:(request:{system:string;prompt:string})=>{requests.push(request);return Promise.resolve({text:JSON.stringify({cards:[card]})})}} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline([{id:'alert',version:'1',kind:'im',text:'The node recovered',observed_at:'2026-10-17T00:00:00Z'}],{local_date:'2026-10-17',timezone:'UTC',prior_cards:[prior],new_input_ids:['alert']},new AbortController().signal)
+ assert.ok(requests.length>=1)
+ for(const request of requests){
+  assert.match(request.system,/本次是增量整理/)
+  const body=JSON.parse(request.prompt) as {context:{prior_cards?:{id:string}[];new_input_ids?:string[]}}
+  assert.deepEqual(body.context.prior_cards,[prior])
+  assert.deepEqual(body.context.new_input_ids,['alert'])
+ }
+ assert.equal(result.cards[0]?.prior_id,'card-1','the composition keeps the prior card id for the host to resolve')
+})
+
+test('timeline diagnostics default the incremental cache counters when no run is supplied',async()=>{
+ const inputs=Array.from({length:201},(_,i)=>({id:'m'+i,version:'1',kind:'im',text:'Update '+i,observed_at:'2026-10-17T00:00:00Z'}))
+ const card=(input:{key:string;text:string})=>({temporal:{kind:'event' as const,dates:[]},category:'Progress',title:input.text,why_now:'A result was recorded',facts:[{text:input.text,quote:input.text,ref:input.key}],uncertainty:'',actions:[],refs:[input.key]})
+ const gateway={complete:(request:CompleteRequest)=>{try{
+   if(request.usage?.operation==='reconcile'){const body=JSON.parse(request.prompt) as {topics:{id:string}[]};return Promise.resolve({text:JSON.stringify({groups:body.topics.map(topic=>({members:[topic.id]}))})})}
+   const prompt=JSON.parse(request.prompt) as {output_schema?:unknown;inputs:{key:string;text:string}[];cards?:unknown[]}
+   if(prompt.output_schema)return Promise.resolve({text:JSON.stringify({topics:prompt.inputs.slice(0,1).map(entry=>({title:entry.text,refs:[entry.key]}))})})
+   if(prompt.cards)return Promise.resolve({text:JSON.stringify({cards:prompt.cards})})
+   return Promise.resolve({text:JSON.stringify({cards:prompt.inputs.map(card)})})
+  }catch(error){return Promise.reject(error instanceof Error ? error : new Error('Non-Error fixture failure',{cause:error}))}}} as unknown as ModelGateway
+ const result=await new GatewayPersonalWriter({gateway,model:'fixture'}).generateTimeline(inputs,{local_date:'2026-10-17',timezone:'UTC'},new AbortController().signal)
+ assert.equal(result.diagnostics?.cache_reused_topics,0)
+ assert.equal(result.diagnostics?.cache_reused_inputs,0)
+ assert.equal(result.diagnostics?.cache_screened_inputs,0)
+ assert.equal(result.diagnostics?.cache_stage_hits,0)
+ assert.equal(result.diagnostics?.cache_stage_misses,0)
+})
+
+test('uncertainty that only describes what the source did not say is dropped', async () => {
+  const {coverageGapFree} = await import('../src/model/personal-writer.js')
+  assert.equal(coverageGapFree('原文未说明当前实际在用哪些模型版本。'), '')
+  assert.equal(coverageGapFree('消息中没有提及负责人。'), '')
+  assert.equal(coverageGapFree('是否已完成迁移仍待确认。'), '是否已完成迁移仍待确认。')
+  assert.equal(coverageGapFree(''), '')
+})
+
+test('discovery diagnostics distinguish invalid JSON, envelopes and individual proposal issues without text',async()=>{
+ const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'UTC',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
+ const run=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discoverDetailed(snapshot,new AbortController().signal)
+ assert.deepEqual((await run('not json')).diagnostics,{raw_length:8,json_ok:false,proposal_count:null,resolved_memory_refs:0,dropped_memory_refs:0,rejections:[]})
+ const envelope=await run('{"proposals":"private text"}')
+ assert.equal(envelope.diagnostics.json_ok,true);assert.equal(envelope.diagnostics.proposal_count,null)
+ assert.deepEqual(envelope.diagnostics.rejections,[{index:null,issues:[{path:['proposals'],code:'invalid_type'}]}])
+ const base={kind:'question',summary:'Private invitation',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
+ const text=JSON.stringify({proposals:[{...base,memory_refs:['wrong']},base]})
+ const result=await run(text)
+ assert.deepEqual(result.proposals,[base,base]);assert.equal(result.diagnostics.dropped_memory_refs,1);assert.equal(result.diagnostics.resolved_memory_refs,0);assert.equal(result.diagnostics.raw_length,text.length);assert.equal(result.diagnostics.proposal_count,2)
+ assert.deepEqual(result.diagnostics.rejections,[{index:0,issues:[{path:['memory_refs',0],code:'invalid_type'}]}])
+ assert.equal(JSON.stringify(result.diagnostics).includes('Private invitation'),false)
+})
+
+test('discovery prompt distinguishes invitation conflicts from contradictions and grounds countdowns in local time',async()=>{
+ const gateway=new ScriptedGateway([],'{"proposals":[]}'),proactive=new GatewayProactivity({gateway,model:'m',proactivityPreset:'balanced'})
+ const snapshot={user_scope:'local',local_date:'2026-11-14',local_time:'13:42',weekday:'Saturday',timezone:'Asia/Shanghai',memory:[],evidence_refs:[],recent_delivery:[]}
+ await proactive.discover(snapshot,new AbortController().signal)
+ const request=gateway.completions[0]!
+ assert.match(request.system,/contradictory facts about the same matter/)
+ assert.match(request.system,/new or rescheduled invitation.*clashes with an existing calendar plan.*moved-up reply deadline.*valid why-now/)
+ assert.match(request.system,/local_date, local_time and timezone/);assert.match(request.system,/never invent hour countdowns/)
+ assert.match(request.system,/memory_refs must contain objects \{entry_id,version\}, never bare strings/)
+ assert.match(request.system,/include a preference memory reference/)
+ assert.equal(JSON.parse(request.prompt).local_time,'13:42')
+})
+
+test('discovery resolves exact snapshot memory IDs and drops bad refs individually without weakening proposal schema',async()=>{
+ const entry={id:'known',version:3,content:'Prefers small groups',kind:'preference' as const,origin:'stated' as const,source_refs:[],observed_at:'2026-11-14T00:00:00Z',recorded_at:'2026-11-14T00:00:00Z',topic:'social',status:'active' as const,corrected_to:null,confidence_note:null}
+ const snapshot={user_scope:'local',local_date:'2026-11-14',weekday:'Saturday',timezone:'UTC',memory:[entry,{...entry,id:'unversioned',version:null}],evidence_refs:['mail:1'],recent_delivery:[]}
+ const base={kind:'question',summary:'Reply?',why_now:'Deadline',evidence_refs:['mail:1'],memory_refs:['known','unknown',' known','unversioned',{entry_id:'known',version:3,extra:true},null,{entry_id:'known',version:3}]}
+ const gateway=new ScriptedGateway([],JSON.stringify({proposals:[base,{...base,evidence_refs:[],memory_refs:['unknown']},{...base,evidence_refs:[],memory_refs:['known']}]}))
+ const result=await new GatewayProactivity({gateway,model:'m',proactivityPreset:'balanced'}).discoverDetailed(snapshot,new AbortController().signal)
+ assert.equal(result.proposals.length,2)
+ assert.deepEqual(result.proposals[0]!.memory_refs,[{entry_id:'known',version:3},{entry_id:'known',version:3}])
+ assert.deepEqual(result.proposals[1]!.memory_refs,[{entry_id:'known',version:3}])
+ assert.equal(result.diagnostics.resolved_memory_refs,2);assert.equal(result.diagnostics.dropped_memory_refs,6)
+ const {proposalSchema}=await import('../src/personal-agent/contracts.js')
+ assert.equal(proposalSchema.safeParse(base).success,false,'strict external/admission contract is unchanged')
 })

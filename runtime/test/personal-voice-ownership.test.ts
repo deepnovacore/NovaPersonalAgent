@@ -43,3 +43,52 @@ test('starting a local Build ends voice ownership instead of leaving a ghost own
     await f.close()
   }
 })
+
+for(const mode of ['chat','plan','build','delegate'] as const)test(`orb announcement and microphone share the frozen ${mode} workbench binding`,async()=>{
+ const f=await fixture(),created:{id:string;overrides:unknown}[]=[],delivered:string[]=[]
+ const service={} as never
+ let emitVoice:(frame:Record<string,unknown>)=>void=()=>{}
+ f.host.setConversationRuntime((item,emit,_mode,_lifetime,_recovery,_execution,overrides)=>{emitVoice=emit;created.push({id:item.id,overrides});return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:()=>{delivered.push(item.id)},bridgeService:service,close:()=>Promise.resolve()})},()=>{})
+ try{
+  await f.command('conversations.voice',{id:'chat:main',enabled:false})
+  await f.command('conversations.create',{title:'Frozen source'})
+  const source=f.host.conversationSnapshot().selected_id
+  if(['plan','delegate'].includes(mode))assert.equal((await f.command('conversations.mode',{id:source,mode:'plan'})).ok,true)
+  assert.equal((await f.command('presentation.set',{mode:'orb',conversation_id:source,voice_mode:mode})).ok,true)
+  await f.command('conversations.select',{id:'chat:main'})
+  const pool=new SuggestionPool(),suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15})
+  f.host.routePersonalSuggestion(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+  for(let i=0;i<100&&!delivered.length;i++)await new Promise(resolve=>setTimeout(resolve,10))
+  const overrides={voice_mode:mode,...(mode==='delegate'?{chat:false}:{})}
+  assert.deepEqual(created,[{id:source,overrides}])
+  assert.deepEqual(delivered,[source]);assert.equal(f.host.voiceService(),service)
+  assert.equal(f.host.conversationSnapshot().voice_id,null)
+  emitVoice({type:'conversation.delivered',role:'assistant',text:'Task result',final:true,turn_id:'orb-result'})
+  await f.command('conversations.select',{id:source})
+  assert.ok(f.host.conversationSnapshot().messages.some(message=>message.text==='Task result'),'implicit voice results stay in the frozen conversation')
+  assert.equal((await f.command('conversations.voice',{id:source,enabled:true,voice_mode:mode})).ok,true)
+  assert.deepEqual(created.at(-1),{id:source,overrides})
+  assert.equal((await f.command('conversations.voice',{id:source,enabled:true,voice_mode:mode==='delegate'?'chat':'delegate'})).error,'conversation_busy')
+  assert.equal((await f.command('conversations.mode',{id:source,mode:'chat'})).error,'local_workbench_required')
+ }finally{await f.close()}
+})
+
+test('direct orb announcement defaults to delegate but an explicit Chat binding remains Chat after voice stops',async()=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-orb-default-')),pool=new SuggestionPool(),created:unknown[]=[]
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool,evidence:()=>null})
+ let request=0,delivered=0
+ const command=(method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id:'orb-'+request++,method,params},{client_id:'desktop:local'}) as Promise<{ok:boolean;error?:string}>
+ host.setConversationRuntime((_item,_emit,_mode,_lifetime,_recovery,_execution,overrides)=>{created.push(overrides);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:()=>{delivered++},close:()=>Promise.resolve()})},()=>{})
+ const announce=async()=>{const before=delivered,suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15});host.routePersonalSuggestion(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id});for(let i=0;i<100&&delivered===before;i++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(delivered,before+1)}
+ try{
+  await host.open();assert.equal((await command('presentation.set',{mode:'orb'})).ok,true)
+  await announce();assert.deepEqual(created,[{voice_mode:'delegate',chat:false}])
+  assert.equal((await command('conversations.voice',{id:'chat:main',enabled:true})).ok,true)
+  assert.deepEqual(created.at(-1),{voice_mode:'delegate',chat:false})
+  await command('conversations.voice',{id:'chat:main',enabled:false})
+  assert.equal((await command('conversations.voice',{id:'chat:main',enabled:true,voice_mode:'invalid'})).ok,false)
+  assert.equal((await command('conversations.voice',{id:'chat:main',enabled:true,voice_mode:'chat'})).ok,true)
+  await command('conversations.voice',{id:'chat:main',enabled:false})
+  await announce();assert.deepEqual(created.slice(2),[{voice_mode:'chat'},{voice_mode:'chat'}])
+ }finally{await host.close();await rm(root,{recursive:true,force:true})}
+})

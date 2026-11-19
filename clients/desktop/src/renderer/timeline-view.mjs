@@ -1,11 +1,17 @@
 import {attachSources,attachSourceTags,disposeSources} from './source-popover.mjs'
-import {renderSourceStatus} from './source-status.mjs'
+import {renderSourceStatus,timelineMeta} from './source-status.mjs'
 import {t,currentLanguage} from './locale.mjs'
 import {renderCardTags} from './card-tags.mjs'
 import {markOpensConversation} from './new-conversation-mark.mjs'
 const LABEL={overdue:'已过截止',current:'今天到期',soon:'接下来 7 天',later:'之后',waiting:'等待中 · 未设期限',unscheduled:'尚未安排',completed:'已完成'}
 const STATUS={open:'待开始',doing:'进行中',waiting:'等待回复'}
 export const TIMELINE_LABELS=LABEL,TIMELINE_STATUS_LABELS=STATUS
+/** Legacy cards use their saved reference day, never today's clock, for placement. */
+export function effectiveTimelineAnchor(time){
+ const anchor_date=time?.anchor_date??null,anchor_basis=time?.anchor_basis??'unknown'
+ if(['deadline','scheduled'].includes(anchor_basis)&&anchor_date&&time?.as_of&&anchor_date>time.as_of&&time.last_reported_on)return {anchor_date:time.last_reported_on,anchor_basis:'reported'}
+ return {anchor_date,anchor_basis}
+}
 export function timelineDate(snapshot,now=new Date()){return now.toLocaleDateString('en-CA',{timeZone:snapshot?.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})}
 export function timelineGroups(snapshot,now=new Date()){
  const currentDate=timelineDate(snapshot,now),week=new Date(Date.parse(currentDate+'T00:00:00Z')+7*86400000).toISOString().slice(0,10)
@@ -21,10 +27,10 @@ export function timelineGroups(snapshot,now=new Date()){
 }
 export function renderTimeline(parent,{snapshot,el,button,discuss,startConversation,openArticle,openSettings,command,expanded=new Set(),compact=false,connected=true,now=new Date()}){
  const root=el('section',undefined,`timeline-content${compact?' timeline-compact':''}${snapshot?.timeline?' timeline-briefing':''}`);parent.append(root)
- renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
+ if(!snapshot?.timeline)renderSourceStatus(root,{sources:snapshot?.sources??[],status:snapshot?.profile_preparation?.status,processing:snapshot?.profile_preparation?.processing,el,button,openSettings})
  const allGroups=timelineGroups(snapshot,now).filter(group=>!compact||group.id!=='completed'),groups=snapshot?.timeline?[]:allGroups
- // In briefing mode suggestions already appear above as pending cards, so only the user's own todos are listed under the briefing.
- const todoGroups=snapshot?.timeline?allGroups.map(group=>({...group,items:group.items.filter(item=>!item.suggested)})).filter(group=>group.items.length):[],currentDate=timelineDate(snapshot,now)
+ // Todos belong to the timeline itself, so the briefing no longer lists them in a separate section.
+ const currentDate=timelineDate(snapshot,now)
  const formatDate=date=>new Date(date+'T12:00:00Z').toLocaleDateString(currentLanguage(),{...(date.slice(0,4)!==currentDate.slice(0,4)?{year:'numeric'}:{}),month:'short',day:'numeric',timeZone:'UTC'})
  if(!snapshot?.life){const status=el('p',t(connected?'正在读取事项…':'连接后可查看安排。'),'hint');status.setAttribute('role','status');root.append(status);return}
  if(!compact){
@@ -48,49 +54,54 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
  }
  const attention=snapshot.timeline
  const briefCards=[]
- const pageKey=`timeline:page:${attention?.generation_id??attention?.updated_at??'pending'}:`
+ // Progress publishes keep the same input generation, so expansion survives batch updates instead of resetting on updated_at.
+ const pageKey=`timeline:page:${attention?.pagination_key??attention?.generation_id??attention?.updated_at??'pending'}:`
  let pages=1;while(expanded.has(pageKey+pages))pages++
  const visibleCount=compact?3:pages*8
  if(attention){
   const section=el('section',undefined,'timeline-attention');section.setAttribute('aria-label',t('近期简报'));root.append(section)
   const header=el('div',undefined,'timeline-attention-header');header.append(el('p',t(attention.status==='working'?'正在整理近期进展…':'近期进展与值得关注的事'),'timeline-briefing-caption'));section.append(header)
-  if(attention.updated_at&&Number.isFinite(Date.parse(attention.updated_at)))section.append(el('p',t('整理于 {0} · 卡片按事项时间排列',new Date(attention.updated_at).toLocaleString(currentLanguage(),{timeZone:snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone,month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})),'timeline-generated-at'))
-  if(attention.input_count&&attention.coverage)section.append(el('p',attention.coverage,'hint timeline-coverage'))
-  if((attention.diagnostics?.failed_batches?.length||attention.diagnostics?.pending_batches)&&attention.status!=='working')section.append(el('p',t('部分资料尚未完成整理，以下保留已核对的进展；可刷新补充。'),'hint timeline-partial'))
-  if(attention.cards?.length&&attention.status==='failed')section.append(el('p',t('本次更新未完成，以下保留上次结果。'),'hint'))
-  if(command){const refresh=button(t(attention.status==='working'?'正在整理…':'刷新'),()=>command('timeline.refresh',{}),header,'timeline:refresh');refresh.className='quiet';refresh.disabled=attention.status==='working'||attention.available===false}
+  if(command){const refresh=button(t(attention.status==='working'?'正在整理…':'刷新'),()=>command('timeline.refresh',{force:true}),header,'timeline:refresh');refresh.className='quiet';refresh.disabled=attention.status==='working'||attention.available===false}
   const latestReport=item=>Math.max(0,...(item.sources??[]).map(source=>Date.parse(source.observed_at??'')||0))
-  const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(b.time?.anchor_date??'').localeCompare(a.time?.anchor_date??'')||latestReport(b)-latestReport(a))
-  if(orderedBriefs.length)section.append(el('p',t('共 {0} 条进展 · 已展示 {1} 条',orderedBriefs.length,Math.min(visibleCount,orderedBriefs.length)),'hint timeline-brief-count'))
+  const orderedBriefs=[...(attention.cards??[])].sort((a,b)=>(effectiveTimelineAnchor(b.time).anchor_date??'').localeCompare(effectiveTimelineAnchor(a.time).anchor_date??'')||latestReport(b)-latestReport(a))
+  // Active cards still have their evidence; archived cards are retained history whose sources moved or were withdrawn.
+  const archived=Math.max(0,Math.min(attention.archived_count??orderedBriefs.filter(item=>item.sources_available===false||item.historical===true).length,orderedBriefs.length))
+  const meta=timelineMeta({attention,sources:snapshot.sources??[],status:snapshot.profile_preparation?.status,total:orderedBriefs.length,shown:Math.min(visibleCount,orderedBriefs.length),archived,timeZone:snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone})
+  if(meta.line){const line=el('p',meta.line,'hint timeline-meta-line');if(meta.title)line.setAttribute('title',meta.title);section.append(line)}
+  if(meta.issue){
+   if(meta.issue.sources)renderSourceStatus(section,{sources:snapshot.sources??[],status:snapshot.profile_preparation?.status,processing:snapshot.profile_preparation?.processing,el,button,openSettings,text:meta.issue.text,link:'查看来源',className:'timeline-meta-line timeline-meta-issue'})
+   else section.append(el('p',t(meta.issue.text),'hint timeline-meta-line timeline-meta-issue'))
+  }
   for(const item of orderedBriefs.slice(0,visibleCount)){
    const historical=item.historical===true||!!item.time?.as_of&&(item.time.as_of!==currentDate||!!item.timezone&&item.timezone!==(snapshot.settings?.timezone??Intl.DateTimeFormat().resolvedOptions().timeZone))
    const kind=['attention','deadline','progress','insight'].includes(item.kind)?item.kind:'insight'
    const card=el('article',undefined,'timeline-attention-card');card.tabIndex=-1;card.dataset.kind=kind;card.dataset.historical=String(historical);card.dataset.objectId=item.id;briefCards.push({item,card});if(compact)section.append(card)
    const meta=el('div',undefined,'timeline-brief-meta'),topic=el('span',undefined,'timeline-topic')
    const glyph=el('span',{attention:'!',deadline:'◷',progress:'✓',insight:'◇'}[kind],'timeline-topic-icon');glyph.setAttribute('aria-hidden','true');topic.append(glyph,el('span',item.category));meta.append(topic)
-   if(item.status_label)meta.append(el('span',historical?t('当时状态：{0}',item.status_label):item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
+   if(item.status_label)meta.append(el('span',item.status_label,'timeline-status-tag'));card.append(meta,el('h3',item.title))
    if(historical&&item.time?.as_of)card.append(el('p',t('整理于 {0}',formatDate(item.time.as_of)),'hint timeline-history-note'))
    if(item.people?.length){const people=renderCardTags(card,item.people.map(person=>({label:person.name,tone:'person'})),{el});people.className+=' timeline-people';people.setAttribute('aria-label',t('相关同事'))}
-   const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
-   if(time?.anchor_date){
-    label(t({occurred:'发生于 {0}',deadline:'截止 {0}',scheduled:'安排于 {0}',reported:'最近记录 {0}'}[time.anchor_basis]??'记录于 {0}',formatDate(time.anchor_date)))
-    if(time.last_reported_on&&time.anchor_basis!=='reported')label(t('最近记录 {0}',formatDate(time.last_reported_on)))
+   const timeMeta=el('div',undefined,'timeline-card-time'),time=item.time,anchor=effectiveTimelineAnchor(time),label=text=>timeMeta.append(el('span',text,'timeline-time-label'))
+   if(anchor.anchor_date){
+    label(t({occurred:'发生于 {0}',deadline:'截止 {0}',scheduled:'安排于 {0}',reported:'最近记录 {0}'}[anchor.anchor_basis]??'记录于 {0}',formatDate(anchor.anchor_date)))
+    if(anchor.anchor_basis==='reported'&&time.scheduled_on)label(t('安排于 {0}',formatDate(time.scheduled_on)))
+    if(time.due_on&&anchor.anchor_basis!=='deadline')label(t('截止 {0}',formatDate(time.due_on)))
+    if(time.last_reported_on&&anchor.anchor_basis!=='reported')label(t('最近记录 {0}',formatDate(time.last_reported_on)))
     if(time.evidence_from&&time.evidence_to&&time.evidence_from!==time.evidence_to)label(t('依据 {0}—{1}',formatDate(time.evidence_from),formatDate(time.evidence_to)))
     if(time.started_on){label(t('始于 {0}',formatDate(time.started_on)));if(time.last_reported_on)label(t('记录跨度 {0} 天',Math.max(0,Math.round((Date.parse(time.last_reported_on)-Date.parse(time.started_on))/86400000))))}
     if(time.due_on){const days=Math.round((Date.parse(time.due_on)-Date.parse(currentDate))/86400000);label(t(days>0?'距截止 {0} 天':days===0?'今天截止':'原截止已过 {0} 天，结果以最新记录为准',Math.abs(days)))}
     if(time.kind==='ongoing'&&time.last_reported_on<currentDate)label(t('当前状态待更新'))
-    if(time.anchor_basis==='reported'&&time.kind==='event')label(t('发生日期未明确'))
+    if(anchor.anchor_basis==='reported'&&time.kind==='event')label(t('发生日期未明确'))
    }else label(t('时间待明确'))
    card.append(timeMeta)
    const facts=el('div',undefined,'timeline-attention-facts');facts.dataset.count=String(item.facts?.length??0);for(const fact of item.facts??[]){const panel=el('div',undefined,'timeline-fact');panel.dataset.tone=['risk','warning','positive'].includes(fact.tone)?fact.tone:'neutral';if(fact.label)panel.append(el('h4',fact.label));panel.append(el('p',fact.text));facts.append(panel)}card.append(facts)
-   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t(historical?'当时判断':{attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
+   const reason=el('div',undefined,'timeline-attention-reason');reason.append(el('span',t({attention:'影响',deadline:'时间窗口',progress:'进展',insight:'判断'}[kind])),el('p',item.why_now));card.append(reason)
    if(item.next_steps?.length){
-    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t(historical?'当时建议':'后续建议')))
+    const followups=el('section',undefined,'timeline-followups');followups.append(el('h4',t('后续建议')))
     const steps=el('ol',undefined,'timeline-next-steps');for(const [index,step] of item.next_steps.entries()){const tile=el('li');tile.append(el('span',String(index+1).padStart(2,'0'),'timeline-step-number'),el('h5',step.title),el('p',step.detail));steps.append(tile)}followups.append(steps);card.append(followups)
    }
    if(item.uncertainty){const caution=el('p',undefined,'timeline-caution');caution.append(el('span',t('尚不确定：')),el('span',item.uncertainty));card.append(caution)}
-   if(item.sources_available===false&&!item.sources_checking)card.append(el('p',t('原始来源已不可用'),'hint timeline-source-unavailable'))
-   else if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
+   if(item.sources_available!==false)attachSourceTags(card,item.sources,{openArticle,title:t('事项依据')})
    const actions=el('div',undefined,'timeline-actions');card.append(actions)
    for(const action of item.sources_available===false||item.historical===true?[]:item.actions??[]){
     const reference=[{kind:'timeline',id:item.id,version:item.version,interaction:action.kind}],draft=action.kind==='draft'
@@ -111,8 +122,8 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    if(!dates.has(item.date))dates.set(item.date,{id:group.id,date:item.date,items:[]})
    dates.get(item.date).items.push(item)
   }
-  for(const entry of briefCards){const date=entry.item.time?.anchor_date;if(!date)continue;if(!dates.has(date))dates.set(date,{id:date===currentDate?'current':date<currentDate?'history':'future',date,items:[]});const group=dates.get(date);(group.briefs??=[]).push(entry.card)}
-  if(briefCards.some(entry=>entry.item.time?.anchor_date)&&!dates.get(currentDate).items.length&&!dates.get(currentDate).briefs?.length)dates.delete(currentDate)
+  for(const entry of briefCards){const date=effectiveTimelineAnchor(entry.item.time).anchor_date;if(!date)continue;if(!dates.has(date))dates.set(date,{id:date===currentDate?'current':date<currentDate?'history':'future',date,items:[]});const group=dates.get(date);(group.briefs??=[]).push(entry.card)}
+  if(briefCards.some(entry=>effectiveTimelineAnchor(entry.item.time).anchor_date)&&!dates.get(currentDate).items.length&&!dates.get(currentDate).briefs?.length)dates.delete(currentDate)
   const dateGroups=[...dates.values()].sort((a,b)=>b.date.localeCompare(a.date))
   displayGroups=[...dateGroups,...groups.filter(group=>['waiting','unscheduled','completed'].includes(group.id))]
   axis=el('div',undefined,'timeline-axis');axis.setAttribute('aria-label',t(attention?'近期简报':'待办截止日期'));root.append(axis)
@@ -186,7 +197,7 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
   }
  }
  displayGroups.forEach(renderGroup)
- if(!compact){const unplaced=briefCards.filter(entry=>!entry.item.time?.anchor_date);if(unplaced.length){const section=el('section',undefined,'timeline-unplaced');section.append(el('h3',t('时间待明确'),'timeline-group-title'),el('p',t('以下事项尚无可用于排序的日期。'),'hint'),...unplaced.map(entry=>entry.card));root.append(section)}}
+ if(!compact){const unplaced=briefCards.filter(entry=>!effectiveTimelineAnchor(entry.item.time).anchor_date);if(unplaced.length){const section=el('section',undefined,'timeline-unplaced');section.append(el('h3',t('时间待明确'),'timeline-group-title'),el('p',t('以下事项尚无可用于排序的日期。'),'hint'),...unplaced.map(entry=>entry.card));root.append(section)}}
  if(!compact&&(attention?.cards?.length??0)>visibleCount){
   const more=button(t('继续查看进展（还有 {0} 条）',attention.cards.length-visibleCount),()=>{
    expanded.add(pageKey+pages);disposeSources(root)
@@ -194,10 +205,6 @@ export function renderTimeline(parent,{snapshot,el,button,discuss,startConversat
    const replacement=holder.children[0];root.replaceWith(replacement)
    replacement.querySelectorAll('.timeline-attention-card')[visibleCount]?.focus?.({preventScroll:true})
   },root,'timeline:more');more.className='soft timeline-load-more'
- }
- if(todoGroups.length){
-  root.append(el('h2',t('我的待办'),'timeline-todos-title'))
-  todoGroups.forEach(renderGroup)
  }
  root.append(el('p',t('这里展示已记录的事项和待确认建议，不代表完整日程。'),'timeline-source-note'))
  for(const node of root.querySelectorAll('button'))if(!connected&&node.className!=='source-info')node.disabled=true

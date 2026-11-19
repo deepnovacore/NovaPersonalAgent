@@ -18,6 +18,7 @@ final records = <Map<String, dynamic>>[
 final observations = <Map<String, dynamic>>[
   {
     'text': '【事】本人完成核验',
+    'relevance': 'ongoing_work',
     'refs': ['e0'],
   },
 ];

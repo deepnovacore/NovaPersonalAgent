@@ -1,8 +1,9 @@
+import {createHash,randomUUID} from 'node:crypto'
 import type {MemoryOperation} from '../memory-substrate/store.js'
 import {AsyncLocalStorage} from 'node:async_hooks'
 import { Worker, type WorkerOptions } from 'node:worker_threads'
 
-import type {MemoryLedgerStoreErrorCode} from './store.js'
+import type {MemoryLedgerStoreErrorCode,LifeAuthorizationRevision} from './store.js'
 import {hasOnlyKeys, isRecord} from '../core/guards.js'
 
 export interface MemoryLedgerWorker {
@@ -77,6 +78,8 @@ type RpcResultValidator<Result> = (value: unknown) => Result
 
 interface WorkerSuccess {
   readonly kind: 'response'
+  readonly authority_epoch?: number
+  readonly authority_changed?: boolean
   readonly request_id: number
   readonly ok: true
   readonly result: unknown
@@ -84,6 +87,8 @@ interface WorkerSuccess {
 
 interface WorkerFailure {
   readonly kind: 'response'
+  readonly authority_epoch?: number
+  readonly authority_changed?: boolean
   readonly request_id: number
   readonly ok: false
   readonly error_code: MemoryLedgerStoreErrorCode
@@ -119,6 +124,16 @@ interface QueuedRequest {
 const STUCK_GRACE_MS = 30_000
 const CLOSE_TIMEOUT_MS = 5_000
 
+// Include compound operations: they may change evidence, revisions, or consumer grants internally.
+const recallAuthorityMutations = new Set<MemoryOperation>([
+  'space_source_input', 'explicit_write', 'source_processing', 'append_evidence_batch',
+  'invalidate_message', 'purge_index_complete', 'purge', 'enable_files', 'commit_diary',
+  'commit_consolidation', 'life_load', 'life_mutate', 'life_capture_im', 'append_evidence', 'merge',
+  'delete_source', 'forget', 'record_extraction', 'record_evidence_batch',
+  'migrate_legacy', 'source_connection', 'source_apply_page', 'invalidate_evidence',
+  'source_grant', 'commit_extraction',
+])
+
 export class MemoryLedgerClient {
   readonly #workerFactory: (url: URL, options: WorkerOptions) => MemoryLedgerWorker
   readonly #workerUrl = new URL('./store-worker.js', import.meta.url)
@@ -127,6 +142,7 @@ export class MemoryLedgerClient {
     readonly memoryLockWaitMs?: number
   }
   #worker: MemoryLedgerWorker
+  #authorizationFence = randomUUID()
   readonly #pending = new Map<number, PendingRequest>()
   readonly #queue: QueuedRequest[] = []
   #inService: number | null = null
@@ -135,6 +151,8 @@ export class MemoryLedgerClient {
   #recycleTimer: ReturnType<typeof setTimeout> | null = null
   #reopenTimer: ReturnType<typeof setTimeout> | null = null
   #recycleFailures = 0
+  #recallAuthorityRevision = 0
+  #observedAuthorityEpoch: number | undefined
   #nextRequestId = 1
   #failed = false
   #closed = false
@@ -152,9 +170,34 @@ export class MemoryLedgerClient {
     this.#worker = this.#spawnWorker()
   }
 
+  recallAuthorityRevision(): number { return this.#recallAuthorityRevision }
+
+  async lifeAuthorizationRevision(namespace: string, signal?: AbortSignal): Promise<string> {
+    const fence = this.#authorizationFence
+    const revision = await this.#request('life_authorization_revision', {namespace}, value => {
+      const counter=(item:unknown)=>typeof item==='number'&&Number.isSafeInteger(item)&&item>=0
+      if (!Array.isArray(value)||value.length!==4||(value[0]!==null&&!counter(value[0]))||!counter(value[1])||!counter(value[2])
+        ||!Array.isArray(value[3])||value[3].length>256||!value[3].every((item:unknown)=>Array.isArray(item)&&item.length===2&&typeof item[0]==='string'&&item[0].length>0&&item[0].length<=512&&!item[0].includes('\0')&&counter(item[1]))) throw new TypeError('invalid life authorization revision')
+      return value as unknown as LifeAuthorizationRevision
+    }, priorityRank.interactive, signal)
+    if (fence !== this.#authorizationFence) throw new MemoryLedgerClientError('WORKER_RECYCLED')
+    return createHash('sha256').update(JSON.stringify([fence,revision])).digest('hex')
+  }
+
   memory(operation: MemoryOperation, input: unknown, options: {readonly priority?: MemoryRequestPriority; readonly signal?: AbortSignal} = {}): Promise<unknown> {
     const priority = options.priority ?? (backgroundContext.getStore() ? 'background' : 'normal')
+    // Evidence reads run expiry maintenance; no-op expiry must not invalidate every consume.
+    if (operation === 'expire') return this.#request('memory', {memoryOperation: operation, input}, value => value, priorityRank[priority], options.signal)
+      .then(result => {if (typeof result === 'number' && result > 0) this.#recallAuthorityRevision++; return result})
+    const mutates = recallAuthorityMutations.has(operation)
+      && !(operation === 'source_grant' && isRecord(input) && input.action === 'get')
+      && !(operation === 'source_connection' && isRecord(input) && ['get', 'list'].includes(String(input.action)))
+      && !(operation === 'life_load' && isRecord(input) && input.legacy === undefined)
+    if (!mutates) return this.#request('memory', {memoryOperation: operation, input}, value => value, priorityRank[priority], options.signal)
+    // Fence both newly queued and previously in-flight mutations, including failed/partial writes.
+    this.#recallAuthorityRevision++
     return this.#request('memory', {memoryOperation: operation, input}, value => value, priorityRank[priority], options.signal)
+      .finally(() => { this.#recallAuthorityRevision++ })
   }
 
   async open(): Promise<void> {
@@ -282,6 +325,8 @@ export class MemoryLedgerClient {
   /** Replace a worker stuck on a synchronous op; the next `open()` re-establishes the store. */
   #recycleWorker(code: 'WORKER_ERROR' | 'WORKER_EXITED' | 'WORKER_RECYCLED'): void {
     if (this.#closed || this.#expectedExit) return
+    // Reopening loses TEMP session consent even when the persistent authority epoch is unchanged.
+    this.#recallAuthorityRevision++
     const previous = this.#worker
     this.#abandonedInService = null
     if (this.#recycleTimer !== null) {
@@ -343,6 +388,12 @@ export class MemoryLedgerClient {
       return
     }
     this.#recycleFailures = 0
+    // Apply committed implicit writes before resolving (or dropping) even a nominal read.
+    if (response.authority_epoch !== undefined) {
+      if (response.authority_epoch !== this.#observedAuthorityEpoch) this.#recallAuthorityRevision++
+      this.#observedAuthorityEpoch = response.authority_epoch
+    }
+    if (response.authority_changed) this.#recallAuthorityRevision++
     if (this.#dropped.delete(response.request_id)) {
       // An abandoned read finished late; free its service slot without delivering a result.
       if (this.#inService === response.request_id) this.#inService = null
@@ -382,6 +433,7 @@ export class MemoryLedgerClient {
   }
 
   #spawnWorker(): MemoryLedgerWorker {
+    this.#authorizationFence = randomUUID()
     const worker = this.#workerFactory(this.#workerUrl, {workerData: this.#workerData})
     worker.on('message', message => this.#handleMessage(worker, message))
     worker.on('error', () => this.#handleWorkerFailure(worker, 'WORKER_ERROR'))
@@ -416,20 +468,23 @@ function parseWorkerResponse(message: unknown): WorkerResponse | undefined {
     || message.kind !== 'response'
     || !Number.isSafeInteger(message.request_id)
     || (message.request_id as number) <= 0
+    || (message.authority_epoch !== undefined && (!Number.isSafeInteger(message.authority_epoch) || (message.authority_epoch as number) < 0))
+    || (message.authority_changed !== undefined && typeof message.authority_changed !== 'boolean')
   ) {
     return undefined
   }
   if (message.ok === true && 'result' in message) {
-    if (!hasOnlyKeys(message, ['kind', 'request_id', 'ok', 'result'])) return undefined
-    return {kind: 'response', request_id: message.request_id as number, ok: true, result: message.result}
+    if (!hasOnlyKeys(message, ['kind', 'request_id', 'ok', 'result', 'authority_changed', 'authority_epoch'])) return undefined
+    return {kind: 'response', request_id: message.request_id as number, ok: true, result: message.result, ...(message.authority_epoch === undefined ? {} : {authority_epoch: message.authority_epoch as number}), ...(message.authority_changed === undefined ? {} : {authority_changed: message.authority_changed})}
   }
   if (message.ok === false && isStoreErrorCode(message.error_code)) {
-    if (!hasOnlyKeys(message, ['kind', 'request_id', 'ok', 'error_code'])) return undefined
+    if (!hasOnlyKeys(message, ['kind', 'request_id', 'ok', 'error_code', 'authority_changed', 'authority_epoch'])) return undefined
     return {
       kind: 'response',
       request_id: message.request_id as number,
       ok: false,
       error_code: message.error_code,
+      ...(message.authority_epoch === undefined ? {} : {authority_epoch: message.authority_epoch as number}), ...(message.authority_changed === undefined ? {} : {authority_changed: message.authority_changed}),
     }
   }
   return undefined

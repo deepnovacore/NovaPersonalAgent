@@ -24,13 +24,13 @@ function harness(soul,overrides={}){
 }
 
 test('soulIntro builds every sentence from a field and never adds a trait',()=>{
- assert.equal(soulIntro(full,'zh-CN'),'我叫小星。你希望我是——靠谱、说话直接。平时说话我会按你说的来：简短、先给结论。我最多每天主动找你 3 次，22:00 到 08:00 不打扰你。')
+ assert.equal(soulIntro(full,'zh-CN'),'我叫小星。你希望我是——靠谱、说话直接。平时说话我会按你说的来：简短、先给结论。我最多每天主动找你 3 次（资讯推送另计，每天最多 2 条），22:00 到 08:00 不打扰你。')
  const text=soulIntro(full,'zh-CN')
  for(const fact of ['小星','靠谱、说话直接','简短、先给结论','3','22:00','08:00'])assert.ok(text.includes(fact))
  assert.equal(soulIntro({...full,assistant_name:'',role:'',reply_style:null,contact:{...full.contact,briefs_on:false}},'zh-CN'),'你还没告诉我希望我是什么样的，想好了在下面写给我就行。我不会主动来找你，你叫我我再出现。')
  assert.ok(!/我叫/u.test(soulIntro(empty,'zh-CN')),'no invented name when the field is empty')
  assert.ok(!/平时说话/u.test(soulIntro(empty,'zh-CN')))
- assert.ok(soulIntro({...full,contact:{...full.contact,briefs_on:false,discovery_on:true}},'zh-CN').includes('最多每天主动找你 3 次'))
+ assert.ok(soulIntro({...full,contact:{...full.contact,briefs_on:false,discovery_on:true}},'zh-CN').includes('最多每天主动找你 3 次（资讯推送另计，每天最多 2 条）'))
  assert.equal(soulIntro({role:'x'},'zh-CN'),'你希望我是——x。')
 })
 
@@ -39,7 +39,7 @@ test('soulIntro flattens newlines, truncates a long role at 80 characters and ha
  assert.ok(text.includes('第一行 第二行')&&!text.includes('\n'))
  assert.equal(text.match(/你希望我是——(.*?)。/u)[1],('第一行 第二行'+'长'.repeat(200)).slice(0,80)+'…')
  const en=soulIntro(full,'en')
- assert.equal(en,"I'm 小星. You'd like me to be: 靠谱、说话直接. I'll talk the way you asked: 简短、先给结论. I'll reach out at most 3 times a day, and stay quiet from 22:00 to 08:00.")
+ assert.equal(en,"I'm 小星. You'd like me to be: 靠谱、说话直接. I'll talk the way you asked: 简短、先给结论. I'll reach out at most 3 times a day (news pushes have a separate allowance of 2 a day), and stay quiet from 22:00 to 08:00.")
  assert.equal(soulIntro(empty,'en'),"You haven't told me what kind of assistant you'd like yet. Write it below whenever you're ready. I won't reach out on my own; call me and I'll show up.")
  assert.equal(soulIntro(empty,'zh-CN').includes('hello'),false)
 })

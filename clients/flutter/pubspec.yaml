@@ -38,6 +38,9 @@ dependencies:
   cupertino_icons: ^1.0.8
   mobile_scanner: 7.4.2
   crypto: ^3.0.7
+  cryptography: ^2.7.0
+  pointycastle: ^4.0.0
+  jose: ^0.3.5+2
   ffi: ^2.1.4
   xml: 6.6.1
   path_provider: ^2.1.6
@@ -47,6 +50,7 @@ dependencies:
   flutter_markdown_plus: 1.0.12
   url_launcher: 6.3.2
   image_picker: ^1.2.4
+  file_picker: 13.3.2
 
 dev_dependencies:
   fake_async: ^1.3.3
@@ -77,6 +81,7 @@ flutter:
   # docs/ASSET_PUBLICATION.md.
   assets:
     - assets/pets/nova.png
+    - assets/licenses/NovaDocumentSansSC-OFL.txt
 
   # To add assets to your application, add an assets section, like this:
   # assets:

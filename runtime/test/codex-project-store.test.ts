@@ -3330,7 +3330,7 @@ test('live recovery preserves Python v1 bytes and migrates recovered session ide
   }
 })
 
-test('case aliases of one directory import as one workspace and take one path lock', async () => {
+test('case aliases of one directory import as one workspace and take one path lock', async t => {
   const f = await projectStoreFixture('nova-project-identity-')
   const store = await f.open()
   try {
@@ -3340,6 +3340,13 @@ test('case aliases of one directory import as one workspace and take one path lo
     const segments = canonical.split('/')
     const alias = '/' + segments[1]!.toUpperCase() + canonical.slice(segments[1]!.length + 1)
     assert.notEqual(alias, canonical)
+    try {
+      await realpath(alias)
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+      t.skip('Filesystem distinguishes case')
+      return
+    }
     const first = await store.ensureImported('alpha', hostWorkspaceForTest(canonical))
     const second = await store.ensureImported('alias', hostWorkspaceForTest(alias))
     assert.equal(second.workspace_id, first.workspace_id)

@@ -1,14 +1,33 @@
 import {selectTimelineInputs} from './timeline-inputs.js'
-import {temporalSchema,resolvedTimeSchema,resolveTimelineTime} from './timeline-time.js'
+import {temporalSchema,resolvedTimeSchema,resolveTimelineTime,effectiveTimelineAnchor} from './timeline-time.js'
 import {SensitiveContentPolicy} from '../memory/sensitivity.js'
 import {createHash} from 'node:crypto'
 import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {abortable} from '../core/camera-session.js'
 import {sourceTagSchema,type SourceTag} from '../memory/provenance.js'
+import type {TimelineCachePort,TimelineRunOptions} from './timeline-cache.js'
+import {clusterCards} from './timeline-cluster.js'
 
 export interface TimelineAccess {scope:string;allowed:boolean;legacy_refs:readonly string[]}
 export interface TimelineInput {account_scope?:string;history_only?:boolean;id:string;version:string;kind:string;text:string;observed_at:string;group?:string;evidence_refs?:string[];relation?:'self'|'addressed'|'participant'|'system';source?:SourceTag;author?:{key:string;name?:string;kind:'person'|'system'|'unknown';is_user:boolean}}
+/** One already-published card, as a bounded index for an incremental synthesis. Never evidence. */
+export interface TimelinePriorCard {id:string;title:string;category:string;why_now:string;anchor_date:string|null;evidence_ids?:string[]}
+/** Shared by generation and publication so omitted identities cannot bypass revision checks. */
+export function timelineRevisionId(priorId:string|undefined,refs:readonly string[],priorCards:readonly {id:string;evidence_ids?:readonly string[]}[],infer:boolean):string|undefined{
+ if(priorId&&priorCards.some(card=>card.id===priorId))return priorId
+ if(!infer)return undefined
+ const candidates=priorCards.filter(card=>card.evidence_ids?.some(id=>refs.includes(id)))
+ return candidates.length===1?candidates[0]!.id:undefined
+}
+/** How long a source recheck may run before the cards are shown as being checked. */
+const CHECKING_GRACE_MS=4000
+/** Scheduled synthesis is batched by events, not polled. */
+const TIMELINE_BATCH_INPUTS=20
+const TIMELINE_BATCH_SPACING_MS=10*60_000
+const TIMELINE_DAY_SPACING_MS=30*60_000
+const TIMELINE_IDLE_SPACING_MS=4*3600_000
+const MESSAGE_KINDS=new Set(['im','mail','calendar'])
 export const TIMELINE_MAX_REFS=16
 const ref=z.string().min(1).max(600)
 export const timelineReplySchema=z.object({cards:z.array(z.object({
@@ -19,6 +38,8 @@ export const timelineReplySchema=z.object({cards:z.array(z.object({
  facts:z.array(z.object({label:z.string().trim().max(32).default(''),tone:z.enum(['neutral','risk','warning','positive']).default('neutral'),text:z.string().trim().min(1).max(160),quote:z.string().min(1).max(600),ref}).strict()).min(1).max(3),
  next_steps:z.array(z.object({title:z.string().trim().min(1).max(40),detail:z.string().trim().min(1).max(100)}).strict()).max(3).default([]),
  uncertainty:z.string().max(160),actions:z.array(z.object({label:z.string().trim().min(1).max(40),kind:z.enum(['discuss','draft'])}).strict()).max(2),refs:z.array(ref).min(1).max(TIMELINE_MAX_REFS),
+ /** Set only when this output revises an already published card; the host then keeps that stable identity. */
+ prior_id:z.string().min(1).max(128).optional(),
 }).strict())}).strict()
 /** Names are presentation hints, not inferred assignments or authority. */
 export function groundedTimelinePeople(card:z.infer<typeof timelineReplySchema>['cards'][number],inputs:ReadonlyMap<string,TimelineInput>){
@@ -37,16 +58,33 @@ export const timelineDiagnosticsSchema=z.object({
  failed_batches:z.array(z.object({batch:count,reason:z.string()})).default([]),
  stages:z.array(z.object({batch:count,phase:z.enum(['compose','review']),received:count,accepted:count,dropped:z.record(z.string(),count)})),
  host_received:count.default(0),published:count.default(0),host_dropped:z.record(z.string(),count).default({}),
+ // Incremental cache counters are part of the persisted shape; parse would strip them otherwise.
+ cache_reused_topics:count.default(0),cache_reused_inputs:count.default(0),cache_screened_inputs:count.default(0),cache_stage_hits:count.default(0),cache_stage_misses:count.default(0),
+ /** Topics whose inputs were all already published, so their existing cards stay the answer. */
+ cache_skipped_topics:count.default(0),
+ /** Repeated routine alerts folded into one batch entry, and revisions that ignored a new state change. */
+ duplicates_folded:count.default(0),cards_folded:count.default(0),stale_state_repairs:count.default(0),stale_state_dropped:count.default(0),
 })
 export type TimelineDiagnostics=z.infer<typeof timelineDiagnosticsSchema>
-export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:TimelineDiagnostics}
-export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[]}
-export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>)=>Promise<TimelineGenerated>
-const cardSchema=timelineReplySchema.shape.cards.element.extend({id:z.string(),version:z.string(),timezone:z.string().optional(),artifact_scope:z.string().optional(),evidence_basis:z.array(z.object({id:ref,version:z.string()})).optional(),policy_revision:z.number().int().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
+export type TimelineGenerated=z.input<typeof timelineReplySchema>&{diagnostics?:z.input<typeof timelineDiagnosticsSchema>;/** Inputs whose screening and composition completed, including valid empty results. */completed_input_ids?:string[]}
+/** `prior_cards` and `new_input_ids` only describe what is already published and what changed since the last checkpoint; they are never evidence. */
+export interface TimelineContext {local_date:string;timezone:string;viewer_names?:string[];prior_cards?:TimelinePriorCard[];new_input_ids?:string[]}
+export type TimelineGenerator=(inputs:readonly TimelineInput[],context:TimelineContext,signal:AbortSignal,progress?:(result:TimelineGenerated)=>Promise<void>,run?:TimelineRunOptions)=>Promise<TimelineGenerated>
+const cardSchema=timelineReplySchema.shape.cards.element.omit({prior_id:true}).extend({id:z.string(),version:z.string(),timezone:z.string().optional(),artifact_scope:z.string().optional(),evidence_basis:z.array(z.object({id:ref,version:z.string()})).optional(),policy_revision:z.number().int().optional(),sources:z.array(sourceTagSchema),time:resolvedTimeSchema})
 const failureSchema=z.object({name:z.string(),code:z.string(),issues:z.array(z.object({code:z.string(),path:z.array(z.union([z.string(),z.number()])),maximum:z.number().optional()})).optional()})
-const stateSchema=z.object({diagnostics:timelineDiagnosticsSchema.nullable().default(null),failure:failureSchema.nullable().default(null),version:z.literal(1),perspective_revision:z.number().int().default(0),key:z.string(),local_date:z.string(),timezone:z.string().nullable().default(null),basis:z.array(z.object({id:ref,version:z.string()})),cards:z.array(cardSchema),updated_at:z.string().nullable(),last_attempt:z.number(),dismissed:z.array(z.string()).max(256)})
+/** State v2 stores the last successful synthesis as a checkpoint: which inputs it covered and which generation it produced. */
+const checkpointSchema=z.object({last_success_at:z.string().nullable(),input_versions:z.array(z.object({id:ref,version:z.string()})),generation:z.string()})
+/** v1 states are migrated in place (checkpoint derived from key/basis/updated_at); running the migration again is a no-op. */
+const migrateTimelineState=(raw:unknown):unknown=>{
+ if(!raw||typeof raw!=='object'||Array.isArray(raw))return raw
+ const state=raw as Record<string,unknown>,saved=state.checkpoint
+ if(state.version===2&&saved&&typeof saved==='object'&&!Array.isArray(saved))return raw
+ if(state.version!==1&&state.version!==2&&state.version!==undefined)return raw
+ return {...state,version:2,checkpoint:{last_success_at:typeof state.updated_at==='string'?state.updated_at:null,input_versions:Array.isArray(state.basis)?state.basis:[],generation:typeof state.key==='string'?state.key:''}}
+}
+const stateSchema=z.preprocess(migrateTimelineState,z.object({diagnostics:timelineDiagnosticsSchema.nullable().default(null),failure:failureSchema.nullable().default(null),version:z.literal(2),checkpoint:checkpointSchema,perspective_revision:z.number().int().default(0),key:z.string(),local_date:z.string(),timezone:z.string().nullable().default(null),basis:z.array(z.object({id:ref,version:z.string()})),cards:z.array(cardSchema),updated_at:z.string().nullable(),last_attempt:z.number(),dismissed:z.array(z.string()).max(256)}))
 type State=z.infer<typeof stateSchema>
-const empty=():State=>({diagnostics:null,failure:null,version:1,perspective_revision:1,key:'',local_date:'',timezone:null,basis:[],cards:[],updated_at:null,last_attempt:0,dismissed:[]})
+const empty=():State=>({diagnostics:null,failure:null,version:2,checkpoint:{last_success_at:null,input_versions:[],generation:''},perspective_revision:1,key:'',local_date:'',timezone:null,basis:[],cards:[],updated_at:null,last_attempt:0,dismissed:[]})
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
 const scrubber=new SensitiveContentPolicy()
 const sensitive=(text:string)=>scrubber.scrub('timeline',text).kind!=='clean'
@@ -56,17 +94,25 @@ export class TimelineBrief {
  #persisted:State=empty()
  #loadFailed=false
  get loadFailed(){return this.#loadFailed}
- #access:TimelineAccess|undefined;#pendingValidation=false;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
- constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void){this.#store=new BoundedJsonStore(path,stateSchema)}
- async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
+ #access:TimelineAccess|undefined;#cache:TimelineCachePort|undefined;#pendingValidation=false;#epoch=0;#suspendedAt=0;#tail:Promise<void>=Promise.resolve();#defer=true;#store:BoundedJsonStore<State>;#state=empty();#inputs:TimelineInput[]=[];#date='';#timezone='UTC';#status='idle';#error:string|null=null;#opened=false;#timer:ReturnType<typeof setTimeout>|undefined;#abort=new AbortController();#run:Promise<void>|undefined
+ constructor(path:string,readonly generate:TimelineGenerator|undefined,readonly changed:()=>void,options?:{readonly cache?:TimelineCachePort}){this.#store=new BoundedJsonStore(path,stateSchema);this.#cache=options?.cache}
+ async open(){this.#loadFailed=false;try{this.#state=await this.#store.read(empty());if(this.#state.timezone)for(const card of this.#state.cards)card.timezone??=this.#state.timezone}catch(error){if(!(error instanceof z.ZodError)&&!(error instanceof SyntaxError))throw error;this.#loadFailed=true;this.#state=empty()}
+  if(this.#dropDuplicates())await this.#save()
+  // Older progress writes claimed the whole pool even when a batch failed or never finished.
+  if(this.#state.checkpoint.generation&&this.#state.checkpoint.generation===this.#state.key&&(this.#state.failure||this.#state.diagnostics?.failed_batches.length||this.#state.diagnostics?.pending_batches))this.#state.checkpoint={last_success_at:null,input_versions:[],generation:''}
+  this.#persisted=structuredClone(this.#state);this.#access=undefined;this.#inputs=[];this.#date='';this.#status='idle';this.#defer=true;this.#opened=true;this.#abort=new AbortController()}
  startGeneration(){this.#defer=false;this.#schedule()}
  #save(){const state=structuredClone(this.#state);const run=this.#tail.then(async()=>{await this.#store.write(state);this.#persisted=state});this.#tail=run.catch(()=>undefined);return run}
  /** IDs only: each cached citation must be re-read under current source permissions. */
  retainedEvidenceIds(){return [...new Set(this.#state.cards.filter(card=>!this.#dismissed(card)).flatMap(card=>card.refs))]}
  basis(id?:string){return structuredClone([...new Map(this.#visibleCards().filter(card=>(!id||card.id===id)&&this.#sourcesAvailable(card)).flatMap(card=>(card.evidence_basis??this.#state.basis).filter(input=>card.refs.includes(input.id))).map(input=>[input.id,input])).values()])}
- async clear(){this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.#loadFailed=false;this.changed()}
- suspend(){this.#pendingValidation=true;this.changed()}
- invalidate(){this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
+ async clear(){this.#epoch++;this.#abort.abort();await this.#run;this.#abort=new AbortController();this.#state=empty();this.#inputs=[];await this.#save();this.#loadFailed=false;this.changed()}
+ /** Counts every event after which previously read inputs may no longer be authorized; a cached read is reusable only within one epoch. */
+ get epoch():number{return this.#epoch}
+ suspend(){this.#epoch++;if(!this.#pendingValidation)this.#suspendedAt=Date.now();this.#pendingValidation=true;this.changed()}
+ /** A recheck that finishes within the grace window is invisible; only a slow one shows the checking state, so source events do not make cards and their buttons blink. */
+ #checking(){return this.#pendingValidation&&Date.now()-this.#suspendedAt>CHECKING_GRACE_MS}
+ invalidate(){this.#epoch++;this.update([],this.#date,this.#timezone,this.#access?{...this.#access,legacy_refs:[]}:{scope:'local',allowed:true,legacy_refs:[]})}
  unavailable(){this.invalidate();this.#status='failed';this.#error='timeline_sources_unavailable';this.changed()}
  #key(){return hash(['timeline-scope-v15',this.#date,this.#timezone,this.#inputs.map(({id,version})=>({id,version}))])}
  #compatible(basis:readonly {id:string;version:string}[],date:string,timezone:string|null){
@@ -75,21 +121,61 @@ export class TimelineBrief {
   return basis.every(input=>versions.get(input.id)===input.version)
  }
  setAccess(access:TimelineAccess){
-  if(this.#access?.scope!==access.scope||!access.allowed){this.#abort.abort();this.#abort=new AbortController();this.#inputs=[]}
+  if(this.#access?.scope!==access.scope||!access.allowed){this.#epoch++;this.#abort.abort();this.#abort=new AbortController();this.#inputs=[]}
   this.#access={...access,legacy_refs:[...access.legacy_refs]}
  }
  #dismissed(card:State['cards'][number],state=this.#state){return state.dismissed.includes(`${card.artifact_scope??''}:${card.id}`)||!card.artifact_scope&&state.dismissed.includes(card.id)}
- #sourcesAvailable(card:State['cards'][number],state=this.#state){
-  if(this.#pendingValidation)return false
-  const versions=new Map(this.#inputs.map(input=>[input.id,input.version])),basis=new Map((card.evidence_basis??state.basis).map(input=>[input.id,input.version]))
-  return card.refs.every(ref=>versions.has(ref)&&versions.get(ref)===basis.get(ref))
+ #sourcesAvailable(card:State['cards'][number],state=this.#state,duringRecheck=false){
+  if(this.#pendingValidation&&!duringRecheck)return false
+  const inputs=new Map(this.#inputs.map(input=>[input.id,input])),basis=new Map((card.evidence_basis??state.basis).map(input=>[input.id,input.version]))
+  // A message's version also covers permission bookkeeping (source fence, grant revision), which changes on pause, resume and rescan
+  // without the message changing; presence is the proof for messages. Files and memories keep the exact-version check.
+  return card.refs.every(ref=>{const input=inputs.get(ref);return !!input&&(MESSAGE_KINDS.has(input.kind)||input.version===basis.get(ref))})
+ }
+ /** Cited message ids that are absent from the current inputs; the host asks the ledger which of them were really deleted. */
+ missingMessageRefs():string[]{
+  const present=new Set(this.#inputs.map(input=>input.id))
+  return [...new Set(this.#state.cards.flatMap(card=>card.refs).filter(id=>!present.has(id)&&!id.startsWith('source:')&&!id.startsWith('memory:')))]
+ }
+ /** Removes cards that cite a message that no longer exists. Cards whose source is merely paused or unauthorized stay. */
+ async retire(ids:ReadonlySet<string>):Promise<number>{
+  if(!ids.size)return 0
+  const before=this.#state.cards.length
+  this.#state.cards=this.#state.cards.filter(card=>!card.refs.some(ref=>ids.has(ref)))
+  const removed=before-this.#state.cards.length
+  if(removed){await this.#save();this.changed()}
+  return removed
+ }
+ /** Deletes cards that repeat a stronger card (same cited message, same matter). Cards that revise a published card are kept. */
+ #dropDuplicates():number{
+  const byScope=new Map<string|undefined,State['cards']>()
+  for(const card of this.#state.cards)byScope.set(card.artifact_scope,[...(byScope.get(card.artifact_scope)??[]),card])
+  const drop=new Set<State['cards'][number]>()
+  for(const group of byScope.values())for(const cluster of clusterCards(group))for(const member of cluster.members)drop.add(member)
+  if(!drop.size)return 0
+  const dropped=new Set([...drop].map(card=>card.id))
+  this.#state.cards=this.#state.cards.filter(card=>!drop.has(card))
+  this.#state.dismissed=this.#state.dismissed.filter(entry=>![...dropped].some(id=>entry===id||entry.endsWith(':'+id)))
+  return drop.size
  }
  #visibleCards(state=this.#state){
   if(!this.#access?.allowed)return []
   return state.cards.filter(card=>card.artifact_scope===this.#access!.scope&&!this.#dismissed(card,state))
  }
  #current(state=this.#state){return this.#visibleCards(state).length>0||state.perspective_revision===1&&!this.#pendingValidation&&state.key===this.#key()}
- snapshot(persisted=false){const state=persisted?this.#persisted:this.#state;const counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort();return {generation_id:this.#current(state)?state.key:null,diagnostics:this.#current(state)?structuredClone(state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current(state)?state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards:structuredClone(this.#visibleCards(state).map(card=>({...card,sources_available:this.#sourcesAvailable(card,state),sources_checking:this.#pendingValidation,historical:card.policy_revision!==1||!this.#sourcesAvailable(card,state)})))}}
+ snapshot(persisted=false){
+  const state=persisted?this.#persisted:this.#state,counts={messages:0,files:0,memories:0},dates:string[]=[];for(const input of this.#inputs){if(input.kind==='file')counts.files++;else if(input.kind==='memory')counts.memories++;else{counts.messages++;if(Number.isFinite(Date.parse(input.observed_at)))dates.push(new Date(input.observed_at).toLocaleDateString('en-CA',{timeZone:this.#timezone}))}}dates.sort()
+  // Persisted cards predate the effective-anchor rule; re-derive placement here so cached
+  // deadline/scheduled cards are not grouped after today without a regeneration.
+  const placed=<T extends {time?:z.infer<typeof resolvedTimeSchema>}>(card:T):T=>card.time?{...card,time:{...card.time,...effectiveTimelineAnchor(card.time)}}:card
+  const cards=structuredClone(this.#visibleCards(state).map(raw=>placed(raw)).map(card=>({...card,sources_available:this.#sourcesAvailable(card,state,!this.#checking()),sources_checking:this.#checking(),historical:card.policy_revision!==1||!this.#sourcesAvailable(card,state,!this.#checking())})))
+  const activeCount=cards.filter(card=>card.sources_available).length
+  return {generation_id:this.#current(state)?state.key:null,diagnostics:this.#current(state)?structuredClone(state.diagnostics):null,available:!!this.generate,status:this.#status,error:this.#error,updated_at:this.#current(state)?state.updated_at:null,input_count:this.#inputs.length,coverage:`本轮资料：${counts.messages} 条消息 · ${counts.files} 份文档 · ${counts.memories} 条个人记录${dates.length?'；消息记录 '+dates[0]+'—'+dates.at(-1):''}`,cards,
+   /** Active cards still have their original evidence; archived cards are retained history whose sources moved or were withdrawn. */
+   active_count:activeCount,archived_count:cards.length-activeCount,
+   /** Stable across batch-progress publishes, so an expanded page stays expanded while the same generation runs. */
+   pagination_key:state.key||this.#key(),checkpoint:{last_success_at:state.checkpoint.last_success_at,generation:state.checkpoint.generation}}
+ }
  update(inputs:readonly TimelineInput[],date:string,timezone:string,access:TimelineAccess={scope:'local',allowed:true,legacy_refs:inputs.map(input=>input.id)}){
   this.setAccess(access)
   const old=this.#key(),previous=this.#inputs,previousDate=this.#date,previousZone=this.#timezone,pending=this.#pendingValidation;this.#pendingValidation=false;const eligible=inputs.filter(input=>input.text.trim()&&!sensitive(input.text)),selected=selectTimelineInputs(eligible.filter(input=>!input.history_only)),selectedIds=new Set(selected.map(input=>input.id)),retained=new Set(this.retainedEvidenceIds());this.#inputs=[...selected,...eligible.filter(input=>retained.has(input.id)&&!selectedIds.has(input.id))];this.#date=date;this.#timezone=timezone
@@ -106,14 +192,44 @@ export class TimelineBrief {
  }
  #schedule(){
   clearTimeout(this.#timer);this.#timer=undefined
-  if(!this.#access?.allowed||this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.key&&this.#state.perspective_revision===1)return
-  this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh()},Math.max(1000,this.#state.last_attempt+300000-Date.now()));this.#timer.unref()
+  if(!this.#access?.allowed||this.#pendingValidation||this.#defer||!this.#opened||!this.generate||this.#run||!this.#inputs.some(input=>!input.history_only)||this.#key()===this.#state.checkpoint.generation&&this.#state.perspective_revision===1)return
+  const delay=this.#scheduleDelay();if(delay===undefined)return
+  this.#timer=setTimeout(()=>{this.#timer=undefined;void this.refresh({force:false})},delay);this.#timer.unref()
  }
- async refresh(){
+ /**
+  * Event-batched, not polled. A first synthesis (or one from an older recipe) runs promptly; afterwards a batch of new messages runs
+  * at most every ten minutes, a new day or an edited file/memory within half an hour, and a trickle of fewer new messages only after
+  * hours. Version drift on a message that is already covered (pause, resume, rescan) teaches nothing, so it never triggers a run.
+  */
+ #scheduleDelay():number|undefined{
+  const state=this.#state,now=Date.now()
+  if(state.perspective_revision!==1||!state.checkpoint.generation||!state.checkpoint.last_success_at)return 1000
+  const covered=new Map(state.checkpoint.input_versions.map(input=>[input.id,input.version]))
+  const live=this.#inputs.filter(input=>!input.history_only)
+  const added=live.filter(input=>!covered.has(input.id)).length
+  const editedStatic=live.some(input=>covered.has(input.id)&&covered.get(input.id)!==input.version&&!MESSAGE_KINDS.has(input.kind))
+  const dayChanged=!!state.local_date&&state.local_date!==this.#date
+  const wait=(spacing:number)=>Math.max(1000,state.last_attempt+spacing-now)
+  if(added>=TIMELINE_BATCH_INPUTS)return wait(TIMELINE_BATCH_SPACING_MS)
+  // The inputs are exactly what was synthesized, yet the key moved: a new day, time zone or recipe.
+  const sameInputs=live.every(input=>covered.get(input.id)===input.version)
+  if(dayChanged||editedStatic||sameInputs)return wait(TIMELINE_DAY_SPACING_MS)
+  if(added>0)return wait(TIMELINE_IDLE_SPACING_MS)
+  return undefined
+ }
+ /** A manual refresh may force a new synthesis even when the checkpoint already covers the same inputs; the scheduled path never does. */
+ async refresh(options:{force?:boolean}={}){
   if(this.#run)return this.#run
   if(!this.#access?.allowed||this.#pendingValidation||!this.#opened||!this.generate||!this.#inputs.some(input=>!input.history_only))return
   clearTimeout(this.#timer);this.#timer=undefined
-  const key=this.#key(),inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(source=>{const input={...source};delete input.account_scope;return input})),context={local_date:this.#date,timezone:this.#timezone},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
+  const key=this.#key(),force=options.force!==false
+  // Nothing has changed since the last successful synthesis: the stored cards are already the answer, so no model call is spent.
+  if(!force&&this.#state.perspective_revision===1&&this.#state.checkpoint.generation===key){if(this.#current())this.#status='ready';return}
+  const checkpointVersions=new Map(this.#state.checkpoint.input_versions.map(({id,version})=>[id,version]))
+  const inputs=structuredClone(selectTimelineInputs(this.#inputs.filter(input=>!input.history_only)).map(source=>{const input={...source};delete input.account_scope;return input}))
+  const newInputIds=inputs.filter(input=>checkpointVersions.get(input.id)!==input.version).map(input=>input.id)
+  const priorCards=this.#visibleCards().map(card=>({id:card.id,title:card.title,category:card.category,why_now:card.why_now.slice(0,120),anchor_date:card.time.anchor_date,evidence_ids:[...new Set(card.refs)].slice(0,TIMELINE_MAX_REFS)}))
+  const context:TimelineContext={local_date:this.#date,timezone:this.#timezone,...(priorCards.length?{prior_cards:priorCards}:{}),new_input_ids:newInputIds},cancel=this.#abort.signal,timeout=AbortSignal.timeout(600000),signal=AbortSignal.any([cancel,timeout])
   this.#status='working';this.#error=null;this.changed()
   const publish=async(generated:TimelineGenerated,done:boolean)=>{
    if(signal.aborted||!this.#compatible(inputs,context.local_date,context.timezone)||!this.#opened)return
@@ -122,8 +238,11 @@ export class TimelineBrief {
    diagnostics.host_received=result.cards.length;diagnostics.host_dropped={}
    const drop=(reason:string)=>{diagnostics.host_dropped[reason]=(diagnostics.host_dropped[reason]??0)+1;return []}
    const byId=new Map(inputs.map(input=>[input.id,input])),seen=new Set<string>()
+   // A delta synthesis may revise an already published card; prior_id keeps that card's stable identity and history.
+   const revisionCards=priorCards
    const cards=result.cards.flatMap(raw=>{
     const card={...raw,people:groundedTimelinePeople(raw,byId)}
+    const priorId=card.prior_id;delete card.prior_id
     const refs=[...new Set([...card.refs,...card.facts.map(fact=>fact.ref),...card.temporal.dates.map(date=>date.ref)])]
     if(refs.length>TIMELINE_MAX_REFS)return drop('reference_limit')
     if(refs.some(id=>!byId.has(id)))return drop('unknown_reference')
@@ -132,25 +251,38 @@ export class TimelineBrief {
     const time=resolveTimelineTime(card.temporal,refs.map(id=>byId.get(id)!),context);if(!time)return drop('invalid_time_or_background')
     const recentSince=new Date(Date.parse(context.local_date+'T00:00:00Z')-14*86400000).toISOString().slice(0,10)
     if(time.anchor_date&&time.anchor_date<recentSince&&(!time.last_reported_on||time.last_reported_on<recentSince)&&(!time.due_on||time.due_on<recentSince)&&(!time.scheduled_on||time.scheduled_on<recentSince))return drop('outside_window')
-    const id=hash([card.title,refs.sort()]);if(seen.has(id))return drop('duplicate');seen.add(id)
+    const newInputs=context.new_input_ids??[]
+    const stable=timelineRevisionId(priorId,refs,revisionCards,newInputs.length>0)
+    // A revision has to be grounded in at least one new original: unchanged sources alone cannot
+    // justify rewriting a published conclusion, so the previous card is kept instead.
+    if(stable&&!refs.some(id=>newInputs.includes(id)))return drop('unsupported_revision')
+    const id=stable??hash([card.title,refs.sort()]);if(seen.has(id))return drop('duplicate');seen.add(id)
     const sources=refs.flatMap(id=>{const source=byId.get(id)!.source;return source?[{...source,summary:card.facts.filter(fact=>fact.ref===id).map(fact=>fact.quote).join('\n').slice(0,700)||source.summary}]:[]})
     return [{...card,time,timezone:context.timezone,artifact_scope:this.#access!.scope,evidence_basis:refs.map(id=>({id,version:byId.get(id)!.version})),policy_revision:1,refs,id,version:hash([card,refs.map(id=>byId.get(id)!.version)]),sources}]
    })
    // A new synthesis updates matching cards; omission is not a withdrawal.
    const merged=new Map(this.#state.cards.map(card=>[`${card.artifact_scope??''}:${card.id}`,card]))
    for(const card of cards)merged.set(`${card.artifact_scope}:${card.id}`,card)
-   const retainedCards=[...merged.values()]
+   const retainedCards=[...merged.values()],changed=hash(retainedCards)!==hash(this.#state.cards)
+   const basis=inputs.map(({id,version})=>({id,version})),now=new Date().toISOString()
+   const completed=new Set(generated.completed_input_ids??(done&&!diagnostics.failed_batches.length&&!diagnostics.pending_batches?inputs.map(input=>input.id):[]))
+   const previous=new Map(this.#state.checkpoint.input_versions.map(input=>[input.id,input.version]))
+   const covered=basis.filter(input=>completed.has(input.id)||previous.get(input.id)===input.version)
+   const complete=done&&!diagnostics.failed_batches.length&&!diagnostics.pending_batches&&covered.length===basis.length
    diagnostics.published=cards.length
-   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis:this.#inputs.map(({id,version})=>({id,version})),cards:retainedCards,updated_at:new Date().toISOString()};await this.#save();this.#loadFailed=false;if(done)this.#status='ready';this.changed()
+   // updated_at only moves when a card actually changed; a no-op or empty refresh keeps the earlier briefing timestamp.
+   this.#state={...this.#state,perspective_revision:1,diagnostics,failure:null,key,local_date:context.local_date,timezone:context.timezone,basis,cards:retainedCards,updated_at:changed?now:this.#state.updated_at,checkpoint:{last_success_at:complete?now:this.#state.checkpoint.last_success_at,input_versions:covered,generation:complete?key:this.#state.checkpoint.generation}};this.#dropDuplicates();await this.#save();this.#loadFailed=false;if(done)this.#status='ready';this.changed()
   }
   const work=(async()=>{try{
    this.#state.last_attempt=Date.now();this.#state.failure=null;await this.#save();signal.throwIfAborted()
-   const generated=await abortable(this.generate!(inputs,context,signal,result=>publish(result,false)),signal)
+   // Every refresh is cache-first, manual ones included; the generator re-authorizes through the host wrapper and only pays for changed input.
+   const generated=await abortable(this.generate!(inputs,context,signal,result=>publish(result,false),{...(this.#cache?{cache:this.#cache}:{}),scope:this.#access?.scope??'local',force}),signal)
    signal.throwIfAborted();await publish(generated,true)
   }catch(error){if(!cancel.aborted){if(error instanceof Error&&'diagnostics' in error){const parsed=timelineDiagnosticsSchema.safeParse(error.diagnostics);if(parsed.success)this.#state.diagnostics=parsed.data}this.#state.failure={name:error instanceof Error?error.name:'unknown',code:error instanceof Error&&['invalid_timeline_evidence','invalid_timeline_selection','timeline_batches_failed','processing_consent_required'].includes(error.message)?error.message:error instanceof Error&&'classification' in error&&typeof error.classification==='string'?error.classification:'unavailable',...(error instanceof z.ZodError?{issues:error.issues.map(issue=>({code:issue.code,path:issue.path.map(part=>typeof part==='number'?part:String(part)),...('maximum' in issue&&typeof issue.maximum==='number'?{maximum:issue.maximum}:{})}))}:{})};await this.#save().catch(()=>undefined)}if(cancel.aborted){this.#status=this.#inputs.length?'queued':'idle';this.#error=null;this.#state.last_attempt=0}else{this.#status='failed';this.#error=timeout.aborted?'timeline_generation_timeout':'timeline_generation_failed'}}finally{this.#run=undefined;this.changed();this.#schedule()}})()
   this.#run=work;await work
  }
  async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id))throw Error('stale_reference');this.#state.dismissed=[...new Set([...this.#state.dismissed,`${this.#access!.scope}:${id}`])].slice(-256);await this.#save();this.#loadFailed=false;this.changed()}
- discussion(id:string,version:string){const card=this.snapshot().cards.find(card=>card.id===id&&card.version===version);if(!card||!this.#sourcesAvailable(card)||card.policy_revision!==1)throw Error('stale_reference');return {card,evidence_refs:[...new Set(card.refs.flatMap(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return input.kind==='file'?[]:input.evidence_refs??[ref]}))],originals:card.refs.map(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return {text:input.text,observed_at:input.observed_at,relation:input.relation,author:input.author}})}}
+ /** Looks the card up directly: a full snapshot() would also format a date for every input, which is the slow part with thousands of messages. */
+ discussion(id:string,version:string){const card=this.#visibleCards().find(card=>card.id===id&&card.version===version);if(!card||!this.#sourcesAvailable(card)||card.policy_revision!==1)throw Error('stale_reference');return {card:structuredClone({...card,sources_available:true,sources_checking:this.#checking(),historical:false}),evidence_refs:[...new Set(card.refs.flatMap(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return input.kind==='file'?[]:input.evidence_refs??[ref]}))],originals:card.refs.map(ref=>{const input=this.#inputs.find(input=>input.id===ref)!;return {text:input.text,observed_at:input.observed_at,relation:input.relation,author:input.author}})}}
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#timer=undefined;this.#abort.abort();await this.#run;await this.#tail}
 }

@@ -1,18 +1,22 @@
 import {t} from './locale.mjs'
 
+export async function readComputerPermissions(api){
+ const permissions=(await Promise.resolve(api?.welcome?.get?.()).catch(()=>null))?.permissions
+ return permissions?{screen:String(permissions.screen),accessibility:String(permissions.accessibility)}:undefined
+}
+
 const ITEMS={
  platform:{text:'当前系统不支持 Computer Use，仅支持 macOS 和 Windows。'},
- configuration:{text:'电脑操作的高级配置无效，请检查后重试。',action:'打开设置',run:api=>api.orbMenu?.openSettings?.('connections')},
+ configuration:{text:'电脑操作的高级配置无效，请检查后重试。',action:'打开设置',run:api=>api.orbMenu?.openSettings?.('permissions')},
  screen_permission:{text:'Nova 需要“屏幕录制”权限才能看到屏幕。',action:'打开系统设置',run:api=>api.welcome?.permission?.('screen')},
  accessibility_permission:{text:'Nova 需要“辅助功能”权限才能点击和输入。',action:'打开系统设置',run:api=>api.welcome?.permission?.('accessibility')},
  vision_model:{text:'当前模型不支持图片，切换到视觉模型后即可使用电脑操作。'},
- display_count:{text:'电脑操作暂时仅支持单屏，调整为单屏后可重新检查。'},
 }
 
 /**
  * The Build-session switch, kept in the composer's action row. The runtime decides; this view only asks and shows
  * exactly what is missing. A new Build session starts with it on: the first time one is shown the switch asks the
- * runtime once; missing prerequisites keep it off, with quiet hints for model/display limits. Switching it off is final.
+ * runtime once; missing prerequisites keep it off, with quiet hints for a missing vision model or permission. Switching it off is final.
  */
 export function mountComputerUseControl(actions,panelHost,{c,el,run,api,autoEnable=true}){
  const toggle=el('button',undefined,'computer-use-toggle');toggle.type='button';toggle.hidden=true;toggle.setAttribute('role','switch');toggle.setAttribute('aria-checked','false')
@@ -42,10 +46,10 @@ export function mountComputerUseControl(actions,panelHost,{c,el,run,api,autoEnab
   const id=c.selectedId;if(!id||busy)return
   busy=true;update()
   try{
-   const permissions=enabled?(await api.welcome?.get?.().catch(()=>null))?.permissions:undefined
-   const params={conversation_id:id,enabled,...(permissions?{permissions:{screen:String(permissions.screen),accessibility:String(permissions.accessibility),...(Number.isSafeInteger(permissions.displayCount)?{displayCount:permissions.displayCount}:{})}}:{})}
+   const permissions=enabled?await readComputerPermissions(api):undefined
+   const params={conversation_id:id,enabled,...(permissions?{permissions}:{})}
    const response=await c.command('build.computer_use',params)
-   if(c.selectedId===id){result=silent&&response?.ok===false?{...response,missing:response.missing.filter(item=>['vision_model','display_count'].includes(item))}:response;resultFor=id}
+   if(c.selectedId===id){result=silent&&response?.ok===false?{...response,missing:response.missing.filter(item=>['vision_model','screen_permission','accessibility_permission'].includes(item))}:response;resultFor=id}
   }finally{busy=false;update()}
  }
  toggle.addEventListener('click',()=>run(()=>request(!state()?.enabled)))

@@ -111,14 +111,20 @@ TimelineWritingPlan timelineWritingPlan(
 }
 
 const _selectInstructions = '''$timelinePerspectiveRules
-逐条阅读本批完整观察，选出有实际个人价值的独立事项，不设目标数量。只返回 {"topics":[{"title":"具体对象的独立交付与变化","observation_indices":[0]}]}。title只作检索索引，不是发布事实；写具体事项，不能用“项目概况”“全部进展”把不同事项塞成一组。同一对象同一交付的计划、完成、取消、恢复归在一起，不同交付分开。编号只能是allowed_indices中的原观察global index，不是本批行号或字典下标。观察不是最终证据，正文会回取全部所引完整原文。共享背景观察可跨主题引用，但不能因此合并独立事项。没有相关事项可返回空topics。单主题原文过大时按真实独立事项重新分题；若确实不可分割则保留完整主题，宿主标记待处理，不能机械拆编号伪造独立事项或抛掉完成/取消观察。''';
+title必须是非空字符串，长度≤160字符，只返回本次规定的JSON对象。
+逐条阅读本批完整原文records，选出有实际个人价值的独立事项，不设目标数量。只返回 {"topics":[{"title":"具体对象的独立交付与变化","observation_indices":[0]}]}。title只作检索索引，不是发布事实；写具体事项，不能用“项目概况”“全部进展”把不同事项塞成一组。同一对象同一交付的计划、完成、取消、恢复归在一起，不同交付分开。编号只能是allowed_indices中的原文key，不是本批行号或字典下标。observation_indices沿用成员字段名，但编号指records的key，不指画像观察；正文回取所选完整原文。共享背景观察可跨主题引用，但不能因此合并独立事项。没有相关事项可返回空topics。单主题原文过大时按真实独立事项重新分题；若确实不可分割则保留完整主题，宿主标记待处理，不能机械拆编号伪造独立事项或抛掉完成/取消观察。''';
 const _reconcileInstructions = '''$timelinePerspectiveRules
-这是跨批次主题索引归并。只返回 {"groups":[{"members":["t0","t1"]}]}。仅列出有把握应合并的主题组；未列出的主题由宿主保留为独立项，不会删除。没有确定的合并关系时返回空groups，不需要逐个枚举独立主题；也允许单成员组。每个列出的id必须来自输入且最多出现一次，不能新增id。同一主体、同一对象、同一交付的早期计划与后续完成、取消、恢复归为一组；不同事项独立。共同项目名、会话、背景消息或同一个人不足以证明同一事项。拿不准则独立保留。title及观察文字只是检索线索，不是最终证据；正文回取所有所选完整原文。不要把全部主题压成项目概况。容量不足时按真正独立事项分组，不能为了容量拆散确属同一事项的状态更新。''';
+这是跨批次主题索引归并。只返回JSON对象 {"groups":[{"members":["t0","t1"]}]}。仅列出有把握应合并的主题组；未列出的主题由宿主保留为独立项，不会删除。没有确定的合并关系时返回空groups，不需要逐个枚举独立主题；也允许单成员组。每个列出的id必须来自输入且最多出现一次，不能新增id。同一主体、同一对象、同一交付的早期计划与后续完成、取消、恢复归为一组；不同事项独立。共同项目名、会话、背景消息或同一个人不足以证明同一事项。拿不准则独立保留。title及观察文字只是检索线索，不是最终证据；正文回取所有所选完整原文。不要把全部主题压成项目概况。容量不足时按真正独立事项分组，不能为了容量拆散确属同一事项的状态更新。''';
+const timelinePriorRules =
+    'context.prior_cards 只是已发布卡片的索引，不是事实来源；事实、日期、人物与状态仍须引用所给原文。修订已有卡片时必须填写其 prior_id，草稿中的 prior_id 原样保留。';
+
+const timelineDeltaRules =
+    '本次是增量整理。context.prior_cards 是已发布的简报摘要，context.new_input_ids 是自上次整理后新增或变化的输入。只就 new_input_ids 涉及的事项及因此需要更新的旧卡写卡：修订某张 prior_card 时必须在 prior_id 填写该卡 id，并让 facts/refs 引用能支持新状态的原文；未变化的事项不必重复输出。prior_cards 只是索引，不是事实来源，不得据摘要补写原文没有的事实、日期、人物或状态；prior_id 只能使用 context.prior_cards 中出现的 id；草稿中已有卡片的 prior_id 必须原样保留。';
+
 const _composeInstructions =
-    '''$profileGrounding
-$timelinePerspectiveRules
+    '''$timelinePerspectiveRules
 $timelineEntryInstructions
-本请求仅生成Timeline，返回 {"timeline":[...]}，不生成profile或todos。按输入的多个独立timeline_topics逐项核对，不能因为同项目而压成一张总览，不凑卡。history_complete=false表示未读到全部历史，不得推断当前仍未完成。每张卡的全部引用必须来自单一timeline_topics主题。只用messages完整原文作事实证据，title是检索线索。''';
+本请求仅生成Timeline，返回 {"timeline":[...]}，不生成profile或todos。逐项识别独立事项；单个timeline_topics也可包含多个独立事项，应分别成卡，不能据其中性标题写总览。按输入的多个独立timeline_topics逐项核对，不能因为同项目而压成一张总览，不凑卡。history_complete=false表示未读到全部历史，不得推断当前仍未完成。每张卡的全部引用必须来自单一timeline_topics主题。只用messages完整原文作事实证据，title是检索线索。''';
 
 /// Pure orchestration. Host owns authorization, encrypted storage and publication.
 class TimelinePipeline {
@@ -129,6 +135,7 @@ class TimelinePipeline {
     this.loadCheckpoint,
     this.saveCheckpoint,
     this.onPublish,
+    this.evidenceIdentities = const {},
     this.maxWritingRecords = 120,
     this.maxWritingCharacters = 48000,
   }) {
@@ -140,7 +147,7 @@ class TimelinePipeline {
       throw ArgumentError('invalid_timeline_writing_capacity');
     }
   }
-  static const recipe = 'timeline-pipeline-v1';
+  static const recipe = 'timeline-pipeline-v3';
   static const _hostFallbackReasons = {
     'groups_schema',
     'members_schema',
@@ -149,6 +156,7 @@ class TimelinePipeline {
   final ProfileCompletion complete;
   final Future<void> Function() authorize;
   final String cacheScope;
+  final Map<String, String> evidenceIdentities;
   final int maxWritingRecords, maxWritingCharacters;
   final Future<Map<String, dynamic>?> Function(String)? loadCheckpoint;
   final Future<void> Function(String, Map<String, dynamic>)? saveCheckpoint;
@@ -165,7 +173,17 @@ class TimelinePipeline {
           'first': Map.of(_firstValidationFailure!),
           'last': Map.of(_lastValidationFailure!),
         };
+  Map<String, dynamic> _context = {};
   final _readEvidenceIds = <String>{};
+  final _inputEvidenceIds = <String>{};
+  final _completedEvidenceIds = <String>{};
+  final _pendingEvidenceIds = <String>{};
+  final _droppedCards = <String>{};
+  Set<String> get completedEvidenceIds =>
+      Set.unmodifiable(_completedEvidenceIds.difference(_pendingEvidenceIds));
+  Set<String> get inputEvidenceIds => Set.unmodifiable(_inputEvidenceIds);
+  Set<String> _priorIds = {};
+  final _priorKeysByEvidence = <String, String?>{};
   Set<String> get readEvidenceIds => Set.unmodifiable(_readEvidenceIds);
   Map<String, int> get coverage => Map.unmodifiable(_metrics);
 
@@ -245,15 +263,27 @@ class TimelinePipeline {
     String stage,
     String instructions,
     Map<String, dynamic> input,
-    T Function(Map<String, dynamic>, bool) validate,
-  ) async {
+    T Function(Map<String, dynamic>, bool) validate, {
+    Map<String, dynamic>? Function(Map<String, dynamic>)? salvage,
+  }) async {
     _activeStage = stage;
+    // Delta hints advance during partial publication; unchanged authorized source
+    // stages must still replay through validation rather than spend another call.
+    final checkpointInput = {...input};
+    if (input['context'] is Map) {
+      checkpointInput['context'] =
+          Map<String, dynamic>.from(input['context'] as Map)
+            ..remove('prior_cards')
+            ..remove('new_input_ids');
+    }
     final key = _digest({
       'recipe': recipe,
       'scope': cacheScope,
       'stage': stage,
-      'instructions': instructions,
-      'input': input,
+      'instructions': instructions
+          .replaceAll('\n$timelineDeltaRules', '')
+          .replaceAll('\n$timelinePriorRules', ''),
+      'input': checkpointInput,
     });
     await authorize();
     final saved = await loadCheckpoint?.call(key);
@@ -297,15 +327,36 @@ class TimelinePipeline {
           (_metrics['timeline_cached_stages'] ?? 0) + 1;
       return result;
     }
-    var response = await _complete(stage, instructions, input);
+    Map<String, dynamic> response;
+    var invalidJson = false;
+    try {
+      response = await _complete(stage, instructions, input);
+    } on ProfileResponseFormatFailure {
+      response = {};
+      invalidJson = true;
+    }
     Set<int>? requiredSelection;
     List<String>? requiredTitleTopics;
     String? hostFallbackReason;
+    String? firstWritingFailure;
     for (var attempt = 0; ; attempt++) {
       try {
+        if (invalidJson) {
+          _invalid(
+            'invalid_json',
+            stage == 'timeline_select'
+                ? 'topics'
+                : stage == 'timeline_reconcile'
+                ? 'groups'
+                : 'timeline',
+            code: stage == 'timeline_select' || stage == 'timeline_reconcile'
+                ? 'profile_selection_invalid'
+                : 'profile_timeline_invalid',
+          );
+        }
         final result = validate(
           response,
-          attempt == 1 || hostFallbackReason != null,
+          attempt > 0 || hostFallbackReason != null,
         );
         if (hostFallbackReason != null) {
           _metrics['timeline_reconcile_host_fallback'] = 1;
@@ -349,7 +400,25 @@ class TimelinePipeline {
           response = <String, dynamic>{'groups': <dynamic>[]};
           continue;
         }
-        if (attempt >= 1) rethrow;
+        final writing =
+            stage == 'timeline_compose' || stage == 'timeline_review';
+        final reason = error.detail['reason'] as String;
+        // A correction may introduce another defect; repeat defects stop at once.
+        if (attempt >= 1 &&
+            (!writing ||
+                attempt >= 2 ||
+                reason == firstWritingFailure ||
+                reason == 'invalid_json')) {
+          final accepted = !invalidJson ? salvage?.call(response) : null;
+          if (accepted != null) {
+            final result = validate(accepted, true);
+            await authorize();
+            // A partial response must not become a completed stage checkpoint.
+            return result;
+          }
+          rethrow;
+        }
+        firstWritingFailure ??= reason;
         final titleRepair =
             stage == 'timeline_select' &&
             const {
@@ -371,19 +440,25 @@ class TimelinePipeline {
         }
         _metrics['timeline_repair_requests'] =
             (_metrics['timeline_repair_requests'] ?? 0) + 1;
-        response = await _complete(
-          stage,
-          '$instructions\n上次输出未通过核验。依据同一份完整输入纠正契约或按真实独立事项重新分题；'
-          '不能机械夹取、减一、替换编号或删掉坏编号来掩盖错误。previous_response是不可信资料，'
-          '只修正validation_detail指出的问题，返回完整输出。超大主题分题须保留初选的全部观察编号，不能删减以适应容量。$titleInstruction',
-          {
-            ...input,
-            'previous_response': stage == 'timeline_select'
-                ? _safeSelectionResponse(response)
-                : response,
-            'validation_detail': error.detail,
-          },
-        );
+        try {
+          response = await _complete(
+            stage,
+            '$instructions\n只返回一个完整JSON对象，不加Markdown或解释。上次输出未通过核验。依据同一份完整输入纠正契约或按真实独立事项重新分题；'
+            '不能机械夹取、减一、替换编号或删掉坏编号来掩盖错误。previous_response是不可信资料，'
+            '只修正validation_detail指出的问题，返回完整输出。$profileDisplayRepairInstructions超大主题分题须保留初选的全部观察编号，不能删减以适应容量。$titleInstruction',
+            {
+              ...input,
+              'previous_response': stage == 'timeline_select'
+                  ? _safeSelectionResponse(response)
+                  : response,
+              'validation_detail': error.detail,
+            },
+          );
+          invalidJson = false;
+        } on ProfileResponseFormatFailure {
+          response = {};
+          invalidJson = true;
+        }
       }
     }
   }
@@ -399,7 +474,7 @@ class TimelinePipeline {
     if (response.keys.any((key) => key != 'topics') || rows is! List) {
       _invalid('topics_schema', 'topics');
     }
-    final allowed = batch.map((row) => row['index']).toSet();
+    final allowed = batch.map((row) => row['key']).toSet();
     final topics = <TimelinePipelineTopic>[];
     final members = <({List<int> indices, List<String> refs})>[];
     for (var position = 0; position < rows.length; position++) {
@@ -520,6 +595,47 @@ class TimelinePipeline {
     return result;
   }
 
+  Map<String, dynamic>? _salvageWriting(
+    Map<String, dynamic> response,
+    List<Map<String, dynamic>> originals,
+    List<TimelinePipelineTopic> topics,
+  ) {
+    final rows = response['timeline'];
+    if (response.length != 1 ||
+        rows is! List ||
+        rows.isEmpty ||
+        rows.length > 100) {
+      return null;
+    }
+    final accepted = <dynamic>[];
+    for (final row in rows) {
+      try {
+        ProfileWriter.encodeEntries(
+          {
+            'timeline': [row],
+          },
+          originals,
+          requireBrief: true,
+          localDate: _context['local_date'] as String,
+          recentSince: _context['recent_since'] as String,
+          timelineGroups: topics.map((topic) => topic.refs).toList(),
+          timelinePriorIds: _priorIds,
+          timelineEvidenceIdentities: evidenceIdentities,
+          timelinePriorKeysByEvidence: _priorKeysByEvidence,
+        );
+        accepted.add(row);
+      } catch (error) {
+        if (profileRepairReason(error) == null) rethrow;
+      }
+    }
+    if (accepted.isEmpty || accepted.length == rows.length) return null;
+    _metrics['timeline_dropped_cards'] =
+        (_metrics['timeline_dropped_cards'] ?? 0) +
+        rows.length -
+        accepted.length;
+    return {'timeline': accepted};
+  }
+
   String _writing(
     Map<String, dynamic> response,
     List<Map<String, dynamic>> originals,
@@ -534,7 +650,25 @@ class TimelinePipeline {
         response,
         originals,
         requireBrief: true,
+        localDate: _context['local_date'] as String,
+        recentSince: _context['recent_since'] as String,
         timelineGroups: topics.map((topic) => topic.refs).toList(),
+        timelinePriorIds: _priorIds,
+        timelineEvidenceIdentities: evidenceIdentities,
+        timelinePriorKeysByEvidence: _priorKeysByEvidence,
+        onTimelineDrop: (reason, entry) {
+          final refs = (entry['evidence_ids'] as List).cast<String>().toList()
+            ..sort();
+          if (!_droppedCards.add(
+            _digest([reason, entry['brief']['title'], refs]),
+          )) {
+            return;
+          }
+          _metrics['timeline_dropped_cards'] =
+              (_metrics['timeline_dropped_cards'] ?? 0) + 1;
+          final key = 'timeline_dropped_${reason}_cards';
+          _metrics[key] = (_metrics[key] ?? 0) + 1;
+        },
       );
     } catch (error) {
       final reason = profileRepairReason(error);
@@ -553,32 +687,189 @@ class TimelinePipeline {
   Future<TimelinePipelineResult> generate(
     List<Map<String, dynamic>> observations,
     List<Map<String, dynamic>> records, {
-    required bool historyComplete,
+    bool historyComplete = true,
     String corrections = '',
+    DateTime? now,
+    List<Map<String, dynamic>> priorCards = const [],
+    List<String>? newInputIds,
   }) async {
+    // Desktop timeline-selection uses parts.length == 1; mobile defers oversized topics whole.
+    historyComplete = true;
     _metrics.clear();
     _firstValidationFailure = null;
     _lastValidationFailure = null;
     _activeStage = null;
     _readEvidenceIds.clear();
+    _inputEvidenceIds.clear();
+    _completedEvidenceIds.clear();
+    _pendingEvidenceIds.clear();
+    _droppedCards.clear();
+    _priorIds = {
+      for (final card in priorCards)
+        if (card['policy_revision'] is int &&
+            card['policy_revision'] >= 2 &&
+            card['key'] is String)
+          card['key'] as String,
+    };
+    _priorKeysByEvidence.clear();
+    for (final card in priorCards) {
+      if (!_priorIds.contains(card['key'])) continue;
+      final refs = card['identity_evidence_ids'] is List
+          ? List<String>.from(card['identity_evidence_ids'] as List)
+          : [
+              for (final ref in card['evidence_ids'] as List? ?? [])
+                evidenceIdentities[ref] ?? ref as String,
+            ];
+      if (refs.isEmpty) continue;
+      refs.sort();
+      _priorKeysByEvidence.update(
+        jsonEncode(refs),
+        (_) => null,
+        ifAbsent: () => card['key'] as String,
+      );
+    }
     _metrics.addAll({
       'timeline_cached_stages': 0,
       'timeline_repair_requests': 0,
       'timeline_reconcile_host_fallback': 0,
       'final_original_records': 0,
       'timeline_completed_batches': 0,
+      'timeline_incomplete_batches': 0,
+      'timeline_dropped_cards': 0,
     });
     await authorize();
-    final index = timelineObservationIndex(observations, records);
-    final batches = timelineSelectionBatches(index);
+    final localNow = (now ?? DateTime.now()).toLocal();
+    final day = DateTime(localNow.year, localNow.month, localNow.day);
+    String date(DateTime value) => value.toIso8601String().substring(0, 10);
+    final recentSince = date(DateTime(day.year, day.month, day.day - 14));
+    _context = {
+      'local_date': date(day),
+      'timezone': localNow.timeZoneName,
+      'recent_since': recentSince,
+      'viewer_names': <String>[],
+    };
+    final historyRefs = <String>{
+      for (final card in priorCards)
+        if (card['policy_revision'] is int && card['policy_revision'] >= 2)
+          ...((card['evidence_ids'] as List?) ?? []).whereType<String>(),
+    };
+    records = [
+      for (final record in records)
+        {
+          ...record,
+          'local_date':
+              record['local_date'] ??
+              date(DateTime.parse(record['created_at'] as String).toLocal()),
+        },
+    ];
+    final allRecordCount = records.length;
+    records = [
+      for (final record in records)
+        if ((record['local_date'] as String? ??
+                    date(
+                      DateTime.parse(record['created_at'] as String).toLocal(),
+                    ))
+                .compareTo(recentSince) >=
+            0)
+          record
+        else if (historyRefs.contains(record['evidence_id']))
+          {...record, 'history_only': true},
+    ];
+    _inputEvidenceIds.addAll(records.map((r) => r['evidence_id'] as String));
+    final summaries = [
+      for (final card in priorCards)
+        if (card['policy_revision'] is int &&
+            card['policy_revision'] >= 2 &&
+            card['key'] is String &&
+            card['brief'] is Map)
+          {
+            'id': card['key'],
+            'title': card['brief']['title'],
+            'why_now': (card['brief']['why_now'] as String).substring(
+              0,
+              (card['brief']['why_now'] as String).length.clamp(0, 120),
+            ),
+            'anchor_date': (card['time'] as Map?)?['anchor_date'],
+          },
+    ].take(32).toList();
+    if (summaries.isNotEmpty) _context['prior_cards'] = summaries;
+    if (newInputIds != null) {
+      final changed = newInputIds
+          .where(_inputEvidenceIds.contains)
+          .toSet()
+          .toList();
+      if (changed.isEmpty) {
+        return TimelinePipelineResult(
+          entries: '[]',
+          coverage: coverage,
+          deferredTopics: 0,
+          completedBatches: 0,
+          totalBatches: 0,
+        );
+      }
+      _context['new_input_ids'] = changed;
+    }
+    _metrics['timeline_outside_window_records'] =
+        allRecordCount - records.length;
+    // Membership is a raw-record index, independent of Profile observations.
+    observations = [
+      for (final record in records)
+        {
+          'refs': [record['evidence_id']],
+        },
+    ];
+    final index = [
+      for (var i = 0; i < records.length; i++)
+        <String, dynamic>{
+          'key': i,
+          'group': records[i]['chat'],
+          'at': records[i]['created_at'],
+          'relation': records[i]['relation'],
+          'author':
+              records[i]['author'] ??
+              {
+                'key': 'unknown',
+                'kind': 'unknown',
+                'is_user': records[i]['relation'] == 'self',
+              },
+          'text': records[i]['text'],
+          if (records[i]['history_only'] == true) 'history_only': true,
+        },
+    ];
+    final direct =
+        records.length <= maxWritingRecords &&
+        jsonEncode(records).length <= maxWritingCharacters;
+    final oversized = <int>{
+      for (var i = 0; i < records.length; i++)
+        if (jsonEncode([records[i]]).length > maxWritingCharacters) i,
+    };
+    final batches = direct
+        ? <List<Map<String, dynamic>>>[]
+        : timelineSelectionBatches(
+            [
+              for (final row in index)
+                if (!oversized.contains(row['key'])) row,
+            ],
+            maxCharacters: 48000,
+            maxBytes: 160000,
+          );
+
     _metrics['timeline_selection_batches'] = batches.length;
-    final candidates = <TimelinePipelineTopic>[];
+    final candidates = <TimelinePipelineTopic>[
+      if (direct && records.isNotEmpty)
+        TimelinePipelineTopic(
+          '近期独立事项',
+          List.generate(records.length, (i) => i),
+          records.map((r) => r['evidence_id'] as String).toList(),
+        ),
+    ];
     for (var batch = 0; batch < batches.length; batch++) {
       final rows = batches[batch];
       final input = <String, dynamic>{
-        'observations': rows,
-        'observation_count': observations.length,
-        'allowed_indices': rows.map((row) => row['index']).toList(),
+        'records': rows,
+        'record_count': records.length,
+        'context': _context,
+        'allowed_indices': rows.map((row) => row['key']).toList(),
         'history_complete': historyComplete,
         'writing_capacity': {
           'max_originals': maxWritingRecords,
@@ -600,6 +891,7 @@ class TimelinePipeline {
     var topics = candidates;
     if (candidates.length > 1) {
       final input = <String, dynamic>{
+        'context': _context,
         'topics': [
           for (var i = 0; i < candidates.length; i++)
             {
@@ -609,22 +901,22 @@ class TimelinePipeline {
               'observation_indices': candidates[i].indices,
               'from':
                   (candidates[i].indices
-                          .map((id) => index[id]['from'] as String)
+                          .map((id) => index[id]['at'] as String)
                           .toList()
                         ..sort())
                       .first,
               'to':
                   (candidates[i].indices
-                          .map((id) => index[id]['to'] as String)
+                          .map((id) => index[id]['at'] as String)
                           .toList()
                         ..sort())
                       .last,
               'groups': candidates[i].indices
-                  .expand((id) => index[id]['groups'] as List)
+                  .map((id) => index[id]['group'])
                   .toSet()
                   .toList(),
               'relations': candidates[i].indices
-                  .expand((id) => index[id]['relations'] as List)
+                  .map((id) => index[id]['relation'])
                   .toSet()
                   .toList(),
               'original_records': candidates[i].refs.length,
@@ -644,6 +936,16 @@ class TimelinePipeline {
             _reconciliation(response, candidates, records, relaxed),
       );
     }
+    // A singleton already over writing capacity cannot be screened by truncation.
+    topics = [
+      ...topics,
+      for (final i in oversized)
+        TimelinePipelineTopic(
+          '待处理原文',
+          [i],
+          [records[i]['evidence_id'] as String],
+        ),
+    ];
     final plan = timelineWritingPlan(
       topics,
       records,
@@ -677,11 +979,14 @@ class TimelinePipeline {
       completedBatches: _metrics['timeline_completed_batches']!,
       totalBatches: plan.batches.length + plan.deferred.length,
     );
+    final unfinishedRefs = plan.deferred.expand((topic) => topic.refs).toSet();
+    TimelinePipelineValidationFailure? firstBatchFailure;
     for (var batch = 0; batch < plan.batches.length; batch++) {
       final batchTopics = plan.batches[batch];
       final ids = batchTopics.expand((topic) => topic.refs).toSet();
       final messages = [for (final id in ids) originals[id]!];
       final material = <String, dynamic>{
+        'context': _context,
         'messages': messages,
         'timeline_topics': [
           for (final topic in batchTopics)
@@ -690,39 +995,80 @@ class TimelinePipeline {
         'history_complete': historyComplete,
         'explicit_corrections': corrections,
       };
-      final draft = await _validated<Map<String, dynamic>>(
-        'timeline_compose',
-        _composeInstructions,
-        material,
-        (response, _) {
-          _writing(response, messages, batchTopics);
-          return response;
-        },
-      );
-      final reviewed = await _validated<String>(
-        'timeline_review',
-        '$_composeInstructions\n独立审查并直接返回修正后的完整timeline：逐句核对主体、事实、最新来源状态、'
-            '日期与引用；把每句拆成具体断言，逐一对照所引原文的对象与状态，删除原文未支持的部分。'
-            '审查可以缩短或删除，不能为补足篇幅新增行为、因果、能力或状态；'
-            '删除无个人联系的整卡及无据推测，不用润色掩盖事实错误。'
-            '已完成事项不要凑下一步，不能因没有更新说今天仍未完成。保留有依据的独立事项，允许空timeline。',
-        {...material, 'draft': draft},
-        (response, _) => _writing(response, messages, batchTopics),
-      );
-      for (final raw in jsonDecode(reviewed) as List) {
-        final entry = Map<String, dynamic>.from(raw as Map)..remove('key');
-        final key = 'timeline_${_digest(entry).substring(0, 24)}';
-        entries[key] = {...entry, 'key': key};
+      var incomplete = false;
+      Map<String, dynamic>? salvage(Map<String, dynamic> response) {
+        final accepted = _salvageWriting(response, messages, batchTopics);
+        if (accepted != null) incomplete = true;
+        return accepted;
       }
-      writtenRefs.addAll(ids);
-      _readEvidenceIds.addAll(ids);
+
+      final instructions =
+          '$_composeInstructions${_context.containsKey('new_input_ids')
+              ? '\n$timelineDeltaRules'
+              : _context.containsKey('prior_cards')
+              ? '\n$timelinePriorRules'
+              : ''}';
+      try {
+        final draft = await _validated<Map<String, dynamic>>(
+          'timeline_compose',
+          instructions,
+          material,
+          (response, _) {
+            _writing(response, messages, batchTopics);
+            return response;
+          },
+          salvage: salvage,
+        );
+        final reviewed = await _validated<String>(
+          'timeline_review',
+          '$instructions\n独立审查并直接返回修正后的完整timeline：逐句核对主体、事实、最新来源状态、'
+              '日期与引用；把每句拆成具体断言，逐一对照所引原文的对象与状态，删除原文未支持的部分。'
+              '审查可以缩短或删除，不能为补足篇幅新增行为、因果、能力或状态；'
+              '删除无个人联系的整卡及无据推测，不用润色掩盖事实错误。'
+              '已完成事项不要凑下一步，不能因没有更新说今天仍未完成。保留有依据的独立事项，允许空timeline。',
+          {...material, 'draft': draft},
+          (response, _) => _writing(response, messages, batchTopics),
+          salvage: salvage,
+        );
+        for (final raw in jsonDecode(reviewed) as List) {
+          final entry = Map<String, dynamic>.from(raw as Map);
+          entries[entry['key'] as String] = entry;
+        }
+        writtenRefs.addAll(ids);
+        _readEvidenceIds.addAll(ids);
+        if (!incomplete) _completedEvidenceIds.addAll(ids);
+      } on TimelinePipelineValidationFailure catch (error) {
+        firstBatchFailure ??= error;
+        incomplete = true;
+      }
+      if (incomplete) unfinishedRefs.addAll(ids);
+      _pendingEvidenceIds
+        ..clear()
+        ..addAll(unfinishedRefs)
+        ..addAll(
+          plan.batches
+              .skip(batch + 1)
+              .expand((batch) => batch)
+              .expand((topic) => topic.refs),
+        );
+      final count = incomplete
+          ? 'timeline_incomplete_batches'
+          : 'timeline_completed_batches';
+      _metrics[count] = (_metrics[count] ?? 0) + 1;
       _metrics['final_original_records'] = writtenRefs.length;
-      _metrics['timeline_completed_batches'] = batch + 1;
       _metrics['timeline_pending_batches'] =
-          plan.batches.length - batch - 1 + plan.deferred.length;
+          plan.batches.length -
+          batch -
+          1 +
+          plan.deferred.length +
+          _metrics['timeline_incomplete_batches']!;
       await authorize();
       if (entries.isNotEmpty) await onPublish?.call(snapshot());
       await authorize();
+    }
+    if (entries.isEmpty && _metrics['timeline_incomplete_batches']! > 0) {
+      if (firstBatchFailure != null) throw firstBatchFailure;
+      throw StateError('profile_timeline_invalid');
     }
     await authorize();
     return snapshot();

@@ -24,6 +24,7 @@ import {
   type WorkspaceContextDeliveryRecord,
 } from './protocol.js'
 
+
 export type RealtimeProviderSessionState =
   | 'new'
   | 'connecting'
@@ -80,6 +81,8 @@ export class RealtimeProviderSession {
   readonly #onDiagnostic: RealtimeProviderSessionOptions['onDiagnostic']
   #responseAdaptationTail: Promise<void> = Promise.resolve()
   #audioAdaptationRefresh: Promise<void> | undefined
+  #audioFenceVerified: {readonly epoch: number; readonly at: number} | undefined
+  #audioFenceRead: Promise<void> | undefined
   #responseAdaptationReadFailureDiagnosedEpoch: number | null = null
   #responseAdaptationAttempt: {
     readonly epoch: number
@@ -154,6 +157,8 @@ export class RealtimeProviderSession {
       this.#identity = Object.freeze({...identity})
       this.#responseAdaptationTail = Promise.resolve()
       this.#audioAdaptationRefresh = undefined
+      this.#audioFenceVerified = undefined
+      this.#audioFenceRead = undefined
       this.#responseAdaptationReadFailureDiagnosedEpoch = null
       this.#responseAdaptationAttempt = null
       this.#state = 'connected'
@@ -176,6 +181,8 @@ export class RealtimeProviderSession {
         if (!this.#isClosed()) this.#state = 'disconnected'
       }
       this.#identity = null
+      // A sanitized connect code (see RealtimeConnectError) is what the user can act on; keep it.
+      if (error instanceof Error && /^realtime_[a-z_]{1,64}$/u.test(error.message)) throw new RealtimeProtocolError(error.message)
       throw protocolFailure('provider connect failed', error)
     }
   }
@@ -234,14 +241,7 @@ export class RealtimeProviderSession {
       // Requested-response providers only transcribe PCM here. Their model sees memory at
       // createResponse/ensureResponse, which revalidate authorization before generating.
       // Automatic providers can generate directly from PCM and still need the input fence.
-      if (this.userResponseMode === 'automatic' && this.#responseAdaptationRequired?.() === true) {
-        await this.#refreshResponseAdaptation(owner, signal)
-      } else if (this.userResponseMode === 'automatic' && this.#audioAdaptationRefresh === undefined) {
-        const refresh = this.#refreshResponseAdaptation(owner, signal).catch(() => undefined).finally(() => {
-          if (this.#audioAdaptationRefresh === refresh) this.#audioAdaptationRefresh = undefined
-        })
-        this.#audioAdaptationRefresh = refresh
-      }
+      if (this.userResponseMode === 'automatic') await this.#audioAdaptationFence(owner, signal)
       this.#assertCurrentConnection(owner)
       signal?.throwIfAborted()
       await this.#provider.sendAudio(
@@ -252,6 +252,23 @@ export class RealtimeProviderSession {
     } catch (error) {
       throw protocolFailure('provider audio send failed', error)
     }
+  }
+
+  /**
+   * The memory context is read once per provider session and reused for every later audio frame.
+   * Frames wait only until that first read has succeeded (a read that cannot be verified still fails closed for a required fence);
+   * after that a frame never waits for memory, so the serial audio path cannot be stalled by a slow read.
+   */
+  async #audioAdaptationFence(owner: ConnectionOwner, signal?: AbortSignal): Promise<void> {
+    const epoch = owner.identity.epoch
+    if (this.#audioFenceVerified?.epoch === epoch) return
+    if (this.#audioAdaptationRefresh === undefined) {
+      const read = this.#refreshResponseAdaptation(owner, signal).then(() => { this.#audioFenceVerified = {epoch, at: Date.now()} })
+      const tracked = read.catch(() => undefined).finally(() => { if (this.#audioAdaptationRefresh === tracked) this.#audioAdaptationRefresh = undefined })
+      this.#audioAdaptationRefresh = tracked
+      this.#audioFenceRead = read
+    }
+    if (this.#responseAdaptationRequired?.() === true) await this.#audioFenceRead
   }
 
   async injectHostItem(

@@ -13,7 +13,24 @@ export {CODING_BACKENDS} from './coding-settings.mjs'
 
 // `normalizeSettings` always rebuilds and stamps the latest shape, so an older file
 // keeps its provider choices while gaining packaged-desktop configuration.
-export const SETTINGS_VERSION = 4
+export const SETTINGS_VERSION = 5
+
+/** Lanes the runtime can route independently; null means "keep the legacy derivation". */
+export const MODEL_ROUTE_LANES = Object.freeze(['conversationText', 'support', 'fast', 'compressor', 'watch', 'embedding'])
+const TEXT_ROUTE_PROVIDERS = Object.freeze(['qwen', 'deepseek', 'openai', 'gemini', 'stepfun', 'ark', 'openai-compatible', 'self-hosted'])
+// StepFun is realtime-only and has no cascaded text factory, so it cannot route conversationText.
+const CONVERSATION_ROUTE_PROVIDERS = Object.freeze(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
+const WATCH_ROUTE_PROVIDERS = Object.freeze(['qwen', 'deepseek', 'stepfun', 'ark', 'openai-compatible'])
+const EMBEDDING_ROUTE_PROVIDERS = Object.freeze(['dashscope'])
+const EMPTY_MODEL_ROUTES = Object.freeze(Object.fromEntries(MODEL_ROUTE_LANES.map(lane => [lane, null])))
+const ROUTE_PROVIDERS = Object.freeze({
+  conversationText: CONVERSATION_ROUTE_PROVIDERS,
+  support: TEXT_ROUTE_PROVIDERS,
+  fast: TEXT_ROUTE_PROVIDERS,
+  compressor: TEXT_ROUTE_PROVIDERS,
+  watch: WATCH_ROUTE_PROVIDERS,
+  embedding: EMBEDDING_ROUTE_PROVIDERS,
+})
 
 export const SECRET_KEYS = Object.freeze([
   'minicpmRealtimeApiKey', 'personaplexRealtimeApiKey',
@@ -30,7 +47,6 @@ export const SECRET_KEYS = Object.freeze([
   'geminiApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
-  'modelApiKey',
   'codexApiKey',
   'arkApiKey',
   'deepseekApiKey',
@@ -58,6 +74,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   ...RUNTIME_DEFAULTS,
   ...Object.fromEntries(Object.values(NATIVE_VOICE_PROVIDERS).map(profile=>[profile.endpoint,profile.defaultUrl])),
   version: SETTINGS_VERSION,
+  modelRoutes: EMPTY_MODEL_ROUTES,
   language: 'zh-CN',
   startupView: 'workbench',
   lastPresentation: 'workbench',
@@ -65,6 +82,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   workbenchMaximized: true,
   palette: 'ember',
   skinId: 'nova',
+  companionForm: 'pet',
   importedSkins: Object.freeze([]),
   codingProgressNarration: 'smart',
   codingBackend: 'codex',
@@ -74,7 +92,6 @@ export const DEFAULT_SETTINGS = Object.freeze({
   codexBinaryPath: '',
   codexWorkspace: '',
   codexManagedRoot: '',
-  modelBaseUrl: '',
   startListeningOnLaunch: false,
   wakeWordEnabled: false,
   autoHideSeconds: 60,
@@ -82,13 +99,8 @@ export const DEFAULT_SETTINGS = Object.freeze({
   voiceprintId: '',
   voiceprintName: '',
   voiceprintUploadUrl: '',
-  conversationVisionEnabled: false,
   monitorCameraDeviceId: '',
   watchModel: '',
-  phoneConnectionEnabled: false,
-  phoneServerPort: 0,
-  phoneServerTokenFile: '',
-  phoneServerUrl: '',
   memoryPrerecallEnabled: false,
   secrets: Object.freeze({}),
 })
@@ -126,6 +138,10 @@ function pick(candidate, base, defaultValue, validate) {
 
 function validPalette(value) {
   return PALETTE_SET.has(value) ? value : null
+}
+
+function validCompanionForm(value) {
+  return value === 'orb' || value === 'pet' ? value : null
 }
 
 function validProactivity(value) {
@@ -184,31 +200,27 @@ function validDesktopString(value) {
   return [...trimmed].length <= MAX_DESKTOP_SETTING_LENGTH ? trimmed : null
 }
 
-export function validModelBaseUrl(value) {
-  const normalized = validDesktopString(value)
-  if (normalized === null || normalized === '') return normalized
-  try {
-    const parsed = new URL(normalized)
-    if (parsed.username !== '' || parsed.password !== '') return null
-    if (parsed.protocol === 'https:') return normalized
-    if (parsed.protocol !== 'http:') return null
-    return ['127.0.0.1', '[::1]', 'localhost'].includes(parsed.hostname)
-      ? normalized
-      : null
-  } catch {
-    return null
-  }
+function normalizeModelRoute(lane, raw) {
+  if (!isRecord(raw)) return null
+  const provider = raw.provider
+  const model = typeof raw.model === 'string' ? raw.model.trim() : ''
+  if (!ROUTE_PROVIDERS[lane].includes(provider)) return null
+  if (model === '' || CONTROL_CHARACTERS.test(model) || [...model].length > 256) return null
+  return Object.freeze({provider, model})
 }
 
-function validPhoneServerUrl(value) {
-  const text = validDesktopString(value)
-  if (text === null || text === '') return text
-  if (text.length > 2048) return null
-  try {
-    const url = new URL(text)
-    return url.protocol === 'wss:' && url.hostname && !url.username && !url.password && !url.search && !url.hash
-      && ['', '/', '/client/v1'].includes(url.pathname) ? text : null
-  } catch { return null }
+function normalizeModelRoutes(raw, base) {
+  const source = isRecord(raw) ? raw : {}
+  const fallback = isRecord(base) ? base : EMPTY_MODEL_ROUTES
+  const routes = {}
+  for (const lane of MODEL_ROUTE_LANES) {
+    // An explicit null clears the override ("follow the conversation model"); an absent lane
+    // keeps the caller-supplied base so unrelated saves never erase a route.
+    routes[lane] = Object.hasOwn(source, lane)
+      ? (source[lane] === null ? null : normalizeModelRoute(lane, source[lane]))
+      : normalizeModelRoute(lane, fallback[lane])
+  }
+  return Object.freeze(routes)
 }
 
 function normalizeCascadedLlmModels(raw, base) {
@@ -259,18 +271,21 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
   const sameProvider = selectedProvider === fallback.integratedProvider
   const rawVersion = source.version
   const baseVersion = fallback.version
+  const V4_FIELDS_VERSION = 4
   const acceptsV4Fields = !Object.hasOwn(source, 'version')
     ? !Object.hasOwn(fallback, 'version')
-      || (typeof baseVersion === 'number' && baseVersion >= SETTINGS_VERSION)
-    : typeof rawVersion === 'number' && rawVersion >= SETTINGS_VERSION
+      || (typeof baseVersion === 'number' && baseVersion >= V4_FIELDS_VERSION)
+    : typeof rawVersion === 'number' && rawVersion >= V4_FIELDS_VERSION
   return {
     version: SETTINGS_VERSION,
+    modelRoutes: normalizeModelRoutes(source.modelRoutes, fallback.modelRoutes),
     ...normalizeSkinSettings(source, fallback),
     language: pick(source.language, fallback.language, DEFAULT_SETTINGS.language, value => ['zh-CN', 'en'].includes(value) ? value : null),
     startupView: pick(source.startupView, fallback.startupView, DEFAULT_SETTINGS.startupView, value => ['orb', 'workbench', 'last'].includes(value) ? value : null),
     lastPresentation: pick(source.lastPresentation, fallback.lastPresentation, DEFAULT_SETTINGS.lastPresentation, value => ['orb', 'workbench'].includes(value) ? value : null),
     workbenchMaximized: pick(source.workbenchMaximized, fallback.workbenchMaximized, DEFAULT_SETTINGS.workbenchMaximized, value => typeof value === 'boolean' ? value : null),
     palette: pick(source.palette, fallback.palette, DEFAULT_SETTINGS.palette, validPalette),
+    companionForm: pick(source.companionForm, fallback.companionForm, DEFAULT_SETTINGS.companionForm, validCompanionForm),
     codingProgressNarration: pick(source.codingProgressNarration, fallback.codingProgressNarration, DEFAULT_SETTINGS.codingProgressNarration, value => value === 'smart' || value === 'continuous' ? value : null),
     codingBackend: pick(source.codingBackend, fallback.codingBackend, DEFAULT_SETTINGS.codingBackend, value => CODING_BACKENDS.includes(value) ? value : null),
     codingBackendPaths: normalizeCodingPaths(source.codingBackendPaths, fallback.codingBackendPaths),
@@ -281,7 +296,6 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     codexBinaryPath: pick(source.codexBinaryPath, fallback.codexBinaryPath, DEFAULT_SETTINGS.codexBinaryPath, validDesktopString),
     codexWorkspace: pick(source.codexWorkspace, fallback.codexWorkspace, DEFAULT_SETTINGS.codexWorkspace, validDesktopString),
     codexManagedRoot: pick(source.codexManagedRoot, fallback.codexManagedRoot, DEFAULT_SETTINGS.codexManagedRoot, validDesktopString),
-    modelBaseUrl: pick(source.modelBaseUrl, fallback.modelBaseUrl, DEFAULT_SETTINGS.modelBaseUrl, validModelBaseUrl),
     wakeWordEnabled: pick(
       source.wakeWordEnabled,
       fallback.wakeWordEnabled, false, validBoolean,
@@ -327,24 +341,24 @@ export function normalizeSettings(raw, base = DEFAULT_SETTINGS) {
     cascadedTtsVoice: pick(source.cascadedTtsVoice, fallback.cascadedTtsVoice, DEFAULT_SETTINGS.cascadedTtsVoice, validModelOrVoice),
     codexApprovalMode: pick(acceptsV4Fields ? source.codexApprovalMode : undefined, acceptsV4Fields ? fallback.codexApprovalMode : undefined, DEFAULT_SETTINGS.codexApprovalMode, validCodexApprovalMode),
     localToolApproval: pick(source.localToolApproval,fallback.localToolApproval,DEFAULT_SETTINGS.localToolApproval,enumValidator(new Set(['ask','never']))),
+    systemNotifications: pick(source.systemNotifications, fallback.systemNotifications, DEFAULT_SETTINGS.systemNotifications, validBoolean),
     clarificationDepth: pick(acceptsV4Fields ? source.clarificationDepth : undefined, acceptsV4Fields ? fallback.clarificationDepth : undefined, DEFAULT_SETTINGS.clarificationDepth, validClarificationDepth),
     generatePlan: pick(source.generatePlan, fallback.generatePlan, DEFAULT_SETTINGS.generatePlan, validBoolean),
     buildReasoning: pick(source.buildReasoning, fallback.buildReasoning, DEFAULT_SETTINGS.buildReasoning, validBoolean),
     profileParticipantMessages: pick(source.profileParticipantMessages, fallback.profileParticipantMessages, DEFAULT_SETTINGS.profileParticipantMessages, validBoolean),
     planReadback: pick(acceptsV4Fields ? source.planReadback : undefined, acceptsV4Fields ? fallback.planReadback : undefined, DEFAULT_SETTINGS.planReadback, validPlanReadback),
     progressBubbles: pick(acceptsV4Fields ? source.progressBubbles : undefined, acceptsV4Fields ? fallback.progressBubbles : undefined, DEFAULT_SETTINGS.progressBubbles, validProgressBubbles),
-    conversationVisionEnabled: pick(source.conversationVisionEnabled, fallback.conversationVisionEnabled, DEFAULT_SETTINGS.conversationVisionEnabled, validBoolean),
     monitorCameraDeviceId: pick(source.monitorCameraDeviceId, fallback.monitorCameraDeviceId, DEFAULT_SETTINGS.monitorCameraDeviceId, value => typeof value === 'string' && value.length <= 256 && !/[\x00-\x1f]/u.test(value) ? value : null),
     watchModel: pick(source.watchModel, fallback.watchModel, DEFAULT_SETTINGS.watchModel, validModelOrVoice),
-    phoneConnectionEnabled: pick(source.phoneConnectionEnabled, fallback.phoneConnectionEnabled, false, validBoolean),
-    phoneServerPort: pick(source.phoneServerPort, fallback.phoneServerPort, 0, value => Number.isInteger(value) && value >= 0 && value <= 65535 ? value : null),
-    phoneServerTokenFile: pick(source.phoneServerTokenFile, fallback.phoneServerTokenFile, '', value => { const path = validDesktopString(value); return path !== null && (path === '' || isAbsolute(path)) ? path : null }),
-    phoneServerUrl: pick(source.phoneServerUrl, fallback.phoneServerUrl, '', validPhoneServerUrl),
     embeddingProvider: pick(acceptsV4Fields ? source.embeddingProvider : undefined, acceptsV4Fields ? fallback.embeddingProvider : undefined, DEFAULT_SETTINGS.embeddingProvider, validEmbeddingProvider),
     embeddingModel: pick(acceptsV4Fields ? source.embeddingModel : undefined, acceptsV4Fields ? fallback.embeddingModel : undefined, DEFAULT_SETTINGS.embeddingModel, validDesktopString),
     capabilitiesConfigPath: pick(acceptsV4Fields ? source.capabilitiesConfigPath : undefined, acceptsV4Fields ? fallback.capabilitiesConfigPath : undefined, DEFAULT_SETTINGS.capabilitiesConfigPath, validDesktopString),
     memoryPrerecallEnabled: pick(source.memoryPrerecallEnabled, fallback.memoryPrerecallEnabled, DEFAULT_SETTINGS.memoryPrerecallEnabled, validBoolean),
     knowledgePath: pick(acceptsV4Fields ? source.knowledgePath : undefined, acceptsV4Fields ? fallback.knowledgePath : undefined, DEFAULT_SETTINGS.knowledgePath, validDesktopString),
+    spaceHostConfigPath: pick(source.spaceHostConfigPath, fallback.spaceHostConfigPath, DEFAULT_SETTINGS.spaceHostConfigPath, value => {
+      const path = validDesktopString(value)
+      return path === '' || (path !== null && isAbsolute(path)) ? path : null
+    }),
     secrets: normalizeSecrets(source.secrets),
   }
 }
@@ -356,7 +370,7 @@ export function startupPresentation(settings, argv = []) {
 }
 
 export function backendSettings(settings) {
-  const {skinId, importedSkins, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, phoneConnectionEnabled, phoneServerPort, phoneServerTokenFile, phoneServerUrl, ...backend} = normalizeSettings(settings)
+  const {skinId, importedSkins, companionForm, startupView, lastPresentation, workbenchMaximized, palette, wakeWordEnabled, autoHideSeconds, codingProgressNarration, codingBackend, localToolApproval, systemNotifications, ...backend} = normalizeSettings(settings)
   return backend
 }
 
@@ -366,11 +380,13 @@ export function publicSettings(settings) {
   const normalized = normalizeSettings(settings)
   return {
     version: normalized.version,
+    modelRoutes: {...normalized.modelRoutes},
     language: normalized.language,
     startupView: normalized.startupView,
     palette: normalized.palette,
     skinId: normalized.skinId,
     importedSkins: normalized.importedSkins,
+    companionForm: normalized.companionForm,
     proactivity: normalized.proactivity,
     codingProgressNarration: normalized.codingProgressNarration,
     codingBackend: normalized.codingBackend,
@@ -380,7 +396,6 @@ export function publicSettings(settings) {
     codexBinaryPath: normalized.codexBinaryPath,
     codexWorkspace: normalized.codexWorkspace,
     codexManagedRoot: normalized.codexManagedRoot,
-    modelBaseUrl: normalized.modelBaseUrl,
     startListeningOnLaunch: normalized.startListeningOnLaunch,
     wakeWordEnabled: normalized.wakeWordEnabled,
     autoHideSeconds: normalized.autoHideSeconds,
@@ -408,19 +423,15 @@ export function publicSettings(settings) {
     cascadedTtsVoice: normalized.cascadedTtsVoice,
     codexApprovalMode: normalized.codexApprovalMode,
     localToolApproval: normalized.localToolApproval,
+    systemNotifications: normalized.systemNotifications,
     clarificationDepth: normalized.clarificationDepth,
     planReadback: normalized.planReadback,
     generatePlan: normalized.generatePlan,
     buildReasoning: normalized.buildReasoning,
     profileParticipantMessages: normalized.profileParticipantMessages,
     progressBubbles: normalized.progressBubbles,
-    conversationVisionEnabled: normalized.conversationVisionEnabled,
     monitorCameraDeviceId: normalized.monitorCameraDeviceId,
     watchModel: normalized.watchModel,
-    phoneConnectionEnabled: normalized.phoneConnectionEnabled,
-    phoneServerPort: normalized.phoneServerPort,
-    phoneServerTokenFile: normalized.phoneServerTokenFile,
-    phoneServerUrl: normalized.phoneServerUrl,
     embeddingProvider: normalized.embeddingProvider,
     embeddingModel: normalized.embeddingModel,
     capabilitiesConfigPath: normalized.capabilitiesConfigPath,
@@ -438,7 +449,7 @@ export function orbSettings(settings) {
     palette: normalized.palette,
     skinId: normalized.skinId,
     importedSkins: normalized.importedSkins,
-    conversationVisionEnabled: normalized.conversationVisionEnabled,
+    companionForm: normalized.companionForm,
     startListeningOnLaunch: normalized.startListeningOnLaunch,
     wakeWordEnabled: normalized.wakeWordEnabled,
     autoHideSeconds: normalized.autoHideSeconds,

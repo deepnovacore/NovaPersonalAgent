@@ -14,12 +14,12 @@ import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 const input=(id='m1'):TimelineInput=>({id,version:'1',text:'我会整理发布材料。长期目标是让助手成为每日工作入口。',kind:'im',group:'chat:a',relation:'self',author:{key:'me',kind:'person',is_user:true},observed_at:'2026-10-18T01:00:00Z'})
 const matter=(i:TimelineInput,kind:'goal'|'topic'='goal')=>({kind,title:kind==='goal'?'助手成为每日工作入口':'整理发布材料',summary:'准备本轮发布',ownership:'user' as const,assertion:'direct' as const,state:'open' as const,due:null,due_quote:null,refs:[{entry_id:i.id,version:i.version,quote:i.text}]})
 const generate:WorkbenchGenerator=request=>Promise.resolve(request.phase==='reconcile'?{groups:request.matters.map(m=>({members:[m.id],state:m.state,current:m.id,basis:[m.id]}))}:request.phase==='extract'?{matters:request.inputs.flatMap(i=>[matter(i),matter(i,'topic')])}:{matches:request.matters.filter(m=>m.kind!=='topic').map(m=>({matter_id:m.id,target_id:request.existing.find(e=>e.kind===m.kind)?.id??null,same_as:null,capture:'record'})),suggestions:[{tab:'ideas',title:'先做一个发布预检清单',body:'可以把发布检查变成一键预检，减少重复操作。',why:null,next:null,matter_ids:[request.matters[0]!.id]}]})
-async function fixture(run:(f:{daily:DailyWorkbench;life:LifeService;setInputs:(i:TimelineInput[])=>void;nextDay:()=>void;calls:string[];reads:()=>number;failure:()=>Promise<string|null>;reopen:()=>Promise<void>})=>Promise<void>,generator:(r:Exclude<WorkbenchRequest,{phase:'reconcile'}>,s:AbortSignal)=>Promise<unknown>=generate,reconcile:WorkbenchGenerator=generate){
+async function fixture(run:(f:{daily:DailyWorkbench;life:LifeService;path:string;setScope:(scope:string)=>void;setInputs:(i:TimelineInput[])=>void;nextDay:()=>void;calls:string[];reads:()=>number;failure:()=>Promise<string|null>;reopen:()=>Promise<void>})=>Promise<void>,generator:(r:Exclude<WorkbenchRequest,{phase:'reconcile'}>,s:AbortSignal)=>Promise<unknown>=generate,reconcile:WorkbenchGenerator=generate){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-'));const life=new LifeService(join(dir,'life.json'));await life.open()
- let inputs=[input()],now=new Date('2026-10-18T03:00:00Z');const calls:string[]=[];let reads=0
- const daily=new DailyWorkbench({path:join(dir,'daily.json'),life:()=>life,inputs:()=>{reads++;return Promise.resolve(inputs)},timezone:()=>'Asia/Shanghai',now:()=>now,ready:()=>true,changed:()=>undefined,generate:async(r,s)=>{calls.push(r.phase);return r.phase==='reconcile'?reconcile(r,s):generator(r,s)}})
+ let scope='local',inputs=[input()],now=new Date('2026-10-18T03:00:00Z');const calls:string[]=[];let reads=0
+ const daily=new DailyWorkbench({path:join(dir,'daily.json'),life:()=>life,scope:()=>scope,inputs:()=>{reads++;return Promise.resolve(inputs)},timezone:()=>'Asia/Shanghai',now:()=>now,ready:()=>true,changed:()=>undefined,generate:async(r,s)=>{calls.push(r.phase);return r.phase==='reconcile'?reconcile(r,s):generator(r,s)}})
  await daily.open()
- try{await run({daily,life,setInputs:i=>{inputs=i},nextDay:()=>{now=new Date(now.getTime()+86400000)},calls,reads:()=>reads,failure:async()=>(JSON.parse(await readFile(join(dir,'daily.json'),'utf8')) as {failure:string|null}).failure,reopen:async()=>{await daily.close();await daily.open()}})}finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
+ try{await run({daily,life,path:join(dir,'daily.json'),setScope:value=>{scope=value},setInputs:i=>{inputs=i},nextDay:()=>{now=new Date(now.getTime()+86400000)},calls,reads:()=>reads,failure:async()=>(JSON.parse(await readFile(join(dir,'daily.json'),'utf8')) as {failure:string|null}).failure,reopen:async()=>{await daily.close();await daily.open()}})}finally{await daily.close();await life.close();await rm(dir,{recursive:true,force:true})}
 }
 test('one shared run records explicit goals, never todos, and produces grounded inspiration',()=>fixture(async({daily,life,calls})=>{
  await daily.refresh(true);assert.equal(daily.snapshot().error,null);assert.equal(life.snapshot().todos.length,0);assert.equal(life.snapshot().goals.length,1)
@@ -67,7 +67,7 @@ test('source withdrawal during composition cancels automatic persistence',async(
 
 test('host wires the shared generator and rejects direct automatic write injection',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-host-'))
- const memory={timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:generate})
  host.setSources({list:()=>[{scope:'computer',scan_pending:true,indexed:2000}],command:()=>Promise.resolve({})})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(host.snapshot().life.todos.length,0);assert.equal(host.snapshot().life.goals.length,1)
@@ -107,7 +107,8 @@ test('source notification hides pending cards but a no-change refresh preserves 
 
 test('host waits for the first successful selected-chat sync before shared generation',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-workbench-sync-'));let lastSync:string|undefined,calls=0
- const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>({timelineEvidence:()=>Promise.resolve([input()])}) as unknown as PersonalMemoryResource,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()])} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  host.setFeishu({open:()=>Promise.resolve(),close:()=>Promise.resolve(),snapshot:()=>({state:'ready',chats:[{selected:true}],last_sync:lastSync}),command:()=>Promise.resolve({})})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(calls,0);lastSync=new Date().toISOString();await host.workbenchContext.refresh();assert.equal(calls,3)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
@@ -226,7 +227,7 @@ test('state reads do not queue shared refresh behind a slow memory projection',a
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-state-responsive-'))
  let slow=false,reads=0,release!:()=>void
  const gate=new Promise<void>(resolve=>{release=resolve})
- const memory={timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{if(slow){reads++;await gate}return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{if(slow){reads++;await gate}return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:generate})
  try{
   await host.open();slow=true
@@ -244,7 +245,7 @@ test('shared generation waits for the first complete memory projection after def
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-memory-ready-'))
  let release!:()=>void,started!:()=>void,calls=0
  const gate=new Promise<void>(resolve=>{release=resolve}),loading=new Promise<void>(resolve=>{started=resolve})
- const memory={timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{started();await gate;return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()]),list:async()=>{started();await gate;return {entries:[],cursor:null}}} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  try{
   await host.open({deferBackground:true});host.startBackgroundWork();await loading
@@ -282,7 +283,7 @@ test('inferred records pushing stated memory to a later UI page do not change sh
  const dir=await mkdtemp(join(await realpath(tmpdir()),'daily-stated-pages-'))
  let paginated=false,calls=0
  const entry={id:'stated-memory',version:1,content:input().text,kind:'fact',origin:'stated',source_refs:[{type:'conversation',ref:'own',observed_at:input().observed_at}],evidence_refs:['own-evidence'],observed_at:input().observed_at,recorded_at:input().observed_at,topic:'',status:'active',corrected_to:null,confidence_note:null}
- const memory={timelineEvidence:()=>Promise.resolve([input()]),canProcessEvidence:()=>Promise.resolve(true),getMany:(ids:readonly string[])=>Promise.resolve(ids.map(id=>id===entry.id?entry:null)),list:(options?:{cursor?:string})=>Promise.resolve(!paginated||options?.cursor==='next'?{entries:[entry],cursor:null}:{entries:[],cursor:'next'})} as unknown as PersonalMemoryResource
+ const memory={productSurfaces:true,timelineEvidence:()=>Promise.resolve([input()]),canProcessEvidence:()=>Promise.resolve(true),getMany:(ids:readonly string[])=>Promise.resolve(ids.map(id=>id===entry.id?entry:null)),list:(options?:{cursor?:string})=>Promise.resolve(!paginated||options?.cursor==='next'?{entries:[entry],cursor:null}:{entries:[],cursor:'next'})} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'local',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,generateWorkbench:(r,s)=>{calls++;return generate(r,s)}})
  try{await host.open();await host.workbenchContext.refresh();assert.equal(host.workbenchContext.snapshot().status,'ready');const previous=calls;paginated=true;await host.refreshMemory();await host.workbenchContext.refresh();assert.equal(calls,previous,'UI pagination must not cause a paid re-extraction or recomposition')}
  finally{await host.close();await rm(dir,{recursive:true,force:true})}
@@ -314,4 +315,94 @@ test('opening a cache that still holds todo matters, todo cards or recorded todo
   const clean=await readFile(path,'utf8');assert.doesNotMatch(clean,/"todo"|"todos"|old-card/u);assert.match(clean,/keep-me/u)
   await assert.rejects(daily.adopt('old-card'),/card_not_found/)
  }finally{await life.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a forced refresh re-runs the shared pipeline after the automatic quota is spent',()=>fixture(async({daily})=>{
+ await daily.refresh(true);assert.equal(daily.snapshot().diagnostics.cache_hits,0)
+ await daily.refresh(true);assert.equal(daily.snapshot().diagnostics.cache_hits,0,'the automatic daily retry stays blocked')
+ await daily.refresh(true,true)
+ assert.ok(daily.snapshot().diagnostics.cache_hits>0,'an explicit force bypasses the spent quota and reuses validated caches')
+ assert.equal(daily.snapshot().status,'ready')
+}))
+
+test('a message edit during a run does not cancel the interpretation',async()=>{
+ let release:()=>void=()=>undefined,reached:()=>void=()=>undefined
+ const composed=new Promise<void>(resolve=>{reached=resolve}),gate=new Promise<void>(resolve=>{release=resolve})
+ await fixture(async({daily,setInputs,calls})=>{
+  const pending=daily.refresh(true)
+  await composed
+  // Pause/resume or a rescan bumps a message version while the model is still composing.
+  setInputs([{...input(),version:'9'}]);await daily.sync()
+  release();await pending
+  const snapshot=daily.snapshot()
+  assert.notEqual(snapshot.error,'sources_changed','a version bump must not cancel the interpretation')
+  assert.equal(snapshot.status,'ready')
+  assert.ok(calls.includes('compose'),'the run reached its composition step')
+ },async(request,signal)=>{if(request.phase==='compose'){reached();await gate}return generate(request,signal)})
+})
+
+test('a generated idea stays in history after edits but is hidden when its source is withdrawn',async()=>{
+ await fixture(async({daily,setInputs})=>{
+  await daily.refresh(true)
+  const published=daily.snapshot().cards.filter(card=>card.tab==='ideas')
+  assert.equal(published.length,1)
+  // The message behind the idea is edited, then its source is withdrawn entirely.
+  setInputs([{...input(),version:'2'}]);await daily.sync()
+  const edited=daily.snapshot()
+  assert.equal(edited.cards.length,0,'a stale idea is no longer current')
+  assert.equal(edited.idea_history.length,1,'the generated idea is never silently dropped')
+  assert.equal(edited.idea_history[0]!.id,published[0]!.id)
+  assert.equal(edited.idea_history[0]!.title,published[0]!.title)
+  assert.equal(edited.idea_history[0]!.source_changed,true)
+  assert.equal(edited.empty_reasons.ideas,null,'history keeps the ideas tab out of its empty state')
+  setInputs([]);await daily.sync()
+  assert.equal(daily.snapshot().idea_history.length,0,'withdrawn evidence must not be exposed as history')
+  setInputs([{...input(),version:'2'}]);await daily.sync()
+  assert.equal(daily.snapshot().idea_history.length,1,'reauthorizing the source restores retained history')
+  await daily.dismiss(published[0]!.id)
+  assert.equal(daily.snapshot().idea_history.length,0,'a dismissed idea leaves the history view')
+ })
+})
+
+test('an imported history entry is accepted, persisted and shown with its source state',async()=>{
+ await fixture(async({daily,path,reopen,setInputs})=>{
+  await daily.close()
+  const state=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>
+  const row={id:'recovered-1',tab:'ideas',title:'用「意图理解」案例反推产品设计语言',body:'整理一段演示',why:null,next:null,refs:[{entry_id:'m1',version:'1',quote:'我会整理发布材料。'}],sources:[],generated_at:'2026-10-18T11:07:45.359Z',imported:true}
+  await writeFile(path,JSON.stringify({...state,history:[row]}))
+  await reopen()
+  assert.equal(daily.snapshot().idea_history.length,0,'startup must not show unvalidated history')
+  setInputs([{...input(),version:'2'}]);await daily.sync()
+  const snapshot=daily.snapshot()
+  assert.equal(snapshot.error,null,'an imported row must not trip validation')
+  assert.equal(snapshot.idea_history.length,1)
+  assert.deepEqual({title:snapshot.idea_history[0]!.title,imported:snapshot.idea_history[0]!.imported,source_changed:snapshot.idea_history[0]!.source_changed},{title:row.title,imported:true,source_changed:true})
+ })
+})
+
+test('history revalidates after restart, source notifications and account switches',()=>fixture(async({daily,setInputs,setScope,reopen})=>{
+ await daily.refresh();setInputs([{...input(),version:'2'}]);await daily.sync()
+ assert.equal(daily.snapshot().idea_history.length,1)
+ daily.suspend();assert.equal(daily.snapshot().idea_history.length,0,'unvalidated sources never disclose history')
+ await daily.sync();assert.equal(daily.snapshot().idea_history.length,1)
+ setScope('other-account');assert.equal(daily.snapshot().idea_history.length,0,'switching accounts hides old history immediately')
+ await daily.sync();assert.equal(daily.snapshot().idea_history.length,0,'even identical input IDs cannot rebind scoped history')
+ setScope('local');await daily.sync();assert.equal(daily.snapshot().idea_history.length,1)
+ await reopen();assert.equal(daily.snapshot().idea_history.length,0,'startup must validate sources first')
+ await daily.sync();assert.equal(daily.snapshot().idea_history.length,1)
+}))
+
+test('upgrading old cards before an empty synthesis retains the generated idea and adoption is idempotent',async()=>{
+ let abstain=false
+ await fixture(async({daily,path,reopen,life})=>{
+  await daily.refresh();const original=daily.snapshot().cards.find(row=>row.tab==='ideas')!
+  await daily.close();const state=JSON.parse(await readFile(path,'utf8')) as Record<string,unknown>;delete state.history
+  await writeFile(path,JSON.stringify(state));await reopen();await daily.sync();abstain=true
+  await daily.refresh(false,true)
+  assert.equal(daily.snapshot().cards.length,0)
+  assert.equal(daily.snapshot().idea_history[0]!.id,original.id,'upgrade migrates old cards before replacing them')
+  const first=await daily.adopt(original.id),again=await daily.adopt(original.id)
+  assert.deepEqual(first,again);assert.equal(life.snapshot().ideas.length,1,'double save cannot duplicate an archived idea')
+  assert.equal(daily.snapshot().idea_history.length,0,'saving removes the actionable history entry')
+ },async(request,signal)=>{const response=await generate(request,signal);return abstain&&request.phase==='compose'?{...(response as object),suggestions:[]}:response})
 })

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/voice/voice_settings.dart';
+import 'package:nova_mobile/agent_core/provider_credentials.dart';
 import 'package:nova_mobile/voice/voice_settings_sheet.dart';
 
 Future<void> openDictationSettings(
@@ -17,7 +18,7 @@ Future<void> openDictationSettings(
           builder: (context) => TextButton(
             onPressed: () => showVoiceSettings(
               context,
-              const VoiceSettings(),
+              VoiceSettings(),
               dictationOnly: true,
               language: language,
             ),
@@ -48,14 +49,20 @@ void main() {
       expect(find.byKey(const ValueKey('tts.provider')), findsNothing);
       expect(find.textContaining('转写结果仅填入输入框'), findsOneWidget);
       expect(find.textContaining('AOQ'), findsNothing);
-      final key = find.byKey(const ValueKey('ASR.key'));
-      expect(tester.widget<TextField>(key).obscureText, isTrue);
-      await tester.enterText(key, 'asr-test-secret');
+      expect(find.byKey(const ValueKey('ASR.key')), findsNothing);
+      await ProviderCredentials().save(
+        endpoint: const VoiceConfiguration().asr.endpoint,
+        key: 'asr-test-secret',
+      );
       await tester.tap(find.text('保存'));
       await tester.pumpAndSettle();
       expect(find.byType(VoiceSettingsSheet), findsNothing);
-      final saved = (await const VoiceSettings().readDraft())!;
-      expect(saved.asr.key, 'asr-test-secret');
+      final saved = (await VoiceSettings().readDraft())!;
+      expect(saved.asr.key, isEmpty);
+      expect(
+        (await VoiceSettings().readForDictation())!.asr.key,
+        'asr-test-secret',
+      );
       expect(saved.integrated.key, isEmpty);
       expect(saved.fastLlm.key, isEmpty);
       expect(saved.tts.key, isEmpty);
@@ -87,25 +94,25 @@ void main() {
           .map((text) => text.data ?? '')
           .join(' ');
       expect(RegExp(r'[\u4e00-\u9fff]').hasMatch(visibleText), isFalse);
-      expect(
-        tester
-            .widget<TextField>(find.byKey(const ValueKey('ASR.key')))
-            .controller!
-            .text,
-        isEmpty,
-      );
+      expect(find.byKey(const ValueKey('ASR.key')), findsNothing);
       await tester.enterText(
         find.byKey(const ValueKey('ASR.model')),
         'updated-asr-model',
       );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
-      final saved = (await const VoiceSettings().readDraft())!;
-      expect(saved.asr.key, 'saved-asr-secret');
+      final saved = (await VoiceSettings().readDraft())!;
+      expect(saved.asr.key, isEmpty);
+      expect(
+        (await VoiceSettings().readForDictation())!.asr.key,
+        'saved-asr-secret',
+      );
       expect(saved.asr.model, 'updated-asr-model');
       expect(saved.pipeline, initial.pipeline);
       expect(saved.fastLlm.toJson(), initial.fastLlm.toJson());
-      expect(saved.tts.toJson(), initial.tts.toJson());
+      expect(saved.tts.key, isEmpty);
+      expect(saved.tts.credentialId, isNotNull);
+      expect(saved.tts.endpoint, initial.tts.endpoint);
       expect(saved.integrated.toJson(), initial.integrated.toJson());
     },
   );
@@ -120,27 +127,29 @@ void main() {
         VoiceSettings.storageKey: jsonEncode(initial.toJson()),
       });
       await openDictationSettings(tester, language: 'en');
-      final key = find.byKey(const ValueKey('ASR.key'));
-      await tester.enterText(key, 'newly-entered-secret');
+      expect(find.byKey(const ValueKey('ASR.key')), findsNothing);
       await tester.enterText(
         find.byKey(const ValueKey('ASR.endpoint')),
         'https://another.example/v1beta',
       );
-      expect(tester.widget<TextField>(key).controller!.text, isEmpty);
+
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(find.byType(VoiceSettingsSheet), findsOneWidget);
       expect(find.textContaining('Check the service address'), findsOneWidget);
       expect(
-        (await const VoiceSettings().readDraft())!.asr.endpoint,
+        (await VoiceSettings().readDraft())!.asr.endpoint,
         initial.asr.endpoint,
       );
-      await tester.enterText(key, 'replacement-secret');
+      await ProviderCredentials().save(
+        endpoint: 'https://another.example/v1beta',
+        key: 'replacement-secret',
+      );
       await tester.tap(find.text('Save'));
       await tester.pumpAndSettle();
       expect(find.byType(VoiceSettingsSheet), findsNothing);
       expect(
-        (await const VoiceSettings().readDraft())!.asr.key,
+        (await VoiceSettings().readForDictation())!.asr.key,
         'replacement-secret',
       );
     },

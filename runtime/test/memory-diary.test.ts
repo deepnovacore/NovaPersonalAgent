@@ -1,7 +1,7 @@
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm} from 'node:fs/promises'
+import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
@@ -11,7 +11,7 @@ import type {EntryRevision} from '../src/memory-substrate/store.js'
 
 type DiaryResource=SubstrateMemoryResource & {configureDiary?:(settings:{enabled:boolean;timezone:string})=>void;diaries?:()=>Promise<{id:string;version:number;day:string;text:string}[]>}
 for(const scenario of ['success','incorrect','revoke','disable','correct','revoke-before-send'] as const)test(`diary uses yesterday authorized revisions and fences ${scenario}`,async t=>{
- const root=await mkdtemp(join(tmpdir(),'nova-diary-')),client=new MemoryLedgerClient(join(root,'memory.sqlite'))
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-diary-')),client=new MemoryLedgerClient(join(root,'memory.sqlite'))
  const yesterday=Date.parse('2026-10-22T10:00:00Z');t.mock.timers.enable({apis:['Date'],now:yesterday})
  let calls=0,release!:()=>void,started!:()=>void
  const gate=new Promise<void>(resolve=>{release=resolve}),ready=new Promise<void>(resolve=>{started=resolve})
@@ -61,7 +61,7 @@ for(const scenario of ['success','incorrect','revoke','disable','correct','revok
 
 test('host persists the diary switch and exposes diaries separately from generation memories',async()=>{
  const {PersonalAgentHost}=await import('../src/personal-agent/host.js'),{SuggestionPool}=await import('../src/core/suggestions.js')
- const root=await mkdtemp(join(tmpdir(),'nova-diary-host-')),settings:{enabled:boolean;timezone:string}[]=[]
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-diary-host-')),settings:{enabled:boolean;timezone:string}[]=[]
  const diary={id:'d',version:1,day:'2026-10-22',text:'derived diary'}
  const memory={configureDiary:(s:{enabled:boolean;timezone:string})=>settings.push(s),diaries:()=>Promise.resolve([diary])}
  const make=()=>new PersonalAgentHost({path:join(root,'personal.json'),userScope:'test',memory:()=>memory as unknown as PersonalMemoryResource,pool:new SuggestionPool(),evidence:()=>null})

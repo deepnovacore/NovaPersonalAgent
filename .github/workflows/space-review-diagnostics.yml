@@ -1,0 +1,158 @@
+name: Space review platform diagnostics
+
+on:
+  push:
+    paths: ['.github/workflows/space-review-diagnostics.yml']
+  workflow_dispatch:
+    inputs:
+      include_baselines:
+        description: 'Also rerun the already-public baseline and original reviewed revision'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  compare-platform-behavior:
+    name: ${{ matrix.os }} / ${{ matrix.revision }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+        revision: ${{ fromJSON(inputs.include_baselines && '["baseline","reviewed","head"]' || '["head"]') }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # All comparison revisions are already public. Never push a recovery/baseline ref.
+          ref: ${{ matrix.revision == 'baseline' && '5652030ed755512e7d464866205b9229f27f2bab' || matrix.revision == 'reviewed' && 'ff378da412a0240455cb1c98d92a98a88e0aca79' || github.sha }}
+          path: checkout
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Isolate source, build outputs and caches
+        run: |
+          $root = Join-Path $env:RUNNER_TEMP "space-review-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT-${{ matrix.revision }}"
+          New-Item -ItemType Directory -Force -Path "$root/evidence" | Out-Null
+          Copy-Item -Path "$env:GITHUB_WORKSPACE/checkout" -Destination "$root/source" -Recurse -Force
+          $sha = git -C "$root/source" rev-parse HEAD
+          @{
+            revision = '${{ matrix.revision }}'
+            source_sha = "$sha"
+            workflow_sha = $env:GITHUB_SHA
+            platform = '${{ matrix.os }}'
+            source = "$root/source"
+            original_tmpdir = $env:TMPDIR
+            node = (node --version)
+          } | ConvertTo-Json | Set-Content "$root/evidence/provenance.json"
+          "NOVA_DIAG_ROOT=$root" >> $env:GITHUB_ENV
+          "NOVA_DIAG_SOURCE=$root/source" >> $env:GITHUB_ENV
+          "npm_config_cache=$root/npm-cache" >> $env:GITHUB_ENV
+          "npm_config_devdir=$root/node-gyp" >> $env:GITHUB_ENV
+          "XDG_CACHE_HOME=$root/xdg-cache" >> $env:GITHUB_ENV
+          # Keep the runner's original TMPDIR: canonical-path failures are part
+          # of the macOS investigation, not something to conceal with an override.
+      - name: Install the same npm version and dependencies as Electron CI
+        run: |
+          Set-Location $env:NOVA_DIAG_SOURCE
+          npm install --global npm@11.6.0 2>&1 | Tee-Object "$env:NOVA_DIAG_ROOT/evidence/npm-version-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          npm ci 2>&1 | Tee-Object "$env:NOVA_DIAG_ROOT/evidence/npm-ci.log"
+          exit $LASTEXITCODE
+      - name: Build runtime prerequisites
+        id: build
+        run: |
+          Set-Location $env:NOVA_DIAG_SOURCE
+          npm run build --workspace @nova-personal-agent/runtime 2>&1 | Tee-Object "$env:NOVA_DIAG_ROOT/evidence/runtime-build.log"
+          exit $LASTEXITCODE
+      - name: Windows desktop tests and unchanged source startup smoke
+        if: runner.os == 'Windows'
+        run: |
+          Set-Location $env:NOVA_DIAG_SOURCE
+          node clients/desktop/node_modules/electron/install.js 2>&1 | Tee-Object "$env:NOVA_DIAG_ROOT/evidence/electron-install.log"
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          # This is the exact CI command, including desktop build, node --test,
+          # and the original 20-second source-startup-smoke timeout.
+          npm run test:desktop 2>&1 | Tee-Object "$env:NOVA_DIAG_ROOT/evidence/desktop-and-source-smoke.log"
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Set-Content "$env:NOVA_DIAG_ROOT/evidence/desktop-result.txt"
+          if ($code -ne 0) {
+            $match = Select-String -Path "$env:NOVA_DIAG_ROOT/evidence/desktop-and-source-smoke.log" -Pattern 'source_startup_smoke_(timeout|failed)[^\r\n]*' | Select-Object -Last 1
+            $detail = if ($match) { $match.Matches[0].Value } else {
+              $failures = @(Select-String -Path "$env:NOVA_DIAG_ROOT/evidence/desktop-and-source-smoke.log" -Pattern @('not ok\b', '^\s*[✖✗×]\s', '^\s*(?:[A-Za-z]*Error(?:\s+\[[A-Z0-9_]+\])?:|error:)', 'error TS[0-9]+:', '^\s*npm (?:ERR!|error)\b') | Select-Object -First 12 | ForEach-Object {
+                if ($_.Line.Length -gt 300) { $_.Line.Substring(0, 300) } else { $_.Line }
+              })
+              if ($failures.Count -gt 0) { $failures -join "`n" } else { 'Desktop command failed without matching error lines; inspect retained artifact.' }
+            }
+            $safe = $detail.Replace('%', '%25').Replace("`r", '%0D').Replace("`n", '%0A')
+            Write-Output "::error title=Windows ${{ matrix.revision }} diagnostic::$safe"
+          }
+          exit $code
+      - name: macOS runtime diagnostics with progress and a bounded test harness
+        if: runner.os == 'macOS'
+        run: |
+          Set-Location $env:NOVA_DIAG_SOURCE
+          @'
+          import {spawn} from 'node:child_process';
+          import {createWriteStream} from 'node:fs';
+          import {mkdir,readdir,writeFile} from 'node:fs/promises';
+          import {availableParallelism} from 'node:os';
+          import {join,resolve} from 'node:path';
+          const directory=resolve(process.argv[2]),evidence=resolve(process.argv[3]);
+          const fileTimeoutMs=Number(process.argv[4]??150000);
+          if(!Number.isSafeInteger(fileTimeoutMs)||fileTimeoutMs<1)throw Error('invalid diagnostic deadline');
+          await mkdir(evidence,{recursive:true});
+          const files=(await readdir(directory)).filter(name=>name.endsWith('.test.js')).sort();
+          if(!files.length)throw Error('No compiled runtime tests found');
+          const concurrency=Math.max(1,availableParallelism()-1),results=[];
+          const progress=createWriteStream(join(evidence,'runtime-progress.jsonl'));
+          const record=row=>{const line=JSON.stringify({at:new Date().toISOString(),...row})+'\n';progress.write(line);process.stdout.write(line)};
+          await writeFile(join(evidence,'runtime-test-files.json'),JSON.stringify({directory,files,concurrency,fileTimeoutMs},null,2));
+          let next=0;
+          async function run(name){
+            const started=Date.now(),log=createWriteStream(join(evidence,name+'.tap'));
+            record({event:'start',file:name});
+            await new Promise(done=>{
+              const child=spawn(process.execPath,['--test','--test-reporter=tap','--test-timeout=120000',join(directory,name)],{detached:true,stdio:['ignore','pipe','pipe']});
+              child.stdout.pipe(log,{end:false});child.stderr.pipe(log,{end:false});
+              let timedOut=false,killTimer,error,tail='';
+              const capture=bytes=>{tail=(tail+bytes.toString()).slice(-32768)};child.stdout.on('data',capture);child.stderr.on('data',capture);
+              const kill=signal=>{if(child.pid)try{process.kill(-child.pid,signal)}catch(failure){if(failure.code!=='ESRCH')record({event:'kill_error',file:name,error:failure.code})}};
+              const timer=setTimeout(()=>{timedOut=true;record({event:'deadline',file:name});kill('SIGTERM');killTimer=setTimeout(()=>kill('SIGKILL'),1000)},fileTimeoutMs);
+              child.once('error',failure=>{error=failure.code??failure.message});
+              child.once('close',(code,signal)=>{
+                clearTimeout(timer);clearTimeout(killTimer);log.end();
+                const detail=error??tail.match(/error: ([^\r\n]+)/u)?.[1]?.slice(0,300);
+                const result={file:name,code,signal,timedOut,error,detail,duration_ms:Date.now()-started,passed:code===0&&!timedOut&&!error};
+                if(!result.passed){const message=JSON.stringify({file:name,code,timedOut,detail}).replaceAll('%','%25').replaceAll('\r','%0D').replaceAll('\n','%0A');process.stdout.write('::error title=macOS runtime file diagnostic::'+message+'\n')}
+                results.push(result);record({event:'finish',...result});done();
+              });
+            });
+          }
+          await Promise.all(Array.from({length:Math.min(concurrency,files.length)},async()=>{while(next<files.length){const index=next++;await run(files[index])}}));
+          const failed=results.filter(row=>!row.passed);
+          await writeFile(join(evidence,'runtime-summary.json'),JSON.stringify({files:files.length,failed:failed.length,results},null,2));
+          progress.end();process.exitCode=failed.length?1:0;
+          '@ | Set-Content "$env:NOVA_DIAG_ROOT/diagnose-runtime.mjs"
+          # Same compiled test-file selection and normal file parallelism as CI.
+          # A per-file subprocess deadline also catches leaked handles AFTER a
+          # test completes (Node's own --test-timeout does not terminate those).
+          # Timeouts remain failures; no production code/deadline is changed.
+          node "$env:NOVA_DIAG_ROOT/diagnose-runtime.mjs" runtime/dist/test "$env:NOVA_DIAG_ROOT/evidence" 2>&1 | Tee-Object "$env:NOVA_DIAG_ROOT/evidence/runtime-console.log"
+          $code = $LASTEXITCODE
+          "exit_code=$code" | Set-Content "$env:NOVA_DIAG_ROOT/evidence/runtime-result.txt"
+          exit $code
+      - name: Upload all available evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: space-review-${{ matrix.os }}-${{ matrix.revision }}-${{ github.run_attempt }}
+          path: ${{ env.NOVA_DIAG_ROOT }}/evidence/
+          if-no-files-found: warn
+          retention-days: 14

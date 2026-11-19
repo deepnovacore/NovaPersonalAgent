@@ -38,3 +38,10 @@ test('initial automatic retries show progress without claiming a lost connection
  assert.match(startupMessage({stage:'backend',code:'backend_start_timeout'}),/自动重试/)
  assert.doesNotMatch(startupMessage({stage:'backend',code:'backend_start_timeout'}),/连接已断开/)
 })
+
+test('schema incompatibility explains preservation without suggesting a reset',()=>{
+ const message=startupMessage({stage:'failed',code:'state_schema_incompatible'})
+ assert.match(message,/不兼容/)
+ assert.match(message,/原文件未改动/)
+ assert.doesNotMatch(message,/reset-state|空状态/)
+})

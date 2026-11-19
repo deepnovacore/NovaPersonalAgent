@@ -316,10 +316,11 @@ test('coding target menu lives in the composer, appears only with a coding execu
  item('Session').listeners.click();assert.deepEqual(sent.at(-1).params,{id:'a',target:{workspace_id:'ws-1',session_id:'session-7'}});reply({});await flush()
 })
 
-test('opening a waiting approval never acknowledges an unseen card',async()=>{
+test('opening a waiting approval never acknowledges an unseen card and lands in the workbench dock',async()=>{
  const source=await readFile(new URL('../src/renderer/personal-view.mjs',import.meta.url),'utf8')
  assert.equal(source.includes("c.command('presentation.seen'"),false)
- assert.match(source,/item.conversation_id!==c.selectedId\)await c.select\(item.conversation_id\);await c.setPresentation\('orb'\)/)
+ assert.match(source,/item\.conversation_id!==c\.selectedId\)await c\.select\(item\.conversation_id\);[\s\S]{0,160}await c\.setPresentation\('workbench'\);chat\.reveal\(\)/)
+ assert.doesNotMatch(source,/item\.conversation_id!==c\.selectedId\)await c\.select\(item\.conversation_id\);await c\.setPresentation\('orb'\)/)
 })
 
 test('notification route remains recoverable when Feishu CLI is unavailable',async()=>{

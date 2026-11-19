@@ -33,6 +33,7 @@ class _SyntheticCapture extends FakeAudio {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   }) async {
     if (!capture || capturing) throw StateError('invalid_synthetic_capture');
     this.generation = generation;

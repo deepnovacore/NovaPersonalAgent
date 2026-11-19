@@ -11,6 +11,30 @@ import WebKit
     channel.setMethodCallHandler { [weak self] call, reply in
       Task { @MainActor in
         guard let self else { return }
+        if call.method == "shareFile" {
+          guard UIApplication.shared.applicationState == .active,
+            let input = call.arguments as? [String: Any],
+            let name = input["name"] as? String, !name.isEmpty, name.count <= 200,
+            name != ".", name != "..", !name.contains("/"), !name.contains("\\"),
+            name.rangeOfCharacter(from: .controlCharacters) == nil,
+            let bytes = input["bytes"] as? FlutterStandardTypedData, bytes.data.count <= 25 * 1024 * 1024,
+            let parent = Self.presenter() else {
+            reply(FlutterError(code: "invalid_document", message: nil, details: nil)); return
+          }
+          let folder = FileManager.default.temporaryDirectory.appendingPathComponent("nova-documents/" + UUID().uuidString, isDirectory: true)
+          do {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            let file = folder.appendingPathComponent(name)
+            try bytes.data.write(to: file, options: .atomic)
+            let share = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+            share.popoverPresentationController?.sourceView = parent.view
+            share.popoverPresentationController?.sourceRect = CGRect(x: parent.view.bounds.midX, y: parent.view.bounds.midY, width: 1, height: 1)
+            share.completionWithItemsHandler = { _, _, _, _ in try? FileManager.default.removeItem(at: folder) }
+            parent.present(share, animated: true)
+            reply(nil)
+          } catch { try? FileManager.default.removeItem(at: folder); reply(FlutterError(code: "document_share_failed", message: nil, details: nil)) }
+          return
+        }
         guard let input = call.arguments as? [String: Any], let html = input["html"] as? String,
           !html.isEmpty, html.utf8.count <= 256 * 1024,
           let parent = Self.presenter(), (UIApplication.shared.applicationState != .background || (call.method == "inspect" && NovaBackgroundExecution.hasExecutionTime())) else {

@@ -474,7 +474,7 @@ void main() {
       });
       await tester.pumpAndSettle();
       expect(find.text('Cancel task'), findsNothing);
-      expect(find.textContaining('cancelled'), findsOneWidget);
+      expect(find.textContaining('Cancelled'), findsOneWidget);
       store.receive({
         'type': 'personal.state',
         'revision': 2,
@@ -483,7 +483,7 @@ void main() {
         ],
       });
       await tester.pump();
-      expect(find.textContaining('completed'), findsOneWidget);
+      expect(find.textContaining('Completed'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       store.setConnected(false);
       await tester.pump();

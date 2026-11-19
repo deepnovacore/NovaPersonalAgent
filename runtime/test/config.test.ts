@@ -17,7 +17,9 @@ import {
   requireVolcengineRealtime,
   resolveCascadedSelection,
   resolveMemoryExtractionConnection,
-  resolveModelApiKey,
+  resolveMemoryComposition,
+  resolveProviderModelConnection,
+  resolveSelectedModelConnection,
   resolveWatchModelConnection,
   resolveProactivity,
   settingsSchema,
@@ -30,12 +32,64 @@ test('local memory retains DashScope credentials with a non-Qwen conversation mo
   if(memory?.connection==='local')assert.equal(memory.embedding.apiKey,'memory-key')
 })
 
-test('DashScope key also configures support models only on the DashScope endpoint', () => {
-  const env = {DASHSCOPE_API_KEY: 'dashscope-test-key'}
-  assert.equal(resolveModelApiKey(loadSettings(env)), null)
-  assert.equal(resolveModelApiKey(loadSettings({...env, MODEL_BASE_URL: DASHSCOPE_COMPATIBLE_BASE_URL})), env.DASHSCOPE_API_KEY)
-  assert.equal(resolveModelApiKey(loadSettings({...env, MODEL_BASE_URL: 'https://example.com/v1'})), null)
-  assert.equal(resolveModelApiKey(loadSettings({...env, MODEL_API_KEY: 'custom-test-key'})), 'custom-test-key')
+test('each model provider uses only its own model URL and credential', () => {
+  const settings = loadSettings({
+    DASHSCOPE_MODEL_BASE_URL: 'https://qwen-model.example/v1',
+    DEEPSEEK_MODEL_BASE_URL: 'https://deepseek-model.example/v1',
+    OPENAI_MODEL_BASE_URL: 'https://openai-model.example/v1',
+    GEMINI_MODEL_BASE_URL: 'https://gemini-model.example/v1',
+    STEPFUN_MODEL_BASE_URL: 'https://stepfun-model.example/v1',
+    DASHSCOPE_API_KEY: 'dash-key',
+    DEEPSEEK_API_KEY: 'deepseek-key',
+    OPENAI_API_KEY: 'openai-key',
+    GEMINI_API_KEY: 'gemini-key',
+    STEPFUN_API_KEY: 'stepfun-key',
+  })
+  const expected = {
+    qwen: ['https://qwen-model.example/v1', 'dash-key', 'DASHSCOPE_API_KEY'],
+    deepseek: ['https://deepseek-model.example/v1', 'deepseek-key', 'DEEPSEEK_API_KEY'],
+    openai: ['https://openai-model.example/v1', 'openai-key', 'OPENAI_API_KEY'],
+    gemini: ['https://gemini-model.example/v1', 'gemini-key', 'GEMINI_API_KEY'],
+    stepfun: ['https://stepfun-model.example/v1', 'stepfun-key', 'STEPFUN_API_KEY'],
+  } as const
+  for (const [provider, [baseUrl, apiKey, keyName]] of Object.entries(expected)) {
+    assert.deepEqual(resolveProviderModelConnection(settings, provider), {
+      provider, baseUrl, apiKey, missing: null,
+    })
+    const withoutKey = resolveProviderModelConnection(loadSettings({}), provider)
+    assert.equal(withoutKey?.apiKey, '')
+    assert.equal(withoutKey?.missing, keyName)
+    assert.equal(withoutKey?.baseUrl !== '', true)
+  }
+  // A key on another provider is never borrowed.
+  const onlyQwen = loadSettings({DASHSCOPE_API_KEY: 'dash-only'})
+  assert.equal(resolveProviderModelConnection(onlyQwen, 'deepseek')?.apiKey, '')
+  assert.equal(resolveProviderModelConnection(onlyQwen, 'deepseek')?.missing, 'DEEPSEEK_API_KEY')
+})
+
+test('provider model URLs reject empty, cleartext, credentials, query and fragment', () => {
+  assert.throws(() => loadSettings({DASHSCOPE_MODEL_BASE_URL: ''}),
+    /invalid configuration: DASHSCOPE_MODEL_BASE_URL/u)
+  assert.throws(() => loadSettings({DEEPSEEK_MODEL_BASE_URL: '   '}),
+    /invalid configuration: DEEPSEEK_MODEL_BASE_URL/u)
+  for (const value of [
+    'http://models.example/v1',
+    'https://user:password@models.example/v1',
+    'https://models.example/v1?api-version=1',
+    'https://models.example/v1#fragment',
+  ]) {
+    assert.throws(() => resolveProviderModelConnection(
+      loadSettings({OPENAI_MODEL_BASE_URL: value}), 'openai',
+    ), /OPENAI_MODEL_BASE_URL/u)
+  }
+})
+
+test('the retired generic model URL and key are refused explicitly', () => {
+  assert.throws(() => loadSettings({MODEL_BASE_URL: 'https://api.deepseek.com'}),
+    /MODEL_BASE_URL 已移除/u)
+  assert.throws(() => loadSettings({MODEL_API_KEY: 'legacy-key'}),
+    /MODEL_API_KEY 已移除/u)
+  assert.doesNotThrow(() => loadSettings({MODEL_BASE_URL: '', MODEL_API_KEY: '  '}))
 })
 
 test('a monitor preset loads its own provider credential independently of the conversation provider', () => {
@@ -48,6 +102,34 @@ test('a monitor preset loads its own provider credential independently of the co
   assert.deepEqual(resolveWatchModelConnection(cascaded), {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'qwen-test'})
   assert.throws(() => resolveWatchModelConnection(loadSettings({WATCH_MODEL: 'doubao-seed-2-0-pro-260215', DASHSCOPE_API_KEY: 'qwen-test'})), /ARK_API_KEY/)
   assert.equal(resolveWatchModelConnection(loadSettings({WATCH_MODEL: 'custom-model'})), null)
+})
+
+test('watch and memory extraction use the selected provider model URL', () => {
+  const qwen = loadSettings({
+    WATCH_MODEL: 'qwen3-vl-plus',
+    DASHSCOPE_API_KEY: 'qwen-key',
+    DASHSCOPE_MODEL_BASE_URL: 'https://qwen-model.example/v1',
+  })
+  assert.deepEqual(resolveWatchModelConnection(qwen), {
+    baseUrl: 'https://qwen-model.example/v1', apiKey: 'qwen-key',
+  })
+  assert.equal(resolveMemoryExtractionConnection(qwen).baseUrl, 'https://qwen-model.example/v1')
+
+  const deepseek = loadSettings({
+    PIPELINE_MODE: 'cascaded',
+    CASCADE_LLM_PROVIDER: 'deepseek',
+    WATCH_MODEL: 'deepseek-flash',
+    DEEPSEEK_API_KEY: 'deepseek-key',
+    DEEPSEEK_MODEL_BASE_URL: 'https://deepseek-model.example/v1',
+  })
+  assert.deepEqual(resolveWatchModelConnection(deepseek), {
+    baseUrl: 'https://deepseek-model.example/v1', apiKey: 'deepseek-key',
+  })
+  assert.equal(resolveMemoryExtractionConnection(deepseek).baseUrl, 'https://deepseek-model.example/v1')
+  assert.throws(() => resolveWatchModelConnection(loadSettings({
+    WATCH_MODEL: 'qwen3-vl-plus',
+    DEEPSEEK_API_KEY: 'foreign',
+  })), /DASHSCOPE_API_KEY/u)
 })
 
 test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Flash', () => {
@@ -121,6 +203,8 @@ test('personal memory selects the v0.3 ledger by default and maps its host-owned
   )
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'disabled'})), null)
   assert.deepEqual(requirePersonalMemory(loadSettings({
+    PIPELINE_MODE: 'cascaded',
+    CASCADE_LLM_PROVIDER: 'deepseek',
     EMBEDDING_BASE_URL: 'https://embedding.example/v1/',
     EMBEDDING_API_KEY: 'embedding-key',
     DEEPSEEK_API_KEY: 'text-key',
@@ -141,13 +225,31 @@ test('personal memory selects the v0.3 ledger by default and maps its host-owned
       model: 'embedding-model',
     },
   })
+  // A DeepSeek key never unlocks extraction for the default Qwen provider.
+  assert.equal(requirePersonalMemory(loadSettings({
+    EMBEDDING_BASE_URL: 'https://embedding.example/v1',
+    EMBEDDING_API_KEY: 'embedding-key',
+    DEEPSEEK_API_KEY: 'text-key',
+    MEMORY_CONNECTION: 'local',
+  })), null)
   // Local memory is optional: no embedding credential turns it off rather than blocking startup.
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'local'})), null)
-  // Remote memory is an explicit opt-in, so its missing credential still fails loudly.
-  assert.throws(
-    () => requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example/'})),
-    /MEMORY_TOKEN/u,
-  )
+  // Remote startup uses structured variable names, never endpoint or credential values.
+  for (const token of [undefined, 'private invalid token']) {
+    const url = 'https://private-memory.example/'
+    assert.throws(
+      () => requirePersonalMemory(loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: url, MEMORY_TOKEN: token})),
+      error => {
+        assert.ok(error instanceof ConfigurationError)
+        assert.equal(error.code, 'invalid_configuration')
+        assert.equal(error.message, 'invalid remote memory configuration')
+        assert.deepEqual(error.startupConfiguration, {code: 'memory_configuration_invalid', variables: ['MEMORY_CONNECTION', 'MEMORY_TOKEN']})
+        const diagnostic = [error.message, error.stack, JSON.stringify(error)].join('\n')
+        for (const privateValue of [url, 'private-memory.example', 'private invalid token']) assert.ok(!diagnostic.includes(privateValue))
+        return true
+      },
+    )
+  }
 })
 
 test('v4 settings env selectors and paths load with the documented names', () => {
@@ -226,31 +328,27 @@ test('integrated loading never reads Ark or Doubao credential slots', () => {
   assert.equal(requireIntegratedRealtime(loadSettings(environment)).apiKey, 'dashscope-key')
 })
 
-test('integrated Qwen credential resolution binds generic keys to the DashScope endpoint', () => {
-  const compatible = loadSettings({
+test('integrated Qwen uses only DASHSCOPE_API_KEY and never borrows another model key', () => {
+  const keyed = loadSettings({
     PIPELINE_MODE: 'integrated',
     INTEGRATED_PROVIDER: 'qwen',
-    MODEL_BASE_URL: DASHSCOPE_COMPATIBLE_BASE_URL,
-    MODEL_API_KEY: 'generic-dashscope-key',
-  })
-  assert.equal(requireIntegratedRealtime(compatible).apiKey, 'generic-dashscope-key')
-
-  const explicit = loadSettings({
-    PIPELINE_MODE: 'integrated',
-    INTEGRATED_PROVIDER: 'qwen',
-    MODEL_BASE_URL: DASHSCOPE_COMPATIBLE_BASE_URL,
-    MODEL_API_KEY: 'generic-dashscope-key',
     DASHSCOPE_API_KEY: 'explicit-dashscope-key',
   })
-  assert.equal(requireIntegratedRealtime(explicit).apiKey, 'explicit-dashscope-key')
+  assert.equal(requireIntegratedRealtime(keyed).apiKey, 'explicit-dashscope-key')
 
-  const foreign = loadSettings({
+  const customModelEndpoint = loadSettings({
     PIPELINE_MODE: 'integrated',
     INTEGRATED_PROVIDER: 'qwen',
-    MODEL_BASE_URL: 'https://example.invalid/v1',
-    MODEL_API_KEY: 'foreign-key',
+    DASHSCOPE_API_KEY: 'explicit-dashscope-key',
+    DASHSCOPE_MODEL_BASE_URL: 'https://model.example/v1',
   })
-  assert.throws(() => requireIntegratedRealtime(foreign), /DASHSCOPE_API_KEY/u)
+  assert.equal(requireIntegratedRealtime(customModelEndpoint).apiKey, 'explicit-dashscope-key')
+
+  assert.throws(() => requireIntegratedRealtime(loadSettings({
+    PIPELINE_MODE: 'integrated',
+    INTEGRATED_PROVIDER: 'qwen',
+    DEEPSEEK_API_KEY: 'foreign-key',
+  })), /DASHSCOPE_API_KEY/u)
 })
 
 test('StepFun realtime config resolves its own key and Qwen 3.1 gets its matching default voice', () => {
@@ -286,8 +384,8 @@ test('StepFun support models default to Step 3.7 Flash and memory extraction fol
     WATCH_MODEL: ''})
   assert.equal(explicit.support_model, 'qwen-plus', 'an explicit model is never rewritten')
   assert.equal(explicit.watch_model, 'step-3.7-flash', 'empty watch would fall back to a DashScope model')
-  const gateway = loadSettings({...base, MODEL_API_KEY: 'gateway-secret'})
-  assert.equal(gateway.support_model, 'deepseek-flash', 'a custom gateway keeps the generic defaults')
+  const customEndpoint = loadSettings({...base, STEPFUN_MODEL_BASE_URL: 'https://stepfun-model.example/v1'})
+  assert.equal(resolveMemoryExtractionConnection(customEndpoint).baseUrl, 'https://stepfun-model.example/v1')
   assert.equal(loadSettings({DASHSCOPE_API_KEY: 'qwen-secret'}).support_model, 'qwen-flash')
 })
 
@@ -487,7 +585,7 @@ test('configuration failures never echo secret values', () => {
   let message = ''
   try {
     loadSettings({
-      MODEL_API_KEY: secret,
+      DASHSCOPE_MODEL_BASE_URL: `https://model.invalid/${secret}`,
       PIPELINE_MODE: 'invalid',
     })
   } catch (error) {
@@ -536,7 +634,7 @@ test('configuration normalization uses Python whitespace rather than JavaScript 
 })
 
 test('Qwen realtime settings preserve Python defaults and every host override', () => {
-  const defaults = loadSettings({MODEL_API_KEY: 'model-key'})
+  const defaults = loadSettings({DASHSCOPE_API_KEY: 'model-key'})
   assert.deepEqual(requireQwenRealtime(defaults), {
     url: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
     model: 'qwen-audio-3.0-realtime-plus',
@@ -550,7 +648,6 @@ test('Qwen realtime settings preserve Python defaults and every host override', 
   }, {controlled: false, recovery: 'none', pairs: 4})
 
   const explicit = loadSettings({
-    MODEL_API_KEY: 'model-key',
     DASHSCOPE_API_KEY: 'dash-key',
     QWEN_REALTIME_URL: ' wss://qwen.example/realtime ',
     QWEN_REALTIME_MODEL: ' qwen-test ',
@@ -578,7 +675,6 @@ test('Qwen require uses Python strip for URL, model, voice, and credentials', ()
     QWEN_REALTIME_MODEL: '\u001cqwen-test\u0085',
     QWEN_REALTIME_VOICE: '\u001cvoice-test\u0085',
     DASHSCOPE_API_KEY: '\u001cdash-key\u0085',
-    MODEL_API_KEY: '\u001cmodel-key\u0085',
   })
   assert.deepEqual(requireQwenRealtime(pythonWhitespace), {
     url: 'wss://qwen.example/realtime',
@@ -611,12 +707,11 @@ test('Qwen require uses Python strip for URL, model, voice, and credentials', ()
   )
   assert.equal(requireQwenRealtime(loadSettings({
     DASHSCOPE_API_KEY: '\ufeff',
-    MODEL_API_KEY: 'model-key',
   })).apiKey, '\ufeff')
   assert.deepEqual(requireQwenRealtime(loadSettings({
     QWEN_REALTIME_MODEL: '\ufeffqwen-test\ufeff',
     QWEN_REALTIME_VOICE: '\ufeffvoice-test\ufeff',
-    MODEL_API_KEY: '\ufeffmodel-key\ufeff',
+    DASHSCOPE_API_KEY: '\ufeffmodel-key\ufeff',
   })), {
     url: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
     model: '\ufeffqwen-test\ufeff',
@@ -630,11 +725,11 @@ test('Qwen require returns focused credential-safe validation errors', () => {
   const cases: readonly [NodeJS.ProcessEnv, string][] = [
     [{
       QWEN_REALTIME_URL: `https://qwen.invalid/?token=${sentinel}`,
-      MODEL_API_KEY: sentinel,
+      DASHSCOPE_API_KEY: sentinel,
     }, 'QWEN_REALTIME_URL 必须使用 wss://'],
     [{
       QWEN_REALTIME_MODEL: '\u001c',
-      MODEL_API_KEY: sentinel,
+      DASHSCOPE_API_KEY: sentinel,
     }, 'QWEN_REALTIME_MODEL 不能为空'],
     [{
       QWEN_REALTIME_VOICE: '\u0085',
@@ -643,8 +738,7 @@ test('Qwen require returns focused credential-safe validation errors', () => {
     [{
       QWEN_REALTIME_URL: `wss://qwen.invalid/?token=${sentinel}`,
       DASHSCOPE_API_KEY: '\u001c',
-      MODEL_API_KEY: '\u0085',
-    }, '缺少 DASHSCOPE_API_KEY 或 MODEL_API_KEY'],
+    }, '缺少 DASHSCOPE_API_KEY'],
   ]
   for (const [environment, expected] of cases) {
     assert.throws(
@@ -768,7 +862,7 @@ test('memory connection separates local provider selection from remote engine ow
   })
   const local = {MEMORY_CONNECTION:'local',
     EMBEDDING_API_KEY:'test', EMBEDDING_BASE_URL:'https://example.com/v1',
-    MODEL_API_KEY:'extract-test', MODEL_BASE_URL:'https://example.com/v1'}
+    DASHSCOPE_API_KEY:'extract-test', DASHSCOPE_MODEL_BASE_URL:'https://example.com/v1'}
   assert.deepEqual(requirePersonalMemory(loadSettings(local)),
     requirePersonalMemory(loadSettings({...local, MEMORY_PROVIDER:'voicemem'})))
   assert.equal(requirePersonalMemory(loadSettings({MEMORY_CONNECTION:'disabled'})), null)
@@ -861,9 +955,9 @@ test('daily memory consolidation uses a validated configurable hour and timezone
 
 test('DeepSeek defaults keep Qwen embedding credentials and endpoints isolated', () => {
   const settings = loadSettings({DEEPSEEK_API_KEY: 'text-only', DASHSCOPE_API_KEY: 'embedding-only'})
-  assert.equal(settings.model_base_url, DEEPSEEK_BASE_URL)
+  assert.equal(settings.dashscope_model_base_url, DASHSCOPE_COMPATIBLE_BASE_URL)
   for (const model of [settings.fast_model, settings.support_model, settings.compressor_model]) assert.equal(model, 'qwen-flash')
-  assert.equal(resolveModelApiKey(settings), 'text-only')
+  assert.equal(resolveSelectedModelConnection(settings)?.apiKey, 'embedding-only')
   assert.deepEqual(resolveEmbeddingConnection(settings), {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: 'embedding-only'})
   const memory = requirePersonalMemory(settings)
   assert.ok(memory?.connection === 'local')
@@ -871,10 +965,9 @@ test('DeepSeek defaults keep Qwen embedding credentials and endpoints isolated',
   assert.equal(memory.extractionModel, 'qwen-flash')
   assert.equal(memory.embedding.apiKey, 'embedding-only')
   assert.equal(memory.embedding.model, 'text-embedding-v4')
-  assert.equal(resolveModelApiKey(loadSettings({DASHSCOPE_API_KEY: 'embedding-only'})), null)
   assert.equal(requirePersonalMemory(loadSettings({DEEPSEEK_API_KEY: 'text-only'})), null)
   assert.equal(resolveEmbeddingConnection(loadSettings({DASHSCOPE_API_KEY: 'secret', EMBEDDING_BASE_URL: 'https://custom.invalid/v1'})).apiKey, '')
-  assert.equal(resolveModelApiKey(loadSettings({DEEPSEEK_API_KEY: 'secret', MODEL_BASE_URL: 'https://custom.invalid/v1'})), null)
+  assert.equal(resolveEmbeddingConnection(loadSettings({DEEPSEEK_API_KEY: 'secret', DASHSCOPE_MODEL_BASE_URL: 'https://model.invalid/v1'})).baseUrl, DASHSCOPE_COMPATIBLE_BASE_URL)
 })
 
 test('one DashScope key pairs every auxiliary model and memory extraction with DashScope', () => {
@@ -915,7 +1008,7 @@ test('cascaded auxiliary models follow the selected LLM provider', () => {
 test('memory status names a missing extraction credential instead of reporting enabled', () => {
   const settings = loadSettings({EMBEDDING_API_KEY: 'embed', EMBEDDING_BASE_URL: 'https://e.example/v1',
     MEMORY_CONNECTION: 'local'})
-  assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'missing_environment:DEEPSEEK_API_KEY', fallback: null})
+  assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY', fallback: null})
   assert.equal(requirePersonalMemory(settings), null)
   const noEmbedding = loadSettings({DEEPSEEK_API_KEY: 'text'})
   assert.deepEqual(memoryStatus(noEmbedding), {enabled: false, reason: 'missing_environment:DASHSCOPE_API_KEY', fallback: null})
@@ -942,7 +1035,43 @@ test('memory extraction stays on a selected keyless local gateway', () => {
 
 test('memory status reports an invalid endpoint instead of throwing during composition', () => {
   const settings = loadSettings({MEMORY_CONNECTION: 'local', EMBEDDING_API_KEY: 'embed',
-    EMBEDDING_BASE_URL: 'https://e.example/v1', MODEL_API_KEY: 'gateway',
-    MODEL_BASE_URL: 'http://127.0.0.1:11434/v1'})
+    EMBEDDING_BASE_URL: 'https://e.example/v1', DASHSCOPE_API_KEY: 'gateway',
+    DASHSCOPE_MODEL_BASE_URL: 'http://127.0.0.1:11434/v1'})
   assert.deepEqual(memoryStatus(settings), {enabled: false, reason: 'invalid_configuration', fallback: null})
+})
+
+test('memory engine and extractor settings retain legacy defaults and allow ledger with optional VoiceMem', () => {
+  const defaults = loadSettings({})
+  assert.equal(defaults.memory_recall_engine, null)
+  assert.equal(defaults.memory_extractors, null)
+  assert.deepEqual(loadSettings({MEMORY_EXTRACTORS: ' ledger '}).memory_extractors, ['ledger'])
+  for (const engine of ['ledger', 'mem0', 'voicemem']) {
+    const settings = loadSettings({DASHSCOPE_API_KEY: 'fixture', CASCADE_LLM_PROVIDER: 'qwen', MEMORY_RECALL_ENGINE: engine, MEMORY_EXTRACTORS: ' ledger , voicemem '})
+    assert.deepEqual(settings.memory_extractors, ['ledger', 'voicemem'])
+    const composition = resolveMemoryComposition(settings)
+    assert.equal(composition.kind, 'ledger')
+    assert.ok(composition.kind === 'ledger')
+    assert.equal(composition.engine, engine)
+    assert.deepEqual(composition.extractors, ['ledger', 'voicemem'])
+    assert.equal(composition.migrateLegacy, undefined)
+  }
+  for (const value of ['unknown', 'ledger,unknown', 'voicemem', 'ledger,ledger', 'ledger,voicemem,voicemem', 'ledger,', ',ledger']) {
+    assert.throws(() => loadSettings({MEMORY_EXTRACTORS: value}), /MEMORY_EXTRACTORS/)
+  }
+  assert.throws(() => loadSettings({MEMORY_CONNECTION: 'remote', MEMORY_URL: 'https://memory.example', MEMORY_TOKEN: 'fixture', MEMORY_EXTRACTORS: 'ledger,voicemem'}), error => {
+    assert.ok(error instanceof ConfigurationError)
+    assert.deepEqual(error.startupConfiguration, {code: 'memory_configuration_invalid', variables: ['MEMORY_CONNECTION', 'MEMORY_EXTRACTORS']})
+    return true
+  })
+})
+
+
+test('empty memory composition environment variables preserve unset defaults', () => {
+  const defaults = loadSettings({})
+  for (const empty of ['', '   ']) {
+    const settings = loadSettings({MEMORY_RECALL_ENGINE: empty, MEMORY_EXTRACTORS: empty})
+    assert.equal(settings.memory_recall_engine, defaults.memory_recall_engine)
+    assert.equal(settings.memory_extractors, defaults.memory_extractors)
+    assert.equal(loadSettings({MEMORY_PROVIDER: 'voicemem', MEMORY_RECALL_ENGINE: empty, MEMORY_EXTRACTORS: empty}).memory_provider, 'voicemem')
+  }
 })

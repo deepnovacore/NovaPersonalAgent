@@ -300,3 +300,82 @@ test('the fingerprinted snapshot cache notices an in-place edit of the same byte
  assert.equal(changed.edits.length,1)
  assert.equal(changed.edits[0]!.content.text,'Prefur concise replies')
 })
+
+// Reference implementation: write every blob, then feed the original modes and sorted rows to mktree.
+function fullDocumentTree(root:string,files:ReadonlyMap<string,string>):string{
+ const run=(args:string[],input:string)=>execFileSync('git',['-C',root,...args],{input,encoding:'utf8'}).trim()
+ const directories=new Map<string,string[]>(),top:string[]=[]
+ for(const [path,text] of files){
+  const blob=run(['hash-object','-w','--stdin'],text),slash=path.indexOf('/')
+  if(slash<0)top.push(`100644 blob ${blob}\t${path}\n`)
+  else{const folder=path.slice(0,slash),rows=directories.get(folder)??[];rows.push(`100644 blob ${blob}\t${path.slice(slash+1)}\n`);directories.set(folder,rows)}
+ }
+ for(const [folder,rows] of directories)top.push(`040000 tree ${run(['mktree'],rows.sort().join(''))}\t${folder}\n`)
+ return run(['mktree'],top.sort().join(''))
+}
+function preparedFiles(root:string):Map<string,string>{
+ const journal=JSON.parse(readFileSync(join(root,'.nova-memory-batch.json'),'utf8')) as {files:{path:string;after:string}[]}
+ return new Map(journal.files.map(file=>[file.path,file.after]))
+}
+
+for(const count of [1,30])test(`publishing one changed file among ${count} entries writes only one blob and preserves the reference tree`,t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root)
+ // Diary revisions have no current semantic projection, so this update changes exactly one file.
+ const entries:EntryRevision[]=Array.from({length:count},(_,i)=>({...first,entry_id:`personal:diary:${i}`,kind:'diary',content:{text:`中文日记 🚀 ${i}\n第二行`}}))
+ repo.open(entries)
+ const unchanged=join(root,'USER.md'),before=statSync(unchanged),calls=countGit(t,repo)
+ const updated:EntryRevision={...entries[0]!,revision:2,supersedes:1,op:'update',content:{text:'更新日记 🌌\n新的一行'}}
+ const operation=repo.prepare([...entries,updated]),files=preparedFiles(root)
+ const changed=[...files].filter(([path,text])=>git(root,'show',`HEAD:${path}`)!==text.trimEnd())
+ assert.equal(changed.length,1)
+ repo.publishPrepared(operation);repo.finalize(operation)
+ assert.equal(calls.filter(args=>args[0]==='hash-object').length,1)
+ assert.equal(calls.filter(args=>args[0]==='ls-tree'&&args.includes('-z')).length,1)
+ assert.equal(git(root,'rev-parse','HEAD^{tree}'),fullDocumentTree(root,files))
+ assert.deepEqual(repo.read().revisions,[...entries,updated].sort((a,b)=>a.entry_id.localeCompare(b.entry_id)||a.revision-b.revision))
+ // An unchanged projection must not be replaced or fsynced as part of this update.
+ const after=statSync(unchanged)
+ assert.equal(after.ino,before.ino)
+ assert.equal(after.mtimeMs,before.mtimeMs)
+ calls.length=0;const head=git(root,'rev-parse','HEAD');repo.publish([...entries,updated])
+ assert.equal(calls.filter(args=>args[0]==='hash-object').length,0)
+ assert.equal(git(root,'rev-parse','HEAD'),head)
+})
+
+test('the first Markdown commit falls back to writing every blob without HEAD',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root),calls=countGit(t,repo)
+ repo.initialize()
+ const operation=repo.prepare([first]),files=preparedFiles(root)
+ repo.publishPrepared(operation);repo.finalize(operation)
+ assert.equal(calls.filter(args=>args[0]==='hash-object').length,files.size)
+ assert.equal(calls.filter(args=>args[0]==='ls-tree'&&args.includes('-z')).length,0)
+ assert.equal(git(root,'rev-parse','HEAD^{tree}'),fullDocumentTree(root,files))
+})
+
+test('SHA-256 Markdown repositories reuse unchanged blobs with the same reference tree',t=>{
+ const root=fixture(t)
+ try{git(root,'init','--quiet','--object-format=sha256')}catch{t.skip('Git does not support SHA-256 repositories');return}
+ const repo=new MarkdownRepository(root),initial=repo.prepare([first])
+ // Seed HEAD directly: the existing first-publication path assumes a 40-character null old oid.
+ const initialTree=fullDocumentTree(root,preparedFiles(root))
+ const initialCommit=git(root,'-c','user.name=Fixture','-c','user.email=fixture@localhost','commit-tree',initialTree,'-m','SHA-256 fixture')
+ git(root,'update-ref','HEAD',initialCommit);repo.recover(initial)
+ assert.equal(git(root,'rev-parse','HEAD').length,64)
+ const calls=countGit(t,repo),operation=repo.prepare([first,next]),files=preparedFiles(root)
+ repo.publishPrepared(operation);repo.finalize(operation)
+ assert.equal(calls.filter(args=>args[0]==='hash-object').length,2)
+ assert.equal(git(root,'rev-parse','HEAD^{tree}'),fullDocumentTree(root,files))
+ assert.deepEqual(repo.read().revisions,[first,next])
+})
+
+test('publishing after purge recreates pruned blobs rather than reusing stale object ids',t=>{
+ const root=fixture(t),repo=new MarkdownRepository(root);repo.open([first])
+ const oldPath=git(root,'ls-tree','-r','--name-only','HEAD').split('\n').find(path=>path.startsWith('entries/'))!
+ const oldBlob=git(root,'rev-parse',`HEAD:${oldPath}`)
+ repo.purge([],'prune-before-republish',repo.read().baselines)
+ assert.throws(()=>git(root,'cat-file','-e',oldBlob))
+ const calls=countGit(t,repo);repo.publish([first])
+ assert.equal(calls.filter(args=>args[0]==='hash-object').length,2)
+ assert.deepEqual(repo.read().revisions,[first])
+ assert.equal(git(root,'fsck','--no-reflogs','--unreachable'),'')
+})

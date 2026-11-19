@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,rm,writeFile} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
@@ -11,6 +11,24 @@ import {settingsSchema} from '../src/config/config.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 
 const build={project:'/test',plan_id:'p',plan_version:1,source_conversation_id:'chat:main',status:'paused' as const,reason:null,log_revision:0,approval:null}
+test('first Build turn already has Computer Use with granted permissions, whatever the display count',{skip:process.platform!=='darwin',timeout:10000},async t=>{
+ const root=await mkdtemp(join(await realpath(tmpdir()),'computer-first-turn-'))
+ const host=new PersonalAgentHost({path:join(root,'state.json'),userScope:'test',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null})
+ t.after(async()=>{try{await host.close()}finally{await rm(root,{recursive:true,force:true})}})
+ await host.open()
+ host.setWorkbenchModel({provider:'qwen',model:'qwen3-vl-plus'})
+ let resolveFirstTurn!:(enabled:boolean)=>void
+ const firstTurn=new Promise<boolean>(resolve=>{resolveFirstTurn=resolve})
+ host.setConversationRuntime(conversation=>Promise.resolve({
+  runTurn:()=>{resolveFirstTurn(host.computerUseState(conversation.id).enabled);return Promise.resolve({assistant:'ready'})},
+  close:()=>Promise.resolve(),
+ }),()=>{/* No notifications in this host fixture. */})
+ const command=(method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id:method,method,params},{client_id:'desktop:local'})
+ await command('presentation.set',{mode:'workbench'})
+ const result=await command('build.begin',{text:'Open the app',project:root,computer_permissions:{screen:'granted',accessibility:'granted'}}) as {ok:boolean}
+ assert.equal(result.ok,true,JSON.stringify(result))
+ assert.equal(await firstTurn,true)
+})
 test('legacy builds remain readable and computer state is strict',()=>{
  assert.equal(localBuildSchema.parse(build).computer_use,undefined)
  assert.deepEqual(localBuildSchema.parse({...build,computer_use:{enabled:true}}).computer_use,{enabled:true,direct:false})
@@ -19,11 +37,14 @@ test('legacy builds remain readable and computer state is strict',()=>{
 test('computer switch requires local selected Build and fails closed without permissions/configuration',{timeout:10000},async t=>{
  const platform=Object.getOwnPropertyDescriptor(process,'platform')!;Object.defineProperty(process,'platform',{value:'darwin'});t.after(()=>Object.defineProperty(process,'platform',platform))
  const env=process.env;process.env={...env,COMPUTER_DISPLAY_ID:'1',EXECUTOR_BASE_URL:'https://example.com/v1',EXECUTOR_MODEL:'test',EXECUTOR_MODEL_FAMILY:'qwen3-vl',EXECUTOR_API_KEY:'test',COMPUTER_MAC_WINDOW_PID:'',COMPUTER_MAC_WINDOW_ID:''};t.after(()=>{process.env=env})
- const root=await mkdtemp(join(tmpdir(),'computer-host-')),path=join(root,'state.json'),state=initialState()
+ const root=await mkdtemp(join(await realpath(tmpdir()),'computer-host-')),path=join(root,'state.json'),state=initialState()
+ let ownedHost:PersonalAgentHost|undefined=undefined
+ t.after(async()=>{try{await ownedHost?.close()}finally{await rm(root,{recursive:true,force:true})}})
  const item=createConversation('build','Build',null,'build:test');item.build=build;state.conversations.items.push(item);state.conversations.selected_id=item.id
  await writeFile(path,JSON.stringify(state),{mode:0o600})
  const host=new PersonalAgentHost({path,userScope:'test',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null})
- await host.open();t.after(async()=>{await host.close();await rm(root,{recursive:true,force:true})})
+ ownedHost=host
+ await host.open()
  let n=0
  const command=(method:string,params:Record<string,unknown>,local=true)=>host.command({type:'personal.command',request_id:String(n++),method,params},{client_id:local?'desktop:local':'remote'}) as Promise<{ok:boolean;error?:string;data:{ok:boolean;state:{enabled:boolean;direct:boolean};missing:string[]}}>
  await command('presentation.set',{mode:'workbench'})
@@ -36,9 +57,7 @@ test('computer switch requires local selected Build and fails closed without per
  assert.equal(delegated.data.ok,false);assert.equal(delegated.data.state.enabled,false);assert.equal(delegated.data.state.direct,false);assert.deepEqual(delegated.data.missing,['vision_model'])
  conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],cascade_llm_provider:'qwen',cascade_llm_model:'qwen3-vl-plus',dashscope_api_key:'test'})})
  for(const key of ['COMPUTER_DISPLAY_ID','EXECUTOR_BASE_URL','EXECUTOR_MODEL','EXECUTOR_MODEL_FAMILY','EXECUTOR_API_KEY'])delete process.env[key]
- const multi=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted',displayCount:2}})
- assert.equal(multi.ok,true);assert.equal(multi.data.ok,false);assert.deepEqual(multi.data.missing,['display_count']);assert.equal(multi.data.state.enabled,false)
- const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted',displayCount:1}})
+ const direct=await command('build.computer_use',{conversation_id:item.id,enabled:true,permissions:{screen:'granted',accessibility:'granted'}})
  assert.equal(direct.data.state.direct,true);assert.deepEqual(direct.data.missing,[])
  const badge=()=>host.conversationSnapshot().items.find(value=>value.id===item.id)!.build!.computer_use
  assert.equal(badge().direct,true)

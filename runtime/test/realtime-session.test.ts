@@ -24,7 +24,7 @@ function noop(): void {
   // Intentionally empty: these tests do not observe frames or diagnostics.
 }
 
-function makeSession(options: {readonly ids?: readonly string[]; readonly requested?: boolean; readonly ensureResponse?: () => Promise<void | boolean>; readonly failCreate?: boolean; readonly rejectCreate?: boolean} = {}): {
+function makeSession(options: {readonly onDelivery?: (completion: PlaybackCompletion) => void; readonly ids?: readonly string[]; readonly requested?: boolean; readonly ensureResponse?: () => Promise<void | boolean>; readonly failCreate?: boolean; readonly rejectCreate?: boolean} = {}): {
   readonly session: RealtimeSession
   readonly actions: string[]
   readonly userOrigin: (itemId: string) => {kind: 'user_item'; item_id: string; request_id: string}
@@ -96,6 +96,7 @@ function makeSession(options: {readonly ids?: readonly string[]; readonly reques
     idFactory,
     clock: new VirtualClock(),
     onDiagnostic: noop,
+    onDelivery: options.onDelivery ?? noop,
   })
   return {session, actions, userOrigin: itemId => {
     const requestId = requestIds.get(itemId)
@@ -1207,4 +1208,21 @@ test('full text previews reach authorized captions without expanding voice subti
   assert.equal(session.captionFor({...event,response_id:'unowned'}),null)
   assert.equal(realtimeProviderEventSchema.safeParse({...event,full_text:'x'.repeat(4001)}).success,false)
   assert.equal(session.captionFor({kind:'response_transcript_final',session_epoch:1,response_id:'r',text:''})?.full_text,'')
+})
+
+
+test('spoken delivery observers can identify the suggestion before response cleanup',async()=>{
+  let deliveredIds:readonly string[]=[]
+  const {session}=makeSession({onDelivery:completion=>{deliveredIds=session.responseEventIds(completion.response_id)}})
+  await session.connect({tools:[]})
+  await session.deliverHostItem({kind:'final',host_item_id:'notice',event_id:'suggestion:s-1',content:'邀请需要回复。',call_id:null})
+  await session.accept({kind:'response_started',session_epoch:1,response_id:'response'})
+  await session.accept({kind:'response_audio_delta',session_epoch:1,response_id:'response',pcm:new Uint8Array([0,1,2,3])})
+  const generation=session.currentGeneration
+  assert.ok(generation)
+  session.playbackStarted(generation.utterance_id,generation.generation_epoch)
+  await session.accept({kind:'response_terminal',session_epoch:1,response_id:'response',status:'completed',reason:''})
+  assert.ok(session.playbackDone(generation.utterance_id,generation.generation_epoch,100))
+  assert.deepEqual(deliveredIds,['suggestion:s-1'])
+  assert.deepEqual(session.responseEventIds('response'),[],'bookkeeping is still released after notification')
 })

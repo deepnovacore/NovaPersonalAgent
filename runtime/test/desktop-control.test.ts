@@ -1,11 +1,19 @@
 import assert from 'node:assert/strict'
+import {mkdtemp, realpath, rm} from 'node:fs/promises'
+import {tmpdir} from 'node:os'
+import {join} from 'node:path'
+import {PersonalAgentHost} from '../src/personal-agent/host.js'
+import {SuggestionPool} from '../src/core/suggestions.js'
 import {EventEmitter} from 'node:events'
+import {HostModelRoutesStore} from '../src/space-host/model-settings.js'
+import type {SpaceHostController} from '../src/space-host/config.js'
 import {test} from 'node:test'
 import {installDesktopControl, handleFeishuSettings, handlePersonalSettings, connectionsProjection, PERSONAL_SETTINGS_METHODS, desktopBudgetFailure, type DesktopCapabilityState} from '../src/desktop/desktop-control.js'
 import {runDesktopEntry} from '../src/desktop/desktop-session.js'
 import {buildProductionRealtimeAssembly} from '../src/composition/cascaded-realtime-assembly.js'
 import {loadSettings} from '../src/config/config.js'
 import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
+import {FULL_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
 
 class Parent extends EventEmitter {
   readonly sent: unknown[] = []
@@ -34,7 +42,7 @@ test('real final compilation failure preserves exact N/B over private startup st
       announce: () => Promise.reject(new Error('budget failure must precede readiness')), onDiagnostic: () => { /* bounded diagnostics are asserted through the private status instead */ },
       onStartupFailure: error => {status = desktopBudgetFailure(error); control.publish()},
       construct: () => {
-        buildProductionRealtimeAssembly({settings: {...loadSettings({MEMORY_CONNECTION: 'disabled', MODEL_API_KEY: 'fixture', DASHSCOPE_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture'}), executors: []},
+        buildProductionRealtimeAssembly({memoryTools: FULL_MEMORY_TOOLS, settings: {...loadSettings({MEMORY_CONNECTION: 'disabled', DASHSCOPE_API_KEY: 'fixture', TAVILY_API_KEY: 'fixture'}), executors: []},
           capabilities: parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {camera: {enabled: false}, coding: {enabled: false}, search: {enabled: true}}}, {TAVILY_API_KEY: 'fixture'})})
         throw new Error('expected final compilation budget failure')
       },
@@ -108,4 +116,128 @@ test('settings connections port admits only sources, connectors and discovery sc
   assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:true}),'sources.consent',{id:'x',consent:false}),{ok:true})
   assert.ok(PERSONAL_SETTINGS_METHODS.every(method => !method.startsWith('feishu.')))
   assert.deepEqual(await handlePersonalSettings(()=>Promise.resolve({ok:false,error:'unavailable'}),'sources.sync',{id:'s'}),{error:'unavailable'})
+})
+
+
+test('settings Space port routes pairing controls but rejects mobile commands', async () => {
+  const calls: unknown[] = []
+  const command = (input: unknown) => {calls.push(input); return Promise.resolve({ok: true, data: {available: true}})}
+  for (const method of ['space.status', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke']) {
+    assert.ok(PERSONAL_SETTINGS_METHODS.includes(method), method)
+    assert.deepEqual(await handlePersonalSettings(command, method, {}), {available: true}, method)
+  }
+  assert.equal(calls.length, 5)
+  for (const method of ['space.mobile_action', 'space.mobile_result'])
+    assert.deepEqual(await handlePersonalSettings(command, method, {}), {error: 'unsupported'})
+  assert.equal(calls.length, 5)
+})
+
+
+test('private settings pass local identity to the real Host without authorizing remote Space administration', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'desktop-space-control-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'fixture', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  try {
+    await host.open({deferBackground: true})
+    const status = host.spaceHostStatus()
+    assert.deepEqual(await handlePersonalSettings(host.command.bind(host), 'space.status', {}), status)
+    for (const context of [undefined, {client_id: 'phone:fixture'}]) {
+      for (const method of ['space.status', 'space.models.status', 'space.models.configure']) {
+        const result = await host.command({type: 'personal.command', request_id: 'remote', method, params: {}}, context) as {ok: boolean; error: string}
+        assert.equal(result.ok, false)
+        assert.equal(result.error, 'local_desktop_required')
+      }
+    }
+  } finally {await host.close(); await rm(dir, {recursive: true, force: true})}
+})
+
+test('a saturated control port answers busy with the request id instead of staying silent', async () => {
+  const parentPort = new Parent(), stop = new AbortController()
+  const finishers: ((value: unknown) => void)[] = []
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined,
+    handle: () => new Promise(resolve => {finishers.push(resolve)})})
+  try {
+    for (let index = 0; index < 9; index++)
+      parentPort.emit('message', {data: {type: 'nova.control.request', id: `slow-${index}`, method: 'knowledge.reindex', params: {}}})
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(parentPort.sent, [{type: 'nova.control.reply', id: 'slow-8', error: 'busy'}])
+    for (const finish of finishers) finish({ok: true})
+  } finally {control.dispose(); stop.abort()}
+})
+
+test('a control request before the host handle exists answers not_ready, a thrown handler answers unavailable', async () => {
+  const parentPort = new Parent(), stop = new AbortController()
+  let handle: ((method: string, params: unknown) => Promise<unknown>) | undefined
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined,
+    handle: (method, params) => handle ? handle(method, params) : Promise.resolve(undefined)})
+  try {
+    parentPort.emit('message', {data: {type: 'nova.control.request', id: 'early', method: 'feishu.status', params: {}}})
+    await new Promise(resolve => setImmediate(resolve))
+    handle = () => Promise.reject(new Error('lark-cli secret detail'))
+    parentPort.emit('message', {data: {type: 'nova.control.request', id: 'thrown', method: 'feishu.status', params: {}}})
+    await new Promise(resolve => setImmediate(resolve))
+    assert.deepEqual(parentPort.sent, [
+      {type: 'nova.control.reply', id: 'early', error: 'not_ready'},
+      {type: 'nova.control.reply', id: 'thrown', error: 'unavailable'},
+    ])
+  } finally {control.dispose(); stop.abort()}
+})
+
+test('cached settings reads bypass a slow command queue on the real Host', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'desktop-read-bypass-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'fixture', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  let release: (() => void) | undefined
+  const methods: unknown[] = []
+  try {
+    await host.open({deferBackground: true})
+    host.setFeishu({snapshot: () => ({available: true, configured: true, state: 'ready'}), open: () => Promise.resolve(), close: () => Promise.resolve(),
+      command: (method, params) => {
+        methods.push([method, params])
+        if (method === 'feishu.sync') return new Promise(resolve => {release = () => resolve({available: true, configured: true, state: 'ready'})})
+        return Promise.resolve({available: true, configured: true, state: 'ready', cached: true})
+      }})
+    const slow = handleFeishuSettings(input => host.command(input), 'feishu.sync', {})
+    await new Promise(resolve => setImmediate(resolve))
+    const outcome = await Promise.race([
+      Promise.all([
+        handleFeishuSettings(input => host.command(input), 'feishu.status', {cached: true}),
+        handlePersonalSettings(host.command.bind(host), 'state', {}),
+      ]),
+      new Promise(resolve => setTimeout(() => resolve('blocked'), 1000)),
+    ])
+    assert.notEqual(outcome, 'blocked', 'cached reads must not wait for the slow feishu.sync')
+    const [feishu, state] = outcome as [Record<string, unknown>, Record<string, unknown>]
+    assert.equal(feishu.cached, true)
+    assert.ok(Array.isArray(state.sources))
+    assert.deepEqual(methods.at(-1), ['feishu.status', {cached: true}])
+    release?.()
+    assert.equal((await slow as {state: string}).state, 'ready')
+  } finally {release?.(); await host.close(); await rm(dir, {recursive: true, force: true})}
+})
+
+
+test('desktop model commands reach the shared store and durable writes notify only the active parent', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'desktop-model-control-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'fixture', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  const models = new HostModelRoutesStore(join(dir, 'space.json'), {DEEPSEEK_API_KEY: 'private-key'})
+  const parentPort = new Parent(), stop = new AbortController()
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined})
+  host.setSpaceHost({modelsStatus: () => models.view(), configureModels: (params: unknown, opId: string) => models.configure(params, opId), open: () => Promise.resolve(), close: () => Promise.resolve(), status: () => ({mode: 'host', clients: []})} as unknown as SpaceHostController)
+  try {
+    await host.open({deferBackground: true})
+    const command = host.command.bind(host)
+    assert.equal((await handlePersonalSettings(command, 'space.models.status', {}) as {version: number}).version, 0)
+    const statusRequest = {type: 'personal.command', request_id: 'desktop-model-status', method: 'space.models.status', params: {}}
+    assert.equal((await command(statusRequest, {client_id: 'desktop:local'}) as {data: {version: number}}).data.version, 0)
+    const edit = {type: 'personal.command', request_id: 'desktop-model-edit', method: 'space.models.configure', params: {expected_version: 0, routes: {support: {provider: 'deepseek', model: 'deepseek-chat'}}}}
+    const applied = await command(edit, {client_id: 'desktop:local'}) as {ok: boolean; data: unknown}
+    assert.equal(applied.ok, true)
+    assert.deepEqual(applied.data, {version: 1, applies: 'restart'})
+    assert.deepEqual(await command(edit, {client_id: 'desktop:local'}), applied)
+    assert.equal((await command(statusRequest, {client_id: 'desktop:local'}) as {data: {version: number}}).data.version, 1)
+    assert.deepEqual(parentPort.sent, [{type: 'nova.space.models.changed'}])
+    assert.deepEqual(await handlePersonalSettings(command, 'space.models.configure', {expected_version: 0, routes: {}}), {error: 'version_conflict'})
+    stop.abort()
+    await models.configure({expected_version: 1, routes: {support: null}}, 'after-dispose')
+    assert.equal(parentPort.sent.length, 1)
+  } finally {control.dispose(); stop.abort(); await host.close(); await rm(dir, {recursive: true, force: true})}
 })

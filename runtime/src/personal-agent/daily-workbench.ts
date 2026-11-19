@@ -1,5 +1,5 @@
 import {z} from 'zod'
-import {TEMPORAL_RECIPE,temporalReplySchema,resolveWorkbenchGroups} from './workbench-temporal.js'
+import {TEMPORAL_RECIPE,temporalResultSchema,resolveWorkbenchGroups} from './workbench-temporal.js'
 import {readFile} from 'node:fs/promises'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import type {TimelineInput} from './timeline-brief.js'
@@ -10,9 +10,11 @@ import {sourceTagSchema} from '../memory/provenance.js'
 import {automaticWorkbenchMatter,validWorkbenchMatter,workbenchBatches,workbenchCompositionSchema,workbenchExistingCandidates,workbenchHash,workbenchMatterSchema,workbenchRefSchema,workbenchSensitive,type WorkbenchExisting,type WorkbenchGenerator,type WorkbenchMatter} from './workbench-evidence.js'
 
 const matterSchema=workbenchMatterSchema.extend({id:z.string(),group:z.string(),observed_at:z.string().default('')})
-const cardSchema=z.object({id:z.string(),candidate_id:z.string(),tab:z.enum(['ideas','goals']),title:z.string(),body:z.string(),why:z.string().nullable(),next:z.string().nullable(),refs:z.array(workbenchRefSchema),sources:z.array(sourceTagSchema),update:z.object({id:z.string(),kind:z.literal('goal'),version:z.number(),status:z.string()}).optional()})
+const cardSchema=z.object({scope:z.string().optional(),id:z.string(),candidate_id:z.string(),tab:z.enum(['ideas','goals']),title:z.string(),body:z.string(),why:z.string().nullable(),next:z.string().nullable(),refs:z.array(workbenchRefSchema),sources:z.array(sourceTagSchema),update:z.object({id:z.string(),kind:z.literal('goal'),version:z.number(),status:z.string()}).optional()})
 const cacheSchema=z.object({key:z.string(),group:z.string(),basis:z.array(z.object({id:z.string(),version:z.string()})),matters:z.array(matterSchema)})
 const recordedSchema=z.object({matter: matterSchema.pick({id:true,kind:true,title:true,summary:true}),id:z.string(),version:z.number(),undone:z.boolean().default(false)})
+/** Every idea ever generated stays readable, even after its cited sources changed or a later run produced none. */
+const historySchema=cardSchema.pick({id:true,tab:true,title:true,body:true,why:true,next:true,refs:true,sources:true}).extend({generated_at:z.string(),imported:z.boolean().default(false),scope:z.string().optional()})
 const legacyDismissedSchema=z.object({tab:z.string(),refs:z.array(z.object({entry_id:z.string(),version:z.union([z.string(),z.number()])}))})
 /** Todo generation is gone: a cache that still holds todo matters, todo cards or recorded todos is cleared, and the day is reopened for a fresh run. */
 const dropTodoState=(raw:unknown):unknown=>{
@@ -21,11 +23,11 @@ const dropTodoState=(raw:unknown):unknown=>{
  const stale=(state.cards??[]).some(card=>card.tab==='todos'||todo(card.update))||(state.cache??[]).some(entry=>(entry.matters??[]).some(todo))||(state.recorded??[]).some(row=>todo(row.matter))
  return stale?{...state,temporal:null,compositions:[],cache:[],cards:[],key:'',updated_at:null,automatic_day:'',recorded:(state.recorded??[]).filter(row=>!todo(row.matter))}:raw
 }
-const stateSchema=z.preprocess(dropTodoState,z.object({version:z.literal(1),failure:z.string().nullable().default(null),temporal:z.object({key:z.string(),source_key:z.string().default(''),result:temporalReplySchema}).nullable().default(null),legacy_imported:z.boolean().default(false),legacy_dismissed:z.array(legacyDismissedSchema).default([]),automatic_day:z.string(),key:z.string(),updated_at:z.string().nullable(),cache:z.array(cacheSchema),compositions:z.array(z.object({key:z.string(),result:workbenchCompositionSchema})).default([]),cards:z.array(cardSchema),dismissed:z.array(z.string()),recorded:z.array(recordedSchema),
- diagnostics:z.object({inputs:z.number(),cache_hits:z.number(),extraction_calls:z.number(),composition_calls:z.number(),received:z.number(),rejected:z.number(),recorded:z.number()})}))
-type State=z.infer<typeof stateSchema>
+export const dailyWorkbenchStateSchema=z.preprocess(dropTodoState,z.object({version:z.literal(1),failure:z.string().nullable().default(null),temporal:z.object({key:z.string(),source_key:z.string().default(''),result:temporalResultSchema}).nullable().default(null),legacy_imported:z.boolean().default(false),legacy_dismissed:z.array(legacyDismissedSchema).default([]),automatic_day:z.string(),key:z.string(),updated_at:z.string().nullable(),cache:z.array(cacheSchema),compositions:z.array(z.object({key:z.string(),result:workbenchCompositionSchema})).default([]),cards:z.array(cardSchema),dismissed:z.array(z.string()),recorded:z.array(recordedSchema),
+ diagnostics:z.object({inputs:z.number(),cache_hits:z.number(),extraction_calls:z.number(),composition_calls:z.number(),received:z.number(),rejected:z.number(),recorded:z.number()}),history:z.array(historySchema).max(200).default([])}))
+type State=z.infer<typeof dailyWorkbenchStateSchema>
 const diagnostics=()=>({inputs:0,cache_hits:0,extraction_calls:0,composition_calls:0,received:0,rejected:0,recorded:0})
-const empty=():State=>({version:1,failure:null,temporal:null,legacy_imported:false,legacy_dismissed:[],automatic_day:'',key:'',updated_at:null,cache:[],compositions:[],cards:[],dismissed:[],recorded:[],diagnostics:diagnostics()})
+const empty=():State=>({version:1,failure:null,temporal:null,legacy_imported:false,legacy_dismissed:[],automatic_day:'',key:'',updated_at:null,cache:[],compositions:[],cards:[],dismissed:[],recorded:[],diagnostics:diagnostics(),history:[]})
 const RECIPE='workbench-daily-v1'
 function invalidMatches(reason:'count'|'unknown_matter'|'duplicate_matter'|'invalid_target'|'invalid_same_as'):never{
  throw Object.assign(Error('invalid_workbench_matches'),{classification:'invalid_workbench_matches_'+reason})
@@ -36,23 +38,30 @@ function unresolvedWorkbenchReference(card:{title:string;body:string;why:string|
 }
 interface DailyWorkbenchOptions {
  path:string;legacyPath?:string;generate:WorkbenchGenerator;life:()=>LifeService;changed:()=>void;
- inputs:()=>Promise<TimelineInput[]>;inputsReady?:()=>boolean;timezone:()=>string;now?:()=>Date;ready:()=>boolean;
+ inputs:()=>Promise<TimelineInput[]>;inputsReady?:()=>boolean;scope?:()=>string;timezone:()=>string;now?:()=>Date;ready:()=>boolean;
 }
 /** One daily interpretation shared by three tabs; this service never dispatches agent tasks. */
 export class DailyWorkbench {
  readonly #store:BoundedJsonStore<State>;#state:State=empty();#inputs:TimelineInput[]=[];#opened=false;#defer=true;#status='idle';#error:string|null=null
  #abort=new AbortController();#run:Promise<void>|undefined;#sync:Promise<void>|undefined;#tail:Promise<void>=Promise.resolve();#timer:ReturnType<typeof setTimeout>|undefined;#pendingValidation=false;#inputRevision=0
- constructor(readonly options:DailyWorkbenchOptions){this.#store=new BoundedJsonStore(options.path,stateSchema,16*1024*1024)}
+ constructor(readonly options:DailyWorkbenchOptions){this.#store=new BoundedJsonStore(options.path,dailyWorkbenchStateSchema,16*1024*1024)}
+ #validatedScope:string|undefined
+ #scope(){return this.options.scope?.()??'local'}
+ retainedEvidenceIds(){return [...new Set([...this.#state.cards,...this.#state.history].filter(card=>!this.#state.dismissed.includes(card.id)).flatMap(card=>card.refs.map(ref=>ref.entry_id)))]}
  #now(){return this.options.now?.()??new Date()}
  #day(){return this.#now().toLocaleDateString('en-CA',{timeZone:this.options.timezone()})}
  #key(inputs=this.#inputs){return workbenchHash([RECIPE,TEMPORAL_RECIPE,this.options.timezone(),inputs.map(({id,version})=>[id,version]),this.#state.cache.flatMap(c=>c.matters).filter(m=>m.due).map(m=>[m.id,m.due!<this.#day()])])}
  async #save(){const state=structuredClone(this.#state);const run=this.#tail.then(()=>this.#store.write(state));this.#tail=run.catch(()=>undefined);await run}
+ /** Keeps generated ideas readable after their sources move or a later run produces none. */
+ #recordHistory(cards:readonly State['cards'][number][],generatedAt=this.#now().toISOString()){const seen=new Set(this.#state.history.map(row=>row.id)),added=cards.filter(card=>card.tab==='ideas'&&!seen.has(card.id)).map(card=>({id:card.id,tab:card.tab,title:card.title,body:card.body,why:card.why,next:card.next,refs:card.refs,sources:card.sources,generated_at:generatedAt,imported:false,...(card.scope?{scope:card.scope}:{})}));if(added.length)this.#state.history=[...this.#state.history,...added].slice(-200)}
+ #publish(cards:State['cards']){this.#recordHistory(this.#state.cards,this.#state.updated_at??this.#now().toISOString());const scoped=cards.map(card=>({...card,scope:this.#scope()}));this.#recordHistory(scoped);this.#state.cards=scoped.filter((card,index)=>Boolean(card.update)||cards.slice(0,index).filter(c=>c.tab===card.tab&&!c.update).length<3)}
  async open({deferGeneration=false}:{deferGeneration?:boolean}={}){this.#error=null;try{this.#state=await this.#store.read(empty())}catch(error){if(!(error instanceof z.ZodError||error instanceof SyntaxError))throw error;this.#state=empty();this.#state.automatic_day=this.#day();this.#error='cache_invalid'}
   if(!this.#error&&!this.#state.legacy_imported){
    if(this.options.legacyPath)try{const old=z.object({cards:z.array(legacyDismissedSchema.extend({candidate_id:z.string().optional()}).passthrough()),dismissed:z.array(z.string())}).parse(JSON.parse(await readFile(this.options.legacyPath,'utf8')));this.#state.legacy_dismissed=old.cards.filter(card=>old.dismissed.includes(card.candidate_id??workbenchHash(card))).map(({tab,refs})=>({tab,refs}))}catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')this.#error='cache_invalid'}
    if(!this.#error){this.#state.legacy_imported=true;await this.#save()}
   }
-  this.#opened=true;this.#defer=deferGeneration;this.#abort=new AbortController();if(this.#error)this.#status='failed'
+  this.#recordHistory(this.#state.cards,this.#state.updated_at??this.#now().toISOString());await this.#save();
+  this.#validatedScope=undefined;this.#opened=true;this.#defer=deferGeneration;this.#abort=new AbortController();if(this.#error)this.#status='failed'
  }
  startGeneration(){this.#defer=false;void this.sync().catch(()=>undefined)}
  suspend(){this.#pendingValidation=true;this.#inputRevision++;this.options.changed()}
@@ -64,13 +73,18 @@ export class DailyWorkbench {
   if(this.#error==='cache_invalid'||this.options.inputsReady?.()===false)return Promise.resolve()
   if(this.#sync)return this.#sync
   const run=(async()=>{try{let revision:number,inputs:TimelineInput[]
+   const scope=this.#scope();
    do{revision=this.#inputRevision;inputs=await this.options.inputs()}while(revision!==this.#inputRevision&&this.#opened)
+   if(scope!==this.#scope())return
    if(!this.#opened)return
    const next=inputs.filter(input=>input.text.trim()&&!workbenchSensitive(input.text)).sort((a,b)=>a.id.localeCompare(b.id))
-   if(this.#inputs.some(old=>!next.some(input=>input.id===old.id&&input.version===old.version))||this.#run&&workbenchHash(this.#inputs.map(i=>[i.id,i.version]))!==workbenchHash(next.map(i=>[i.id,i.version]))){this.#abort.abort();this.#abort=new AbortController()}
-   this.#inputs=next;this.#pendingValidation=false;if(this.#error==='sources_unavailable')this.#error=null;
+   // Only a withdrawn source invalidates an interpretation. A version bump is a message edit,
+   // a rescan or a pause: it must not cancel a run that is already paying for model calls.
+   if(this.#inputs.some(old=>!next.some(input=>input.id===old.id))){this.#abort.abort();this.#abort=new AbortController()}
+   this.#inputs=next;this.#validatedScope=scope;this.#pendingValidation=false;if(this.#error==='sources_unavailable')this.#error=null;
    const kept=this.#state.cache.filter(c=>c.basis.every(ref=>next.some(input=>input.id===ref.id&&input.version===ref.version)))
-   if(kept.length!==this.#state.cache.length){this.#state.cache=kept;this.#state.compositions=[];this.#state.cards=this.#state.cards.filter(card=>this.#grounded(card.refs));await this.#save()}
+   if(kept.length!==this.#state.cache.length){this.#state.cache=kept;this.#state.compositions=[];this.#recordHistory(this.#state.cards,this.#state.updated_at??this.#now().toISOString());this.#state.cards=this.#state.cards.filter(card=>this.#grounded(card.refs));await this.#save()}
+   let bound=false;for(const row of this.#state.cards)if(!row.scope&&this.#grounded(row.refs)){row.scope=scope;bound=true}for(const row of this.#state.history)if(!row.scope&&row.refs.length&&row.refs.every(ref=>next.some(input=>input.id===ref.entry_id))){row.scope=scope;bound=true}if(bound)await this.#save();
    this.options.changed();this.#schedule()
   }catch{this.#inputs=[];this.#abort.abort();this.#abort=new AbortController();this.#status='failed';this.#error='sources_unavailable';this.options.changed()}})();this.#sync=run;void run.finally(()=>{if(this.#sync===run)this.#sync=undefined});return run
  }
@@ -82,34 +96,37 @@ export class DailyWorkbench {
  #temporalCurrent(){return this.#state.temporal?.source_key===workbenchHash(this.#inputs.map(i=>[i.id,i.version]))}
  snapshot(){
   const life=this.options.life().snapshot()
-  const cards=this.#state.cards.filter(card=>(card.tab==='ideas'||this.#temporalCurrent())&&(!card.update||life.goals.some(row=>row.id===card.update!.id&&row.version===card.update!.version&&row.status!==card.update!.status))&&!this.#pendingValidation&&!this.#state.dismissed.includes(card.id)&&this.#grounded(card.refs)&&!unresolvedWorkbenchReference(card)).map(card=>({...card,refs:card.refs.map(ref=>({...ref,label:ref.quote}))}))
-  const count=this.#state.cache.flatMap(c=>c.matters).filter(m=>this.#grounded(m.refs)).length
+  const cards=this.#state.cards.filter(card=>this.#validatedScope===this.#scope()&&card.scope===this.#scope()&&(card.tab==='ideas'||this.#temporalCurrent())&&(!card.update||life.goals.some(row=>row.id===card.update!.id&&row.version===card.update!.version&&row.status!==card.update!.status))&&!this.#pendingValidation&&!this.#state.dismissed.includes(card.id)&&this.#grounded(card.refs)&&!unresolvedWorkbenchReference(card)).map(card=>({...card,refs:card.refs.map(ref=>({...ref,label:ref.quote}))}))
+  const history=this.#ideaHistory(cards),count=this.#state.cache.flatMap(c=>c.matters).filter(m=>this.#grounded(m.refs)).length
   const reason=this.#error?'generation_failed':!this.#inputs.length?'no_eligible_sources':this.#state.updated_at?this.#state.diagnostics.rejected&&!count?'validation_filtered':'model_abstained':null
   return {status:this.#status,candidate_count:count,recap:{text:null,projects:[] as {name:string;line:string}[]},cards,empty_reason:cards.length?null:reason,
-   empty_reasons:Object.fromEntries(['ideas','goals'].map(tab=>[tab,cards.some(c=>c.tab===tab)?null:reason])) as Record<'ideas'|'goals',string|null>,
+   idea_history:history,empty_reasons:Object.fromEntries(['ideas','goals'].map(tab=>[tab,cards.some(c=>c.tab===tab)||tab==='ideas'&&history.length?null:reason])) as Record<'ideas'|'goals',string|null>,
    daily:true,automatic_available:this.#state.automatic_day<this.#day(),updated_at:this.#state.updated_at,error:this.#error,diagnostics:structuredClone(this.#state.diagnostics)}
  }
- async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id))throw Error('card_not_found');await this.#hide(id)}
+ /** Generated ideas that are no longer current cards stay listed, tagged when their sources moved. */
+ #ideaHistory(current:readonly {id:string;tab:string}[]){if(this.#pendingValidation||this.#validatedScope!==this.#scope()||this.options.inputsReady?.()===false)return [];const visible=new Set(current.filter(card=>card.tab==='ideas').map(card=>card.id));return this.#state.history.filter(row=>row.tab==='ideas'&&row.scope===this.#scope()&&row.refs.every(ref=>this.#inputs.some(input=>input.id===ref.entry_id))&&!visible.has(row.id)&&!this.#state.dismissed.includes(row.id)).map(row=>({...row,source_changed:!this.#grounded(row.refs),refs:row.refs.map(ref=>({...ref,label:ref.quote}))})).reverse()}
+ async dismiss(id:string){if(!this.snapshot().cards.some(card=>card.id===id)&&!this.#state.history.some(row=>row.id===id))throw Error('card_not_found');await this.#hide(id)}
  async #hide(id:string){this.#state.dismissed=[...new Set([...this.#state.dismissed,id])];await this.#save();this.options.changed()}
  #existing():WorkbenchExisting[]{const life=this.options.life().snapshot(),saved=[...life.ideas,...life.goals].map(row=>({id:row.id,kind:row.kind,title:row.title,note:row.note,status:row.status,version:row.version}));return [...saved,...this.#state.recorded.filter(r=>r.undone&&!saved.some(row=>row.id===r.id)).map(r=>({id:r.id,kind:'goal' as const,title:r.matter.title,note:r.matter.summary,status:'cancelled',version:r.version}))]}
  #matterCurrent(matter:WorkbenchMatter){return !this.#pendingValidation&&this.#grounded(matter.refs)&&validWorkbenchMatter(matter,this.#inputs)}
  #composition(value:unknown){const raw=workbenchCompositionSchema.extend({suggestions:z.array(z.unknown()).max(9)}).parse(value);return {...raw,suggestions:raw.suggestions.flatMap(item=>{const parsed=workbenchCompositionSchema.shape.suggestions.element.safeParse(item);if(parsed.success)return [parsed.data];this.#state.diagnostics.rejected++;return []})}}
- async refresh(automatic=false):Promise<void>{
+ /** `force` re-runs the shared pipeline for an explicit user retry even when today's automatic attempt is spent or the inputs are unchanged. */
+ async refresh(automatic=false,force=false):Promise<void>{
   if(this.#run)return this.#run
-  const work=this.#refresh(automatic);this.#run=work
+  const work=this.#refresh(automatic,force);this.#run=work
   try{await work}finally{this.#run=undefined;this.options.changed()}
  }
- async #refresh(automatic:boolean){
+ async #refresh(automatic:boolean,force:boolean){
   await this.sync();if(!this.#opened||this.#defer||!this.#inputs.length||!this.options.ready()||this.#error==='sources_unavailable'||this.#error==='cache_invalid')return
-  if(automatic&&this.#state.automatic_day>=this.#day())return
-  const key=this.#key();if(key===this.#state.key){this.#status='ready';return}
+  if(automatic&&!force&&this.#state.automatic_day>=this.#day())return
+  const key=this.#key();if(!force&&key===this.#state.key){this.#status='ready';return}
   clearTimeout(this.#timer);this.#status='working';this.#error=null;this.#state.failure=null
   // A full run includes bounded extraction, global review and multiple sequential composition batches.
-  const cancel=this.#abort.signal,signal=AbortSignal.any([cancel,AbortSignal.timeout(1800000)]),inputs=structuredClone(this.#inputs),day=this.#day(),timezone=this.options.timezone()
-  const guard=()=>{signal.throwIfAborted();if(!this.#opened)throw Error('workbench_closed')}
+  const cancel=this.#abort.signal,signal=AbortSignal.any([cancel,AbortSignal.timeout(1800000)]),inputs=structuredClone(this.#inputs),day=this.#day(),timezone=this.options.timezone(),scope=this.#scope(),spentDay=this.#state.automatic_day
+  const guard=()=>{signal.throwIfAborted();if(!this.#opened)throw Error('workbench_closed');if(scope!==this.#scope())throw Error('context_authorization_changed')}
   this.#state.diagnostics={...diagnostics(),inputs:inputs.length}
   try{
-   if(automatic){this.#state.automatic_day=day;await this.#save()}
+   if(automatic&&!force){this.#state.automatic_day=day;await this.#save()}
    const caches:State['cache']=[],batches=workbenchBatches(inputs),initialKeys=new Set(this.#state.cache.map(c=>c.key))
    for(const [index,batch] of batches.entries()){
     guard();const cacheKey=workbenchHash([RECIPE,timezone,batch.inputs]),cached=this.#state.cache.find(c=>c.key===cacheKey)
@@ -144,7 +161,7 @@ export class DailyWorkbench {
    let temporal=this.#state.temporal?.key===temporalKey?this.#state.temporal.result:undefined
    if(!temporal){
     this.#state.diagnostics.composition_calls++
-    temporal=temporalReplySchema.parse(await this.options.generate({phase:'reconcile',matters:extracted,inputs,date:day,timezone},signal));guard()
+    temporal=temporalResultSchema.parse(await this.options.generate({phase:'reconcile',matters:extracted,inputs,date:day,timezone},signal));guard()
    }
    const resolved=resolveWorkbenchGroups(extracted,temporal)
    this.#state.temporal={key:temporalKey,source_key:workbenchHash(inputs.map(i=>[i.id,i.version])),result:temporal};await this.#save()
@@ -230,14 +247,24 @@ export class DailyWorkbench {
      cards.push({id,candidate_id:id,tab:suggestion.tab,title:suggestion.title,body:suggestion.body,why:suggestion.why,next:suggestion.next,refs,sources:this.sourcesForRefs(refs)})
     }
     // Keep validated batches visible if a later model call fails.
-    this.#state.cards=cards.filter((card,index)=>Boolean(card.update)||cards.slice(0,index).filter(c=>c.tab===card.tab&&!c.update).length<3);await this.#save();this.options.changed()
+    this.#publish(cards);await this.#save();this.options.changed()
     }catch(error){signal.throwIfAborted();if(error instanceof Error&&error.message==='workbench_records_changed')throw error;batchFailure=error}
    }
    if(batchFailure)throw batchFailure instanceof Error?batchFailure:Error('generation_failed')
-   guard();this.#state.cards=cards.filter((card,index)=>Boolean(card.update)||cards.slice(0,index).filter(c=>c.tab===card.tab&&!c.update).length<3);this.#state.key=this.#key(inputs);this.#state.updated_at=this.#now().toISOString();await this.#save();this.#status='ready'
-  }catch(error){this.#status='failed';this.#error=cancel.aborted?'sources_changed':error instanceof Error&&['invalid_workbench_matches','workbench_records_changed'].includes(error.message)?error.message:'generation_failed';this.#state.failure=error instanceof z.ZodError?error.issues.map(issue=>issue.path.join('.')+':'+issue.code).join(',').slice(0,1000):error instanceof Error&&'classification' in error&&typeof error.classification==='string'&&/^[a-zA-Z0-9_]{1,80}$/u.test(error.classification)?error.classification:error instanceof Error&&error.name==='TimeoutError'?'generation_timeout':error instanceof Error&&'code' in error&&typeof error.code==='string'&&/^[A-Z_]+$/u.test(error.code)?error.code:error instanceof Error&&/^[a-zA-Z0-9_.:-]{1,160}$/u.test(error.message)?error.message:this.#error;await this.#save().catch(()=>undefined)}
+   guard();this.#publish(cards);this.#state.key=this.#key(inputs);this.#state.updated_at=this.#now().toISOString();await this.#save();this.#status='ready'
+  }catch(error){this.#status='failed';this.#error=cancel.aborted?'sources_changed':error instanceof Error&&['invalid_workbench_matches','workbench_records_changed'].includes(error.message)?error.message:'generation_failed';if(cancel.aborted&&automatic&&!force)this.#state.automatic_day=spentDay;
+  this.#state.failure=error instanceof z.ZodError?error.issues.map(issue=>issue.path.join('.')+':'+issue.code).join(',').slice(0,1000):error instanceof Error&&'classification' in error&&typeof error.classification==='string'&&/^[a-zA-Z0-9_]{1,80}$/u.test(error.classification)?error.classification:error instanceof Error&&error.name==='TimeoutError'?'generation_timeout':error instanceof Error&&'code' in error&&typeof error.code==='string'&&/^[A-Z_]+$/u.test(error.code)?error.code:error instanceof Error&&/^[a-zA-Z0-9_.:-]{1,160}$/u.test(error.message)?error.message:this.#error;await this.#save().catch(()=>undefined)}
  }
- async adopt(id:string){const original=this.#state.cards.find(c=>c.id===id);if(!original)throw Error('card_not_found');await this.sync();await this.options.life().refresh();const card=this.snapshot().cards.find(c=>c.id===id);if(!card)throw Error(original.update?'version_conflict':'candidate_stale_source');if(workbenchHash(card)!==workbenchHash({...original,refs:original.refs.map(ref=>({...ref,label:ref.quote}))}))throw Error('candidate_stale_source');if(!this.#grounded(card.refs)||card.tab!=='ideas'&&!this.#temporalCurrent())throw Error('candidate_stale_source')
+ async #adoptHistory(id:string){
+  await this.sync();const life=this.options.life(),requestId='history-idea:'+workbenchHash([this.#scope(),id]);await life.refresh()
+  const prior=life.receipt(requestId);if(prior){await this.#hide(id);return prior}
+  const row=this.snapshot().idea_history.find(row=>row.id===id);if(!row)throw Error('card_not_found')
+  // Explicitly keeping an older interpretation creates a personal note, not a claim that
+  // its superseded evidence is still current. Its original citations stay in history.
+  const result=await life.mutate({op:'create',kind:'idea',title:row.title.slice(0,200),note:[row.body,row.next].filter(Boolean).join('\n').slice(0,4000)},requestId,()=>{if(!this.snapshot().idea_history.some(row=>row.id===id))throw Error('candidate_stale_source')})
+  await this.#hide(id);return result
+ }
+ async adopt(id:string){if(this.#state.history.some(row=>row.id===id)&&!this.snapshot().cards.some(card=>card.id===id))return this.#adoptHistory(id);const original=this.#state.cards.find(c=>c.id===id);if(!original)throw Error('card_not_found');await this.sync();await this.options.life().refresh();const card=this.snapshot().cards.find(c=>c.id===id);if(!card)throw Error(original.update?'version_conflict':'candidate_stale_source');if(workbenchHash(card)!==workbenchHash({...original,refs:original.refs.map(ref=>({...ref,label:ref.quote}))}))throw Error('candidate_stale_source');if(!this.#grounded(card.refs)||card.tab!=='ideas'&&!this.#temporalCurrent())throw Error('candidate_stale_source')
   if(card.update){
    const update=card.update,life=this.options.life();await life.refresh()
    const result=await life.mutate({op:'update',kind:update.kind,id:update.id,expected_version:update.version,status:update.status},'workbench-update:'+card.id,()=>{if(!this.#grounded(card.refs)||card.tab!=='ideas'&&!this.#temporalCurrent())throw Error('candidate_stale_source')})

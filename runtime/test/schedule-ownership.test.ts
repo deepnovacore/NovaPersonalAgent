@@ -1,22 +1,23 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {HubStore} from '../src/hub/store.js'
-test('shared slots have one fixed owner; an unknown effect blocks transfer and an epoch change cannot replay a slot',()=>{
- const hub=new HubStore(':memory:');try{
-  const pc=hub.enroll('s','pc','desktop'),other=hub.enroll('s','other','desktop'),phone=hub.enroll('s','phone','mobile');hub.authority.initialize(pc.token)
-  const definition={title:'Fixture',goal:'Read fixture',acceptance:['Return result'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context:{todos:false,goals:false,tasks:false,memory:false,knowledge:false,search:false}}
-  hub.scheduleOwnership.register(pc.token,{id:'rule',authority_epoch:1,definition,frontier:'2026-10-16T00:00:00.000Z'})
-  const claim={id:'rule',owner_revision:1,run_id:'stable',slot_key:'2026-10-17',scheduled_at:'2026-10-17T09:00:00.000Z'}
-  assert.throws(()=>hub.scheduleOwnership.claim(phone.token,claim),/schedule_owner_required/)
-  assert.deepEqual(hub.scheduleOwnership.claim(pc.token,claim),hub.scheduleOwnership.claim(pc.token,claim))
-  const transfer={id:'rule',owner_revision:1,transition_id:'transfer',target:other.device_id}
-  assert.throws(()=>hub.scheduleOwnership.handoff(pc.token,{...transfer,action:'prepare'}),/schedule_unresolved/)
-  hub.scheduleOwnership.checkpoint(pc.token,{id:'rule',owner_revision:1,run_id:'stable',task_id:'task',terminal:false})
-  assert.throws(()=>hub.scheduleOwnership.handoff(pc.token,{...transfer,action:'prepare'}),/schedule_unresolved/)
-  hub.scheduleOwnership.checkpoint(pc.token,{id:'rule',owner_revision:1,run_id:'stable',task_id:'task',terminal:true})
-  hub.scheduleOwnership.handoff(pc.token,{...transfer,action:'prepare'});hub.scheduleOwnership.handoff(other.token,{...transfer,action:'ack'});hub.scheduleOwnership.handoff(pc.token,{...transfer,action:'commit'})
-  assert.throws(()=>hub.scheduleOwnership.claim(pc.token,claim),/schedule_owner_required/)
-  assert.equal(hub.scheduleOwnership.claim(other.token,{...claim,owner_revision:2}).status,'terminal')
-  assert.throws(()=>hub.scheduleOwnership.claim(other.token,{...claim,owner_revision:2,run_id:'epoch-replay'}),/occurrence_conflict/)
- }finally{hub.close()}
+import {DatabaseSync} from 'node:sqlite'
+import {ScheduleOwnership} from '../src/device/schedule-ownership.js'
+const definition={title:'Fixture',goal:'Read fixture',acceptance:['Return result'],rule:{kind:'daily' as const,timezone:'UTC',time:'09:00'},context:{todos:false,goals:false,tasks:false,memory:false,knowledge:false,search:false}}
+test('fixed Host reserves and checkpoints slots without a transferable owner revision',()=>{
+ const db=new DatabaseSync(':memory:');const revoked=new Set<string>();
+ const host={token:'host',device_id:'host'},other={token:'other',device_id:'other'},phone={token:'phone',device_id:'phone'};
+ const ownership=new ScheduleOwnership(db,token=>{if(revoked.has(token))throw Error('unauthorized');return {account_id:'s',device_id:token}},token=>{if(token!=='host'||revoked.has(token))throw Error('host_required')});try{
+  const item=ownership.register(host.token,{id:'rule',definition,frontier:'2026-10-16T00:00:00.000Z'})
+  assert.equal('revision' in item,false);assert.equal('pending' in item,false)
+  const claim={id:'rule',run_id:'stable',slot_key:'2026-10-17',scheduled_at:'2026-10-17T09:00:00.000Z'}
+  for(const client of [phone,other])assert.throws(()=>ownership.claim(client.token,claim),/host_required/)
+  assert.deepEqual(ownership.claim(host.token,claim),ownership.claim(host.token,claim))
+  ownership.checkpoint(host.token,{id:'rule',run_id:'stable',task_id:'task',terminal:false})
+  assert.throws(()=>ownership.claim(host.token,{...claim,run_id:'next',slot_key:'next',scheduled_at:'2026-10-18T09:00:00.000Z'}),/schedule_unresolved/)
+  ownership.checkpoint(host.token,{id:'rule',run_id:'stable',task_id:'task',terminal:true})
+  assert.equal(ownership.claim(host.token,claim).status,'terminal')
+  assert.throws(()=>ownership.claim(host.token,{...claim,run_id:'replay'}),/occurrence_conflict/)
+  revoked.add(host.token)
+  assert.throws(()=>ownership.register(other.token,{id:'another',definition,frontier:'2026-10-16T00:00:00.000Z'}),/host_required/)
+ }finally{db.close()}
 })

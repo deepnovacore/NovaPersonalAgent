@@ -1,3 +1,4 @@
+import '../space/space_storage.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -29,6 +30,7 @@ class ChatGptAccounts {
   final FlutterSecureStorage storage;
   final ChatGptRequest request;
   final Future<bool> Function(Uri) openBrowser;
+  final String _scopedKey = SpaceStorage.secureKey(storageKey);
   static const storageKey = 'nova.chatgpt.accounts.v1';
   static const _iosStorage = IOSOptions(
     accessibility: KeychainAccessibility.unlocked_this_device,
@@ -61,14 +63,14 @@ class ChatGptAccounts {
   }
 
   Future<Map<String, dynamic>> read() async {
-    final raw = await storage.read(key: storageKey, iOptions: _iosStorage);
+    final raw = await storage.read(key: _scopedKey, iOptions: _iosStorage);
     return raw == null
         ? {'accounts': <dynamic>[]}
         : Map<String, dynamic>.from(jsonDecode(raw) as Map);
   }
 
   Future<void> _save(Map<String, dynamic> data) => storage.write(
-    key: storageKey,
+    key: _scopedKey,
     value: jsonEncode(data),
     iOptions: _iosStorage,
   );

@@ -10,7 +10,7 @@ export async function launchScheduledDesktop(directory){
  await mkdir(profile,{recursive:true,mode:0o700})
  const capabilities=join(output,'capabilities.json')
  await writeFile(capabilities,JSON.stringify({version:1,modules:{search:{enabled:false},coding:{enabled:false},camera:{enabled:false},knowledge:{enabled:false}}}))
- await writeFile(join(profile,'ambient-orb-settings.json'),JSON.stringify({...DEFAULT_SETTINGS,capabilitiesConfigPath:capabilities,startupView:'workbench',lastPresentation:'workbench',language:'zh-CN',cascadedLlmProvider:'deepseek',modelBaseUrl:'https://dashscope.aliyuncs.com/compatible-mode/v1',startListeningOnLaunch:false,phoneConnectionEnabled:false}),{mode:0o600})
+ await writeFile(join(profile,'ambient-orb-settings.json'),JSON.stringify({...DEFAULT_SETTINGS,capabilitiesConfigPath:capabilities,startupView:'workbench',lastPresentation:'workbench',language:'zh-CN',cascadedLlmProvider:'deepseek',startListeningOnLaunch:false,phoneConnectionEnabled:false}),{mode:0o600})
  const require=createRequire(join(root,'clients/desktop/package.json')),electron=require('electron'),environment={...process.env,BLACKBOARD_PATH:join(output,'blackboard.sqlite'),MEMORY_CONNECTION:'disabled',CAPABILITIES_CONFIG:capabilities,DEV_START_MUTED:'1',REALTIME_TELEMETRY:'',COMPOSIO_API_KEY:'',CODEX_MANAGED_ROOT:join(output,'workspaces'),CODEX_PROJECT_STATE_ROOT:join(output,'projects')}
  delete environment.ELECTRON_RUN_AS_NODE
  const log=await open(join(output,'native.log'),'w',0o600)

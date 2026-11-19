@@ -40,8 +40,11 @@ object NovaScheduleBridge {
     private var context: Context? = null
     private var wakeGeneration = 0L
 
-    fun install(app: Context, engine: FlutterEngine) {
+    fun install(host: Context, engine: FlutterEngine) {
+        val app = host.applicationContext
+        val activity = java.lang.ref.WeakReference(host as? Activity)
         context = app.applicationContext
+        NovaSpaceScope.install(engine.dartExecutor.binaryMessenger)
         val candidate = MethodChannel(engine.dartExecutor.binaryMessenger, "nova/schedule/v1")
         candidate.setMethodCallHandler { call, result ->
             try {
@@ -64,7 +67,9 @@ object NovaScheduleBridge {
                     }
                     "release" -> { if (owner === engine) release(); result.success(null) }
                     "requestNotifications" -> {
-                        if (Build.VERSION.SDK_INT >= 33 && app is Activity && app.checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) app.requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 48271)
+                        activity.get()?.let { current ->
+                            if (Build.VERSION.SDK_INT >= 33 && current.checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) current.requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 48271)
+                        }
                         result.success(null)
                     }
                     "notifyWaiting" -> { notifyWaiting(app); result.success(null) }

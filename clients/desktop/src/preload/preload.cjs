@@ -23,17 +23,26 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     permission:kind=>ipcRenderer.invoke('nova:welcome:permission',kind),
     onChanged:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('nova:welcome:changed',listener);return()=>ipcRenderer.removeListener('nova:welcome:changed',listener)},
   }),
+  experience: Object.freeze({
+    list:()=>ipcRenderer.invoke('nova:experience:list'),
+    select:id=>ipcRenderer.invoke('nova:experience:select',id),
+    redeem:code=>ipcRenderer.invoke('nova:experience:redeem',code),
+    send:request=>ipcRenderer.invoke('nova:experience:send',request),
+    onChanged:callback=>{const listener=(_event,value)=>callback(value);ipcRenderer.on('nova:experience:changed',listener);return()=>ipcRenderer.removeListener('nova:experience:changed',listener)},
+  }),
   personal: Object.freeze({
+    sharedIdeas:language=>ipcRenderer.invoke('nova:personal:shared-ideas',language),
     openArticle: url => ipcRenderer.invoke('nova:personal:article', url),
     chooseBuildDirectory: () => ipcRenderer.invoke('nova:personal:build-directory'),
     defaultWorkspace: () => ipcRenderer.invoke('nova:personal:default-workspace'),
     setUnread: value => ipcRenderer.invoke('nova:personal:unread', value),
+    notify: payload => ipcRenderer.invoke('nova:personal:notify', payload),
     wake: () => ipcRenderer.invoke('nova:personal:wake'),
     localToolApproval: mode => ipcRenderer.invoke('nova:personal:local-tool-approval', mode),
     showPresentationError: message => ipcRenderer.invoke('nova:personal:presentation-error', message),
     setPresentation: (mode,activate=true) => ipcRenderer.invoke('nova:personal:presentation', mode,activate),
     onPresentationRequest: callback => {
-      const listener = (_event, mode, attention) => { if (['background','workbench','orb'].includes(mode)) callback(mode, {attention: attention === true}) }
+      const listener = (_event, mode, attention, conversationId) => { if (['background','workbench','orb'].includes(mode)) callback(mode, {attention: attention === true,...(conversationId==='chat:main'?{conversationId}:{})}) }
       ipcRenderer.on('nova:personal:presentation-request', listener)
       return () => ipcRenderer.removeListener('nova:personal:presentation-request', listener)
     },
@@ -232,11 +241,12 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     },
   }),
   settings: Object.freeze({
+    systemNotifications: () => ipcRenderer.invoke('nova:personal:notifications-status'),
+    setSystemNotifications: value => ipcRenderer.invoke('nova:personal:notifications-enabled', value),
+    openNotificationSettings: () => ipcRenderer.invoke('nova:personal:notifications-settings'),
     voicePreset: (action, settings) => ipcRenderer.invoke('nova:settings:voice-preset', action, settings),
     nativeVoiceCapabilities: provider => ipcRenderer.invoke('nova:settings:native-voice', provider),
     voiceprint: input => ipcRenderer.invoke('nova:settings:voiceprint', input),
-    hubAction: (action, deviceId) => ipcRenderer.invoke('nova:hub:action', action, deviceId),
-    phoneAction: (action, deviceId) => ipcRenderer.invoke('nova:phone:action', action, deviceId),
     get: () => ipcRenderer.invoke('nova:settings:get'),
     rescanCodex: () => ipcRenderer.invoke('nova:codex:rescan'),
     retryBackend: () => ipcRenderer.invoke('nova:backend:retry'),
@@ -247,6 +257,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     clearAllManagedWorkspaces: () => ipcRenderer.invoke('nova:workspaces:clear-all'),
     // The payload may carry plaintext key values on their way *into* main; the
     // reply never carries any back out.
+    testKey: (key, value) => ipcRenderer.invoke('nova:settings:test-key', key, value),
     set: commit => ipcRenderer.invoke('nova:settings:set', commit),
     restart: () => ipcRenderer.invoke('nova:settings:set', {settingsPatch: {}}, true),
     probeCapabilities: payload => ipcRenderer.invoke('nova:capabilities:probe', payload),
@@ -256,6 +267,7 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
     chooseDirectory: () => ipcRenderer.invoke('nova:personal:directory'),
     openFeishuVerification: url => ipcRenderer.invoke('nova:personal:feishu-verification', url),
     knowledgeAction: payload => ipcRenderer.invoke('nova:knowledge:action', payload),
+    spaceCreate: request => ipcRenderer.invoke('nova:space:create', request),
     onChanged: callback => {
       if (typeof callback !== 'function') return () => {}
       const listener = (_event, value) => callback(value)

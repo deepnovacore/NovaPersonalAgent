@@ -21,7 +21,7 @@ class VoiceCallOverlayTest {
         val instrumentation = InstrumentationRegistry.getInstrumentation()
         instrumentation.runOnMainSync {
             val context = instrumentation.targetContext
-            val overlay = VoiceCallOverlay(context, {}, {})
+            val overlay = VoiceCallOverlay(context, {}, {}, {}, {})
             val avatar = VoiceCallOverlay::class.java.getDeclaredMethod("avatarView").apply { isAccessible = true }.invoke(overlay) as ImageView
             val expected = BitmapFactory.decodeResource(context.resources, R.drawable.nova_orb_avatar)
             assertTrue((avatar.drawable as BitmapDrawable).bitmap.sameAs(expected))
@@ -36,7 +36,7 @@ class VoiceCallOverlayTest {
             val context = instrumentation.targetContext
             val actions = mutableListOf<String>()
             var opened = false
-            val overlay = VoiceCallOverlay(context, { actions.add(it) }, { opened = true })
+            val overlay = VoiceCallOverlay(context, { actions.add(it) }, { opened = true }, {}, {})
             val box = LinearLayout(context).apply {
                 orientation = LinearLayout.VERTICAL
                 addView(FrameLayout(context))

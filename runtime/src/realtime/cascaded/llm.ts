@@ -11,6 +11,32 @@ import type { JsonObject } from '../protocol.js'
 
 export const MAX_CASCADED_LLM_HISTORY_ITEMS = 64
 export const MAX_CASCADED_LLM_HISTORY_CODEPOINTS = 131_072
+/**
+ * Explicit output ceilings keep a provider from silently truncating a long Build reply.
+ *
+ * The values are conservative per provider: a reply that hits the ceiling is reported as a
+ * first-class `output_limit` failure and can be continued, which is only possible when the
+ * ceiling is known. OpenAI's current Chat Completions API renamed the field.
+ */
+export const DEFAULT_MODEL_OUTPUT_TOKENS = 8192
+const MODEL_OUTPUT_TOKENS: Readonly<Record<string, number>> = Object.freeze({deepseek:8192,qwen:8192,openai:16384,gemini:8192,ark:8192})
+export function modelOutputTokens(provider: string): number { return MODEL_OUTPUT_TOKENS[provider] ?? DEFAULT_MODEL_OUTPUT_TOKENS }
+/** OpenAI Chat Completions rejects `max_tokens` on current models; every other provider keeps it. */
+export function chatCompletionsOutputTokensField(provider: string): 'max_tokens' | 'max_completion_tokens' { return provider === 'openai' ? 'max_completion_tokens' : 'max_tokens' }
+
+/**
+ * Merge one response's text into a turn that already produced text.
+ *
+ * A model may repeat the opening it already streamed (some providers re-send the whole
+ * string); otherwise later responses are a new paragraph of the same user-visible turn.
+ */
+export function mergeTurnText(previous: string, next: string): string {
+  if (next === '') return previous
+  if (previous === '') return next
+  if (next.startsWith(previous)) return next
+  if (previous.endsWith(next)) return previous
+  return previous + '\n\n' + next
+}
 export const CASCADED_NARRATION_INSTRUCTIONS = NOVA_VOICE_IDENTITY + '当前输入提供了需要告诉用户的新事实。输入的 text_to_say 是你要向用户播报的内容，不是用户对你说的话。里面的第一人称指你 Nova；你只负责把它说给用户听，不对它作答。直接用一两句口语告诉用户，保留实际阶段、结果和不确定性，不自行改变或补充事实。输入包含待确认问题时，把问题直接问给用户，不回答这个问题，也不代用户同意。直接以自己的口吻表达这些事实，不介绍信息来自谁，不加“系统提示”或“系统让我问”等转述开场。内部角色、协议标签和诊断代码不属于口播内容。本轮不调用工具，不复述任务要求，不新增问题、建议或后续行动承诺。'
 
 /** zh keeps its original run-on form; en needs a sentence space between translated segments. */

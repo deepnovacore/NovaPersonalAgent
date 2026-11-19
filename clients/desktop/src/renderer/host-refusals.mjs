@@ -28,12 +28,24 @@ export const HOST_REFUSALS=Object.freeze({
  invalid_params:'提交的内容不符合要求，请检查后重试。',
  build_finished:'这个 Build 已经结束，不能再发送消息。',
  voice_active:'另一段对话正在使用语音，请先结束语音。',
- conversation_mode_transition:'这段对话正在切换模式，请稍后再试。',
  source_todo_conflict:'关联的待办已经变化，请重新选择后再发送。',
  stale_reference:'引用事项已变化或不可用，请移除引用后重新选择。',
  reference_not_authorized:'引用来源当前不允许用于对话，请核对来源权限。',
  outcome_unknown:'主机已重启，上一条消息是否执行无法确认。草稿已保留，请先检查对话与任务再决定是否重发。',
  version_conflict:'内容已在其他操作中更新，请核对最新状态后重试。',
+ brief_in_quiet_hours:'简报时间在免打扰时段内，不会发送。请调整简报时间或免打扰时段。',
+ // Realtime voice connect failures (runtime RealtimeConnectError); the host never forwards provider text.
+ realtime_auth_rejected:'实时语音服务拒绝了这个密钥（401）：密钥无效、已停用，或不属于当前语音服务地址所在的地域（默认是 DashScope 北京站，新加坡站的密钥不能混用）。请在设置里重新保存密钥并点“测试”。',
+ realtime_forbidden:'这个账号暂无权使用所选的实时语音模型（403）：请确认已开通该模型、额度充足，且密钥属于当前地域。',
+ realtime_endpoint_not_found:'找不到实时语音服务地址或模型，请检查语音服务的地域、地址与模型名称。',
+ realtime_rate_limited:'实时语音服务请求过于频繁或额度不足，请稍后重试或检查账户额度。',
+ realtime_handshake_rejected:'实时语音服务拒绝了连接，请稍后重试；若持续失败，请检查语音服务设置。',
+ realtime_unreachable:'无法连接实时语音服务，请检查网络或代理后重试。',
+ realtime_timeout:'连接实时语音服务超时，请检查网络后重试。',
+ realtime_tls_failed:'与实时语音服务的加密连接失败，请检查系统时间、代理或网络证书设置后重试。',
+ realtime_session_rejected:'实时语音服务拒绝了会话，可能是模型权限或账户余额问题，请检查语音服务的模型与账户状态。',
+ realtime_connect_failed:'实时语音连接失败，请稍后重试；若持续失败，请检查语音服务设置。',
+ realtime_protocol_error:'实时语音服务的响应不符合预期，请确认所选模型支持实时语音后重试。',
 })
 
 const GENERIC_REFUSAL='操作没有完成，请检查当前状态后再试。'

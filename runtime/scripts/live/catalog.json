@@ -15,8 +15,7 @@
       "entry": "dist/test/coding-coordinator-eval.test.js",
       "requires": [
         [
-          "DASHSCOPE_API_KEY",
-          "MODEL_API_KEY"
+          "DASHSCOPE_API_KEY"
         ]
       ],
       "timeoutMs": 240000,
@@ -59,8 +58,7 @@
       "entry": "scripts/live/qwen.mjs",
       "requires": [
         [
-          "DASHSCOPE_API_KEY",
-          "MODEL_API_KEY"
+          "DASHSCOPE_API_KEY"
         ]
       ],
       "timeoutMs": 120000,
@@ -84,8 +82,7 @@
       "entry": "scripts/live/qwen-surrogate.mjs",
       "requires": [
         [
-          "DASHSCOPE_API_KEY",
-          "MODEL_API_KEY"
+          "DASHSCOPE_API_KEY"
         ]
       ],
       "timeoutMs": 180000,

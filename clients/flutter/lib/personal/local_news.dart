@@ -7,30 +7,13 @@ import 'package:xml/xml.dart';
 import 'package:xml/xml_events.dart';
 import 'local_life.dart';
 
+part 'local_news_sources.g.dart';
+
 class NewsSource {
   const NewsSource(this.id, this.name, this.url, this.language);
   final String id, name, url, language;
 }
 
-/// Same public sources as the desktop NewsService. No account or model needed.
-const publicNewsSources = [
-  NewsSource('bbc', 'BBC News', 'https://feeds.bbci.co.uk/news/rss.xml', 'en'),
-  NewsSource(
-    'guardian',
-    'The Guardian · Technology',
-    'https://www.theguardian.com/uk/technology/rss',
-    'en',
-  ),
-  NewsSource('ithome', 'IT之家', 'https://www.ithome.com/rss/', 'zh-CN'),
-  NewsSource('sspai', '少数派', 'https://sspai.com/feed', 'zh-CN'),
-  NewsSource(
-    'solidot',
-    'Solidot',
-    'https://www.solidot.org/index.rss',
-    'zh-CN',
-  ),
-  NewsSource('36kr', '36氪', 'https://www.36kr.com/feed', 'zh-CN'),
-];
 String _language(String value) =>
     value.toLowerCase().startsWith('zh') ? 'zh-CN' : 'en';
 String _digest(String value) => sha256.convert(utf8.encode(value)).toString();
@@ -160,7 +143,9 @@ List<Map<String, dynamic>> parseNewsFeed(
     var depth = 0;
     for (final event in parseEvents(xml)) {
       if (event is XmlDoctypeEvent) throw const FormatException('feed_doctype');
-      if (event is XmlStartElementEvent && !event.isSelfClosing && ++depth > 32) {
+      if (event is XmlStartElementEvent &&
+          !event.isSelfClosing &&
+          ++depth > 32) {
         throw const FormatException('feed_depth');
       }
       if (event is XmlEndElementEvent) depth--;
@@ -252,6 +237,10 @@ class LocalNews extends ChangeNotifier {
     'version': 1,
     'items': <dynamic>[],
     'sources': <String, dynamic>{},
+    'enabled': true,
+    'explore': true,
+    'interests': <dynamic>[],
+    'profile_version': 0,
   };
   Future<void>? _run;
   Future<void> _tail = Future.value();
@@ -297,7 +286,30 @@ class LocalNews extends ChangeNotifier {
             throw const FormatException('invalid_cache');
           }
         }
-        _state = Map<String, dynamic>.from(parsed);
+        final interests = parsed['interests'];
+        if (parsed.containsKey('interests') &&
+            (interests is! List ||
+                interests.length > 8 ||
+                interests.any(
+                  (i) =>
+                      i is! Map ||
+                      i['text'] is! String ||
+                      (i['text'] as String).trim().isEmpty ||
+                      (i['text'] as String).length > 100 ||
+                      i['weight'] is! num ||
+                      i['weight'] < 0 ||
+                      i['weight'] > 2,
+                ))) {
+          throw const FormatException('invalid_cache');
+        }
+        if ((parsed.containsKey('enabled') && parsed['enabled'] is! bool) ||
+            (parsed.containsKey('explore') && parsed['explore'] is! bool) ||
+            (parsed.containsKey('profile_version') &&
+                (parsed['profile_version'] is! int ||
+                    parsed['profile_version'] < 0))) {
+          throw const FormatException('invalid_cache');
+        }
+        _state = {..._state, ...Map<String, dynamic>.from(parsed)};
       }
     } catch (_) {
       error = 'cache_unavailable';
@@ -399,7 +411,9 @@ class LocalNews extends ChangeNotifier {
   }
 
   Future<void> refresh() {
-    if (_disposed || !ready) return Future.value();
+    if (_disposed || !ready || _state['enabled'] == false) {
+      return Future.value();
+    }
     return _run ??= _refresh().whenComplete(() {
       _run = null;
       _notify();
@@ -478,6 +492,45 @@ class LocalNews extends ChangeNotifier {
     return order != 0 ? order : '${a['id']}'.compareTo('${b['id']}');
   }
 
+  Future<void> configure(Map<String, dynamic> params) async {
+    final raw = params['interests'];
+    if (params['enabled'] is! bool ||
+        params['explore'] is! bool ||
+        raw is! List ||
+        raw.length > 8 ||
+        raw.any(
+          (i) => i is! String || i.trim().isEmpty || i.trim().length > 100,
+        )) {
+      throw const FormatException('invalid_news_preferences');
+    }
+    await _change((state) {
+      if (params['expected_version'] != null &&
+          params['expected_version'] != state['profile_version']) {
+        throw StateError('version_conflict');
+      }
+      final previous = (state['interests'] as List).cast<Map>();
+      state['interests'] = raw
+          .cast<String>()
+          .map((i) => i.trim())
+          .toSet()
+          .map(
+            (text) => {
+              'id': _digest(text).substring(0, 16),
+              'text': text,
+              'weight':
+                  previous
+                      .where((i) => i['text'] == text)
+                      .firstOrNull?['weight'] ??
+                  1,
+            },
+          )
+          .toList();
+      state['enabled'] = params['enabled'];
+      state['explore'] = params['explore'];
+      state['profile_version'] = (state['profile_version'] as int) + 1;
+    });
+  }
+
   Future<void> action(Map<String, dynamic> params) async {
     if (!['read', 'save'].contains(params['action']) ||
         params['id'] is! String ||
@@ -510,15 +563,118 @@ class LocalNews extends ChangeNotifier {
             .where((a) => allowed.contains(a['source_id']))
             .toList()
           ..sort(_compare);
+    final interests = (_state['interests'] as List).cast<Map>();
+    double weight(Map item) {
+      final text = '${item['title']} ${item['summary']}'.toLowerCase();
+      var best = 0.0;
+      for (final interest in interests) {
+        final phrase = '${interest['text']}'.toLowerCase();
+        final words = phrase
+            .split(RegExp(r'[^a-z0-9\u3400-\u9fff]+'))
+            .where((w) => w.isNotEmpty)
+            .toList();
+        final overlap = words.isEmpty
+            ? 0.0
+            : words.where(text.contains).length / words.length;
+        final score =
+            (text.contains(phrase) ? 1.0 : overlap) *
+            (interest['weight'] as num).toDouble();
+        if (score > best) best = score;
+      }
+      return best;
+    }
+
+    final fresh = items
+        .where(
+          (a) =>
+              _now()
+                  .difference(
+                    DateTime.tryParse(
+                          '${a['published_at'] ?? a['first_seen']}',
+                        ) ??
+                        _now(),
+                  )
+                  .inDays <
+              7,
+        )
+        .toList();
+    final ranked = fresh.where((a) => weight(a) > 0).toList()
+      ..sort((a, b) {
+        double score(Map item) =>
+            weight(item) /
+            (1 +
+                _now()
+                        .difference(
+                          DateTime.tryParse(
+                                '${item['published_at'] ?? item['first_seen']}',
+                              ) ??
+                              _now(),
+                        )
+                        .inHours
+                        .clamp(0, 168) /
+                    24);
+        final order = score(b).compareTo(score(a));
+        return order != 0 ? order : _compare(a, b);
+      });
+    final selected = <Map>[],
+        counts = <String, int>{},
+        exploration = <String>{};
+    final sourceCount = fresh.map((a) => a['source_id']).toSet().length;
+    final cap = (12 / (sourceCount == 0 ? 1 : sourceCount)).ceil().clamp(2, 5);
+    bool add(Map item) {
+      final source = '${item['source_id']}';
+      if (selected.contains(item) || (counts[source] ?? 0) >= cap) return false;
+      selected.add(item);
+      counts[source] = (counts[source] ?? 0) + 1;
+      return true;
+    }
+
+    final slots = _state['explore'] == true && interests.isNotEmpty ? 2 : 0;
+    for (final item in ranked) {
+      if (selected.length >= 12 - slots) break;
+      add(item);
+    }
+    final queues =
+        _sources
+            .map(
+              (s) =>
+                  fresh
+                      .where((a) => a['source_id'] == s.id && weight(a) == 0)
+                      .toList()
+                    ..sort(_compare),
+            )
+            .where((q) => q.isNotEmpty)
+            .toList()
+          ..sort((a, b) => _compare(a.first, b.first));
+    while (selected.length < 12 && queues.any((q) => q.isNotEmpty)) {
+      for (final queue in queues) {
+        if (queue.isEmpty || selected.length >= 12) continue;
+        final item = queue.removeAt(0);
+        if (add(item) && exploration.length < slots) {
+          exploration.add('${item['id']}');
+        }
+      }
+    }
+    for (final item in ranked) {
+      if (selected.length >= 12) break;
+      add(item);
+    }
     final statuses = _state['sources'] as Map;
     return jsonDecode(
           jsonEncode({
-            'enabled': true,
-            'mode': 'timeline',
+            'enabled': _state['enabled'],
+            'explore': _state['explore'],
+            'interests': interests,
+            'profile_version': _state['profile_version'],
+            'mode': interests.isEmpty ? 'timeline' : 'personalized',
             'refreshing': _run != null,
             'error': error,
             'total': items.length,
-            'items': items.take(50).toList(),
+            'items': selected
+                .map(
+                  (a) => {...a, 'exploration': exploration.contains(a['id'])},
+                )
+                .toList(),
             'saved':
                 (_state['items'] as List)
                     .where((a) => a['saved'] == true)

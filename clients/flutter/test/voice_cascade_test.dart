@@ -438,7 +438,7 @@ void main() {
     },
   );
   test(
-    'self-hosted HTTP multipart PCM assembles samples across odd chunks',
+    'self-hosted HTTP sends UTF-8 multipart and assembles odd PCM chunks',
     () async {
       final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
       addTearDown(() => server.close(force: true));
@@ -455,11 +455,11 @@ void main() {
       });
       final result = await SelfHostedPcmTts(
         endpoint: 'http://127.0.0.1:${server.port}/tts',
-        instruction: 'neutral',
-      ).synthesize('Hello', CascadeCancellation()).toList();
+        instruction: '自然一些',
+      ).synthesize('你好，语音测试完成。', CascadeCancellation()).toList();
       expect(result.expand((a) => a.pcm), [1, 0, 2, 0]);
-      expect(body, contains('name="text"\r\n\r\nHello'));
-      expect(body, contains('name="instruction"\r\n\r\nneutral'));
+      expect(body, contains('name="text"\r\n\r\n你好，语音测试完成。'));
+      expect(body, contains('name="instruction"\r\n\r\n自然一些'));
     },
   );
   test('Gemini cancel closes pending HTTP request', () async {

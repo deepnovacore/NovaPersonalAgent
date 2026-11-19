@@ -362,6 +362,25 @@ test('all bubble mode shows streaming and finalized assistant replies, preservin
   await controller.clear()
 })
 
+test('a caption bubble uses the head-preserving full text and one bubble per turn', async () => {
+  const full = '开头不能消失：' + '正文'.repeat(100)
+  const frame = {type: 'caption', role: 'assistant', final: false, turn_id: 'turn-1',
+    message_id: 'assistant:1:reply-1', sequence: 1, text: full.slice(-160), full_text: full}
+  const reply = parseConversationBubble(frame, 'all')
+  assert.equal(reply.summary, full, 'the 160-character tail must not replace the whole reply')
+  assert.equal(reply.delegateId, 'reply-turn-1')
+  // A later segment of the same turn (a new response id) still updates the same bubble.
+  const segment = parseConversationBubble({...frame, message_id: 'assistant:1:reply-2', sequence: 9, text: full.slice(-8)}, 'all')
+  assert.equal(segment.delegateId, reply.delegateId)
+  const bubbles = createProgressBubbleController({reserveBubbleArea: async () => ({}), render() {}, schedule: () => 1, cancel() {}})
+  await bubbles.push(reply)
+  const key = bubbles.items[0].key
+  await bubbles.push({...segment, summary: full + '续'})
+  assert.equal(bubbles.items.length, 1)
+  assert.equal(bubbles.items[0].key, key)
+  await bubbles.clear()
+})
+
 test('a new conversation replaces the old reply and each work retains only its latest progress', async () => {
   const bubbles = createProgressBubbleController({reserveBubbleArea: async () => ({}), render: () => {}, schedule: () => 0, cancel: () => {}})
   await bubbles.push({kind: 'conversation', delegateId: 'reply-1', summary: '正在启动', level: 'milestone'})

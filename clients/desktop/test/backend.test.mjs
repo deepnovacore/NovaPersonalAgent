@@ -54,6 +54,16 @@ function nodeLaunchSpec(options) {
   })
 }
 
+test('Space routes come from the Host store while operator routes retain precedence', () => {
+  const modelRoutes = {conversationText: {provider: 'qwen', model: 'desktop-saved'}}
+  const launch = parentEnv => nodeLaunchSpec({workspace: '/workspace', token: TOKEN,
+    readyEndpoint: '127.0.0.1:1234', settings: {...SETTINGS_V2, modelRoutes}, parentEnv})
+  assert.equal(launch({}).env.MODEL_ROUTES, JSON.stringify(modelRoutes))
+  assert.equal(launch({NOVA_SPACE_HOST_CONFIG: '/space/config.json'}).env.MODEL_ROUTES, undefined)
+  const explicit = '{"support":{"provider":"openai","model":"operator-model"}}'
+  assert.equal(launch({NOVA_SPACE_HOST_CONFIG: '/space/config.json', MODEL_ROUTES: explicit}).env.MODEL_ROUTES, explicit)
+})
+
 function readinessLine(overrides = {}) {
   return `${JSON.stringify({ token: TOKEN, host: '127.0.0.1', port: 49152, ...overrides })}\n`
 }
@@ -218,7 +228,7 @@ test('Node launch uses the compiled utility-process entry and no writable stdin'
   }), /absolute Node resource root/)
 })
 
-test('resolved desktop settings override inherited Codex and model configuration', () => {
+test('resolved desktop settings override inherited Codex configuration and keep provider model URLs', () => {
   const spec = nodeLaunchSpec({
     nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
     nodeResourcesPath: '/repo/clients/desktop/build',
@@ -230,7 +240,9 @@ test('resolved desktop settings override inherited Codex and model configuration
       CODEX_PREFIX_ARGS: '["/environment/shim.js"]',
       CODEX_MANAGED_ROOT: '/environment/managed',
       CODEX_PROJECT_STATE_ROOT: '/environment/state',
-      MODEL_BASE_URL: 'https://environment.example/v1',
+      DASHSCOPE_MODEL_BASE_URL: 'https://environment-model.example/v1',
+      MODEL_BASE_URL: 'https://retired.example/v1',
+      MODEL_API_KEY: 'retired-key',
     },
     resolvedConfig: {
       workspace: '/settings/workspace',
@@ -238,7 +250,6 @@ test('resolved desktop settings override inherited Codex and model configuration
       codexBinaryPrefixArgs: ['/settings/node_modules/@openai/codex/bin/codex.js'],
       managedRoot: '/settings/managed',
       stateRoot: '/settings/state',
-      modelBaseUrl: 'https://settings.example/v1',
     },
   })
 
@@ -250,7 +261,9 @@ test('resolved desktop settings override inherited Codex and model configuration
   )
   assert.equal(spec.env.CODEX_MANAGED_ROOT, '/settings/managed')
   assert.equal(spec.env.CODEX_PROJECT_STATE_ROOT, '/settings/state')
-  assert.equal(spec.env.MODEL_BASE_URL, 'https://settings.example/v1')
+  assert.equal(spec.env.DASHSCOPE_MODEL_BASE_URL, 'https://environment-model.example/v1')
+  assert.equal('MODEL_BASE_URL' in spec.env, false)
+  assert.equal('MODEL_API_KEY' in spec.env, false)
 })
 
 test('launch spec forwards explicit v4 settings for runtime validation and omits empty overrides', () => {
@@ -305,6 +318,20 @@ test('launch spec forwards explicit v4 settings for runtime validation and omits
   assert.equal('KNOWLEDGE_PATH' in empty.env, false)
 })
 
+test('a created Host Space reaches the backend only while its config exists, and the operator environment wins', async t => {
+  const {mkdtemp, writeFile, rm} = await import('node:fs/promises')
+  const {tmpdir} = await import('node:os')
+  const directory = await mkdtemp(posix.join(tmpdir(), 'nova-space-env-'))
+  t.after(() => rm(directory, {recursive: true, force: true}))
+  const config = posix.join(directory, 'config.json')
+  const launch = (settings, parentEnv = {}) => nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152', parentEnv, settings}).env
+  assert.equal('NOVA_SPACE_HOST_CONFIG' in launch({spaceHostConfigPath: config}), false, 'a missing config is not injected')
+  await writeFile(config, '{}', {mode: 0o600})
+  assert.equal(launch({spaceHostConfigPath: config}).NOVA_SPACE_HOST_CONFIG, config)
+  assert.equal(launch({spaceHostConfigPath: config}, {NOVA_SPACE_HOST_CONFIG: '/operator/config.json'}).NOVA_SPACE_HOST_CONFIG, '/operator/config.json')
+  assert.equal('NOVA_SPACE_HOST_CONFIG' in launch({spaceHostConfigPath: ''}), false)
+})
+
 test('plan generation settings override the parent environment and preserve explicit false', () => {
   for (const [settings, expected] of [[undefined, 'true'], [{generatePlan: true}, 'true'], [{generatePlan: false}, 'false']]) {
     const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152',
@@ -314,7 +341,7 @@ test('plan generation settings override the parent environment and preserve expl
 })
 
 test('Build reasoning capture reaches the runtime as an explicit boolean', () => {
-  for (const [settings, expected] of [[undefined, 'false'], [{}, 'false'], [{buildReasoning: false}, 'false'], [{buildReasoning: true}, 'true']]) {
+  for (const [settings, expected] of [[undefined, 'true'], [{}, 'true'], [{buildReasoning: false}, 'false'], [{buildReasoning: true}, 'true']]) {
     const spec = nodeLaunchSpec({workspace: '/workspace', token: TOKEN, readyEndpoint: '127.0.0.1:49152',
       parentEnv: {NOVA_BUILD_REASONING: 'true'}, settings})
     assert.equal(spec.env.NOVA_BUILD_REASONING, expected)
@@ -373,7 +400,6 @@ test('resolved desktop configuration removes an invalid inherited Codex binary',
       codexBinaryPath: '',
       managedRoot: '/managed',
       stateRoot: '/state',
-      modelBaseUrl: '',
     },
   })
 
@@ -585,7 +611,6 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
     decryptedSecrets: {
       dashscopeApiKey: 'dash-key',
       tavilyApiKey: 'tavily-key',
-      modelApiKey: 'model-key',
       codexApiKey: 'codex-key',
       arkApiKey: 'ark-key',
       doubaoBigmodelApiKey: 'doubao-key',
@@ -594,7 +619,7 @@ test('launch spec injects decrypted secrets as env overrides when present', () =
 
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'dash-key')
   assert.equal(spec.env.TAVILY_API_KEY, 'tavily-key')
-  assert.equal(spec.env.MODEL_API_KEY, 'model-key')
+  assert.equal('MODEL_API_KEY' in spec.env, false)
   assert.equal(spec.env.CODEX_API_KEY, 'codex-key')
   assert.equal('ARK_API_KEY' in spec.env, false)
   assert.equal('DOUBAO_BIGMODEL_API_KEY' in spec.env, false)
@@ -680,7 +705,6 @@ test('launch spec omits a decrypted secret carrying a control character', () => 
     parentEnv: { DASHSCOPE_API_KEY: 'from-dotenv' },
     decryptedSecrets: {
       dashscopeApiKey: 'sk-\u0000poison',
-      modelApiKey: 'mk-\u001bpoison',
       tavilyApiKey: 'tvly-clean',
     },
   })
@@ -690,7 +714,6 @@ test('launch spec omits a decrypted secret carrying a control character', () => 
   // injection loop is the last line of defence: drop the value, keep the rest,
   // and let the parent environment's own value stand.
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'from-dotenv')
-  assert.equal('MODEL_API_KEY' in spec.env, false)
   assert.equal(spec.env.TAVILY_API_KEY, 'tvly-clean')
   for (const value of Object.values(spec.env)) {
     assert.doesNotMatch(String(value), /poison/, 'no poisoned value survives into env')
@@ -701,7 +724,6 @@ test('integrated launch rejects raw boundary controls in every active secret ove
   const parentEnv = {
     DASHSCOPE_API_KEY: 'parent-dash',
     TAVILY_API_KEY: 'parent-tavily',
-    MODEL_API_KEY: 'parent-model',
     CODEX_API_KEY: 'parent-codex',
   }
   const spec = nodeLaunchSpec({
@@ -713,14 +735,12 @@ test('integrated launch rejects raw boundary controls in every active secret ove
     decryptedSecrets: {
       dashscopeApiKey: '\ndash-override',
       tavilyApiKey: 'tavily-override\r',
-      modelApiKey: '\tmodel-override',
       codexApiKey: 'codex-override\u007f',
     },
   })
 
   assert.equal(spec.env.DASHSCOPE_API_KEY, 'parent-dash')
   assert.equal(spec.env.TAVILY_API_KEY, 'parent-tavily')
-  assert.equal(spec.env.MODEL_API_KEY, 'parent-model')
   assert.equal(spec.env.CODEX_API_KEY, 'parent-codex')
 })
 

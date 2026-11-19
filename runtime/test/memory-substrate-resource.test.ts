@@ -93,6 +93,7 @@ test('delayed extraction cannot replace a revision written while the model was r
   release();await resource.flush()
   assert.equal((await resource.get(first.id))?.content,'最新状态：仍然不吃辣')
   assert.equal((await resource.get(first.id))?.version,2)
+  assert.equal((await resource.get(first.id))?.written_by,'merge')
   assert.equal((await client.memory('pending_evidence',{source_prefix:resource.prefix,provider:'fixture'}) as unknown[]).length,1,'conflict leaves evidence retryable')
  }finally{release?.();await resource.close();await rm(root,{recursive:true,force:true})}
 })
@@ -208,6 +209,7 @@ test('substrate resource keeps identity, correction, restart and source deletion
   await resource.reextract(first.id);assert.equal(calls,2);assert.equal((await resource.get(first.id))?.version,1,'equivalent re-extraction does not append revisions')
   await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'expired',locator:'expired',text:'旧消息',observedAt:'2020-01-01T00:00:00Z',kind:'im',retentionUntil:'2020-02-01T00:00:00Z'});await resource.flush();assert.equal(calls,2,'expired raw text never reaches the model')
   const corrected=await resource.correct(first.id,first.version,'改到下周一交报告',{type:'conversation',ref:'correction:one',observed_at:'2026-09-12T11:00:00Z'})
+  assert.equal(corrected.entry.written_by,'user_correction')
   assert.equal(corrected.entry.commitment?.due,null,'free-text correction must not retain a stale parsed deadline')
   assert.equal(corrected.entry.id,first.id);assert.equal(corrected.entry.version,2);assert.equal(corrected.entry.origin,'stated')
   await assert.rejects(resource.correct(first.id,1,'旧修改',{type:'conversation',ref:'correction:stale',observed_at:'2026-09-12T11:00:00Z'}),/CONFLICT/)
@@ -227,9 +229,9 @@ test('shared worker creates a private database and rejects symlink targets',asyn
   await client.open();await client.open()
   if(process.platform!=='win32'){assert.equal((await stat(path)).mode&0o777,0o600);assert.equal((await stat(join(root,'new'))).mode&0o777,0o700)}
   await client.close()
-  const target=join(root,'other.sqlite');await writeFile(target,'',{mode:0o644});const linked=join(root,'linked.sqlite');await symlink(target,linked)
+  const target=join(root,'other.sqlite');await writeFile(target,'',{mode:0o644});const targetMode=(await stat(target)).mode&0o777;const linked=join(root,'linked.sqlite');await symlink(target,linked)
   const rejected=new MemoryLedgerClient(linked)
-  try{await assert.rejects(rejected.open());if(process.platform!=='win32')assert.equal((await stat(target)).mode&0o777,0o644)}finally{await rejected.close()}
+  try{await assert.rejects(rejected.open());if(process.platform!=='win32')assert.equal((await stat(target)).mode&0o777,targetMode)}finally{await rejected.close()}
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
 
@@ -281,14 +283,14 @@ test('semantic memory retrieval finds paraphrases and hydrates only current evid
   assert.equal((await resource.list()).entries.length,2,'both unrelated memories survive valid resolver add decisions')
   const answer=await resource.recall('假期安排',{limit:1});assert.equal(answer.degraded,false);assert.equal(answer.hits[0]?.text,'喜欢去海边旅行')
   const hit=answer.hits[0]
-  assert.equal((await resource.evidenceFor(hit.memoryId,hit.revision))[0]?.text,'喜欢去海边旅行')
+  assert.equal((await resource.evidenceFor(hit.memoryId,hit.revision!))[0]?.text,'喜欢去海边旅行')
   assert.deepEqual(await resource.evidenceFor(hit.memoryId,999),[])
   const mismatched=await client.memory('search',{entry_prefix:resource.prefix,provider:'endpoint-b:fixture:2',query:'假期安排',vector:[1,0],scope:'any',limit:1}) as {hits:unknown[];degraded:boolean}
   assert.equal(mismatched.hits.length,0);assert.equal(mismatched.degraded,true,'different provider fingerprints never mix vectors')
   const pending=resource.recall('延迟查询');await started
   await resource.forgetSource('trip');release([new Float32Array([1,0])])
   assert.ok(!(await pending).hits.some(row=>row.memoryId===hit.memoryId),'deletion during provider work cannot return a stale hit')
-  assert.deepEqual(await resource.evidenceFor(hit.memoryId,hit.revision),[])
+  assert.deepEqual(await resource.evidenceFor(hit.memoryId,hit.revision!),[])
  }finally{release?.([new Float32Array([1,0])]);await resource.close();await rm(root,{recursive:true,force:true})}
 })
 
@@ -543,4 +545,31 @@ test('Timeline carries pseudonymous authorship separately from the actor describ
   assert(!JSON.stringify(rows.map(row=>row.author)).includes('ou_peer'))
   assert.equal(own.text,'陈雨已经替林舟完成权限配置。','authorship does not rewrite the reported actor')
  }finally{await memory.close();await rm(root,{recursive:true,force:true})}
+})
+
+
+test('cached and prepared replyPreferences preserve legacy and user rows but exclude general rows',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-memory-scope-')),path=join(root,'memory.sqlite')
+ const texts=['Legacy preference','User preference','Project constraint']
+ const gateway:ModelGateway={async *stream(){ /* extraction uses complete */ },complete:()=>Promise.resolve({text:JSON.stringify({entries:texts.map((text,index)=>({key:String(index),text,topic:'scope',kind:'preference',due:null,direction:null,status:null,valid_until:null}))})})}
+ let client=new MemoryLedgerClient(path)
+ const create=()=>new SubstrateMemoryResource({client,userId:'scope',gateway,model:'fixture',inputConsent:true,conversationProviders:['consumer']})
+ let resource=create()
+ try{
+  await resource.open();await resource.remember({sourceId:'source',sessionId:'test',sequence:1,text:texts.join('; '),occurredAt:new Date().toISOString(),confirmed:true});await resource.flush()
+  const rows=await client.memory('list',{}) as EntryRevision[]
+  assert.equal(rows.length,3)
+  for(const row of rows){
+   assert.equal(row.content.memory_scope,undefined,'extracted legacy rows have no scope field')
+   const scope=row.content.text===texts[1]?'user':row.content.text===texts[2]?'general':undefined
+   if(scope)await client.memory('merge',{entry_id:row.entry_id,expected_revision:row.revision,kind:row.kind,origin:row.origin,written_by:row.written_by,evidence_refs:row.evidence_refs,content:{...row.content,memory_scope:scope},recorded_at:new Date().toISOString()})
+  }
+  await resource.close();client=new MemoryLedgerClient(path);resource=create();await resource.open()
+  for(const adaptation of [resource.responseAdaptation(),await resource.prepareResponseAdaptation('consumer')]){
+   assert.deepEqual(adaptation.replyPreferences.map(row=>row.text).sort(),texts.slice(0,2).sort())
+   assert.match(adaptation.memoryContext!.voice,/Legacy preference/);assert.match(adaptation.memoryContext!.voice,/User preference/);assert.doesNotMatch(adaptation.memoryContext!.voice,/Project constraint/)
+   assert.match(adaptation.memoryContext!.text,/Project constraint/)
+  }
+  assert.deepEqual((await resource.list()).entries.map(row=>row.content).sort(),[...texts].sort())
+ }finally{await resource.close();await rm(root,{recursive:true,force:true})}
 })

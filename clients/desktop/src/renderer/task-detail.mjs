@@ -359,6 +359,7 @@ export function mountTaskDetail(root, { command, onClose, onViewed = () => { }, 
       approvals.replaceChildren()
       for (const approval of next.approvals ?? []) {
         const row = el('article')
+        row.setAttribute('data-approval-id',approval.pending_approval_id);row.setAttribute('data-conversation-id',next.conversation_id)
         row.append(el('p', approval.operation_summary ?? t('等待审批')))
         if (approval.local_detail)
           row.append(el('pre', JSON.stringify(approval.local_detail, null, 2)))

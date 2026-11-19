@@ -4,8 +4,6 @@ Workbench is Nova's main window. It opens a wide, persistent Nova conversation o
 
 ## Layout
 
-[![Nova Workbench and suggested next steps](../../assets/features/workbench-original.en.png)](../../assets/features/workbench-original.en.png)
-
 | Workspace tab | Holds |
 |---|---|
 | Nova | Persistent main conversation with proactive reminders and task receipts |
@@ -26,19 +24,27 @@ Nova can show up three ways: as the Workbench (this window), as a voice orb (a s
 
 Workbench conversations have Chat, Plan and Build modes. New regular conversations start in Chat. These modes do not change the existing permission boundary between the Workbench and the voice orb.
 
-- **Chat** keeps the existing conversation behavior. Nova can answer questions, hand work to an executor when asked, and track existing tasks. You can also ask Nova to switch to Plan. Like the voice orb, Chat cannot read or change local files or run shell commands.
+- **Chat** is the default conversation mode. Nova can answer questions, retrieve memory/search/knowledge, write or correct the user's own memory on explicit request, and show an expandable tool card. It cannot dispatch work, create or cancel tasks, create scheduled tasks, or read/change local files or run shell commands; use the mode selector to switch to Plan or Build for those. Mode changes are never performed by a model tool.
 - **Plan** clarifies the goal, scope, constraints and acceptance criteria, asking about ambiguities when needed. It has no local file or shell tools and does not create or dispatch a task before the user chooses. After Nova publishes a plan, you can edit it and choose local Build in the current project or Build through an executor.
-- **Build** is text-only and carries out the confirmed plan. On macOS and Windows, Nova can use native file read, write and exact-edit tools, plus shell execution. Platforms without local Build support do not show that entry. The selected project directory is the default working directory, and tools access local resources with the current user's operating-system permissions.
+- **Build** carries out the confirmed plan through text. On macOS and Windows, Nova can use native file read, write and exact-edit tools, plus shell execution. Platforms without local Build support do not show that entry. The selected project directory is the default working directory, and tools access local resources with the current user's operating-system permissions.
 
 Local Build does not create a task or Todo and does not continue in the background. File reads return at most 2,000 lines or 64 KiB; text writes and exact edits handle at most 1 MiB. Shell commands default to a 60-second timeout (configurable from 1 to 3,600 seconds), and combined stdout/stderr is capped at 64 KiB. When the command leader exits, the host cleans up lingering descendants and preserves its real exit code. Build accepts follow-up messages while running and processes them in order. Each model response may contain up to 64 calls, and each start or Resume may execute up to 128 calls before pausing. Long replies can be expanded to load their full text. Build remains interactive until Nova calls `finish_build`, which permanently locks that conversation. If you switch to the voice orb, hide the Workbench or leave the Build conversation while it is running, the Workbench asks whether to stop first. After stopping, you must explicitly Resume to continue. A restart also does not restore tool-execution authorization automatically.
 
-Local file reads run directly. File writes, edits and shell commands ask for approval each time by default. Change this in Settings → Programming → Local Build tools; the setting affects only local Workbench Build and is separate from executor approval. Continuous voice still uses Chat; starting voice from Plan or Build first returns to Chat.
+Local file reads run directly. File writes, edits and shell commands ask for approval each time by default. Change this in Settings → Programming → Local Build tools; the setting affects only local Workbench Build and is separate from executor approval. Plan / Build voice has no tools; return to text for execution.
 
 Plan and Build accept multiple tool calls in one model response through both Chat Completions and Responses. Consecutive independent read-only queries run with up to four concurrent calls. Writes, edits, shell commands, plan publication and other operations run in order after earlier queries finish. Plan permits 24 calls per interaction. Build permits 64 calls per model response and 128 per start or Resume, with separate receipts for approval, Stop and Resume. Build tool calls are grouped into one expandable log per interaction, with each call expandable on its own.
 
 The Build transcript shows every tool call, including file reads, writes, exact edits and shell commands. Each row shows its path or command, status, duration and exit code. Expand it for abbreviated input and output; output updates when the tool returns. The execution log contains the full record. Rows keep their expansion during execution, and the operation history is restored when reopening the conversation or reloading the UI.
 
 Build has no 120-second overall turn deadline. A model connection pauses only after 10 minutes without incoming data, and uses larger streaming limits for long replies and code generation. Model timeouts, connection interruptions and capacity failures explain the reason and offer Resume without replaying completed tools. Each shell command retains its own timeout.
+
+## Memory in Plan / Build
+
+Plan and Build text conversations can use the memory retrieval tools supported by the current backend. Backends supporting explicit saves also expose `memory__remember` and `memory__lookup`. Both modes **write only through `memory__remember` on an explicit user request**, with no automatic learning. A save requires a verbatim quote from the current typed user message and a committed receipt. Files, tool results and voice transcripts cannot authorize saves. Resume retains the original user text; host context is not a new request.
+
+Use `scope=general` for project, code and repository constraints, and `scope=user` only for stable facts about the user themself. General project memories remain readable through `memory__recall`, `memory__lookup` and the Memory page, but do not enter `USER.md`, the voice “Memory facts” list or reply preferences. This exclusion does not cover derived summaries.
+
+At the start of a new text turn, shared authorized retrieval may inject a few relevant memories as untrusted reference context. Retrieval failures or a roughly 400 ms timeout are silently skipped. This does not require `MEMORY_PRERECALL_ENABLED` and never triggers automatic writes. Plan / Build voice remains a conversation and steering channel with no tools and no automatic memory capture; return to text to explicitly request a memory write. Chat voice capture is unchanged.
 
 ## Ideas and Goals
 
@@ -48,13 +54,21 @@ Suggestion cards, drawn from the sources you've connected, offer to adopt someth
 
 Goal task progress counts the Todos linked to it and excludes any that were cancelled; whether a Goal is actually done is always your call, never inferred automatically.
 
-Nova can propose long-term goals from recent conversations, creating them only when you accept. Choose daily check-ins, progress-based follow-ups or no reminders. Use a check-in’s reply action before answering to update the goal’s derived progress summary; pausing a goal stops its check-ins. Proactive messages default to five per day, adjustable in Settings → General → Proactivity.
+Nova can propose long-term goals from recent conversations, creating them only when you accept. Choose daily check-ins, progress-based follow-ups or no reminders. Use a check-in’s reply action before answering to update the goal’s derived progress summary; pausing a goal stops its check-ins. Proactive messages default to five per day, adjustable in Settings → General → Proactivity; news pushes have their own allowance of two a day and do not count toward it.
 
 Direct @mentions of you in the Feishu chats you selected feed the Timeline briefing once you have given both Feishu consents; they are not recorded as Todos. See [Sources and connectors](sources-and-connectors.md#feishu).
 
 ## Daily briefs
 
-Optional morning and evening briefs summarize your Todos, calendar events and direct Feishu mentions as proactive reminders. Both are off by default. Turn them on in Settings → General → Proactivity → Daily briefs, where you can also set the times (08:30 and 18:30 by default), the repeat days (weekdays by default), the time zone and quiet hours (22:00 to 08:00 by default); no reminders are sent during quiet hours.
+Optional morning and evening briefs summarize your Todos, calendar events and direct Feishu mentions as proactive reminders. Both are off by default. Turn them on in Settings → Diary & briefings → Daily briefs, where you can also set the times (08:30 and 18:30 by default), the repeat days (weekdays by default) and quiet hours (22:00 to 08:00 by default). Briefs follow the device's time zone. No reminders are sent during quiet hours, so a brief time that falls inside quiet hours cannot be saved until one of the two is changed.
+
+## How reminders arrive
+
+New content from Feishu, mail, the calendar and local files does not interrupt you one item at a time. Nova first gathers what arrives over a stretch of time, either until 3 minutes pass with nothing new or until 15 minutes after the first item, and then judges the whole batch for anything worth a reminder. A batch yields at most 3 reminders, and one matter is raised only once.
+
+News is judged article by article. Only an article that closely matches an interest you confirmed and was published within the last day is pushed; when the ranking provider also reports whether the content has substance, articles it judges thin or promotional are dropped. At most 2 a day, counted separately from the daily proactive message limit.
+
+Every proactive message (suggestions, briefs and news) appears in the main conversation. When you are away from the Workbench (the window is hidden, minimized or not focused), a system notification also appears, with one batch of these messages merged into one notification; clicking it returns you to the unread message. Turn it off in Settings → General → System notifications. System notifications depend on the operating system allowing them: the settings page shows whether the last one succeeded and opens the system notification settings. Turning off Proactive discovery stops source reminders and news pushes.
 
 ## Daily diary
 
@@ -64,11 +78,9 @@ Opening a conversation from a card supplies its references to ordinary chat. Con
 
 ## Feeds
 
-Articles ranked to your interests, split into "For you" and "Saved". Until Nova has learned enough about what you read, it falls back to chronological order and asks you to confirm before switching to interest ranking. Each article shows why it was recommended. From an article you can read the original, save it, or convert it into a Todo, Idea or Goal — none of that authorizes Nova to act on it, it only records it. You can also tell Nova to show more or less of a given interest.
+Articles ranked to your interests, split into "For you" and "Saved". Nova-mined, unconfirmed interests may rank this page (sending those interests and public article excerpts to the ranking provider), but never become personal facts or authorize push notifications. Fresh, source-diverse articles fill weak matches; without scores the page falls back to a timeline. A compact Interests row lets you add or remove words without opening settings. Each article shows why it was recommended. From an article you can read the original, save it, or convert it into a Todo, Idea or Goal — none of that authorizes Nova to act on it, it only records it. You can also tell Nova to show more or less of a given interest.
 
 ## Profile
-
-[![Nova Profile overview and recent projects](../../assets/features/profile-original.en.png)](../../assets/features/profile-original.en.png)
 
 A short free-text description of you, edited directly or filled in gradually as Nova proposes additions from conversation. The page shows what you confirmed plus the current draft; when no current draft is available it asks for an update rather than showing an earlier result.
 

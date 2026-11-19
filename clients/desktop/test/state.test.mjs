@@ -404,3 +404,28 @@ test('session shimmer needs actual working activity in the displayed workspace',
   assert.equal(deriveOrbState({...input, tasks: [{project: '游戏', phase: 'working'}]}).sessionWorking, true)
   assert.equal(deriveOrbState({...input, codex: 'preparing', tasks: [{project: '游戏', phase: 'working'}]}).sessionWorking, false)
 })
+
+test('voice bring-up and reconnect phases never report the inactive copy', () => {
+  const starting = deriveOrbState({ ...base, activated: false, voiceStarting: true })
+  assert.equal(starting.voicePhase, 'starting')
+  assert.equal(starting.name, 'booting')
+  assert.equal(starting.statusLine, '正在启用语音…')
+  assert.match(starting.label, /正在启用语音/)
+
+  const reconnecting = deriveOrbState({ ...base, activated: true, voiceReconnecting: true })
+  assert.equal(reconnecting.voicePhase, 'reconnecting')
+  assert.equal(reconnecting.name, 'reconnecting')
+  assert.equal(reconnecting.statusLine, '语音连接中断，正在重连…')
+
+  const failed = deriveOrbState({ ...base, activated: true, voiceFailed: true })
+  assert.equal(failed.voicePhase, 'failed')
+  assert.equal(failed.name, 'error')
+  assert.equal(failed.statusLine, '语音连接已断开')
+  assert.match(failed.label, /语音连接已断开/)
+
+  // Without a voice phase the ordinary inactive copy is unchanged.
+  const inactive = deriveOrbState({ ...base, activated: false })
+  assert.equal(inactive.voicePhase, null)
+  assert.equal(inactive.name, 'inactive')
+  assert.equal(inactive.statusLine, '未启用')
+})

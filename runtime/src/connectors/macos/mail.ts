@@ -8,11 +8,15 @@ export const macMailScopeSchema=z.object({kind:z.literal('macos_mail'),mailboxes
 export type MacMailScope=z.infer<typeof macMailScopeSchema>
 const cursorSchema=z.object({box:z.number().int().min(0).max(20),offset:z.number().int().min(0).max(500),fingerprints:z.array(z.string().max(256)).max(20)}).strict()
 const requestSchema=z.union([z.object({command:z.enum(['status','request_access','list_mailboxes'])}).strict(),z.object({command:z.literal('snapshot'),mailboxes:macMailScopeSchema.shape.mailboxes,start:z.iso.datetime(),end:z.iso.datetime(),cursor:cursorSchema.nullable()}).strict()])
-const messageSchema=z.object({account:z.string().min(1).max(1024),mailbox:z.string().min(1).max(4096),id:z.string().min(1).max(128),messageId:z.string().max(4096),subject:z.string().max(10000),sender:z.string().max(10000),recipients:z.array(z.string().max(10000)).max(200),received:z.iso.datetime(),sent:z.iso.datetime(),content:z.string().max(2*1024*1024),read:z.boolean(),flagged:z.boolean()}).strict()
+const messageSchema=z.object({account:z.string().min(1).max(1024),mailbox:z.string().min(1).max(4096),id:z.string().min(1).max(128),messageId:z.string().max(4096),subject:z.string().max(10000),sender:z.string().max(10000),recipients:z.array(z.string().max(10000)).max(200),received:z.iso.datetime(),sent:z.iso.datetime(),content:z.string().max(2*1024*1024),body_unavailable:z.boolean().optional(),read:z.boolean(),flagged:z.boolean()}).strict()
 const hash=(s:string)=>createHash('sha256').update(s).digest('hex')
 export function normalizeMacMailMessage(input:unknown):GoogleObject{
- const e=messageSchema.parse(input),{read,flagged,...semantic}=e,key=hash(canonicalJson([e.account,e.mailbox,e.id])),text=[e.subject,e.sender,e.recipients.join(', '),e.received,e.content].join('\n')
- return {key,semanticHash:hash(canonicalJson(semantic)),metadata:{account:e.account,mailbox:e.mailbox,remote_id:e.id,message_id:e.messageId,read,flagged,truncated:text.length>99000},text:text.length>99000?text.slice(0,99000)+'\n[正文已截断]':text,locator:e.messageId?'message://'+encodeURIComponent('<'+e.messageId+'>'):'message://',observedAt:e.received,retentionUntil:new Date(Date.parse(e.received)+180*86400000).toISOString(),kind:'mail',status:'current'}
+ const e=messageSchema.parse(input),{read,flagged,...semantic}=e,key=hash(canonicalJson([e.account,e.mailbox,e.id]))
+ // A stalled body arrives as empty content plus a flag, never as a placeholder sentence: a sentence would be quoted as
+ // fact and would retire a body read earlier. The flag stays in the semantic payload, so this hash is distinct from any
+ // real body and a later successful read replaces it.
+ const unavailable=e.body_unavailable===true,text=[e.subject,e.sender,e.recipients.join(', '),e.received,...(unavailable?[]:[e.content])].join('\n')
+ return {key,semanticHash:hash(canonicalJson(semantic)),metadata:{account:e.account,mailbox:e.mailbox,remote_id:e.id,message_id:e.messageId,read,flagged,...(unavailable?{body_unavailable:true}:{}),truncated:text.length>99000},text:text.length>99000?text.slice(0,99000)+'\n[正文已截断]':text,locator:e.messageId?'message://'+encodeURIComponent('<'+e.messageId+'>'):'message://',observedAt:e.received,retentionUntil:new Date(Date.parse(e.received)+180*86400000).toISOString(),kind:'mail',status:'current'}
 }
 export class MacMailClient {
  constructor(readonly resourcesRoot:string){}

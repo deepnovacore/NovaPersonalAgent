@@ -102,7 +102,7 @@ jobs:
         shell: bash
         run: |
           mkdir -p candidate
-          ditto -c -k --keepParent "clients/desktop/dist/mac-arm64/Nova Personal Agent Desktop.app" candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64-app.zip
+          ditto -c -k --keepParent "clients/desktop/dist/mac-arm64/Nova Personal Agent.app" candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64-app.zip
           cp clients/desktop/dist/*.dmg candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64.dmg
       - name: Archive Windows application with native tools
         if: matrix.platform == 'win32'

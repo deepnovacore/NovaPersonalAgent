@@ -4,6 +4,13 @@
 
 [![Nova 个人 Agent 架构：交互、上下文、协调、执行与表达](../../assets/architecture/nova-personal-agent.zh-CN.png)](../../assets/architecture/nova-personal-agent.zh-CN.png)
 
+## 系统与 Monorepo 全景
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/system-overview.zh-CN.dark.svg">
+  <img src="../../assets/architecture/system-overview.zh-CN.light.svg" alt="Nova Personal Agent 系统与 Monorepo 架构" width="100%">
+</picture>
+
 ## Workbench 与上下文
 
 时间线、想法、目标、资讯、任务和「个人资料」与语音、文字对话共享一个窗口。你可以切成悬浮球，或进入隐藏窗口的后台模式：桌面麦克风关闭，任务继续运行。
@@ -30,7 +37,7 @@ flowchart LR
 
 ## 项目与会话
 
-项目是工作目录，会话是该项目下的一段 Codex 交流。项目文件和会话记录支持之后继续工作。
+项目是工作目录，会话是该项目下的一段编程 Agent 对话（支持 Codex 及 OpenCode、CodeBuddy、Pi、DeepSeek Harness 等 ACP 后端）。项目文件和会话记录支持之后继续工作。
 
 补充正在执行的任务与新建任务分别处理。取消任务不会删除项目和会话记录，断开手机连接也不会取消电脑上的任务。
 
@@ -62,7 +69,7 @@ flowchart LR
 
 ## 桌面与手机
 
-电脑负责模型、记忆和任务执行；手机负责输入、播放、消息和审批操作。
+电脑作为 Space Host 负责模型、记忆和任务执行；手机端（iOS 与 Android）负责输入、播放、消息和审批操作，通过加密 Relay 连接 Host（也可创建本地独立 Space）。
 
 设置中的保存与重启分开：服务配置重启后台后生效，外观和唤醒设置保存后生效。详见[上手指南](getting-started.md)和[手机连接](iphone.md)。
 

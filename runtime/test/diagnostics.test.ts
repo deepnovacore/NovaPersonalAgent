@@ -14,7 +14,6 @@ test('diagnostics pass Search on the DashScope fallback when no Tavily key is se
   const environment = {
     BACKEND: 'node',
     DASHSCOPE_API_KEY: 'dashscope-secret',
-    MODEL_API_KEY: 'sentinel-model-secret',
   }
   const report = await buildDiagnosticReport({environment, nodeVersion: 'v22.12.0'})
   assert.equal(diagnosticReportSchema.safeParse(report).success, true)
@@ -38,7 +37,6 @@ test('diagnostics pass the required Search check without probing Tavily', async 
   const report = await buildDiagnosticReport({
     environment: {
       DASHSCOPE_API_KEY: 'dashscope-secret',
-      MODEL_API_KEY: 'model-secret',
       TAVILY_API_KEY: 'search-secret',
     },
     nodeVersion: 'v22.12.0',
@@ -154,7 +152,7 @@ test('diagnostics classify unexpected access without retaining private data', as
 
 test('diagnostics reject unsupported Node and classify camera paths without touching them', async () => {
   const unsupported = await buildDiagnosticReport({
-    environment: {DASHSCOPE_API_KEY: 'dashscope-key', MODEL_API_KEY: 'key'},
+    environment: {DASHSCOPE_API_KEY: 'dashscope-key'},
     nodeVersion: 'v21.99.0',
   })
   assert.equal(unsupported.checks[0]?.status, 'fail')
@@ -163,7 +161,6 @@ test('diagnostics reject unsupported Node and classify camera paths without touc
   const file = await buildDiagnosticReport({
     environment: {
       DASHSCOPE_API_KEY: 'dashscope-key',
-      MODEL_API_KEY: 'key',
       DESKTOP_VIDEO_FILE: '/sentinel/private/video.mp4',
     },
     nodeVersion: 'v22.12.0',
@@ -176,7 +173,6 @@ test('diagnostics reject unsupported Node and classify camera paths without touc
   const invalid = await buildDiagnosticReport({
     environment: {
       DASHSCOPE_API_KEY: 'dashscope-key',
-      MODEL_API_KEY: 'key',
       DESKTOP_VIDEO_FILE: 'sentinel-relative.mp4',
     },
     nodeVersion: 'v22.12.0',
@@ -192,7 +188,6 @@ test('diagnose CLI emits one canonical line with exact exit behavior', async () 
   const environment = {
     BACKEND: 'node',
     DASHSCOPE_API_KEY: 'dashscope-secret',
-    MODEL_API_KEY: 'sentinel-secret',
     TAVILY_API_KEY: 'sentinel-search-secret',
   }
   const expected = await buildDiagnosticReport({environment, nodeVersion: 'v22.12.0'})

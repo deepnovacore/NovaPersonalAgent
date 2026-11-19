@@ -11,6 +11,7 @@ import 'local_life_test.dart' show MemoryLifePersistence;
 import 'local_news_test.dart' show rss, source, now;
 
 void main() {
+  interestWidgetTests();
   for (final brightness in Brightness.values) {
     testWidgets(
       'news segmented labels have readable contrast in ${brightness.name} theme',
@@ -174,13 +175,66 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull);
-      expect((news.snapshot()['sources'] as List).map((s) => s['id']), [
-        'ithome',
-        'sspai',
-        'solidot',
-        '36kr',
-      ]);
+      expect(
+        (news.snapshot()['sources'] as List).map((s) => s['id']),
+        publicNewsSources.where((s) => s.language == 'zh-CN').map((s) => s.id),
+      );
       expect(find.text('公开资讯 · 按时间排序'), findsOneWidget);
+    },
+  );
+}
+
+void interestWidgetTests() {
+  testWidgets(
+    'Feeds inline interest chips add and remove through news.configure',
+    (tester) async {
+      final news = LocalNews(
+        MemoryLifePersistence(),
+        sources: [source],
+        language: 'en',
+        now: () => now,
+      );
+      await news.open();
+      final life = LocalLife(MemoryLifePersistence());
+      await life.open();
+      final store = PersonalStore(
+        send: (_) => throw StateError('remote forbidden'),
+        local: life,
+        news: news,
+      );
+      addTearDown(() {
+        store.dispose();
+        news.dispose();
+        life.dispose();
+      });
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: WorkbenchPage(
+            store: store,
+            page: 1,
+            language: 'en',
+            onSettings: () {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('Interests'), findsOneWidget);
+      await tester.enterText(
+        find.byKey(const ValueKey('news.interest.word')),
+        'Gardening',
+      );
+      await tester.tap(find.byTooltip('Add interest'));
+      await tester.pumpAndSettle();
+      expect(
+        (news.snapshot()['interests'] as List).single['text'],
+        'Gardening',
+      );
+      expect(find.byType(InputChip), findsOneWidget);
+      await tester.tap(find.byTooltip('Remove interest'));
+      await tester.pumpAndSettle();
+      expect(news.snapshot()['interests'], isEmpty);
+      expect(news.snapshot()['enabled'], isTrue);
     },
   );
 }

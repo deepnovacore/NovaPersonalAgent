@@ -68,7 +68,11 @@ void main() {
       expect(evidence.records.length, 2);
       expect(evidence.records.first['relation'], 'participant');
       expect(evidence.records.last['text'], isNot(contains('synthetic')));
-      expect(evidence.records.last['body_authorship'], 'unverified');
+      expect(evidence.records.last['author'], {
+        'key': 'self',
+        'kind': 'unknown',
+        'is_user': true,
+      });
       expect(originals.last['text'], contains('synthetic'));
     },
   );

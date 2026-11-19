@@ -157,6 +157,33 @@ test('snapshot presentation update pauses capture without changing host voice ow
  await Promise.resolve();assert.equal(h.c.presentationMode,'background');assert.equal(h.c.voiceId,'a');assert.equal(h.starts,0);assert.equal(h.stops,1)
 })
 
+test('the renderer leaves the workbench layout before the window shrinks to the orb, even if presentation stalls or fails',async()=>{
+ const layout=[],changes=[];let release
+ const sent=[]
+ const c=new PersonalController({send:frame=>{sent.push(frame);return true},start:async()=>{},stop:async()=>{},changed:()=>changes.push(c.collapsed),
+  presentationChanged:(mode,collapsed)=>layout.push([mode,collapsed]),
+  applyPresentation:mode=>{layout.push(['window',mode]);return mode==='orb'?new Promise((_resolve,reject)=>{release=reject}):Promise.resolve()}})
+ const ack=()=>{const request=sent.findLast(frame=>frame.method==='presentation.set');c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{mode:request.params.mode}})}
+ const ready=c.connect();ack();await ready;layout.length=0
+ const orb=c.setPresentation('orb');ack()
+ for(let n=0;n<20&&!release;n++)await Promise.resolve()
+ assert.equal(typeof release,'function','the native presentation is in flight')
+ assert.deepEqual(layout,[['orb',true],['window','orb']],'collapsed layout is published before the window is resized')
+ assert.equal(changes.at(-1),true,'subscribers already see the collapsed state while the window call is pending')
+ changes.length=0;release(new Error('native presentation failed'))
+ await assert.rejects(orb,/native presentation failed/)
+ assert.equal(c.collapsed,true,'the window already shrank, so the renderer stays collapsed with it')
+ assert.ok(changes.length>0)
+ // applyMode on its own (snapshot/reconnect paths) must still notify subscribers when the window call fails.
+ changes.length=0;const direct=c.applyMode('workbench');await assert.doesNotReject(direct);assert.equal(changes.at(-1),false)
+ c.applyPresentation=async()=>{throw new Error('window gone')};changes.length=0
+ await assert.rejects(c.applyMode('orb'),/window gone/);assert.deepEqual(changes,[true,true])
+})
+test('a main-process collapse publishes the layout synchronously',()=>{
+ const layout=[];const c=new PersonalController({send:()=>true,start:async()=>{},stop:async()=>{},presentationChanged:(mode,collapsed)=>layout.push([mode,collapsed])})
+ c.presentationMode='orb';c.collapse(true);assert.deepEqual(layout,[['orb',true]])
+})
+
 test('background during pending microphone permission keeps the acquired voice owner',async()=>{
  let rejectStart;const h=presentationHarness(),ready=h.c.connect();h.ack();await ready
  h.c.start=()=>new Promise((_resolve,reject)=>{rejectStart=reject})
@@ -264,6 +291,38 @@ test('a failed independent card request never replaces an existing draft referen
  assert.equal(h.c.draft,'Draft about A');assert.deepEqual(h.c.state().references,[a]);assert.equal(h.c.state().failed_card.text,'Plan B');assert.deepEqual(h.c.state().failed_card.references,[b]);h.c.disconnect()
 })
 
+test('a card request is shown as a pending main message at once, then replaced by the stored one',async()=>{
+ const h=harness();h.snapshot('chat:main');const ref={kind:'timeline',id:'card',version:'v1'}
+ assert.equal(h.c.pendingUserMessage('chat:main'),null,'nothing pending before a request')
+ assert.equal(h.c.submitText('Discuss this card','chat:main',[ref]),true);const request=h.sent.at(-1)
+ const pending=h.c.pendingUserMessage('chat:main')
+ assert.equal(pending.pending,true);assert.equal(pending.text,'Discuss this card');assert.equal(pending.request_id,request.request_id)
+ assert.equal(h.c.pendingUserMessage('a'),null,'only the main conversation shows it')
+ h.c.receive({type:'personal.state',revision:99,feed:[],memory:{entries:[]},conversations:{selected_id:'chat:main',voice_id:null,items:[{id:'chat:main',kind:'chat',title:'Main'}],messages:[{id:'m1',conversation_id:'chat:main',role:'user',text:'Discuss this card',request_id:request.request_id,created_at:new Date().toISOString()}]}})
+ assert.equal(h.c.pendingUserMessage('chat:main'),null,'the stored message with the same request id replaces it, even before the result arrives')
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:true,data:{accepted:true}});await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(h.c.pendingUserMessage('chat:main'),null);h.c.disconnect()
+})
+
+test('a refused card request removes the pending message and keeps the text recoverable',async()=>{
+ const h=harness();h.snapshot('chat:main');const ref={kind:'timeline',id:'card',version:'v1'}
+ assert.equal(h.c.submitText('Discuss this card','chat:main',[ref]),true);const request=h.sent.at(-1)
+ assert.ok(h.c.pendingUserMessage('chat:main'))
+ h.c.receive({type:'personal.result',request_id:request.request_id,ok:false,error:'stale_reference'});await new Promise(resolve=>setImmediate(resolve))
+ assert.equal(h.c.pendingUserMessage('chat:main'),null,'a definitive refusal never leaves a phantom message')
+ assert.equal(h.c.draft,'Discuss this card');assert.deepEqual(h.c.state().references,[ref]);h.c.disconnect()
+})
+
+test('an unknown outcome keeps the pending message until the request is settled',async()=>{
+ const h=harness();h.snapshot('chat:main');const ref={kind:'timeline',id:'card',version:'v1'}
+ assert.equal(h.c.submitText('Discuss this card','chat:main',[ref]),true);const request=h.sent.at(-1)
+ h.c.disconnect();await Promise.resolve()
+ // Disconnect restores the text to the draft, so the bubble is withdrawn and cannot duplicate the restored draft.
+ assert.equal(h.c.pendingUserMessage('chat:main'),null)
+ await h.c.connect();const replay=h.sent.at(-1)
+ assert.equal(replay.request_id,request.request_id,'the replay keeps the command identity');h.c.disconnect()
+})
+
 test('every finished Build is locked, not just the first one in the list',()=>{
  const {c}=harness()
  const item=(id,status)=>({id,kind:'build',build:{status}})
@@ -367,4 +426,24 @@ test('failed text submissions translate the host code and never print raw valida
  const json=submit('r4','[\n  {"origin":"string","code":"invalid_format","message":"Invalid"}\n]')
  assert.match(json,/不符合要求/)
  assert.doesNotMatch(json,/origin|invalid_format|[{}[\]]/)
+})
+
+test('a failed independent topic preserves a draft that contains only a reference',()=>{
+ for(const reject of ['transport','host']){
+  const h=harness();h.snapshot('chat:main')
+  const state=h.c.state(),ref={kind:'todo',id:'draft-ref',version:1}
+  state.references=[ref]
+  if(reject==='transport'){
+   h.c.send=()=>false
+   assert.equal(h.c.submitText('A topic','chat:main'),false)
+  }else{
+   assert.equal(h.c.submitText('A topic','chat:main'),true)
+   const request=h.sent.at(-1)
+   h.c.receive({type:'input.text_result',request_id:request.request_id,conversation_id:'chat:main',ok:false,error:'busy'})
+   assert.equal(state.failed_card?.text,'A topic')
+  }
+  assert.equal(state.draft,'')
+  assert.deepEqual(state.references,[ref])
+  h.c.disconnect()
+ }
 })

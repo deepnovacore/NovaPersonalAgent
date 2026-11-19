@@ -1,5 +1,6 @@
 import {t} from '../renderer/locale.mjs'
 import { DORMANT_ORB_WINDOW_SIZE } from './window-position.mjs'
+import { DESKTOP_PRODUCT_NAME } from './desktop-identity.mjs'
 
 const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]'])
 const TOKEN_PATTERN = /^[a-f0-9]{32}$/
@@ -31,6 +32,7 @@ export function browserWindowOptions(preload, launchId, { opaque = false } = {})
   if (typeof preload !== 'string' || !preload) throw new Error('preload is required')
   if (!/^[A-Za-z0-9_-]+$/.test(launchId)) throw new Error('launch id is invalid')
   return {
+    title: DESKTOP_PRODUCT_NAME,
     width: 160,
     height: 160,
     // The floor is the dormant bubble, not the natural orb: Electron clamps
@@ -94,7 +96,7 @@ export function boardWindowOptions(preload, launchId) {
     height: 760,
     minWidth: 720,
     minHeight: 520,
-    title: t("记忆面板"),
+    title: `${t("记忆面板")} · ${DESKTOP_PRODUCT_NAME}`,
   })
 }
 
@@ -104,7 +106,7 @@ export function settingsWindowOptions(preload, launchId, workArea = {width: 952,
     height: Math.min(720, Math.max(1, workArea.height - 32)),
     minWidth: Math.min(620, Math.max(1, workArea.width - 32)),
     minHeight: Math.min(520, Math.max(1, workArea.height - 32)),
-    title: t("设置"),
+    title: `${t("设置")} · ${DESKTOP_PRODUCT_NAME}`,
   })
 }
 
@@ -114,7 +116,7 @@ export function setupWindowOptions(preload, launchId) {
     height: 640,
     minWidth: 520,
     minHeight: 520,
-    title: t("开始使用 Nova"),
+    title: `${t("开始使用")} · ${DESKTOP_PRODUCT_NAME}`,
   })
 }
 

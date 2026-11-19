@@ -1,8 +1,7 @@
+import {createSharedIdeas} from './shared-ideas.mjs'
+import {installExperienceIpc} from './experience-ipc.mjs'
+import {completeConfiguredExperience} from './experience-model.mjs'
 import {probeNativeVoice} from './native-voice-service.mjs'
-import {createHubService} from './hub-service.mjs'
-import {createHubNetwork} from './hub-network.mjs'
-import {createHubConnection} from './hub-connection.mjs'
-import {installHubIpc} from './hub-integration.mjs'
 import {ChatGptAccounts} from './chatgpt-auth.mjs'
 import {createChatGptBroker,applyChatGptEnvironment} from './chatgpt-broker.mjs'
 import {isEndpointSecret} from '../renderer/compatible-providers.mjs'
@@ -15,17 +14,19 @@ import {probeAcceptanceGate,acceptanceRuntimeHash,appendAcceptanceCounts, allowA
 import {captureNativeWorkbench,waitForNativeWorkbench,installAcceptanceWindowGate,installAcceptanceSessionGate,acceptanceWakeSettings,acceptanceBackendSettings,waitForAcceptanceRuntimeGate} from './workbench-native-acceptance.mjs'
 import {writeFileSync as writeAcceptanceFile} from 'node:fs'
 import {updateTrayUnread, resetTrayUnreadForBackend, trayClickAction} from './tray-unread.mjs'
+import {createSystemNotifier} from './system-notifier.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
 import {codingBackendStatus} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
-import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode} from './desktop-startup.mjs'
-import {FeishuConnector, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
-import {configureDesktopIdentity} from './desktop-identity.mjs'
+import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode, createConfigurationAttempt, runConfigurationStage, configurationTimeout} from './desktop-startup.mjs'
+import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
+import {configureDesktopIdentity, DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
-import {phoneNetwork, requestPhonePairing, renderPhoneQr} from './phone-connection.mjs'
+import {createSpaceCreateHandler} from './space-create.mjs'
+import {createTailscaleRelay} from './tailscale-relay.mjs'
 import {activeMcpMenuRows} from './orb-menu.mjs'
 import {parseSettingsCommit, validatePreparedSettings, prepareCapabilityCommit, readCapabilityDocument, readCapabilityEditor, publicCapabilityProbe, capabilityEnvironment, assertEditorSafe, referencedCapabilitySecrets, capabilityPath, capabilityDocumentRevision, invalidCommit} from './capabilities-settings.mjs'
 import {parseCapabilityRegistry} from '@nova-personal-agent/runtime/desktop'
@@ -43,6 +44,7 @@ import {
   nativeImage,
   nativeTheme,
   net,
+  Notification,
   protocol,
   safeStorage,
   session,
@@ -54,7 +56,7 @@ import {
   WebContentsView,
 } from 'electron'
 import {
-  describeMissingBlockingEnvironment,
+  describeHostBlockingEnvironment,
   inspectProjectNativeHostFromResources,
   ManagedWorkspaceMaintenanceService,
 } from '@nova-personal-agent/runtime/desktop'
@@ -85,7 +87,7 @@ import {
   createDebugBoardRequester,
   formatMemoryBoardExport,
 } from './debug-board-client.mjs'
-import { installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
+import { buildRendererAssetGraph, installAppProtocol, loadAppWindow, registerAppScheme } from './app-protocol.mjs'
 import { startWithSelectedCamera } from './camera-source.mjs'
 import { createDragController } from './drag-controller.mjs'
 import { configureWorkbenchNativeDrag } from './workbench-drag.mjs'
@@ -109,6 +111,7 @@ import {
   saveSettingsRecovery, restoreSettingsRecovery, clearSettingsRecovery,
   hasPlaintextSecret,
   loadSettings,
+  normalizeSettings,
   startupPresentation,
   orbSettings,
   publicSettings,
@@ -151,7 +154,8 @@ import {
   setupWindowOptions,
   validateBootstrap,
 } from './security.mjs'
-import {probeApiKey} from './key-probe.mjs'
+import {probeApiKey, probeKeyForSettings, canProbeKey} from './key-probe.mjs'
+import {planSecretChange, rotationPayload} from './credential-hot-apply.mjs'
 import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import {selectedTextLlmProvider} from './settings-defaults.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
@@ -180,11 +184,14 @@ const packageRoot = resolve(here, '../..')
 const developmentEnvFile = resolve(packageRoot, '../../.env')
 const developmentEnv = !app.isPackaged && existsSync(developmentEnvFile)
   ? parseEnv(readFileSync(developmentEnvFile, 'utf8')) : {}
+// Loaded only when the settings page creates a Host Space; the relay SDK stays out of startup.
+const loadSpaceHostRuntime = () => import('@nova-personal-agent/runtime/space-host')
+const tailscaleRelay = createTailscaleRelay({directory: () => resolve(app.getPath('userData'), 'space', 'relay')})
 // Preserve paths and launch flags already normalized by the source launcher.
 for (const name of Object.values(SECRET_ENV_MAP)) {
   if (developmentEnv[name] !== undefined) process.env[name] = developmentEnv[name]
 }
-const rendererRoot = resolve(packageRoot, 'src/renderer')
+const rendererRoot = resolve(process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(packageRoot, 'build/renderer'))
 const preload = resolve(packageRoot, 'src/preload/preload.cjs')
 const WINDOW_SIZE = Object.freeze({ width: 160, height: 160 })
 // Long-standing Chromium/X11 quirk: the ARGB visual backing a transparent,
@@ -225,6 +232,8 @@ const feishuSetupOwner = createFeishuSetupOwner({Connector: FeishuConnector})
 let backendControl = null
 let settingsApplyStatus = 'idle'
 let settingsRestartPending = false
+let spaceModelsCache = null
+let spaceModelsAppliedVersion = null
 let settingsRecoveryAvailable = false
 let visor = null
 let computerOverlay = null
@@ -248,7 +257,7 @@ function enterBackground(){
 let trayUnread = 0
 const requestPresentation = (mode, options = {}) => {
   if(mode==='background')enterBackground()
-  sendToOrb('nova:personal:presentation-request',mode,options.attention===true)
+  sendToOrb('nova:personal:presentation-request',mode,options.attention===true,options.conversationId==='chat:main'?'chat:main':undefined)
 }
 let bootstrap = null
 let activeLaunchId = null
@@ -259,6 +268,11 @@ let projectNativeHost
 let projectNativeAuthorityPresent = false
 let managedWorkspaceMaintenance = null
 let managedWorkspaceCapabilities = publicManagedWorkspaceCapabilities()
+// Only the newest configuration attempt may commit. A timed-out or superseded
+// attempt keeps running in the background, so its results are discarded and its
+// maintenance store is closed instead of being installed globally.
+let activeConfigurationAttempt = null
+const CONFIGURATION_CLOSE_TIMEOUT_MS = 2_000
 let quitDrain = null
 let quitDrained = false
 let releaseSmokeChannel = null
@@ -296,6 +310,7 @@ let codexStatus = Object.freeze({
   source: null, version: null,
 })
 const secretCodec = createSafeStorageCodec(safeStorage)
+const sharedIdeas = createSharedIdeas()
 const requestBoardSnapshot = createDebugBoardRequester()
 let microphoneStatus = 'checking'
 let microphoneSystemStatus = 'unknown'
@@ -330,6 +345,11 @@ function sendToSettings(channel, ...args) {
 }
 
 // First-run projection: which pipeline is chosen, which of its keys exist, and what the last launch lacked.
+let setupAvatarUrl
+function setupAvatar() {
+  setupAvatarUrl ??= 'data:image/png;base64,' + readFileSync(new URL('./nova-avatar.png', import.meta.url)).toString('base64')
+  return setupAvatarUrl
+}
 function setupView() {
   const {secretsPresent: present} = settingsView()
   return Object.freeze({
@@ -338,6 +358,8 @@ function setupView() {
     secretsPresent: Object.fromEntries(SETUP_KEYS.map(key => [key, present[key] === true])),
     missing: runtimeCapabilities?.reason === 'configuration_required' ? runtimeCapabilities.missing ?? [] : [],
     backendStatus: backendStatus.state,
+    companionForm: currentSettings.companionForm === 'orb' ? 'orb' : 'pet',
+    defaultAvatar: setupAvatar(),
   })
 }
 
@@ -377,6 +399,86 @@ function managedWorkspacesView() {
   })
 }
 
+function configuredSpaceModelsPath() {
+  return process.env.NOVA_SPACE_HOST_CONFIG || currentSettings?.spaceHostConfigPath || null
+}
+
+function projectSpaceModels(value) {
+  if (!value || !Number.isSafeInteger(value.version) || value.version < 0
+    || !Number.isSafeInteger(value.applied_version) || value.applied_version < 0
+    || !['space', 'environment'].includes(value.source) || typeof value.locked !== 'boolean'
+    || !value.routes || typeof value.routes !== 'object' || Array.isArray(value.routes)) throw invalidCommit()
+  const routes = normalizeSettings({modelRoutes: value.routes}).modelRoutes
+  validatePreparedSettings({modelRoutes: value.routes}, {modelRoutes: routes})
+  return {version: value.version, applied_version: value.applied_version, routes,
+    source: value.source, locked: value.locked}
+}
+
+// Disk reads keep settings usable while the child is disconnected; only Runtime writes this file.
+async function refreshSpaceModels({seed = false, status = true} = {}) {
+  const configPath = configuredSpaceModelsPath()
+  if (!configPath) { spaceModelsCache = null; spaceModelsAppliedVersion = null; return }
+  try {
+    const runtime = await loadSpaceHostRuntime()
+    runtime.readHostSpaceConfig(configPath)
+    const operatorRoutes = process.env.MODEL_ROUTES?.trim()
+    if (seed && !operatorRoutes) await runtime.seedHostModelRoutes(configPath, currentSettings.modelRoutes)
+    const stored = operatorRoutes ? {version: 0, routes: {}} : runtime.readHostModelRoutes(configPath) ?? {version: 0, routes: {}}
+    if (seed) spaceModelsAppliedVersion = stored.version
+    let value = {version: stored.version, applied_version: spaceModelsAppliedVersion ?? stored.version,
+      routes: operatorRoutes ? JSON.parse(operatorRoutes) : stored.routes,
+      locked: Boolean(operatorRoutes), source: operatorRoutes ? 'environment' : 'space'}
+    const owner = backendControl
+    if (status && owner) {
+      try {
+        const reported = await owner.request('space.models.status', {})
+        if (owner === backendControl && configPath === configuredSpaceModelsPath() && !reported?.error) value = reported
+      } catch { /* A stopped child does not make its saved model selection unreadable. */ }
+    }
+    if (configPath === configuredSpaceModelsPath()) spaceModelsCache = projectSpaceModels(value)
+  } catch {
+    spaceModelsCache = {routes: {}, locked: true, source: 'unavailable'}
+    if (seed) throw classifyBackendFailure('configuration_required')
+  }
+}
+
+async function applySpaceModelRoutes(commit) {
+  const coordinated = await lifecycleCoordinator.run('settings_save', async () => {
+    try {
+      const {modelRoutes, hostModelRoutesVersion, ...mirrors} = commit.settingsPatch
+      if (commit.capabilitiesDocument !== undefined || !modelRoutes || typeof modelRoutes !== 'object' || Array.isArray(modelRoutes)
+        || !Number.isSafeInteger(hostModelRoutesVersion) || hostModelRoutesVersion < 0) throw invalidCommit()
+      const route = modelRoutes.conversationText
+      const allowed = route ? {cascadedLlmProvider: route.provider, cascadedLlmModels: {[route.provider]: route.model}} : {}
+      if (Object.keys(mirrors).some(key => !Object.hasOwn(allowed, key))) throw invalidCommit()
+      validatePreparedSettings(mirrors, allowed)
+      const routes = normalizeSettings({modelRoutes}).modelRoutes
+      validatePreparedSettings({modelRoutes}, {modelRoutes: routes})
+      if (!spaceModelsCache || spaceModelsCache.locked || process.env.MODEL_ROUTES?.trim()) throw invalidCommit(t('模型选择由启动配置管理，当前只读。'))
+      const owner = backendControl
+      if (!owner) throw invalidCommit(t('请连接后台后再保存模型选择。'))
+      const result = await owner.request('space.models.configure', {expected_version: hostModelRoutesVersion, routes: modelRoutes})
+      if (owner !== backendControl) throw new Error('backend changed')
+      if (result?.error) {
+        if (result.error === 'model_provider_unconfigured') throw invalidCommit(t('请先保存模型密钥并重启后台，再保存模型选择。'))
+        if (result.error === 'version_conflict') throw invalidCommit(t('模型选择已在其他设备修改，请重新读取后再保存。'))
+        throw invalidCommit(t('模型选择未保存，请检查配置后重试。'))
+      }
+      if (!Number.isSafeInteger(result?.version) || result.version <= hostModelRoutesVersion) throw new Error('invalid model settings reply')
+      settingsRestartPending = true
+      publishSettingsApplyStatus('pending_restart')
+      await refreshSpaceModels()
+      sendToSettings('nova:settings:changed', settingsView())
+      return {saved: true, restarted: false, operationStatus: 'pending_restart', rejectedSecrets: []}
+    } catch (error) {
+      await refreshSpaceModels()
+      return {saved: false, restarted: false, operationStatus: error?.code === 'invalid_settings_commit' ? 'invalid' : 'failed',
+        rejectedSecrets: [], ...(error?.code === 'invalid_settings_commit' ? {problems: error.problems} : {})}
+    }
+  })
+  return {...settingsView(), ...(coordinated.status === 'busy' ? {saved: false, operationStatus: 'busy'} : coordinated.value)}
+}
+
 // The single shape the settings panel is ever told. Key material is reduced to
 // presence booleans and source labels here, never plaintext;
 // `keyringAvailable` is what turns the plaintext warning line on. It answers
@@ -399,16 +501,19 @@ function settingsView() {
     capabilitiesRevision: capabilities.revision ?? null,
     capabilities: {...capabilities, document: undefined, revision: undefined, diskGeneration: settingsGeneration, runtime: runtimeCapabilities},
     ...publicSettings(currentSettings),
+    ...(configuredSpaceModelsPath() ? {modelRoutes: spaceModelsCache?.routes ?? {}, hostModelRoutes: spaceModelsCache ?? {locked: true, source: 'unavailable'}} : {}),
     codexStatus,
     codingBackends: codingBackendStatus(currentSettings, process.env),
     skills: skillsCache,
     frontendUsage: frontendUsage.snapshot(),
     visionModels: VISION_MODELS,
+    modelCatalog: MODEL_CATALOG,
     backendStatus: backendStatus.state,
     backendDiagnostic: backendStatus.diagnostic,
     backendRetryInMs: backendStatus.retryInMs,
     startup,
     settingsApplyStatus,
+    settingsRestartPending,
     settingsRecoveryAvailable,
     managedWorkspaces: managedWorkspacesView(),
     microphoneStatus,
@@ -424,8 +529,17 @@ function settingsView() {
   }
 }
 
-function publishStartup(stage, code = null) {
-  startup = Object.freeze({stage, code})
+// Only fixed stage names may reach the log; codes, paths and payloads never do.
+const STARTUP_DIAGNOSTIC_STAGES = Object.freeze(new Set([
+  'configuration', 'backend', 'failed', 'ready',
+]))
+
+function publishStartup(stage, code = null, startupConfiguration = null) {
+  const changed = startup.stage !== stage
+  startup = Object.freeze({stage, code, ...(startupConfiguration ? {startupConfiguration} : {})})
+  if (changed && STARTUP_DIAGNOSTIC_STAGES.has(stage)) {
+    console.error(`[desktop-diagnostic] startup_stage=${stage}`)
+  }
   sendToOrb('nova:backend-status', {...backendStatus, startup})
   sendToSettings('nova:settings:changed', settingsView())
 }
@@ -468,12 +582,12 @@ async function accessCredentials(operation, {retry = false, startupAttempt = fal
       if (startup.stage === 'credentials') {
         if (startupAttempt && backendStatus.state === 'starting') publishStartup('backend')
         else if (backendStatus.state === 'connected') publishStartup('ready')
-        else publishStartup(previous.stage, previous.code)
+        else publishStartup(previous.stage, previous.code, previous.startupConfiguration)
       }
       return result
     } catch (error) {
       if (['credential_access_failed', 'credential_invalid'].includes(error?.code)) credentialFailure = error
-      if (startup.stage === 'credentials') publishStartup(previous.stage, previous.code)
+      if (startup.stage === 'credentials') publishStartup(previous.stage, previous.code, previous.startupConfiguration)
       throw error
     }
   })
@@ -534,7 +648,6 @@ const settingsWriter = createSettingsWriter({
 })
 
 function publishCommittedSettings() {
-  if (!currentSettings.phoneConnectionEnabled) void managedPhone.stop()
   capabilityEditorCache = null
   if(presentationMode!=='background')wakeWord?.configure(acceptanceWakeSettings(currentSettings,!!acceptance))
   settingsGeneration += 1
@@ -563,8 +676,18 @@ async function applyLiveCodingBackend(backend) {
   if (reply?.backend !== backend) throw new Error('coding default update failed')
 }
 
-async function rollbackLiveSettings(previousSettings) {
+/** Hands replaced keys to the running backend. Values travel only over the private control channel and are never returned. */
+async function applyLiveCredentials(plan, {reverse = false} = {}) {
+  if (plan.rotations.length === 0) return
+  if (!backendControl) throw new Error('credential update failed')
+  const payload = rotationPayload(reverse ? {rotations: plan.rotations.map(({from, to}) => ({from: to, to: from}))} : plan)
+  const reply = await backendControl.request('credentials.rotate', payload)
+  if (reply?.applied !== payload.rotations.length) throw new Error('credential update failed')
+}
+
+async function rollbackLiveSettings(previousSettings, secretPlan) {
   // A live default change never replaced capability files or stopped work, even if delivery failed.
+  if (secretPlan) await applyLiveCredentials(secretPlan, {reverse: true}).catch(() => undefined)
   if (previousSettings.codingBackend !== currentSettings.codingBackend) await applyLiveCodingBackend(previousSettings.codingBackend)
   await saveSettings(settingsFile(), previousSettings)
   currentSettings = previousSettings
@@ -674,8 +797,6 @@ function openSettingsWindow(launchId, { category } = {}) {
   })
   window.once('ready-to-show', () => window.show())
   window.on('closed', () => {
-    void cancelPhonePairing()
-    void desktopHubConnection?.action('cancel')
     endVoiceprintRecording()
     settingsWindow = null
     pendingSettingsCategory = null
@@ -725,128 +846,6 @@ function activeMcpSubmenu(launchId) {
     : { label: row.label, enabled: false }))
 }
 
-const phoneRoot = () => resolve(app.getPath('userData'), 'phone')
-let phoneConfig, phonePayload, phoneImage, phoneEpoch = 0
-let phoneIssuedDevices = new Set()
-let phoneQueue = Promise.resolve()
-let phoneBackend, phoneOperation = Promise.resolve()
-const managedPhone = {
-  get running() { return !!backend && !!phoneBackend && phoneBackend === backendControl },
-  start() {
-    const operation = phoneOperation.then(async () => {
-      if (this.running) return
-      if (!configurationReady || !backendControl) throw classifyBackendFailure('configuration_required')
-      const owner = backendControl
-      const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-      const {initializeServerToken, loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
-      await mkdir(phoneRoot(), {recursive: true, mode: 0o700})
-      const tokenFile = resolve(phoneRoot(), 'host.token')
-      try { initializeServerToken(tokenFile) } catch (error) { if (error.code !== 'EEXIST') throw error }
-      const config = loadServerConfig({SERVER_PORT:'19876',SERVER_TOKEN_FILE:tokenFile})
-      if (app.isQuitting || !currentSettings.phoneConnectionEnabled) throw new Error('service_unavailable')
-      const result = await owner.request('phone.start', {port:config.port,tokenFile}, {timeoutMs:30000})
-      if (!result?.running || owner !== backendControl) throw new Error('service_unavailable')
-      phoneConfig = config
-      phoneBackend = owner
-    })
-    phoneOperation = operation.catch(() => {})
-    return operation
-  },
-  stop() {
-    const operation = phoneOperation.then(async () => {
-      const owner = phoneBackend
-      phoneBackend = undefined
-      if (owner) await owner.request('phone.stop', {}, {timeoutMs:10000}).catch(() => {})
-    })
-    phoneOperation = operation.catch(() => {})
-    return operation
-  },
-}
-
-let desktopHubService, desktopHubConnection
-function hubAvailable() { return process.platform === 'darwin' && !acceptance && !sourceStartupSmoke && releaseSmokeChannel === null }
-function getDesktopHub() {
-  if (!desktopHubConnection) {
-    const entry = app.isPackaged
-      ? resolve(app.getAppPath(), 'node_modules/@nova-personal-agent/runtime/dist/src/hub/managed-entry.js')
-      : resolve(packageRoot, '../../runtime/dist/src/hub/managed-entry.js')
-    desktopHubService = createHubService({homeDir:homedir(), executable:process.execPath, entry, appVersion:app.getVersion(), development:!app.isPackaged})
-    desktopHubConnection = createHubConnection({service:desktopHubService, network:createHubNetwork()})
-  }
-  return desktopHubConnection
-}
-
-async function cancelPhonePairing(invalidate = true) {
-  if (invalidate) phoneEpoch++
-  const config = phoneConfig, code = phonePayload?.code
-  phonePayload = undefined; phoneImage = undefined
-  if (config && code) await requestPhonePairing(config, {type: 'pair.cancel', code}).catch(() => {})
-}
-
-async function phoneAction(action, deviceId, epoch = phoneEpoch) {
-  if(acceptance)throw Error('acceptance_phone_disabled')
-  if (action === 'cancel') { await cancelPhonePairing(); return {state: 'idle'} }
-  if (app.isQuitting) return {state: 'idle'}
-  if (action === 'install') { await shell.openExternal('https://tailscale.com/download'); return {state: 'not_installed'} }
-  if (action === 'login') { await shell.openPath('/Applications/Tailscale.app'); return {state: 'needs_login', service: true} }
-  if (action === 'help') { await shell.openExternal('https://tailscale.com/docs/features/tailscale-serve'); return {state: 'needs_serve'} }
-  if (action === 'disable') {
-    await accessCredentials(() => settingsWriter({phoneConnectionEnabled: false}), {retry: true})
-    await cancelPhonePairing(); await managedPhone.stop()
-    return {state: 'idle'}
-  }
-  if (action === 'enable') await accessCredentials(() => settingsWriter({phoneConnectionEnabled: true}), {retry: true})
-  if (!currentSettings.phoneConnectionEnabled) return {state: 'idle'}
-  try {
-    if (process.platform !== 'darwin') return {state: 'unsupported'}
-    if (currentSettings.phoneServerPort && currentSettings.phoneServerTokenFile) {
-      await managedPhone.stop()
-      const entry = nodeRuntimeEntry({isPackaged: app.isPackaged, appPath: app.getAppPath(), packageRoot})
-      const {loadServerConfig} = await import(pathToFileURL(resolve(dirname(entry), 'server/server-config.js')).href)
-      const external = loadServerConfig({SERVER_PORT: String(currentSettings.phoneServerPort),
-        SERVER_TOKEN_FILE: currentSettings.phoneServerTokenFile})
-      if (phoneConfig?.port !== external.port || phoneConfig?.token !== external.token) await cancelPhonePairing(false)
-      phoneConfig = external
-    } else {
-      if (!managedPhone.running && phonePayload) await cancelPhonePairing(false)
-      await managedPhone.start()
-    }
-    const config = phoneConfig
-    const network = currentSettings.phoneServerUrl ? {state: 'ready', url: currentSettings.phoneServerUrl}
-      : await phoneNetwork(config.port, action === 'network')
-    if (epoch !== phoneEpoch) return {state: 'idle'}
-    if (network.state !== 'ready') return {...network, service: true}
-    if (action === 'revoke') await requestPhonePairing(config, {type: 'pair.revoke', device_id: deviceId})
-    if (phonePayload && phonePayload.server !== new URL('/client/v1', network.url).href) await cancelPhonePairing(false)
-    if (epoch !== phoneEpoch) return {state: 'idle'}
-    const activeEpoch = epoch
-    if (action === 'refresh' || !phonePayload) {
-      const before = await requestPhonePairing(config, {type: 'pair.list'})
-      if (epoch !== phoneEpoch) return {state: 'idle'}
-      phoneIssuedDevices = new Set(before.devices.map(device => device.id))
-      const payload = await requestPhonePairing(config, {type: 'pair.create', server: network.url})
-      if (activeEpoch !== phoneEpoch) {
-        await requestPhonePairing(config, {type: 'pair.cancel', code: payload.code}).catch(() => {})
-        return {state: 'idle'}
-      }
-      phonePayload = payload; phoneImage = undefined
-      const script = app.isPackaged ? resolve(process.resourcesPath, 'pair-device.swift') : resolve(packageRoot, '../../runtime/scripts/pair-device.swift')
-      phoneImage = await renderPhoneQr(script, payload)
-      if (activeEpoch !== phoneEpoch) { phoneImage = undefined; return {state: 'idle'} }
-    }
-    const result = await requestPhonePairing(config, {type: 'pair.list', code: phonePayload.code})
-    return {state: result.pairing_active ? 'ready' : result.devices.some(device => !phoneIssuedDevices.has(device.id)) ? 'paired' : 'invalidated', image: result.pairing_active ? phoneImage : undefined,
-      host: new URL(network.url).hostname, devices: result.devices, service: true}
-  } catch (error) {
-    await cancelPhonePairing()
-    return {state: error.message === 'qr_unavailable' ? 'qr_unavailable' : 'service_unavailable'}
-  }
-}
-
-function openPairingWindow(launchId = activeLaunchId) {
-  openSettingsWindow(launchId, {category: 'phone'})
-}
-
 // Sleep is an orb state; the workbench has no bubble to rest in.
 function sleepOrb() {
   if (presentationMode === 'orb') wakeWord?.sleep('bubble')
@@ -857,17 +856,29 @@ async function applyDesktopSettings(payload, restart = false) {
   // only in main for validation or backend spawn. Public settings replies
   // contain presence flags and rejected key names, never secret values.
   if (typeof restart !== 'boolean') throw new Error('invalid restart mode')
+  if (configuredSpaceModelsPath() && payload?.settingsPatch && Object.hasOwn(payload.settingsPatch, 'modelRoutes')) {
+    try { return await applySpaceModelRoutes(parseSettingsCommit(payload)) }
+    catch { return {...settingsView(), saved: false, operationStatus: 'invalid', rejectedSecrets: []} }
+  }
   const pendingRestart = settingsRestartPending
   const previousSettings = currentSettings
   const recoveryPending = settingsRecoveryAvailable
   let capabilitiesChanged = false
+  // Saved keys are compared by what the backend would actually use, so a replaced key can be handed over live
+  // while everything else in the settings still decides whether a restart is needed.
+  let beforeSecrets, secretPlan = {changed: [], rotations: [], needsRestart: false}, liveCredentialsFailed = false
+  const withoutSecrets = settings => { const {secrets: _secrets, ...rest} = backendSettings(settings); return JSON.stringify(rest) }
+  const liveReady = () => backendControl !== null && backendStatus.state === 'connected'
   const changesRequireRestart = () => restart || recoveryPending || capabilitiesChanged
-    || JSON.stringify(backendSettings(previousSettings)) !== JSON.stringify(backendSettings(currentSettings))
-  const applied = await applySettingsTransaction({
+    || withoutSecrets(previousSettings) !== withoutSecrets(currentSettings)
+    || secretPlan.needsRestart || (secretPlan.rotations.length > 0 && !liveReady())
+  let applied = await applySettingsTransaction({
     deferRestart: !restart,
     needsBackendRestart: () => pendingRestart || changesRequireRestart(),
     applyLive: async () => {
       if (previousSettings.codingBackend !== currentSettings.codingBackend) await applyLiveCodingBackend(currentSettings.codingBackend)
+      // A failed hand-over keeps the saved key and asks for a restart instead of discarding the save.
+      if (liveReady()) await applyLiveCredentials(secretPlan).catch(() => { liveCredentialsFailed = true })
     },
     coordinator: lifecycleCoordinator,
     patch: payload,
@@ -876,11 +887,14 @@ async function applyDesktopSettings(payload, restart = false) {
         if (settingsRecoveryAvailable) await rollbackSettings(false)
         const commit = parseSettingsCommit(value)
         capabilitiesChanged = commit.capabilitiesDocument !== undefined
-        return await accessCredentials(() => settingsWriter(commit.settingsPatch ?? {}, next => {
+        try { beforeSecrets = await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec)) } catch { beforeSecrets = undefined }
+        let afterSecrets
+        const written = await accessCredentials(() => settingsWriter(commit.settingsPatch ?? {}, next => {
           validatePreparedSettings(commit.settingsPatch, publicSettings(next))
           if ([resolve(settingsFile()), resolve(`${settingsFile()}.recovery`)].includes(capabilityPath(next, process.env))) throw invalidCommit('capability_settings_path_conflict')
           const document = commit.capabilitiesDocument ?? readCapabilityDocument(next, process.env)
           const secrets = decryptSecretsForSpawn(next, secretCodec)
+          afterSecrets = secrets
           return prepareCapabilityCommit({settings: next, sourceSettings: currentSettings, document: commit.capabilitiesDocument, expectedRevision: commit.capabilitiesBaseRevision,
             environment: capabilityEnvironment(next, secrets, process.env, document), knownSecrets: Object.values(secrets),
             beforeWrite: async capability => {
@@ -888,13 +902,17 @@ async function applyDesktopSettings(payload, restart = false) {
               settingsRecoveryAvailable = true
             }})
         }), {retry: true})
+        secretPlan = !afterSecrets ? {changed: [], rotations: [], needsRestart: false}
+          : !beforeSecrets ? {changed: ['unknown'], rotations: [], needsRestart: true}
+          : planSecretChange(beforeSecrets, afterSecrets)
+        return written
       } catch (error) {
         console.error('[desktop-diagnostic] settings_save_failure')
         throw error
       }
     },
     publishCommitted: publishCommittedSettings,
-    rollback: () => changesRequireRestart() ? rollbackSettings() : rollbackLiveSettings(previousSettings),
+    rollback: () => changesRequireRestart() ? rollbackSettings() : rollbackLiveSettings(previousSettings, secretPlan),
     complete: completeSettings,
     prepareConfiguration: async () => {
       try {
@@ -909,9 +927,20 @@ async function applyDesktopSettings(payload, restart = false) {
     restartBackend: restartSettingsBackend,
     publishStatus: publishSettingsApplyStatus,
   })
+  if (liveCredentialsFailed && applied.operationStatus === 'applied') {
+    applied = Object.freeze({...applied, operationStatus: 'pending_restart'})
+    publishSettingsApplyStatus('pending_restart')
+  }
   if (applied.operationStatus === 'pending_restart') settingsRestartPending = true
   else if (applied.operationStatus === 'applied') settingsRestartPending = false
   if (['applied', 'pending_restart'].includes(applied.operationStatus)) await refreshSettingsCapabilities()
+  if (configuredSpaceModelsPath()) {
+    await refreshSpaceModels()
+    if (spaceModelsCache?.source === 'space' && spaceModelsCache.version !== spaceModelsCache.applied_version) {
+      settingsRestartPending = true
+      publishSettingsApplyStatus('pending_restart')
+    }
+  }
   return {...settingsView(), ...applied}
 }
 
@@ -987,7 +1016,6 @@ function showOrbMenu(launchId) {
       { label: t("悬浮球"), type: 'radio', checked: presentationMode === 'orb', click: () => requestPresentation('orb') },
       { label: t("隐藏"), type: 'radio', checked: presentationMode === 'background', click: () => requestPresentation('background') },
     ] },
-    { label: t("连接 iPhone…"), click: () => { void openPairingWindow() } },
     { label: t("记忆面板"), click: () => openMemoryBoard(launchId) },
     { label: t("设置…"), click: () => openSettingsWindow(launchId) },
     { label: t("MCP 服务"), submenu: activeMcpSubmenu(launchId) },
@@ -1049,9 +1077,18 @@ function hideOrb() {
   requestPresentation('background')
 }
 
+// OS notifications for proactive messages that land while the workbench is not in front of the user.
+const systemNotifier = createSystemNotifier({
+  Notification, platform: process.platform, shell, translate: t,
+  isEnabled: () => currentSettings.systemNotifications !== false,
+  windowState: () => ({visible: Boolean(mainWindow?.isVisible()) && presentationMode === 'workbench', focused: Boolean(mainWindow?.isFocused())}),
+  activate: options => { requestPresentation('workbench', options) },
+  log: message => console.warn(`[nova-personal-agent-desktop] ${message}`),
+})
+
 function createTray() {
   const next = new Tray(trayImage())
-  next.setToolTip('Nova Personal Agent Desktop')
+  next.setToolTip(DESKTOP_PRODUCT_NAME)
   next.setContextMenu(Menu.buildFromTemplate([
     ...[['workbench','工作台'],['orb','悬浮球'],['background','隐藏']].map(([mode,label]) => ({label:t(label),click:()=>requestPresentation(mode)})),
     { type: 'separator' },
@@ -1097,7 +1134,35 @@ async function getChatGptAccounts() {
   return chatGptAccounts
 }
 
-async function prepareDesktopConfiguration() {
+function beginConfigurationAttempt() {
+  if (activeConfigurationAttempt !== null) activeConfigurationAttempt.abort()
+  activeConfigurationAttempt = createConfigurationAttempt()
+  return activeConfigurationAttempt
+}
+
+function configurationAttemptCurrent(attempt) {
+  return attempt !== null && attempt === activeConfigurationAttempt && attempt.current()
+}
+
+// Stage identifiers are fixed, non-secret labels. They replace the previous
+// silent spinner so a stuck configuration wait names the directory or service
+// it is waiting on, and the timeout below reports the same stage.
+function publishConfigurationStage(stage) {
+  if (configurationReady) return
+  publishStartup('configuration', `configuration_wait_${stage}`)
+}
+
+async function closeMaintenanceBounded(maintenance) {
+  if (maintenance === null || maintenance === undefined) return
+  let timer
+  await Promise.race([
+    Promise.resolve().then(() => maintenance.close()).catch(() => undefined),
+    new Promise(resolve => { timer = setTimeout(resolve, CONFIGURATION_CLOSE_TIMEOUT_MS); timer.unref?.() }),
+  ]).finally(() => { if (timer !== undefined) clearTimeout(timer) })
+}
+
+async function prepareDesktopConfiguration(attempt = beginConfigurationAttempt()) {
+  // Loading the native host is synchronous and cannot be preempted by a JS timer.
   if (projectNativeHost === undefined) {
     const projectNativeLoad = inspectProjectNativeHostFromResources({
       resourcesPath: app.isPackaged ? process.resourcesPath : realpathSync(resolve(packageRoot, 'build')),
@@ -1144,30 +1209,78 @@ async function prepareDesktopConfiguration() {
       pathApi: path,
       mkdir,
     }),
+    // Each real wait boundary runs through the same attempt and budget, so the
+    // displayed stage, the deadline being enforced, and error.stage all agree.
+    runStage: (stage, operation) => runConfigurationStage(attempt, stage, operation, {
+      onStage: publishConfigurationStage,
+    }),
   })
   const maintenance = projectNativeHost === null
     ? null
-    : await ManagedWorkspaceMaintenanceService.openFromDesktop({
+    : await runConfigurationStage(attempt, 'maintenance', () =>
+      ManagedWorkspaceMaintenanceService.openFromDesktop({
         stateRoot: prepared.config.stateRoot,
         managedRoot: prepared.config.managedRoot,
         nativeHost: projectNativeHost,
-      })
-  return Object.freeze({...prepared, maintenance})
+      }), {
+      onStage: publishConfigurationStage,
+      // A store opened after the attempt lost ownership is closed here, so it cannot
+      // keep a transaction lock or be installed as the active maintenance service.
+      onLateResult: service => closeMaintenanceBounded(service),
+    })
+  return Object.freeze({...prepared, maintenance, attempt})
+}
+
+async function readManagedWorkspaceCapabilities(maintenance) {
+  if (maintenance === null) return publicManagedWorkspaceCapabilities()
+  try {
+    return publicManagedWorkspaceCapabilities(await maintenance.capabilities())
+  } catch {
+    return publicManagedWorkspaceCapabilities()
+  }
 }
 
 async function commitDesktopConfiguration(prepared) {
-  const reconciliation = prepared.maintenance === null
-    ? null
-    : await prepared.maintenance.reconcileExternalCleanup()
+  const attempt = prepared.attempt ?? null
+  const stage = (name, operation, options = {}) => attempt === null
+    ? operation()
+    : runConfigurationStage(attempt, name, operation, {onStage: publishConfigurationStage, ...options})
+  const current = () => attempt === null || configurationAttemptCurrent(attempt)
+  let reconciliation = null
+  let capabilities
+  try {
+    reconciliation = prepared.maintenance === null
+      ? null
+      : await stage('reconcile', () => prepared.maintenance.reconcileExternalCleanup())
+    if (!current()) throw configurationTimeout('commit')
+    capabilities = await stage('capabilities', () => readManagedWorkspaceCapabilities(prepared.maintenance))
+    if (!current()) throw configurationTimeout('commit')
+    // Observe before installing anything: a recovery hazard must not leave the
+    // previous attempt's configuration half-committed when this wait times out.
+    await stage('recovery', () => managedWorkspaceBackendRecovery.observe(
+      capabilities,
+      projectNativeAuthorityPresent,
+    ))
+    if (!current()) throw configurationTimeout('commit')
+  } catch (error) {
+    // A superseded attempt is reported as a retriable timeout, and its store is
+    // closed here so it cannot keep a lock or be installed later.
+    if (error?.code === 'configuration_superseded') {
+      await discardDesktopConfiguration(prepared)
+      throw configurationTimeout('commit')
+    }
+    throw error
+  }
+  // Point of no return: everything below is synchronous, so a later timeout
+  // cannot observe a partially installed configuration.
   const previousMaintenance = managedWorkspaceMaintenance
   desktopConfig = prepared.config
   codexStatus = prepared.codexStatus
   managedWorkspaceMaintenance = prepared.maintenance
-  if (previousMaintenance !== null) await previousMaintenance.close().catch(() => undefined)
-  await refreshManagedWorkspaceCapabilities()
+  managedWorkspaceCapabilities = capabilities
   configurationReady = true
   settingsReady = true
-  if (!acceptance && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
+  await closeMaintenanceBounded(previousMaintenance)
   return Object.freeze({
     externalWorkspaceReset: reconciliation?.status === 'reconciled'
       && reconciliation.active_workspace_reset === true,
@@ -1175,17 +1288,25 @@ async function commitDesktopConfiguration(prepared) {
 }
 
 async function discardDesktopConfiguration(prepared) {
+  prepared?.attempt?.abort?.()
   const maintenance = prepared?.maintenance
   if (maintenance !== null && maintenance !== undefined
     && maintenance !== managedWorkspaceMaintenance) {
-    await maintenance.close().catch(() => undefined)
+    await closeMaintenanceBounded(maintenance)
   }
 }
 
 async function refreshDesktopConfiguration() {
-  const prepared = await prepareDesktopConfiguration()
-  await commitDesktopConfiguration(prepared)
-  return prepared
+  const attempt = beginConfigurationAttempt()
+  let prepared
+  try {
+    prepared = await prepareDesktopConfiguration(attempt)
+    return await commitDesktopConfiguration(prepared)
+  } catch (error) {
+    attempt.abort(error)
+    if (prepared !== undefined) await discardDesktopConfiguration(prepared)
+    throw error
+  }
 }
 
 async function refreshManagedWorkspaceCapabilities() {
@@ -1198,15 +1319,9 @@ async function refreshManagedWorkspaceCapabilities() {
     )
     return managedWorkspaceCapabilities
   }
-  try {
-    const capabilities = await maintenance.capabilities()
-    if (maintenance !== managedWorkspaceMaintenance) return managedWorkspaceCapabilities
-    managedWorkspaceCapabilities = publicManagedWorkspaceCapabilities(capabilities)
-  } catch {
-    if (maintenance === managedWorkspaceMaintenance) {
-      managedWorkspaceCapabilities = publicManagedWorkspaceCapabilities()
-    }
-  }
+  const capabilities = await readManagedWorkspaceCapabilities(maintenance)
+  if (maintenance !== managedWorkspaceMaintenance) return managedWorkspaceCapabilities
+  managedWorkspaceCapabilities = capabilities
   await managedWorkspaceBackendRecovery.observe(
     managedWorkspaceCapabilities,
     projectNativeAuthorityPresent,
@@ -1259,12 +1374,19 @@ const workspaceActions = createWorkspaceActions({
 })
 
 async function launchBackend(smokeChannel, onExit) {
+  await refreshSpaceModels({seed: true, status: false})
+  const spaceConfig = process.env.NOVA_SPACE_HOST_CONFIG || currentSettings?.spaceHostConfigPath
+  if (spaceConfig && spaceConfig === resolve(app.getPath('userData'), 'space', 'config.json') && existsSync(spaceConfig)) {
+    try {
+      const runtime = await loadSpaceHostRuntime()
+      await tailscaleRelay.restore(runtime.readHostSpaceConfig(spaceConfig).relay_url)
+    } catch { console.error('[desktop-diagnostic] tailscale_relay_restore_failed') }
+  }
   capabilityEditorCache = null
   let launchDocument
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
   const codingEnabled = !acceptance && launchDocument?.modules?.coding?.enabled !== false
-  if (desktopConfig?.modelConfigurationError) throw classifyBackendFailure(desktopConfig.modelConfigurationError)
   // Coding is optional: without a usable Codex CLI, including an unfinished manual path,
   // the runtime starts with the coding module off.
   const codingUnavailable = codingEnabled
@@ -1331,7 +1453,7 @@ async function launchBackend(smokeChannel, onExit) {
     }
     computerLaunchEnvironment = spec.env
     if (codingUnavailable) spec.env.CODING_MODULE_ENABLED = 'false'
-    const blocking = describeMissingBlockingEnvironment(spec.env, true)
+    const blocking = describeHostBlockingEnvironment(spec.env, true)
     if (blocking && blocking.missing.length > 0) {
       runtimeCapabilities = Object.freeze({state: 'startup_failed', toolCount: null, toolBudget: 24,
         reason: 'configuration_required', pipeline: blocking.pipeline, missing: blocking.missing, generation, diskGeneration})
@@ -1351,7 +1473,12 @@ async function launchBackend(smokeChannel, onExit) {
     const acceptanceProof=acceptance?waitForAcceptanceRuntimeGate(spawnedBackend,{buildCommit:acceptance.buildCommit,runtimeHash:acceptanceRuntimeHash(spec.entry)}):Promise.resolve()
     backend = spawnedBackend
     backendControl?.close()
-    backendControl = createBackendControl(spawnedBackend, {onUsage: () => {
+    backendControl = createBackendControl(spawnedBackend, {onSpaceModelsChanged: () => {
+      if (backend !== spawnedBackend || launchGeneration !== generation) return
+      settingsRestartPending = true
+      publishSettingsApplyStatus('pending_restart')
+      void refreshSpaceModels().then(() => sendToSettings('nova:settings:changed', settingsView()))
+    }, onUsage: () => {
       if (backend !== spawnedBackend || launchGeneration !== generation) return
       refreshRuntimeUsage()
     }, onStatus: status => {
@@ -1389,7 +1516,6 @@ async function launchBackend(smokeChannel, onExit) {
     })
     ;[ready] = await Promise.all([waitForBackendReadiness(spawnedBackend, listener.readiness, diagnostic),acceptanceProof])
     if(acceptance)appendAcceptanceCounts('runtime_gate_verified',{verified:1})
-    if (!acceptance && process.platform === 'darwin' && currentSettings.phoneConnectionEnabled && !currentSettings.phoneServerTokenFile) void managedPhone.start().catch(() => {})
   } finally {
     listener.close()
   }
@@ -1536,7 +1662,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   }
   ipcMain.handle('nova:personal:presentation-error', (event, message) => {
     if(event.sender !== mainWindow.webContents || typeof message !== 'string' || message.length > 2000) throw new Error('presentation error rejected')
-    return dialog.showMessageBox({type:'error',title:'Nova',message})
+    return dialog.showMessageBox({type:'error',title:DESKTOP_PRODUCT_NAME,message})
   })
   ipcMain.handle('nova:personal:presentation', async (event, mode, activate=true) => {
     if(event.sender !== mainWindow.webContents || !['background','workbench','orb'].includes(mode) || typeof activate!=='boolean') throw new Error('presentation request rejected')
@@ -1559,6 +1685,24 @@ async function startSelectedCamera(camera, smokeChannel) {
     // Sleep is an orb state: a workbench reached from a sleeping orb must hear its voice session, not the wake detector.
     if(mode==='workbench'&&['sleeping','blocked'].includes(wakeWord?.state))wakeWord.wake({show:false})
     if(activate){mainWindow.show();mainWindow.focus();return shown}
+  })
+  ipcMain.handle('nova:personal:notify', (event, payload) => {
+    if (event.sender !== mainWindow.webContents) throw new Error('notify request rejected')
+    return systemNotifier.notify(payload)
+  })
+  ipcMain.handle('nova:personal:notifications-status', event => {
+    if ((event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) || event.senderFrame !== event.sender.mainFrame) throw new Error('notifications status rejected')
+    return {...systemNotifier.status(), platform: process.platform}
+  })
+  ipcMain.handle('nova:personal:notifications-enabled', async (event, value) => {
+    if ((event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) || event.senderFrame !== event.sender.mainFrame) throw new Error('notifications setting rejected')
+    if (typeof value !== 'boolean') throw new Error('invalid notifications setting')
+    if ((currentSettings.systemNotifications !== false) !== value) await accessCredentials(() => settingsWriter({systemNotifications: value}, undefined, {preserveSecrets: true}))
+    return currentSettings.systemNotifications !== false
+  })
+  ipcMain.handle('nova:personal:notifications-settings', event => {
+    if ((event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) || event.senderFrame !== event.sender.mainFrame) throw new Error('notifications settings rejected')
+    return systemNotifier.openSystemSettings()
   })
   ipcMain.handle('nova:personal:unread', (event, value) => {
     if (event.sender !== mainWindow.webContents || !Number.isSafeInteger(value) || value < 0 || value > 1000000) throw new Error('unread request rejected')
@@ -1584,6 +1728,10 @@ async function startSelectedCamera(camera, smokeChannel) {
   ipcMain.handle('nova:personal:connector-authorization', async (event, value) => {
     if (event.sender !== mainWindow.webContents && event.sender !== settingsWindow?.webContents) throw new Error('authorization request rejected')
     await shell.openExternal(connectorAuthorizationUrl(value))
+  })
+  ipcMain.handle('nova:personal:shared-ideas', (event, language) => {
+    if (event.sender !== mainWindow?.webContents || event.senderFrame !== event.sender.mainFrame) throw new Error('shared ideas request rejected')
+    return sharedIdeas(language)
   })
   ipcMain.handle('nova:personal:article', async (event, value) => {
     if (event.sender !== mainWindow.webContents) throw new Error('article request rejected')
@@ -1705,7 +1853,9 @@ async function startSelectedCamera(camera, smokeChannel) {
     if (!mainWindow || event.sender !== mainWindow.webContents) {
       throw new Error('microphone permission request rejected')
     }
-    if (['granted', 'denied', 'restricted'].includes(microphoneSystemStatus)) {
+    // Only a grant is stable. A denial or restriction can be lifted in System Settings while
+    // the app runs, so it is read again on every request instead of being cached forever.
+    if (microphoneSystemStatus === 'granted') {
       return Object.freeze({ status: microphoneSystemStatus })
     }
     const result = await resolveMicrophonePermission({
@@ -1725,17 +1875,6 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.on('nova:orb-menu:show', event => {
     if (mainWindow && event.sender === mainWindow.webContents) showOrbMenu(launchId)
-  })
-  installHubIpc({ipcMain, getSender:()=>settingsWindow?.webContents, enabled:hubAvailable, action:(name,id)=>getDesktopHub().action(name,id)})
-  ipcMain.handle('nova:phone:action', (event, action, deviceId) => {
-    if (!settingsWindow || event.sender !== settingsWindow.webContents
-      || !['status', 'enable', 'disable', 'network', 'refresh', 'cancel', 'install', 'help', 'login', 'revoke'].includes(action)
-      || (action === 'revoke' ? typeof deviceId !== 'string' || !/^[a-f0-9-]{36}$/.test(deviceId) : deviceId !== undefined)) return {state: 'unavailable'}
-    if (action === 'cancel') return phoneAction(action)
-    const epoch = phoneEpoch
-    const result = phoneQueue.then(() => phoneAction(action, deviceId, epoch))
-    phoneQueue = result.catch(() => {})
-    return result
   })
   ipcMain.on('nova:setup:open', event => {
     if (mainWindow && event.sender === mainWindow.webContents) void openSetupWindow()
@@ -1929,6 +2068,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     }
     await refreshManagedWorkspaceCapabilities()
     await refreshSettingsCapabilities()
+    await refreshSpaceModels()
     ensureBuiltInSkills();skillsCache = listSkills()
     // A cold open cannot be told which category to show by a push: the panel
     // subscribes only after its module evaluates, and this reply is the first
@@ -2087,7 +2227,7 @@ async function startSelectedCamera(camera, smokeChannel) {
   })
   ipcMain.handle('nova:settings:personal', async (event, payload) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('connections request rejected')
-    const allowed = ['state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.priority.add', 'sources.priority.remove', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure']
+    const allowed = ['space.status', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke', 'state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.priority.add', 'sources.priority.remove', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete', 'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent', 'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete', 'connector.local_status', 'connector.local_connect', 'connector.local_access', 'connector.mail_status', 'connector.mail_connect', 'connector.mail_access', 'discovery.configure', 'news.configure']
     if (!payload || Object.getPrototypeOf(payload) !== Object.prototype || Object.keys(payload).sort().join(',') !== 'method,params'
       || !allowed.includes(payload.method) || !payload.params || Object.getPrototypeOf(payload.params) !== Object.prototype
       || JSON.stringify(payload.params).length > 16384) throw new Error('connections request rejected')
@@ -2099,6 +2239,12 @@ async function startSelectedCamera(camera, smokeChannel) {
     if (!owner) throw new Error('connections unavailable')
     const result = await owner.request(payload.method, payload.params, {timeoutMs: 180000})
     if (owner !== backendControl || generation !== settingsGeneration) throw new Error('connections changed')
+    if (payload.method === 'space.invitation' && result && !result.error) {
+      const value = JSON.stringify(result)
+      if (value.length > 8192) throw new Error('pairing payload too large')
+      const {default: QRCode} = await import('qrcode')
+      return {...result, qr_image: await QRCode.toDataURL(value, {width: 360, margin: 2})}
+    }
     return result
   })
   ipcMain.handle('nova:knowledge:action', async (event, payload) => {
@@ -2172,13 +2318,43 @@ async function startSelectedCamera(camera, smokeChannel) {
       return {ok: true}
     } catch { return {error: 'invalid_voice_preset'} }
   })
+  // The bootstrap token stays in main memory; the reply is {ok} or a closed error code.
+  // The renderer restarts the backend afterwards so NOVA_SPACE_HOST_CONFIG takes effect.
+  ipcMain.handle('nova:space:create', createSpaceCreateHandler({
+    allowed: event => !app.isQuitting && Boolean(settingsWindow) && event.sender === settingsWindow.webContents && event.senderFrame === event.sender.mainFrame,
+    directory: () => resolve(app.getPath('userData'), 'space'),
+    configured: () => Boolean(process.env.NOVA_SPACE_HOST_CONFIG) || (Boolean(currentSettings?.spaceHostConfigPath) && existsSync(currentSettings.spaceHostConfigPath)),
+    loadRuntime: loadSpaceHostRuntime,
+    existingPersonalPath: runtime => {
+      if(backendStatus.state!=='connected')throw Error('space_existing_data_unavailable')
+      return runtime.existingHostPersonalPath(computerLaunchEnvironment)
+    },
+    prepareRelay: () => tailscaleRelay.ensure(),
+    persist: configPath => accessCredentials(() => settingsWriter({spaceHostConfigPath: configPath}, undefined, {preserveSecrets: true})),
+  }))
+  // Tests one key from the settings page: the typed value, or the saved one decrypted here. Replies carry a status only.
+  ipcMain.handle('nova:settings:test-key', async (event, key, value) => {
+    if (!settingsWindow || event.sender !== settingsWindow.webContents) throw new Error('settings update rejected')
+    if (typeof key !== 'string' || !SECRET_KEYS.includes(key) || (value !== undefined && typeof value !== 'string')) throw new Error('settings update rejected')
+    if (!canProbeKey(key)) return Object.freeze({status: 'unsupported'})
+    let candidate = typeof value === 'string' ? value : ''
+    if (candidate.trim() === '') {
+      try { candidate = (await accessCredentials(() => decryptSecretsForSpawn(currentSettings, secretCodec)))[key] ?? '' }
+      catch { return Object.freeze({status: 'unreadable'}) }
+    }
+    return probeKeyForSettings(key, candidate)
+  })
   ipcMain.handle('nova:settings:set', async (event, payload, restart = false) => {
     if (!settingsWindow || event.sender !== settingsWindow.webContents) {
       throw new Error('settings update rejected')
     }
     return applyDesktopSettings(payload, restart)
   })
-  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,screen,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
+  installWelcomeIpc({ipcMain,app,dialog,nativeImage,systemPreferences,shell,desktopCapturer,windows:()=>[mainWindow,settingsWindow],environment:()=>computerLaunchEnvironment,backendReady:()=>backendStatus.state==='connected'})
+  installExperienceIpc({ipcMain,app,windows:()=>[mainWindow,settingsWindow],codec:secretCodec,loadRuntime:loadSpaceHostRuntime,fetcher:(...args)=>net.fetch(...args),complete:async(messages,signal)=>{
+    const configuration=await accessCredentials(()=>({settings:{...backendSettings(currentSettings),...(spaceModelsCache?.routes?{modelRoutes:spaceModelsCache.routes}:{})},secrets:decryptSecretsForSpawn(currentSettings,secretCodec),environment:process.env}))
+    return completeConfiguredExperience(configuration,messages,signal)
+  }})
   ipcMain.handle('nova:bootstrap', event => {
     // The renderer binds its backend-exit listener only after this reply lands, so a push
     // sent before then has nobody to reach. Riding the verdict on the very payload the
@@ -2354,7 +2530,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     // neither that nor 'starting' is a real exit, so neither raises the banner.
     } else if (backendStatus.state !== 'starting' && backendStatus.state !== 'stopped') sendToOrb('nova:backend-exit')
   }).catch(() => {
-    console.error('Nova Personal Agent Desktop renderer failed to load')
+    console.error(`${DESKTOP_PRODUCT_NAME} renderer failed to load`)
     app.quit()
   })
   tray = createTray()
@@ -2391,7 +2567,7 @@ async function startSelectedCamera(camera, smokeChannel) {
       sendToSettings('nova:settings:changed', settingsView())
       if (status.state === 'connected') { backendEverConnected = true; publishStartup('ready') }
       else if (status.state === 'reconnecting') publishStartup(backendEverConnected ? 'reconnecting' : 'backend', status.diagnostic)
-      else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic)
+      else if (!['starting', 'stopped'].includes(status.state)) publishStartup('failed', status.diagnostic, status.startupConfiguration)
       sendToOrb('nova:backend-status', {...status, startup})
       if (smokeChannel === null && status.state === 'connected' && status.connection) {
         sendToOrb('nova:backend-ready', status.connection)
@@ -2458,12 +2634,7 @@ async function runInstalledFileCameraSmoke() {
       try {
         installAppProtocol(window.webContents.session.protocol, {
           rendererRoot,
-          rendererFiles: [
-            '/release-camera.html',
-            '/release-camera.mjs',
-            '/release-camera-contract.mjs',
-            '/camera.mjs',
-          ],
+          rendererFiles: await buildRendererAssetGraph(rendererRoot, undefined, ['/release-camera.html']),
           fetchFile: (file, options) => net.fetch(pathToFileURL(file).href, options),
           cameraFile: camera.file,
           fetchCameraFile: (url, init) => net.fetch(url, init),
@@ -2538,9 +2709,8 @@ if (packagedSourceRollbackUnavailable) {
       platform: process.platform,
       iconFile: resolve(packageRoot, 'resources/icon-source/1024x1024.png'),
     })
-    if (hubAvailable()) { getDesktopHub(); void desktopHubService.restore().catch(() => {}) }
     const started=start()
-    if(acceptance)void started.then(async()=>{
+    if(acceptance&&!acceptance.keepOpen)void started.then(async()=>{
       await waitForNativeWorkbench(mainWindow)
       const initial=await captureNativeWorkbench(mainWindow,acceptance.outputDirectory,'initial')
       await new Promise(resolve=>setTimeout(resolve,acceptance.runCapSeconds*1000))
@@ -2597,7 +2767,8 @@ app.on('before-quit', event => {
     await maintenance?.close()
     sourceSmokeStage('maintenance_closed')
   }), wait(3000).then(() => sourceSmokeStage('maintenance_deadline'))])
-  const drain = Promise.all([backendDrain, maintenanceDrain, desktopHubConnection?.action('cancel'), feishuSetupOwner.release(), cancelPhonePairing().then(() => managedPhone.stop())])
+  const relayDrain = backendDrain.finally(() => tailscaleRelay.close())
+  const drain = Promise.all([relayDrain, maintenanceDrain, feishuSetupOwner.release()])
   const resumeQuit = () => { quitDrained = true; sourceSmokeStage('quit_resumed'); app.quit() }
   quitDrain = drain.then(resumeQuit, resumeQuit)
 })

@@ -105,7 +105,7 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
 
  // The orb carries no mode buttons: double-click expands, the context menu switches modes, and sleep is the only voice switch.
  const orbExtras=el('div',undefined,'personal-orb-extras');document.querySelector('#shell').append(orbExtras)
- const orbTask=button('',()=>openTask(orbTask.dataset.taskId),orbExtras);orbTask.className='personal-orb-task'
+ const orbTask=button('',()=>orbTask.dataset.taskId?openTask(orbTask.dataset.taskId):openPendingDecision(),orbExtras);orbTask.className='personal-orb-task'
  const orbNotice=el('p');orbNotice.setAttribute('role','status');orbNotice.setAttribute('aria-live','polite');orbExtras.append(orbNotice)
  // An orb is a voice conversation; sleep only reroutes its audio to wake detection, so opening it must not wake the orb.
  // A failed attempt holds until the orb is re-entered or reconnects, so a refused microphone reports once;
@@ -187,14 +187,20 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   tabs.badge('tasks',active)
   inspector?.setVisible(c.presentationMode==='workbench')
   for(const node of [taskNotice,orbNotice]){const text=t(c.taskNotice);if(node.textContent!==text)node.textContent=text;node.hidden=!text}
-  const aggregate=summarizeTasks(c.snapshot?.tasks??[],[...viewedResults]),decision=(c.snapshot?.pending_approvals??[]).find(item=>item.task_id);orbTask.dataset.taskId=decision?.task_id??aggregate.task_id??'';orbTask.hidden=!orbTask.dataset.taskId;orbTask.disabled=!c.connected;orbTask.textContent=t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',aggregate.active,Math.max(aggregate.decisions,decision?1:0),aggregate.results)
+  const aggregate=summarizeTasks(c.snapshot?.tasks??[],[...viewedResults]),decision=(c.snapshot?.pending_approvals??[]).find(item=>item.task_id)
+  // The executor approval card is gone from the orb HUD, so a decision without a task still needs an entry point:
+  // the pill opens the workbench where the composer dock answers it.
+  const untaskedDecision=(c.snapshot?.pending_approvals??[]).find(item=>!item.task_id)
+  orbTask.dataset.taskId=decision?.task_id??aggregate.task_id??'';orbTask.hidden=!orbTask.dataset.taskId&&!untaskedDecision;orbTask.disabled=!c.connected
+  orbTask.textContent=!orbTask.dataset.taskId&&untaskedDecision?t('处理审批：{0}',untaskedDecision.summary||t('需要你处理')):t('任务：{0} 进行中 · {1} 待处理 · {2} 新结果',aggregate.active,Math.max(aggregate.decisions,decision?1:0),aggregate.results)
   const stateNoticeValue=c.snapshot?.conversations?.state_notice
   if(stateNoticeValue&&c.presentationMode==='workbench'){stateNotice.textContent=t('状态文件无法读取（{0}），已从空状态启动。原文件：{1}；已保留备份：{2}。',stateNoticeValue.code,stateNoticeValue.original_path,stateNoticeValue.backup_path);stateNotice.hidden=false}
   else stateNotice.hidden=true
   error.textContent=c.error;error.hidden=!c.error||c.presentationMode!=='workbench';orbError.textContent=c.error;orbError.hidden=!c.error||c.presentationMode!=='orb'
   syncOrbVoice()
   const pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
-  const nextWaitingKey=JSON.stringify([pending,c.connected]);if(nextWaitingKey!==waitingKey){waitingKey=nextWaitingKey;waiting.replaceChildren();for(const item of pending){const b=button(t('处理审批：{0}',item.summary),async()=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);await c.setPresentation('orb')},waiting);b.disabled=!c.connected}}
+  const nextWaitingKey=JSON.stringify([pending,c.connected]);if(nextWaitingKey!==waitingKey){waitingKey=nextWaitingKey;waiting.replaceChildren();for(const item of pending){const b=button(t('处理审批：{0}',item.summary),async()=>{if(item.task_id){await openTask(item.task_id,true);return}if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id);// The dock lives in the workbench, so an approval must never hand off to the orb.
+   await c.setPresentation('workbench');chat.reveal()},waiting);b.disabled=!c.connected}}
   const unreadTotal=(c.snapshot?.conversations?.items??[]).reduce((sum,item)=>sum+(item.unread_count??0),0)
   const unreadDot=document.querySelector('#unread-indicator');if(unreadDot)unreadDot.hidden=!unreadTotal
   if(!initialHome&&c.snapshot?.conversations?.items?.some(item=>item.id==='chat:main')){initialHome=true;void run(()=>c.home())}
@@ -211,8 +217,18 @@ export function mountPersonalView({send,start,stop,tasks,taskAction,results,api,
   syncPending()
  }
  async function focusAttention(){const target=attentionTarget(c.snapshot);if(!target)return;if(target.taskId){await openTask(target.taskId,true);return}if(target.conversationId!==c.selectedId)await c.select(target.conversationId);chat.reveal()}
+ /** A decision without a task has no detail page; open the workbench and select its conversation so the dock shows it. */
+ async function openPendingDecision(){
+  const pending=[...(c.snapshot?.pending_approvals??[]),...(c.snapshot?.pending_confirmations??[])]
+  const item=pending.find(row=>row.task_id)??pending.find(row=>row.conversation_id)??pending[0]
+  if(!item)return
+  if(item.task_id){await openTask(item.task_id,true);return}
+  if(c.presentationMode!=='workbench')await c.setPresentation('workbench')
+  if(item.conversation_id&&item.conversation_id!==c.selectedId)await c.select(item.conversation_id)
+  chat.reveal()
+ }
  async function collapse(value){await c.setPresentation(value?'orb':'workbench');if(!value)await showHome()}
  function receive(frame){chat.receive(frame);if(frame.type==='client.ready')executorFloat.reset();executorFloat.receive(frame);c.receive(frame);computerUse?.receive(frame);inspector?.receive(frame);if(frame.type==='executor.tasks')renderPanel()}
- api.personal.onPresentationRequest?.((mode,options)=>run(async()=>{await c.setPresentation(mode);if(options?.attention&&mode==='workbench')await focusAttention()}));
+ api.personal.onPresentationRequest?.((mode,options)=>run(async()=>{await c.setPresentation(mode);if(mode==='workbench'&&options?.conversationId==='chat:main')await showHome();else if(options?.attention&&mode==='workbench')await focusAttention()}));
  api.personal.onCollapsed?.(value=>c.collapse(value));api.personal.onMaximized?.(value=>{document.body.dataset.maximized=value?'1':'0'});const dateClock=setInterval(()=>{if(c.presentationMode==='workbench')update()},60000);dateClock.unref?.();update();renderPanel();return {controller:c,receive,identity:value=>chat.identity(value),refresh:update,setOrb:state=>chat.setOrb(state),setOrbLevel:level=>chat.setOrbLevel(level),expand:()=>run(()=>collapse(false)),openTask:id=>run(()=>openTask(id)),startup:value=>{const wasFailed=startupNotice.dataset.stage==='failed',failed=value?.stage==='failed';startupNotice.dataset.stage=value?.stage??'';startupNotice.className=failed?'page-error':'page-notice';startupNotice.setAttribute('role',failed?'alert':'status');startupSettings.hidden=!failed;startup.update(value);if(failed!==wasFailed){update();renderPanel()}}}
 }

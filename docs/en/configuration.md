@@ -22,7 +22,7 @@ Only the selected voice pipeline's keys are required. Search, camera watch, memo
 
 Direct runtime launches use DeepSeek for the cascaded LLM unless `CASCADE_LLM_PROVIDER` selects another provider.
 
-For Qwen Audio 3.1, select `qwen-audio-3.1-realtime-plus` and its matching `longanqian_v3.1` voice. StepAudio 3 is a preview integration awaiting live acceptance. To use it, select StepFun and provide `STEPFUN_API_KEY`; Step 3.7 Flash uses the same key for auxiliary chat and vision by default. Local memory embeddings still need a configured embedding service. To use a custom auxiliary gateway, set `MODEL_API_KEY` and `MODEL_BASE_URL`.
+For Qwen Audio 3.1, select `qwen-audio-3.1-realtime-plus` and its matching `longanqian_v3.1` voice. StepAudio 3 is a preview integration awaiting live acceptance. To use it, select StepFun and provide `STEPFUN_API_KEY`; Step 3.7 Flash uses the same key for auxiliary chat and vision by default. Local memory embeddings still need a configured embedding service. Each provider owns its model endpoint: `DASHSCOPE_MODEL_BASE_URL`, `DEEPSEEK_MODEL_BASE_URL`, `OPENAI_MODEL_BASE_URL`, `GEMINI_MODEL_BASE_URL` and `STEPFUN_MODEL_BASE_URL`; Ark keeps the dedicated `VOLCENGINE_ARK_BASE_URL`. These endpoints cover text, vision and auxiliary model traffic only. Realtime audio keeps each provider's `*_REALTIME_URL`, and embeddings keep the independent `EMBEDDING_BASE_URL`/`EMBEDDING_API_KEY`. The retired generic `MODEL_BASE_URL`/`MODEL_API_KEY` do not apply to any provider. Use `OPENAI_COMPATIBLE_BASE_URL`/`OPENAI_COMPATIBLE_API_KEY` for an explicit compatible gateway and `SELF_HOSTED_LLM_BASE_URL`/`SELF_HOSTED_LLM_API_KEY` for self-hosted serving.
 
 ## Common options
 
@@ -31,7 +31,13 @@ Set only what you need to change. Keep credentials out of Git.
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | Variable | Default | Purpose |
 |---|---|---|
+| `NOVA_SPACE_HOST_CONFIG` | None | Absolute path to a private Host Space configuration; runtime data stays on this Host. |
 | `NOVA_LOCAL_TOOL_APPROVAL` | ask | Local Build file writes, edits and shell approval: ask or never; independent of executor approval. |
+| `DASHSCOPE_MODEL_BASE_URL` | https://dashscope.aliyuncs.com/compatible-mode/v1 | Qwen text and vision model endpoint; independent of realtime audio, ASR, TTS, search and embedding. |
+| `DEEPSEEK_MODEL_BASE_URL` | https://api.deepseek.com | DeepSeek text and vision model endpoint. |
+| `OPENAI_MODEL_BASE_URL` | https://api.openai.com/v1 | OpenAI text model endpoint; the realtime endpoint stays OPENAI_REALTIME_URL. |
+| `GEMINI_MODEL_BASE_URL` | https://generativelanguage.googleapis.com/v1beta/openai | Gemini text model endpoint; the realtime endpoint stays GEMINI_REALTIME_URL. |
+| `STEPFUN_MODEL_BASE_URL` | https://api.stepfun.com/v1 | StepFun text and vision model endpoint; the realtime endpoint stays STEPFUN_REALTIME_URL. |
 | `PIPELINE_MODE` | integrated | Product pipeline shape: integrated or cascaded. |
 | `PROMPT_LANGUAGE` | zh-CN | AI system prompt language: zh-CN or en; desktop supplies its saved preference. |
 | `INTEGRATED_PROVIDER` | qwen | Integrated realtime provider. |
@@ -40,7 +46,9 @@ Set only what you need to change. Keep credentials out of Git.
 | `CODEX_APPROVAL_MODE` | ask | Coding approval mode for Codex and ACP backends; Pi refuses ask. |
 | `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | Capabilities registry path. |
 | `MEMORY_CONNECTION` | local | Memory connection: disabled, local, or remote. |
-| `MEMORY_PROVIDER` | None | Local engine: voicemem (default; unified ledger) or explicit mem0. Remote engines are service-owned. |
+| `MEMORY_PROVIDER` | None | Deprecated local provider: voicemem keeps ledger migration; mem0 keeps standalone mode. Conflicts with new memory variables. |
+| `MEMORY_RECALL_ENGINE` | ledger | Expert local recall engine: ledger, voicemem or mem0; ledger remains authority. No UI picker. |
+| `MEMORY_EXTRACTORS` | ledger | Comma-separated ledger or ledger,voicemem. VoiceMem adds temporary response-style context, not facts. Cannot combine with MEMORY_PROVIDER. |
 | `DASHSCOPE_API_KEY` | None | Qwen realtime credential. |
 | `QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen realtime model. |
 | `QWEN_REALTIME_VOICE` | longanqian | Qwen realtime voice. |
@@ -80,3 +88,8 @@ A target-validation retry currently reruns both stages; at most four model calls
 [Back to getting started](getting-started.md)
 
 See [OpenAI and Gemini providers](../en/global-providers.md) for model presets, credential routing and protocol limitations.
+
+
+### Memory engine provider requirements
+
+For ledger-authoritative SDK recall, set `MEMORY_RECALL_ENGINE=mem0` or `voicemem`; optionally add `MEMORY_EXTRACTORS=ledger,voicemem` for temporary response-style extraction. Leave `MEMORY_PROVIDER` unset. There is no `MEMORY_BACKEND` alias. Existing embedding and fast/extraction model routes supply credentials and OpenAI-compatible `/embeddings` and `/chat/completions` endpoints; DashScope defaults reuse `DASHSCOPE_API_KEY`, not a Mem0 cloud key. Defaults stay ledger-only. See [memory architecture](archs/02-memory.md) for consent, TTL, and durable retry behavior.

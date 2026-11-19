@@ -642,7 +642,7 @@ test('a cancelled memory replacement is retried before the next input instead of
  const provider=Object.assign(new FakeProvider(),{submitText:()=>{order.push('input');return Promise.resolve()}})
  let hold:{resolve:()=>void}|undefined
  const replace=provider.replaceResponseAdaptation.bind(provider)
- provider.replaceResponseAdaptation=(context,signal)=>{order.push(`memory:${context.content}`);if(context.content===null&&hold===undefined)return new Promise<void>((_resolve,reject)=>{hold={resolve:()=>undefined};signal.addEventListener('abort',()=>reject(signal.reason instanceof Error?signal.reason:Error('aborted')),{once:true})});return replace(context,signal)}
+ provider.replaceResponseAdaptation=(context,signal)=>{order.push(`memory:${context.content}`);if(context.content===null&&hold===undefined)return new Promise<void>((_resolve,reject)=>{hold={resolve:()=>undefined};signal.addEventListener('abort',()=>reject(signal.reason instanceof Error?signal.reason:new Error('aborted')),{once:true})});return replace(context,signal)}
  const session=new RealtimeProviderSession(provider,{responseAdaptationRequired:()=>true,responseAdaptation:()=>({revision:content===null?2:1,content})})
  await session.connect();content=null
  const cancelled=new AbortController(),first=session.submitText('first',cancelled.signal)
@@ -664,4 +664,23 @@ test('requested-response audio does not read memory per frame but response admis
  await session.ensureResponse();assert.equal(reads,before+1)
  assert.deepEqual(provider.responseAdaptations.at(-1),{revision:1,content:null});assert.equal(provider.ensured,1)
  await session.close()
+})
+
+test('memory is read once per session and later audio frames never wait for it', async () => {
+  const provider = new FakeProvider()
+  let reads = 0
+  const session = new RealtimeProviderSession(provider, {
+    responseAdaptation: () => { reads += 1; return new Promise(resolve => setTimeout(() => resolve({revision: 1, content: 'ctx'}), 300)) },
+    responseAdaptationRequired: () => true,
+  })
+  await session.connect()
+  // The first frame has no verification yet, so it waits for one read.
+  await session.sendAudio(new Uint8Array([0, 0]))
+  const readsAfterFirst = reads
+  const started = Date.now()
+  for (let i = 1; i <= 200; i++) await session.sendAudio(new Uint8Array([i & 255, 0]))
+  assert.ok(Date.now() - started < 250, 'frames after a verification are not blocked by a read')
+  assert.equal(provider.sentAudio.length, 201)
+  assert.equal(reads - readsAfterFirst, 0, 'no further reads after the first verification')
+  await session.close()
 })

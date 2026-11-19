@@ -1,0 +1,417 @@
+import test from 'node:test'
+import assert from 'node:assert/strict'
+import React, {act,createRef} from 'react'
+import {JSDOM} from 'jsdom'
+import {ChatPane,PlanPreview,Markdown} from '../src/renderer/react/chat.tsx'
+
+async function mount(overrides:any={},props:any={}){
+ const dom=new JSDOM('<!doctype html><html><body><div id="root"></div></body></html>',{url:'http://localhost',pretendToBeVisual:true})
+ Object.assign(globalThis,{window:dom.window,document:dom.window.document,HTMLElement:dom.window.HTMLElement,Element:dom.window.Element,Node:dom.window.Node,Event:dom.window.Event,KeyboardEvent:dom.window.KeyboardEvent,IS_REACT_ACT_ENVIRONMENT:true})
+ dom.window.HTMLMediaElement.prototype.pause=()=>{}
+ dom.window.HTMLMediaElement.prototype.play=()=>Promise.resolve()
+ const {createRoot}=await import('react-dom/client')
+ const states:any={'chat:main':{draft:'',references:[]}},calls:any[]=[]
+ const c:any={ordinarySpace:true,selectedId:'chat:main',connected:true,presentationReady:true,inputInstance:'input',capabilities:['text_input','dictation'],mode:'text',snapshot:{conversations:{items:[{id:'chat:main',kind:'chat',mode:'chat'}],messages:[]}},state(id='chat:main'){return states[id]??=( {draft:'',references:[]})},get selectedConversation(){return this.snapshot.conversations.items.find((i:any)=>i.id===this.selectedId)},get draft(){return this.state(this.selectedId).draft},set draft(v){this.state(this.selectedId).draft=v},isBuildFinished:()=>false,command:async(m:any,p:any)=>{calls.push([m,p]);return{}},openFeed:async(id:any,label:any)=>{calls.push(['openFeed',id,label])},submit:async()=>{calls.push(['submit',c.draft]);return true},dictate:async()=>{calls.push(['dictate'])},finish:async()=>{calls.push(['finish'])},voice:async()=>{calls.push(['voice'])},stopVoice:async()=>{calls.push(['stopVoice'])},home:async()=>{},changed:()=>{},...overrides}
+ const root=createRoot(document.getElementById('root')!),ref=createRef<any>();const render=()=>root.render(<ChatPane ref={ref} c={c} run={(f:any)=>Promise.resolve().then(f).catch(()=>{})} api={{}} onHome={async()=>{}} openTask={()=>{}} openSchedule={()=>{}} onPreviewPlan={()=>{}} {...props} />)
+ c.changed=()=>render();await act(async()=>{render()});
+ return {c,calls,ref,dom,replace:async(node:any)=>act(async()=>root.render(node)),render:async()=>act(async()=>{render()}),close:async()=>{await act(async()=>root.unmount());dom.window.close()},click:async(node:any)=>act(async()=>{node.click()}),key:async(node:any,init:any)=>act(async()=>node.dispatchEvent(new dom.window.KeyboardEvent('keydown',{bubbles:true,cancelable:true,...init}))),byLabel:(label:string)=>document.querySelector(`[aria-label="${label}"]`) as any}
+}
+
+test('a pending card request renders as a quiet user bubble and never as a duplicate of the stored one',async()=>{
+ const h=await mount();try{
+  const request={request_id:'req-1',text:'Discuss this card',references:[{kind:'timeline',id:'card',version:'v1'}],restored:false}
+  h.c.pendingUserMessage=()=>{const rows=h.c.snapshot.conversations.messages;return rows.some((m:any)=>m.request_id==='req-1')?null:{id:'pending:req-1',conversation_id:'chat:main',role:'user',text:request.text,request_id:'req-1',created_at:'',pending:true}}
+  await h.render()
+  const bubble=document.querySelector('[data-pending="true"]') as HTMLElement
+  assert.ok(bubble,'the pending message is visible immediately');assert.match(bubble.textContent??'',/Discuss this card/)
+  assert.ok(bubble.className.includes('message-pending'))
+  h.c.snapshot.conversations.messages=[{id:'m1',conversation_id:'chat:main',role:'user',text:'Discuss this card',request_id:'req-1',created_at:new Date().toISOString()}]
+  await h.render()
+  assert.equal(document.querySelector('[data-pending="true"]'),null,'the stored message replaces it')
+  assert.equal([...document.querySelectorAll('.message.user')].filter(n=>(n.textContent??'').includes('Discuss this card')).length,1,'exactly one bubble')
+ }finally{await h.close()}
+})
+test('IME Enter preserves draft; normal Enter sends current draft',async()=>{
+ const h=await mount();try{h.c.draft='组合输入';await h.render();const input=h.byLabel('消息草稿');await h.key(input,{key:'Enter',isComposing:true});assert.equal(h.calls.length,0);await h.key(input,{key:'Enter'});assert.deepEqual(h.calls,[['submit','组合输入']])}finally{await h.close()}
+})
+test('voice and dictation dispatch distinct controller actions',async()=>{
+ const h=await mount();try{await h.click(h.byLabel('语音输入'));await h.click(h.byLabel('持续对话'));assert.deepEqual(h.calls,[['dictate'],['voice']]);h.c.dictationId='d';h.c.dictationConversationId='chat:main';h.c.mode='recording';await h.render();await h.click(h.byLabel('停止录音'));assert.deepEqual(h.calls.at(-1),['finish'])}finally{await h.close()}
+})
+test('pending approval is single flight and belongs to selected conversation',async()=>{
+ let release:any;const pending=new Promise(r=>release=r);const h=await mount();try{h.c.snapshot.pending_approvals=[{approval_id:'a',conversation_id:'chat:main',summary:'Run command?'},{approval_id:'b',conversation_id:'other',summary:'Other approval'}];h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);await pending};await h.render();assert.equal(document.body.textContent!.includes('Other approval'),false);const allow=[...document.querySelectorAll('button')].find(n=>n.textContent==='允许')!;await h.click(allow);await h.click(allow);assert.equal(h.calls.length,1);assert.deepEqual(h.calls[0],['conversations.approve',{id:'chat:main',approval_id:'a',approved:true}]);await act(async()=>release({}))}finally{await h.close()}
+})
+test('failed card recovers references without overwriting a nonempty draft',async()=>{
+ const h=await mount();try{h.c.state().failed_card={text:'Recover me',references:[{kind:'todo',id:'todo'}]};h.c.draft='Unsaved';await h.render();let restore=[...document.querySelectorAll('button')].find(n=>n.textContent==='放入空草稿')!;assert.equal(restore.disabled,true);h.c.draft='';await h.render();restore=[...document.querySelectorAll('button')].find(n=>n.textContent==='放入空草稿')!;await h.click(restore);assert.equal(h.c.draft,'Recover me');assert.deepEqual(h.c.state().references,[{kind:'todo',id:'todo'}]);assert.equal(h.c.state().failed_card,null)}finally{await h.close()}
+})
+
+test('Build requests consent for attached references and clears only the accepted draft',async()=>{
+ const h=await mount();try{let release:any;h.c.state().execution='build';h.c.draft='Build this';h.c.state().references=[{kind:'todo',id:'t',version:1}];h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(m==='workspaces.list')return[{workspace_id:'w0',is_default:true}];if(m==='build.begin')await new Promise(r=>release=r);return{}};await h.render();await h.click(h.byLabel('发送消息'));assert.ok(document.querySelector('dialog[open]'));assert.equal(h.calls.some(([m]:any)=>m==='build.begin'),false);await h.click([...document.querySelectorAll('dialog button')].find(n=>n.textContent==='取消'));assert.equal(h.c.draft,'Build this');assert.equal(h.c.state().references.length,1);await h.click(h.byLabel('发送消息'));await h.click([...document.querySelectorAll('dialog button')].find(n=>n.textContent==='继续并新建任务'));assert.deepEqual(h.calls.find(([m]:any)=>m==='build.begin'),['build.begin',{text:'Build this',workspace_id:'w0'}]);assert.equal(h.byLabel('消息草稿').disabled,true);assert.equal(h.c.state().references.length,1);h.c.draft='Newer draft';await act(async()=>release({}));assert.equal(h.c.draft,'Newer draft');assert.equal(h.c.state().references.length,0);assert.equal(h.c.state().execution,undefined)}finally{await h.close()}
+})
+test('a rejected direct Build preserves draft and attached references',async()=>{
+ const h=await mount();try{h.c.state().execution='build';h.c.state().workspace={project:'/work/demo'};h.c.draft='Keep on error';h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(m==='build.begin')throw Error('disconnected');return[]};await h.render();await h.click(h.byLabel('发送消息'));assert.equal(h.c.draft,'Keep on error');assert.equal(h.c.state().execution,'build');assert.equal(h.byLabel('消息草稿').disabled,false)}finally{await h.close()}
+})
+test('Shift Tab cycles once while IME and modified Shift Tab preserve mode',async()=>{
+ const h=await mount();try{h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(m==='conversations.mode')h.c.selectedConversation.mode=p.mode;return{}};await h.key(h.byLabel('消息草稿'),{key:'Tab',shiftKey:true,isComposing:true});assert.equal(h.calls.length,0);await h.key(h.byLabel('消息草稿'),{key:'Tab',shiftKey:true,ctrlKey:true});assert.equal(h.calls.length,0);await h.key(h.byLabel('消息草稿'),{key:'Tab',shiftKey:true});assert.deepEqual(h.calls,[['conversations.mode',{id:'chat:main',mode:'plan'}]]);assert.equal(h.byLabel('对话模式：Plan').textContent,'Plan');await h.key(h.byLabel('对话模式：Plan'),{key:'Tab',shiftKey:true});assert.equal(h.c.state().execution,'build');assert.equal(h.calls.filter(([m]:any)=>m==='conversations.mode').length,2)}finally{await h.close()}
+})
+test('live captions render cumulative full text then retract without a state frame',async()=>{
+ const h=await mount();try{const receive=(text:string,final=false)=>act(async()=>h.ref.current.receive({type:'caption',role:'assistant',text:text.slice(-6),full_text:text,conversation_id:'chat:main',turn_id:'turn',final}));await receive('Long opening stays');assert.ok(document.querySelector('[role=log]')!.textContent!.includes('Long opening stays'));await receive('Long opening stays and grows');assert.equal(document.querySelectorAll('[role=log] .message').length,1);await receive('',true);assert.equal(document.querySelectorAll('[role=log] .message').length,0)}finally{await h.close()}
+})
+test('reference limits reject atomically and a valid reference preserves draft and focuses composer',async()=>{
+ const h=await mount();try{h.c.draft='Existing';h.c.state().references=[{kind:'todo',id:'a'}];await act(async()=>h.ref.current.focusReference([{kind:'goal',id:'b'}]));assert.equal(h.c.draft,'Existing');assert.equal(h.c.state().references.length,2);assert.equal(document.activeElement,h.byLabel('消息草稿'));await assert.rejects(h.ref.current.focusReference([{kind:'timeline',id:'c'}],'Would append'),/2/);assert.equal(h.c.draft,'Existing');assert.equal(h.c.state().references.length,2)}finally{await h.close()}
+})
+test('feed presented and read receipts require visible focused expanded content',async()=>{
+ const h=await mount();try{Object.defineProperty(document,'hasFocus',{value:()=>true,configurable:true});h.dom.window.HTMLElement.prototype.getBoundingClientRect=()=>({x:0,y:0,left:0,right:100,top:0,bottom:100,width:100,height:100,toJSON(){}});h.c.collapsed=true;h.c.snapshot.feed=[{id:'f',delivery:{},prepared:{text:'## Prepared\n- Item'}}];h.c.snapshot.conversations.items[0].unread_count=1;h.c.snapshot.conversations.messages=[{id:'feed:f',conversation_id:'chat:main',role:'assistant',text:'fallback'}];await h.render();assert.equal(h.calls.length,0);h.c.collapsed=false;await h.render();assert.ok(document.querySelector('.message-feed h2'));assert.deepEqual(h.calls,[['feed.action',{id:'f',action:'presented'}],['conversations.read',{id:'chat:main',through_message_id:'feed:f'}]]);await h.render();assert.equal(h.calls.length,2)}finally{await h.close()}
+})
+test('Markdown renders nested structure while refusing executable links and remote images',async()=>{
+ const h=await mount();try{const opened:string[]=[];await h.replace(<Markdown text={'## Title\n\n- [x] **Done**\n  - Nested\n\n| A | B |\n| :- | -: |\n| x | y |\n\n[Safe](https://example.com) [bad](javascript:alert) ![remote](https://image.test/a.png)\n\n```js\n<script>unsafe</script>\n```'} openLink={url=>opened.push(url)}/>);assert.equal(document.querySelector('h2')!.textContent,'Title');assert.equal(document.querySelectorAll('ul ul').length,1);assert.equal(document.querySelector('li')!.dataset.task,'done');assert.equal(document.querySelectorAll('table td').length,2);assert.equal(document.querySelector('img'),null);assert.equal(document.querySelector('script'),null);assert.equal(document.querySelectorAll('.md-link').length,1);await h.click(document.querySelector('.md-link'));assert.deepEqual(opened,['https://example.com/']);assert.ok(document.body.textContent!.includes('[bad](javascript:alert)'))}finally{await h.close()}
+})
+test('Build approval preview failure stays actionable and allows explicit preview retry',async()=>{
+ const h=await mount();try{h.c.snapshot.conversations.items[0]={id:'chat:main',kind:'build',build:{status:'awaiting_approval',computer_use:{enabled:false},approval:{id:'approval',name:'shell',call_id:'call',preview:'echo safe'}}};let failed=true;h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(m==='build.details'){if(failed)throw Error('offline');return{text:'Full preview',next_offset:null}}return{}};await h.render();assert.ok(document.querySelector('.workbench-local-approval pre')!.textContent!.includes('echo safe'));const allow=()=>[...document.querySelectorAll('button')].find(n=>n.textContent==='允许本次')!;assert.equal(allow().disabled,false);failed=false;await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='重试预览'));assert.equal(document.querySelector('.workbench-local-approval pre')!.textContent,'Full preview');await h.click(allow());assert.deepEqual(h.calls.at(-1),['build.approve',{id:'chat:main',approval_id:'approval',approved:true}])}finally{await h.close()}
+})
+
+test('plan editor keeps unsaved text when the preview is closed and reopened',async()=>{
+ const h=await mount();try{h.c.snapshot.conversations.items[0].mode='plan';h.c.snapshot.conversations.items[0].plan={id:'p',version:1};h.c.command=async(m:any)=>m==='plans.get'?{title:'Plan',version:1,content:'Original',next_offset:null}:m==='conversations.targets'?{local_build_supported:true,executors:['codex'],targets:[]}:[];const plan=()=> <PlanPreview c={h.c} run={async f=>{try{await f()}catch{}}}/>;await h.replace(plan());await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='修改计划'));const input=h.byLabel('计划内容');await act(async()=>{Object.getOwnPropertyDescriptor(h.dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(input,'Unsaved plan');input.dispatchEvent(new h.dom.window.Event('input',{bubbles:true}))});assert.equal(input.value,'Unsaved plan');await h.replace(<div>Other tab</div>);await h.replace(plan());assert.equal(h.byLabel('计划内容')?.value,'Unsaved plan')}finally{await h.close()}
+})
+
+test('plan conflict retains edits after refreshing to a newer version',async()=>{
+ const h=await mount();try{h.c.selectedConversation.mode='plan';h.c.selectedConversation.plan={id:'p',version:1};h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(m==='plans.get')return{title:'Plan',version:p.version,content:'Remote v'+p.version,next_offset:null};if(m==='conversations.targets')return{local_build_supported:true,executors:[],targets:[]};if(m==='plans.edit')throw Error('version_conflict');return[]};const plan=()=> <PlanPreview c={h.c} run={async f=>{try{await f()}catch{}}}/>;await h.replace(plan());await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='修改计划'));let input=h.byLabel('计划内容');await act(async()=>{Object.getOwnPropertyDescriptor(h.dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(input,'Keep my edits');input.dispatchEvent(new h.dom.window.Event('input',{bubbles:true}))});await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='保存计划'));assert.equal(h.byLabel('计划内容').value,'Keep my edits');h.c.selectedConversation.plan.version=2;await h.replace(plan());assert.equal(h.byLabel('计划内容').value,'Keep my edits');assert.equal(document.querySelector('h3')!.textContent,'计划 · Plan · v2');assert.deepEqual(h.calls.find(([m]:any)=>m==='plans.edit'),['plans.edit',{id:'chat:main',plan_id:'p',expected_version:1,offset:0,text:'Keep my edits',final:true}])}finally{await h.close()}
+})
+test('Build steps page thoughts and tool calls and load screenshots on demand',async()=>{
+ const h=await mount();try{h.c.snapshot.conversations.items[0]={id:'chat:main',generation:1,kind:'build',build:{status:'paused',log_revision:1,computer_use:{enabled:false}}};h.c.snapshot.conversations.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Run'}];h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(p.view==='image')return{media_type:'image/png',data_base64:'aW1hZ2U='};if(p.view==='steps'&&p.offset===0)return{generation:1,total:2,first_id:'call',thoughts_first_id:'thought',items:[{kind:'thinking',id:'thought',message_id:'user',text:'Considering next step',created_at:new Date().toISOString()}],next_offset:1};if(p.view==='steps'&&p.offset===1)return{generation:1,total:2,first_id:'call',thoughts_first_id:'thought',items:[{kind:'tool',id:'call',message_id:'user',name:'computer_click',input:'{"x":4,"y":8}',output:'ok',state:'completed',status:'completed',image_ref:'shot',started_at:'2026-10-28T00:00:00Z',finished_at:'2026-10-28T00:00:01Z'}],next_offset:null};return{}};await h.render();assert.equal(document.querySelectorAll('.build-step').length,2);assert.deepEqual(h.calls.filter(([,p]:any)=>p.view==='steps').map(([,p]:any)=>p.offset),[0,1]);assert.equal(h.calls.some(([,p]:any)=>p.view==='image'),false);const details=document.querySelector('.build-tool-call') as HTMLDetailsElement;await act(async()=>{details.open=true;details.dispatchEvent(new h.dom.window.Event('toggle',{bubbles:false}))});assert.equal(document.querySelector('.computer-shot')!.getAttribute('src'),'data:image/png;base64,aW1hZ2U=');assert.ok(document.querySelector('.build-tool-target')!.textContent!.includes('点击 · 4, 8'))}finally{await h.close()}
+})
+test('Build displays ordinary model text between collapsible tool groups',async()=>{
+ const h=await mount()
+ try{
+  h.c.snapshot.conversations.items[0]={id:'chat:main',generation:0,kind:'build',build:{status:'completed',log_revision:1}}
+  h.c.snapshot.conversations.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Run'},{id:'reply',conversation_id:'chat:main',role:'assistant',text:'Verified'}]
+  const tool={kind:'tool',message_id:'user',state:'completed',status:'completed',input:'{}'}
+  h.c.command=async(_method:any,p:any)=>p.view==='steps'?{generation:0,total:2,items:[{...tool,id:'read',name:'file_read'},{...tool,id:'write',name:'file_write',narration:'I read the file. **Writing the change.**'}],next_offset:null}:{}
+  await h.render()
+  const text=document.querySelector('.build-narration')!
+  assert.equal(text.querySelector('strong')?.textContent,'Writing the change.')
+  assert.equal(text.previousElementSibling?.querySelector('.build-tool-call code')?.textContent,'file_read')
+  assert.equal(text.nextElementSibling?.querySelector('.build-tool-call code')?.textContent,'file_write')
+  assert.equal(text.closest('[hidden]'),null)
+  assert.equal(document.querySelectorAll('.build-narration').length,1)
+ }finally{await h.close()}
+})
+test('Build puts the avatar on the first reply and summarizes real file activity',async()=>{
+ const h=await mount()
+ try{
+  await act(async()=>h.ref.current.identity({profile:{assistantName:'Nova',avatar:'avatar.png'}}))
+  const item={id:'chat:main',generation:0,kind:'build',build:{status:'running',log_revision:1}}
+  h.c.snapshot.conversations.items[0]=item
+  h.c.snapshot.conversations.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Run'},{id:'reply',conversation_id:'chat:main',role:'assistant',text:'Done'}]
+  const tool={kind:'tool',message_id:'user',state:'completed',status:'completed',input:'{}'}
+  const calls=[
+   {...tool,id:'read',name:'file_read',file_key:'a',narration:'Reading first.'},
+   {...tool,id:'read-page',name:'file_read',file_key:'a'},
+   {...tool,id:'list',name:'file_read',file_key:null},
+   {...tool,id:'write',name:'file_write',file_key:'b'},
+   {...tool,id:'edit',name:'file_edit',file_key:'b'},
+   {...tool,id:'shell',name:'shell_execute',state:'running',status:'running'},
+   {...tool,id:'latest',name:'file_read',state:'running',status:'running'},
+  ]
+  h.c.command=async(_method:any,p:any)=>p.view==='steps'?{generation:0,total:calls.length,items:calls.slice(p.offset),next_offset:null}:{}
+  await h.render()
+  assert.equal(document.querySelector('.build-narration .message-avatar img')?.getAttribute('src'),'avatar.png')
+  assert.equal(document.querySelector('[data-message-id="reply"] .message-avatar'),null)
+  assert.match(document.querySelector('.build-steps-label')?.textContent??'',/7 次工具调用 · 读取 1 个文件 · 写入或编辑 1 个文件/)
+  assert.equal(document.querySelector('.build-steps-live')?.textContent,'正在读取文件…')
+  assert.equal(document.querySelectorAll('.build-steps-live').length,1)
+  item.build={status:'completed',log_revision:2}
+  await h.render()
+  assert.equal(document.querySelector('.build-steps-live'),null)
+ }finally{await h.close()}
+})
+test('a host without the steps view falls back to paged tool calls',async()=>{
+ const h=await mount();try{h.c.snapshot.conversations.items[0]={id:'chat:main',generation:0,kind:'build',build:{status:'paused',log_revision:1,computer_use:{enabled:false}}};h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(p.view==='steps')throw Object.assign(Error('unsupported_view'),{refusal_code:'unsupported_view'});return{generation:0,total:1,items:[{id:'call',name:'shell',input:'ls',output:'done',state:'completed',status:'completed'}],next_offset:null}};await h.render();assert.equal(document.querySelectorAll('.build-step-tool').length,1);assert.deepEqual(h.calls.filter(([m]:any)=>m==='build.details').map(([,p]:any)=>p.view),['steps','calls'])}finally{await h.close()}
+})
+test('Computer Use reports prerequisites and retries with explicit system permissions',async()=>{
+ const api={welcome:{get:async()=>({permissions:{screen:'granted',accessibility:'granted'}}),permission:async()=>{}}};const h=await mount({}, {api});try{h.c.snapshot.conversations.items[0]={id:'chat:main',kind:'build',build:{status:'paused',computer_use:{enabled:false}}};h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);return m==='build.computer_use'?{ok:false,missing:['screen_permission']}: {}};await h.render();await h.click(document.querySelector('.computer-use-toggle'));assert.ok(document.querySelector('[data-item=screen_permission]'));assert.deepEqual(h.calls.find(([m]:any)=>m==='build.computer_use'),['build.computer_use',{conversation_id:'chat:main',enabled:true,permissions:{screen:'granted',accessibility:'granted'}}]);await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='重新检查'));assert.equal(h.calls.filter(([m]:any)=>m==='build.computer_use').length,2)}finally{await h.close()}
+})
+test('coding target menu preserves grouping, chooses a session and restores chip focus',async()=>{
+ const h=await mount();try{h.c.selectedId='task';h.c.snapshot.conversations.items.push({id:'task',kind:'topic',title:'Task'});h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);if(m==='conversations.targets')return{targets:[{workspace_id:'w',project:'Demo',directory:'/work/demo',session_id:'s',title:'Session'}]};return{}};await h.render();await act(async()=>h.ref.current.receive({type:'executor.state'}));await h.click(document.querySelector('.target-chip'));await h.click([...document.querySelectorAll('.target-item')].find(n=>n.textContent==='Demo'));await h.click([...document.querySelectorAll('.target-item')].find(n=>n.textContent==='Session'));assert.deepEqual(h.calls.filter(([m]:any)=>m==='conversations.target'),[['conversations.target',{id:'task',target:{workspace_id:'w',session_id:null}}],['conversations.target',{id:'task',target:{workspace_id:'w',session_id:'s'}}]]);assert.equal(document.querySelector('.target-panel'),null);assert.equal(document.activeElement,document.querySelector('.target-chip'))}finally{await h.close()}
+})
+
+test('execution proposal changes cancel the old proposal then submit to its owning conversation',async()=>{
+ const h=await mount();try{h.c.snapshot.pending_confirmations=[{proposal_id:'proposal',workspace:'Demo',session:'Current',conversation_id:'chat:main'}];h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);return m==='conversations.targets'?{targets:[{project:'Other',session_id:'session',title:'Resume'}]}:{}};h.c.submitText=async(text:string,id:string)=>h.calls.push(['submitText',{text,id}]);await h.render();const workspace=h.byLabel('工作区');await act(async()=>{workspace.value='Other';workspace.dispatchEvent(new h.dom.window.Event('change',{bubbles:true}))});await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='改为此位置执行'));assert.deepEqual(h.calls.slice(-2),[['conversations.confirm',{id:'chat:main',proposal_id:'proposal',confirmed:false}],['submitText',{text:'改为在工作区「Other」新开会话执行。',id:'chat:main'}]])}finally{await h.close()}
+})
+test('local tool approval toggle ignores an older settings read that resolves after the change',async()=>{
+ let resolve:any;const loaded=new Promise(r=>resolve=r),persisted:any[]=[];const api={personal:{localToolApproval:(value?:string)=>value?(persisted.push(value),Promise.resolve(value)):loaded}};const h=await mount({}, {api});try{h.c.selectedConversation.mode='plan';await h.render();await h.click(h.byLabel('本地工具确认：Always ask'));assert.deepEqual(persisted,['never']);await act(async()=>resolve('ask'));assert.equal(h.byLabel('本地工具确认：Always approve').getAttribute('aria-pressed'),'true');assert.deepEqual(h.calls,[['settings.local_tool_approval',{mode:'never'}]])}finally{await h.close()}
+})
+test('full Build reply lazily loads all pages as safe Markdown',async()=>{
+ const h=await mount();try{h.c.snapshot.conversations.items[0]={id:'chat:main',kind:'build',build:{status:'paused',computer_use:{enabled:false}}};h.c.snapshot.conversations.messages=[{id:'reply',turn_id:'turn',conversation_id:'chat:main',role:'assistant',text:'Summary',full_text_ref:'ref'}];h.c.command=async(m:any,p:any)=>{h.calls.push([m,p]);return p.offset===0?{text:'## Complete\n',next_offset:1}:{text:'- Full reply',next_offset:null}};await h.render();assert.equal(h.calls.length,0);const details=document.querySelector('.build-full-reply') as HTMLDetailsElement;await act(async()=>{details.open=true;details.dispatchEvent(new h.dom.window.Event('toggle'))});assert.equal(document.querySelector('.build-full-reply h2')!.textContent,'Complete');assert.equal(document.querySelector('.build-full-reply li')!.textContent,'Full reply');assert.deepEqual(h.calls.map(([,p]:any)=>p),[{id:'chat:main',view:'reply',message_id:'turn',offset:0},{id:'chat:main',view:'reply',message_id:'turn',offset:1}])}finally{await h.close()}
+})
+
+test('a different published plan clears the previous plan editor draft',async()=>{
+ const h=await mount();try{h.c.selectedConversation.mode='plan';h.c.selectedConversation.plan={id:'p1',version:1};h.c.command=async(m:any,p:any)=>m==='plans.get'?{title:p.plan_id,version:p.version,content:'Content '+p.plan_id,next_offset:null}:m==='conversations.targets'?{local_build_supported:true,executors:[],targets:[]}:[];const plan=()=> <PlanPreview c={h.c} run={async f=>{try{await f()}catch{}}}/>;await h.replace(plan());await h.click([...document.querySelectorAll('button')].find(n=>n.textContent==='修改计划'));const input=h.byLabel('计划内容');await act(async()=>{Object.getOwnPropertyDescriptor(h.dom.window.HTMLTextAreaElement.prototype,'value')!.set!.call(input,'Stale draft p1');input.dispatchEvent(new h.dom.window.Event('input',{bubbles:true}))});h.c.selectedConversation.plan={id:'p2',version:1};await h.replace(plan());assert.equal(Boolean(h.byLabel('计划内容')),false);assert.equal(document.querySelector('.workbench-plan-body')!.textContent,'Content p2')}finally{await h.close()}
+})
+
+
+test('chat traces render before captions, attach to a turn and retire to safe durable rows',async()=>{
+ const h=await mount();try{
+ const receive=(frame:any)=>act(async()=>h.ref.current.receive(frame));
+ await receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'Looking up',arguments:'PRIVATE'});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ assert.equal(document.querySelector('.chat-tool-trace')!.getAttribute('data-live'),'true');
+ await receive({type:'caption',conversation_id:'chat:main',turn_id:'t',role:'assistant',text:'Reply',sequence:1});
+ await receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'ok',summary:'Found'});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ assert.equal(document.querySelectorAll('.chat-tool-trace-item').length,1);
+ assert.equal(document.querySelector('.chat-tool-trace')!.getAttribute('data-state'),'ok');
+ const detail=document.querySelector('.chat-tool-trace') as HTMLDetailsElement;
+ await act(async()=>{detail.open=true;detail.dispatchEvent(new h.dom.window.Event('toggle'))});
+ h.c.snapshot.conversations.messages=[{id:'a',conversation_id:'chat:main',turn_id:'t',role:'assistant',text:'Reply',tool_trace:[{name:'memory__recall',state:'ok',summary:'Durable',arguments:'PRIVATE'}]}];
+ await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ assert.equal(document.querySelector('.chat-tool-trace')!.getAttribute('data-live'),'false');
+ assert.equal(document.querySelector('.chat-tool-trace-item .chat-tool-trace-note')!.textContent,'Durable');
+ assert.equal(document.querySelector('[role=log]')!.textContent!.includes('PRIVATE'),false);
+ h.c.selectedId='other';await h.render();assert.equal(document.querySelectorAll('.chat-tool-trace').length,0);
+ h.c.selectedId='chat:main';await h.render();assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);
+ }finally{await h.close()}
+})
+test('late captions and retractions cannot replace newer text, and short durable replies preserve it',async()=>{
+ const h=await mount();try{
+ const receive=(frame:any)=>act(async()=>h.ref.current.receive({type:'caption',conversation_id:'chat:main',turn_id:'t',role:'assistant',...frame}));
+ await receive({full_text:'Opening paragraph. Full answer.',text:'answer.',sequence:3});
+ await receive({text:'Old short',sequence:2});
+ await receive({text:'',final:true,sequence:1});
+ assert.ok(document.querySelector('[role=log]')!.textContent!.includes('Opening paragraph. Full answer.'));
+ h.c.snapshot.conversations.messages=[{id:'a',conversation_id:'chat:main',turn_id:'t',role:'assistant',text:'Full answer.'}];
+ await act(async()=>h.ref.current.receive({type:'personal.state',conversations:h.c.snapshot.conversations}));
+ assert.equal(document.querySelectorAll('[role=log] .message').length,1);
+ assert.ok(document.querySelector('[role=log]')!.textContent!.includes('Opening paragraph. Full answer.'));
+ }finally{await h.close()}
+})
+test('legacy approval notifications do not duplicate the selected approval dock',async()=>{
+ const h=await mount();try{
+ h.c.snapshot.pending_approvals=[{approval_id:'a',conversation_id:'chat:main',summary:'Actual decision'}];
+ h.c.snapshot.conversations.messages=[{id:'notification:decision',conversation_id:'chat:main',role:'assistant',text:'需要你处理\nexecutor_admission_pending\n请在 Nova 中查看并处理。'},{id:'notification:progress',conversation_id:'chat:main',role:'assistant',text:'任务进展\nStarting task'},{id:'real',conversation_id:'chat:main',role:'assistant',text:'Real reply'}];
+ await h.render();assert.equal(document.querySelectorAll('[role=log] .message').length,1);
+ assert.equal(document.querySelectorAll('.approval-dock-card').length,1);
+ h.c.snapshot.pending_approvals=[];await h.render();assert.equal(document.querySelectorAll('[role=log] .message').length,2);
+ }finally{await h.close()}
+})
+
+
+test('historical snapshots cannot claim an anonymous tool before its current caption',async()=>{
+ const h=await mount();try{
+ const receive=(frame:any)=>act(async()=>h.ref.current.receive(frame));
+ const old={id:'old',conversation_id:'chat:main',role:'assistant',turn_id:'old-turn',text:'Old answer',created_at:'2020-01-01T00:00:00.000Z'};
+ h.c.snapshot.conversations.messages=[old];await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ await receive({type:'conversation.tool',conversation_id:'chat:main',name:'memory__recall',state:'running',summary:'Current lookup'});
+ assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,1);
+ await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,1,'unrelated state must retain current anonymous lookup');
+ await receive({type:'caption',conversation_id:'chat:main',turn_id:'current-turn',role:'assistant',text:'Current answer',sequence:1});
+ assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,1);
+ h.c.snapshot.conversations.messages=[old,{id:'current',conversation_id:'chat:main',turn_id:'current-turn',role:'assistant',text:'Current answer',tool_trace:[{name:'memory__recall',state:'ok',summary:'Current done'}]}];
+ await receive({type:'personal.state',conversations:h.c.snapshot.conversations});
+ assert.equal(document.querySelectorAll('.chat-tool-trace').length,1);assert.equal(document.querySelectorAll('.chat-tool-trace[data-live=true]').length,0);
+ }finally{await h.close()}
+})
+
+test('compact native workspace picker keeps the chosen workspace in the Build request',async()=>{
+ const h=await mount();try{h.c.state().execution='build';h.c.command=async(method:string,params:any)=>{h.calls.push([method,params]);return method==='workspaces.list'?[{workspace_id:'default',is_default:true},{workspace_id:'project-b',name:'Project B'}]:{}};await h.render();
+ const picker=document.querySelector<HTMLSelectElement>('.workspace-picker select.workspace-folder');assert.ok(picker,'native workspace picker');assert.ok(picker.parentElement?.querySelector('svg[aria-hidden="true"]'));
+ await act(async()=>{picker.value='project-b';picker.dispatchEvent(new h.dom.window.Event('change',{bubbles:true}))});h.c.draft='Build selected workspace';await h.render();await h.key(h.byLabel('消息草稿'),{key:'Enter'});
+ assert.deepEqual(h.calls.find(([method]:any)=>method==='build.begin'),['build.begin',{text:'Build selected workspace',workspace_id:'project-b'}]);
+ }finally{await h.close()}
+})
+test('Computer Use shows one SVG and configuration failures open Permissions settings',async()=>{
+ const opened:string[]=[];const h=await mount({snapshot:{conversations:{items:[{id:'chat:main',kind:'build',build:{status:'paused',computer_use:{enabled:false,direct:false}}}],messages:[]}},command:async(method:string)=>method==='build.computer_use'?{ok:false,missing:['configuration']}:{}} ,{api:{orbMenu:{openSettings:(category:string)=>opened.push(category)}}});
+ try{const toggle=document.querySelector<HTMLButtonElement>('.computer-use-toggle')!;assert.equal(toggle.querySelectorAll('svg').length,1);await h.click(toggle);await h.click([...document.querySelectorAll('button')].find(node=>node.textContent==='打开设置'));assert.deepEqual(opened,['permissions'])}finally{await h.close()}
+})
+
+test('the companion form switches the chat header between pet portrait and orb canvas',async()=>{
+ const pet=await mount({}, {companionForm:'pet'})
+ try{
+  pet.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await pet.render()
+  const layer=document.querySelector('.chat-companion') as HTMLElement
+  assert.equal(layer.getAttribute('data-form'),'pet')
+  assert.equal(layer.querySelector('img')?.getAttribute('src'),'data:image/png;base64,PET')
+  assert.equal(layer.querySelector('canvas'),null)
+ } finally { await pet.close() }
+ const orb=await mount({}, {companionForm:'orb'})
+ try{
+  orb.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await orb.render()
+  const layer=document.querySelector('.chat-companion') as HTMLElement
+  assert.equal(layer.getAttribute('data-form'),'orb')
+  assert.ok(layer.querySelector('.chat-companion-orb'))
+  assert.equal(layer.querySelector('img'),null)
+ } finally { await orb.close() }
+})
+
+test('the live voice stage follows the companion form',async()=>{
+ const pet=await mount({isVoiceConversation:true}, {companionForm:'pet'})
+ try{
+  pet.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  pet.c.voiceId='chat:main'
+  await pet.render()
+  const stage=document.querySelector('.voice-stage') as HTMLElement
+  assert.equal(stage.getAttribute('data-companion-form'),'pet')
+  assert.equal(stage.querySelector('.voice-stage-pet')?.getAttribute('src'),'data:image/png;base64,PET')
+  assert.equal(stage.querySelector('canvas'),null)
+ } finally { await pet.close() }
+ const orb=await mount({isVoiceConversation:true}, {companionForm:'orb'})
+ try{
+  orb.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  orb.c.voiceId='chat:main'
+  await orb.render()
+  const stage=document.querySelector('.voice-stage') as HTMLElement
+  assert.equal(stage.getAttribute('data-companion-form'),'orb')
+  assert.ok(stage.querySelector('.voice-stage-orb'))
+  assert.equal(stage.querySelector('.voice-stage-pet'),null)
+ } finally { await orb.close() }
+})
+
+test('the pet voice aura follows the validated orb state',async()=>{
+ const pet=await mount({isVoiceConversation:true}, {companionForm:'pet'})
+ try{
+  pet.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  pet.c.voiceId='chat:main'
+  await pet.render()
+  const pane=document.querySelector('#chat-pane') as HTMLElement
+  assert.equal(pane.getAttribute('data-companion-form'),'pet')
+  assert.equal(pane.getAttribute('data-companion-state'),'idle')
+  assert.ok(document.querySelector('.voice-stage-pet-frame .companion-aura'))
+  await act(async()=>pet.ref.current.setOrb({name:'listening',statusLine:'正在聆听'}))
+  assert.equal(pane.getAttribute('data-companion-state'),'listening')
+  await act(async()=>pet.ref.current.setOrb({name:'speaking',statusLine:'正在回复'}))
+  assert.equal(pane.getAttribute('data-companion-state'),'speaking')
+  await act(async()=>pet.ref.current.setOrb({name:'not-a-real-state'}))
+  assert.equal(pane.getAttribute('data-companion-state'),'idle')
+ } finally { await pet.close() }
+ const orb=await mount({isVoiceConversation:true}, {companionForm:'orb'})
+ try{
+  orb.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  orb.c.voiceId='chat:main'
+  await orb.render()
+  assert.equal(document.querySelector('.voice-stage-pet-frame'),null)
+  assert.equal(document.querySelector('.companion-aura'),null)
+  assert.ok(document.querySelector('.voice-stage-orb'))
+ } finally { await orb.close() }
+})
+
+
+const goalProposalFeed={id:'f1',kind:'question',title:'想把「练口语」设为目标吗？',why_now:'建议节奏：每天陪你练一点',goal_proposal:{title:'练口语',success_criteria:'每天开口 10 分钟',cadence:'daily',topic_key:'topic',revision:'rev1',evidence_refs:['m1']},evidence_refs:[],memory_refs:[],source:{type:'conversation',ref:'m1'},suggestion_id:null,task_ref:null,subject_key:'goal:topic',priority:40,created_at:'2026-10-31T01:00:00.000Z',updated_at:'2026-10-31T01:00:00.000Z',expires_at:null,user_state:'new',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null}}
+
+test('goal proposal feed renders a complete card and revision-bound actions',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[goalProposalFeed]
+  h.c.snapshot.conversations.messages=[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  await h.render()
+  const card=document.querySelector('.message-feed .feed-card')! as HTMLElement
+  assert.ok(card,'feed card replaces bare markdown')
+  assert.equal(card.getAttribute('data-kind'),'goal_proposal')
+  assert.ok(card.querySelector('.feed-overline')!.textContent!.includes('新目标建议'))
+  assert.ok(card.querySelector('h3')!.textContent!.includes('想把「练口语」设为目标吗？'))
+  assert.deepEqual([...card.querySelectorAll('.feed-row')].map(row=>row.textContent),['目标练口语','怎样算达成每天开口 10 分钟','建议节奏每天陪你练一点'])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='设为目标'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'adopt_goal',goal_revision:'rev1'}])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='不用了'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f1',action:'decline_goal'}])
+ } finally { await h.close() }
+})
+
+test('a terminal voice failure stays visible in the chat pane',async()=>{
+ const h=await mount();try{
+  // What the controller leaves behind after voice_provider_failed: voice ended, copy in voiceNotice.
+  h.c.voiceState='failed';h.c.voiceNotice='语音连接已断开，请重新开启语音'
+  await h.render()
+  assert.ok(document.body.textContent!.includes('语音连接已断开'),'failure copy must not disappear with the voice stage')
+ } finally { await h.close() }
+})
+
+test('a declined goal proposal keeps no action buttons',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[{...goalProposalFeed,user_state:'dismissed'}]
+  h.c.snapshot.conversations.messages=[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  await h.render()
+  const card=document.querySelector('.message-feed .feed-card')! as HTMLElement
+  assert.equal(card.querySelectorAll('button').length,0)
+  assert.ok(card.querySelector('.feed-unavailable')!.textContent!.includes('已忽略'))
+ } finally { await h.close() }
+})
+
+test('goal proposal card explains unavailable actions instead of offering them',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[goalProposalFeed]
+  h.c.snapshot.conversations.messages=[{id:'feed:f1',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  h.c.connected=false
+  await h.render()
+  assert.ok(document.querySelector('.feed-unavailable')!.textContent!.includes('连接后可继续讨论'))
+  assert.equal(document.querySelectorAll('.feed-actions').length,0)
+  h.c.connected=true;h.c.snapshot.feed=[{...goalProposalFeed,lifecycle:'resolved'}]
+  await h.render()
+  assert.ok(document.querySelector('.feed-unavailable')!.textContent!.includes('已设为目标'))
+  assert.ok(document.querySelector('.feed-tag')!.textContent!.includes('已设为目标'))
+  assert.equal(document.querySelectorAll('.feed-actions').length,0)
+ } finally { await h.close() }
+})
+
+test('goal check-in card focuses the goal reference and can mute reminders',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.life={goals:[{id:'g1',title:'学英语',version:3,cadence:'daily'}]}
+  h.c.snapshot.feed=[{...goalProposalFeed,id:'f2',goal_proposal:undefined,title:'问问你的目标',goal_checkin:{local_date:'2026-10-31',items:[{goal_id:'g1',goal_version:3,text:'「学英语」最近怎么样？',recalled:'上次说到练发音'}]}}]
+  h.c.snapshot.conversations.messages=[{id:'feed:f2',conversation_id:'chat:main',role:'assistant',text:'checkin'}]
+  await h.render()
+  const card=document.querySelector('.feed-card')! as HTMLElement
+  assert.equal(card.getAttribute('data-kind'),'goal_checkin')
+  assert.ok(card.textContent!.includes('上次说到练发音'))
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='回复进展'))
+  assert.deepEqual(h.c.state().references,[{kind:'goal',id:'g1',version:3}])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='不再提醒'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f2',action:'goal_checkin_mute',goal_id:'g1'}])
+ } finally { await h.close() }
+})
+
+test('generic feed card renders tags and opens the item before snoozing or dismissing',async()=>{
+ const h=await mount();try{
+  h.c.snapshot.feed=[{...goalProposalFeed,id:'f3',goal_proposal:undefined,title:'有个新发现',why_now:'你昨天聊到的话题有新进展',prepared:{trust:'untrusted_external',text:'## 详情\n\n- 第一条',evidence_refs:[]}}]
+  h.c.snapshot.conversations.messages=[{id:'feed:f3',conversation_id:'chat:main',role:'assistant',text:'fallback'}]
+  await h.render()
+  const card=document.querySelector('.feed-card')! as HTMLElement
+  assert.equal(card.getAttribute('data-kind'),'generic')
+  assert.ok(card.querySelector('.md h2')!.textContent==='详情')
+  assert.ok(card.textContent!.includes('待回应'))
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='回复这个问题'))
+  assert.deepEqual(h.calls.at(-1),['openFeed','f3','回复这个问题'])
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='稍后'))
+  const snooze=h.calls.at(-1)!
+  assert.equal(snooze[0],'feed.action');assert.equal(snooze[1].id,'f3');assert.equal(snooze[1].action,'snooze');assert.ok(Date.parse(snooze[1].snooze_until)>Date.now()+3500000)
+  await h.click([...card.querySelectorAll('button')].find(node=>node.textContent==='忽略'))
+  assert.deepEqual(h.calls.at(-1),['feed.action',{id:'f3',action:'dismiss'}])
+ } finally { await h.close() }
+})
+
+test('voice stage shows activation progress instead of a stale disabled label',async()=>{
+ const h=await mount({isVoiceConversation:true,mode:'starting'});try{
+  h.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await act(async()=>h.ref.current.setOrb({name:'inactive',statusLine:'未启用'}))
+  await h.render()
+  const stage=document.querySelector('.voice-stage')! as HTMLElement
+  assert.equal(stage.getAttribute('data-state'),'starting')
+  assert.ok(stage.querySelector('.voice-stage-spinner'))
+  assert.ok(stage.querySelector('.voice-stage-label')!.textContent!.includes('正在启用语音'))
+  assert.equal(stage.textContent!.includes('未启用'),false)
+  await h.click([...stage.querySelectorAll('button')].find(node=>node.textContent==='取消'))
+  assert.deepEqual(h.calls.at(-1),['stopVoice'])
+ } finally { await h.close() }
+})
+
+test('voice stage surfaces the conversation notice while voice is active',async()=>{
+ const h=await mount({isVoiceConversation:true,mode:'voice'});try{
+  h.c.state().notice='语音连接中断，正在重连…'
+  h.ref.current.identity({profile:{assistantName:'Nova',avatar:null},defaultAvatar:'data:image/png;base64,PET'})
+  await act(async()=>h.ref.current.setOrb({name:'listening',statusLine:'聆听中'}))
+  await h.render()
+  const notice=document.querySelector('.voice-stage .voice-stage-notice')! as HTMLElement
+  assert.equal(notice.getAttribute('role'),'alert')
+  assert.equal(notice.textContent,'语音连接中断，正在重连…')
+ } finally { await h.close() }
+})

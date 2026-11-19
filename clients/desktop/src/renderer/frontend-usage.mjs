@@ -2,6 +2,30 @@ import {t} from './locale.mjs'
 const services = {realtime:t("实时语音"),llm:t("文本模型"),asr:t("语音识别"),tts:t("语音合成"),embedding:t("向量化"),agent:t("外部 Agent")}
 const fields = {inputTokens:t("输入词元"),outputTokens:t("输出词元"),inputTextTokens:t("输入文本"),inputAudioTokens:t("输入音频"),outputTextTokens:t("输出文本"),outputAudioTokens:t("输出音频"),cachedTokens:t("缓存命中"),reasoningTokens:t("推理词元"),characters:t("计费字符")}
 const money = (value,symbol='¥') => value > 0 && value < 0.0001 ? `< ${symbol}0.0001` : `${symbol}${value.toFixed(4)}`
+const CURRENCY_SYMBOLS = {CNY: '¥', USD: '$'}
+/**
+ * Cost components that usageCostText would display, in display order.
+ * Inclusion must stay identical to usageCostText: CNY only for explicit CNY
+ * totals/estimated-only reports, USD for explicit USD totals or reported costs.
+ */
+export function usageCostValues(view) {
+  const value = view ?? {}, costs = []
+  if (value.costCny > 0 || ((value.estimatedCostReports ?? value.pricedReports ?? 0) > 0 && !(value.reportedCostReports > 0))) costs.push({currency: 'CNY', value: value.costCny ?? 0})
+  if (value.costUsd > 0 || value.reportedCostReports > 0) costs.push({currency: 'USD', value: value.costUsd ?? 0})
+  return costs
+}
+/** Localized-agnostic money formatting with thousands separators and a never-zero floor. */
+export function formatUsageMoney(value, currency) {
+  const symbol = CURRENCY_SYMBOLS[currency] ?? '¥', amount = Number.isFinite(Number(value)) ? Number(value) : 0
+  if (amount > 0 && amount < 0.0001) return `< ${symbol}0.0001`
+  const [whole, fraction] = Math.abs(amount).toFixed(4).split('.')
+  return `${amount < 0 ? '-' : ''}${symbol}${whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',')}.${fraction}`
+}
+/** Count formatting with zh-CN thousands separators. */
+export function formatUsageCount(value) {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount.toLocaleString('zh-CN') : '0'
+}
 export const usageFeatureLabels={conversation:t("对话"),voice:t("语音对话"),profile:t("画像生成"),timeline:t("时间线生成"),context:t("上下文生成"),digest:t("摘要与简报"),embedding:t("向量化"),recall:t("记忆检索"),memory:t("记忆处理"),compression:t("上下文压缩"),verification:t("任务验收"),proactivity:t("主动建议"),news:t("新闻筛选"),understanding:t("个人理解"),scheduled:t("定时任务"),source_processing:t("资料处理 Agent"),vision:t("视觉理解"),agent:t("外部 Agent"),other:t("未分类"),legacy:t("历史未分类")}
 export function usageCostText(view) {
  const costs=[]

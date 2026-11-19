@@ -40,16 +40,29 @@ class FeishuAuth extends ChangeNotifier {
   Map<String, dynamic>? _pending;
   Map<String, dynamic>? _registration;
   bool get configured => _data['app'] is Map;
-  bool get authorized =>
-      _data['generation'] == _generation &&
-      _data['credential'] is Map &&
-      _data['identity'] is Map;
-  int get generation => _generation;
+  bool get authorized {
+    final credential = _data['credential'];
+    if (_data['generation'] != _generation ||
+        credential is! Map ||
+        _data['identity'] is! Map) {
+      return false;
+    }
+    final at = now().millisecondsSinceEpoch;
+    final accessExpiry = credential['expires_at'],
+        refreshExpiry = credential['refresh_expires_at'];
+    return accessExpiry is int && accessExpiry > at ||
+        refreshExpiry is int && refreshExpiry > at;
+  }
+
+  // Account binding survives token renewal; request epochs fence old responses.
+  int get generation =>
+      (_data['binding_generation'] ?? _data['generation']) as int;
+  int get authorizationEpoch => _generation;
   String get brand => _data['app']['brand'] as String;
   String? get appId => configured ? _data['app']['app_id'] as String : null;
   Map<String, dynamic>? get identity =>
-      authorized ? copyJson(_data['identity']) : null;
-  String? get identityKey => authorized
+      _data['identity'] is Map ? copyJson(_data['identity']) : null;
+  String? get identityKey => configured && identity != null
       ? '$brand:$appId:${identity!['tenant_key'] ?? ''}:${identity!['open_id']}'
       : null;
   bool get revocationPending => _data['revocation'] != null;
@@ -63,7 +76,11 @@ class FeishuAuth extends ChangeNotifier {
     final raw = await persistence.read();
     if (raw != null) {
       final parsed = jsonDecode(raw) as Map<String, dynamic>;
-      if (parsed['version'] != 1 || parsed['generation'] is! int) {
+      if (parsed['version'] != 1 ||
+          parsed['generation'] is! int ||
+          parsed['binding_generation'] != null &&
+              (parsed['binding_generation'] is! int ||
+                  parsed['binding_generation'] < 0)) {
         throw const FeishuFailure('invalid_credential_store');
       }
       _data = parsed;
@@ -72,7 +89,6 @@ class FeishuAuth extends ChangeNotifier {
         await _save({
           ..._data,
           'credential': null,
-          'identity': null,
           'refreshing': false,
         }, _generation);
       }
@@ -117,6 +133,8 @@ class FeishuAuth extends ChangeNotifier {
     if (!configured || revocationPending) {
       throw const FeishuFailure('app_required');
     }
+    final bindingGeneration = this.generation;
+    final knownIdentity = identity;
     final generation = ++_generation;
     _pending = null;
     final app = Map<String, dynamic>.from(_data['app'] as Map);
@@ -124,6 +142,8 @@ class FeishuAuth extends ChangeNotifier {
       'version': 1,
       'generation': generation,
       'app': app,
+      'binding_generation': bindingGeneration,
+      'identity': ?knownIdentity,
     }, generation);
     final result = await api.oauth(
       app['brand'],
@@ -212,8 +232,12 @@ class FeishuAuth extends ChangeNotifier {
           (identity['open_id'] as String).isEmpty) {
         throw const FeishuFailure('identity_missing');
       }
+      final sameAccount =
+          this.identity?['open_id'] == identity['open_id'] &&
+          this.identity?['tenant_key'] == identity['tenant_key'];
       await _save({
         ..._data,
+        'binding_generation': this.generation + (sameAccount ? 0 : 1),
         'credential': credential,
         'identity': {
           'open_id': identity['open_id'],
@@ -263,7 +287,13 @@ class FeishuAuth extends ChangeNotifier {
   }
 
   Future<String> accessToken() async {
-    if (!authorized) throw const FeishuFailure('authorization_required');
+    if (!authorized) {
+      throw FeishuFailure(
+        identity == null
+            ? 'authorization_required'
+            : 'reauthorization_required',
+      );
+    }
     final credential = _data['credential'] as Map;
     if ((credential['expires_at'] as int) >
         now().millisecondsSinceEpoch + 60000) {
@@ -285,6 +315,11 @@ class FeishuAuth extends ChangeNotifier {
         credential = copyJson(_data['credential']);
     if ((credential['refresh_expires_at'] as int) <=
         now().millisecondsSinceEpoch) {
+      await _save({
+        ..._data,
+        'credential': null,
+        'refreshing': false,
+      }, generation);
       throw const FeishuFailure('reauthorization_required');
     }
     await _save({..._data, 'refreshing': true}, generation);
@@ -311,7 +346,6 @@ class FeishuAuth extends ChangeNotifier {
         await _save({
           ..._data,
           'credential': null,
-          'identity': null,
           'refreshing': false,
         }, generation);
       }

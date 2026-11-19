@@ -5,9 +5,15 @@
 
 | 执行器 | 用途 | 状态 |
 |---|---|---|
-| [Coding](coding.md) | 在已批准的项目中写代码、修改文件、运行命令 | 已接入 Codex app-server |
+| [Coding](coding.md) | 在已批准的项目中写代码、修改文件、运行命令 | 已接入 Codex app-server 及 ACP（OpenCode、CodeBuddy、Pi、DeepSeek Harness） |
+| [Computer Use](computer-use-build.md) | 在审批下操作图形界面 | 已接入 Build 内置及独立桌面执行器 |
+| [Mobile Use](../../guides/mobile.md) | 受控执行手机端操作（`mobile.run`） | 原生 TypeScript Midscene SDK（`autoglm-phone`）及旧版 AutoGLM 桥接 |
 | [Loop Camera](loop-camera.md) | 观察指定摄像头，条件满足时上报 | 已接入原生摄像头与独立视觉模型 |
-| [Computer Use](computer-use-build.md) | 在审批下操作图形界面 | 已接入电脑执行器；Build 集成与实机验收单独跟踪 |
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../../assets/architecture/executor-dispatch.zh-CN.dark.svg">
+  <img src="../../../assets/architecture/executor-dispatch.zh-CN.light.svg" alt="多执行器调度与宿主审批门控" width="100%">
+</picture>
 
 Loop Camera 是面向用户的功能名；运行时由 `vision` 控制器承载，内部使用 `watch` / `guard` 两个执行器。它与对话中的视觉能力相互独立，后者只针对一次提交的语音转写或文字输入抓取一帧。
 

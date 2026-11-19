@@ -511,6 +511,30 @@ test('capture manager waits for native readiness and falls back on startup failu
   assert.deepEqual(await fallback.activate(), { audioMode: 'browser_aec' })
 })
 
+test('a native activation fallback records why without leaking paths or provider text', async () => {
+  const diagnostics = []
+  const spawnFailure = Object.assign(new Error('spawn /Users/someone/secret/macos-voice-io ENOENT'), { code: 'ENOENT' })
+  const fallback = nativeAudioModule.createNativeAudioManager({
+    binary: '/Users/someone/secret/macos-voice-io',
+    startImpl: async () => { throw spawnFailure },
+    diagnostic: message => diagnostics.push(message),
+  })
+  assert.deepEqual(await fallback.activate(), { audioMode: 'browser_aec' })
+  assert.equal(diagnostics.length, 1)
+  assert.match(diagnostics[0], /^\[desktop-diagnostic\] native_audio_activate_fallback /)
+  assert.match(diagnostics[0], /code=ENOENT/)
+  assert.doesNotMatch(diagnostics[0], /someone|secret/)
+
+  const commandFailure = []
+  const muted = nativeAudioModule.createNativeAudioManager({
+    binary: '/tmp/macos-voice-io',
+    startImpl: async () => ({ setCaptureEnabled: () => false, close: async () => {} }),
+    diagnostic: message => commandFailure.push(message),
+  })
+  assert.deepEqual(await muted.activate(), { audioMode: 'browser_aec' })
+  assert.match(commandFailure[0], /reason=native capture command failed/)
+})
+
 test('capture manager remembers output mute before activation and applies it to a new helper', async () => {
   let resolveStart
   const commands = []

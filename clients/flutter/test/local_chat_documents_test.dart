@@ -1,0 +1,233 @@
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/agent_core/agent_core_host.dart';
+import 'package:nova_mobile/agent_core/agent_workspace.dart';
+import 'package:nova_mobile/agent_core/tool_registry.dart';
+import 'package:nova_mobile/conversation/local_chat_panel.dart';
+import 'package:nova_mobile/conversation/local_conversation_store.dart';
+import 'agent_core_test.dart' show MemoryPersistence;
+import 'agent_host_capabilities_test.dart'
+    show PromptModel, SelectableSettings, authorConfiguration;
+import 'scheduled_agent_runner_test.dart' show FixtureSettings;
+
+class DocumentHost extends AgentCoreHost {
+  DocumentHost(ConversationStore store, ToolRunner runner)
+    : super(store: store, settings: FixtureSettings(), tools: runner);
+  bool reject = false;
+  @override
+  Future<void> send(
+    String conversationId,
+    String text, {
+    ToolApproval? approve,
+    String? language,
+    bool userAuthored = true,
+  }) async {
+    if (reject) {
+      error = 'model_settings_required';
+      return;
+    }
+    await store.append(conversationId, {'role': 'user', 'content': text});
+  }
+}
+
+void main() {
+  testWidgets(
+    'author text rejects attached draft and forwards only foreground text',
+    (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      final model = PromptModel();
+      final host = AgentCoreHost(
+        store: store,
+        settings: SelectableSettings(),
+        experienceModel: authorConfiguration,
+        clientFactory: () => model,
+        tools: ToolRunner(
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            workspace: AgentWorkspace(Directory('/unused')),
+          ),
+          journal: ToolJournal(MemoryPersistence()),
+        ),
+      );
+      final key = GlobalKey<LocalChatPanelState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              key: key,
+              host: host,
+              conversationId: id,
+              language: 'en',
+            ),
+          ),
+        ),
+      );
+      key.currentState!.attachmentDrafts[id] = [
+        {'path': '/workspace/inbox/private.txt'},
+      ];
+      key.currentState!.prefill('Hello');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      expect(store.conversation(id)['messages'], isEmpty);
+      expect(
+        find.text(
+          'Experience chat is text only. Remove attachments or set up your own model.',
+        ),
+        findsOneWidget,
+      );
+      expect(key.currentState!.input.text, 'Hello');
+      key.currentState!.attachmentDrafts[id]!.clear();
+      key.currentState!.prefill('Hello');
+      await tester.pump();
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      expect(model.model, 'author');
+      expect(
+        (store.conversation(id)['messages'] as List).first['content'],
+        'Hello',
+      );
+      await tester.pumpWidget(const SizedBox.shrink());
+      host.dispose();
+    },
+  );
+
+  testWidgets(
+    'attachment chips stay with the draft and send workspace references',
+    (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final first = await store.create(), second = await store.create();
+      final host = DocumentHost(
+        store,
+        ToolRunner(
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            workspace: AgentWorkspace(Directory('/unused')),
+          ),
+          journal: ToolJournal(MemoryPersistence()),
+        ),
+      );
+      final key = GlobalKey<LocalChatPanelState>();
+      Widget panel(String id) => MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(
+            key: key,
+            host: host,
+            conversationId: id,
+            language: 'en',
+          ),
+        ),
+      );
+      await tester.pumpWidget(panel(first));
+      key.currentState!.attachmentDrafts[first] = [
+        {'path': '/workspace/inbox/test/sales.xlsx'},
+      ];
+      await tester.pumpWidget(panel(second));
+      expect(find.byType(InputChip), findsNothing);
+      await tester.pumpWidget(panel(first));
+      expect(find.widgetWithText(InputChip, 'sales.xlsx'), findsOneWidget);
+      host.reject = true;
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      expect(key.currentState!.attachments, hasLength(1));
+      host.reject = false;
+      await tester.tap(find.byTooltip('Send'));
+      await tester.pump();
+      final messages = store.conversation(first)['messages'] as List;
+      expect(
+        messages.last['content'],
+        contains('/workspace/inbox/test/sales.xlsx'),
+      );
+      expect(key.currentState!.attachments, isEmpty);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
+
+  testWidgets('attachment chip can be removed without sending', (tester) async {
+    final store = ConversationStore(MemoryPersistence());
+    await store.open();
+    final id = await store.create();
+    final host = AgentCoreHost(store: store, settings: FixtureSettings());
+    final key = GlobalKey<LocalChatPanelState>();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: LocalChatPanel(key: key, host: host, conversationId: id),
+        ),
+      ),
+    );
+    key.currentState!.attachmentDrafts[id] = [
+      {'path': '/workspace/inbox/test/paper.pdf'},
+    ];
+    key.currentState!.prefill('Read this');
+    await tester.pump();
+    final chip = tester.widget<InputChip>(find.byType(InputChip));
+    chip.onDeleted!();
+    await tester.pump();
+    expect(find.byType(InputChip), findsNothing);
+    expect(key.currentState!.input.text, 'Read this');
+    expect(store.conversation(id)['messages'], isEmpty);
+    await tester.pumpWidget(const SizedBox());
+    host.dispose();
+  });
+
+  for (final inCall in [false, true]) {
+    testWidgets('attachment button during a call: $inCall', (tester) async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final id = await store.create();
+      final host = AgentCoreHost(
+        store: store,
+        settings: FixtureSettings(),
+        tools: ToolRunner(
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            workspace: AgentWorkspace(Directory('/unused')),
+          ),
+          journal: ToolJournal(MemoryPersistence()),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: LocalChatPanel(
+              host: host,
+              conversationId: id,
+              onVoiceText: inCall ? (_) async {} : null,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      // The button stays where it always is; in a call it explains itself.
+      expect(find.byIcon(Icons.attach_file), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('attach-in-call')),
+        inCall ? findsOneWidget : findsNothing,
+      );
+      if (inCall) {
+        await tester.tap(find.byIcon(Icons.attach_file));
+        await tester.pump();
+        expect(find.text('通话中暂不支持附件，挂断后可上传。'), findsOneWidget);
+      } else {
+        expect(find.byTooltip('添加文件（最多 25 MiB）'), findsOneWidget);
+      }
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    });
+  }
+}

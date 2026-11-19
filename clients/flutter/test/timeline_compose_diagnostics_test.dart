@@ -26,6 +26,7 @@ Map<String, dynamic> brief() => {
   'why_now': '核验结果已经明确',
   'next_steps': [],
   'uncertainty': '',
+  'temporal': {'kind': 'unknown', 'dates': []},
 };
 Map<String, dynamic> output() => {
   'timeline': [
@@ -224,6 +225,10 @@ void main() {
           if (stage == 'timeline_compose') {
             compose++;
             if (compose == 2) {
+              if (reason == 'internal_alias') {
+                expect(instructions, contains('pN/cN内部别名'));
+                expect(instructions, contains('不能编造名字'));
+              }
               expect(input['validation_detail'], {
                 'stage': 'timeline_compose',
                 'reason': reason,

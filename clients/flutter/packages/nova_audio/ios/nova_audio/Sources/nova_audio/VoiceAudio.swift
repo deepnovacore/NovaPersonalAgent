@@ -17,6 +17,7 @@ private final class CaptureGate: @unchecked Sendable {
     private var lastLevelMS: Double = 0
     private var level: Float = 0
     private var pcmCount = 0
+    private var startupInput = StartupInputCheck()
     private var captureGate = CaptureGate()
     private var startupReconfigurations = 0
     var onControl: (([String: Any]) -> Void)?
@@ -88,6 +89,7 @@ private final class CaptureGate: @unchecked Sendable {
     func start(threshold: Float, capture: Bool = true) throws {
         guard !running else { return }
         pcmCount = 0; captureGate = CaptureGate(); startupReconfigurations = 0
+        startupInput = StartupInputCheck()
         let session = AVAudioSession.sharedInstance()
         if capture { try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth]) }
         else { try session.setCategory(.playback, mode: .default) }
@@ -114,6 +116,7 @@ private final class CaptureGate: @unchecked Sendable {
     }
 
     func mute(_ muted: Bool) throws {
+        startupInput.pause()
         level = 0; onLevel?(0)
         captureID = UUID()
         if tapping { engine.inputNode.removeTap(onBus: 0); tapping = false }
@@ -138,6 +141,15 @@ private final class CaptureGate: @unchecked Sendable {
             if tapCount <= 3 || tapCount % 100 == 0 { print("[audio] tap=\(tapCount) frames=\(input.frameLength)") }
             #endif
             guard gate.acquire() else { return }
+            // Inspect native Float32 samples before Int16 quantization.
+            let allZero = input.floatChannelData.map { channels in
+                (0..<Int(input.format.channelCount)).allSatisfy { channel in
+                    (0..<Int(input.frameLength)).allSatisfy { index in
+                        channels[channel][index * input.stride] == 0
+                    }
+                }
+            }
+            let inputDurationMS = Double(input.frameLength) * 1000 / source.sampleRate
             let capacity = AVAudioFrameCount(ceil(Double(input.frameLength) * 16000 / source.sampleRate) + 32)
             guard let output = AVAudioPCMBuffer(pcmFormat: target, frameCapacity: capacity) else { gate.release(); return }
             var supplied = false
@@ -166,6 +178,10 @@ private final class CaptureGate: @unchecked Sendable {
             Task { @MainActor in
                 defer { gate.release() }
                 guard let self, self.running, self.captureID == id else { return }
+                if let allZero,
+                   let event = self.startupInput.observe(allZero: allZero, durationMS: inputDurationMS) {
+                    self.onControl?(["type": event])
+                }
                 if self.detector.observe(level: rms, durationMS: Double(count) / 16) {
                     self.clearCurrent(type: "playback.stopped")
                     self.onControl?(["type": "speech.onset", "speech_id": UUID().uuidString, "t_render_ms": Wire.renderMS])

@@ -1,4 +1,9 @@
 import {refusalText} from './host-refusals.mjs'
+import {composerMode} from './composer-mode.mjs'
+
+export function hasDraftContent(state){
+  return Boolean(state.draft||state.references?.length||state.source_todo)
+}
 
 /** Host-owned conversations; drafts and delivery recovery are scoped to each conversation. */
 const DICTATION_FAILURES={
@@ -6,10 +11,13 @@ const DICTATION_FAILURES={
   no_speech:'没有听清，请再说一次 · 原有草稿已保留',
 }
 const MODEL_FAILURES={
+  experience_unavailable:'体验对话未完成，请检查模型配置、额度与网络后重试。',
   model_protocol_tool_arguments_json:'模型返回的工具参数不是有效 JSON，请重试。',
   model_protocol_tool_identity:'模型返回了重复或无效的工具调用标识，请重试。',
   model_protocol_tool_call_limit:'单次回复的工具调用数量超出限制，请重试。',
   model_protocol_output_limit:'模型回复达到输出长度上限，请缩小本次范围后重试。',
+  model_output_limit:'模型回复达到输出长度上限，已自动续写；仍失败时请缩小本次范围。',
+  model_output_limit_tool_arguments:'工具调用的内容超过模型输出上限，未执行；请拆小后重试。',
   model_timeout:'等待模型回复超时，请重试。',
   model_http:'模型服务返回错误，请重试。',
   model_network:'模型连接中断，请重试。',
@@ -17,6 +25,9 @@ const MODEL_FAILURES={
   model_http_quota:'模型服务账户余额不足或已欠费，请充值或在设置中更换密钥后重试。',
   model_http_rate_limited:'模型服务请求过于频繁，请稍后重试。',
 }
+/** Failures that only mean a superseded voice start was torn down; nothing for the user to act on. */
+const VOICE_CANCELLATIONS=new Set(['realtime_connect_aborted','conversation_runtime_closed','conversation_cleared','conversation_closed','presentation_hidden','voice_not_owned'])
+function supersededCancellation(error){return error?.outcome_unknown===true||VOICE_CANCELLATIONS.has(error?.refusal_code)}
 function conversationSnapshot(value){
   if(!value||typeof value.selected_id!=='string'||!value.selected_id||!Array.isArray(value.items))return false
   const ids=new Set()
@@ -36,9 +47,13 @@ function dropDraftIntent(state){
  return had
 }
 export class PersonalController {
-  constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{}}) {
+  constructor({send,start,stop,applyPresentation,confirmBuildSwitch=async()=>false,changed=()=>{},presentationChanged=(_mode,_collapsed)=>{}}) {
     this.confirmBuildSwitch=confirmBuildSwitch
-    Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false})
+    // Synchronous layout hook: the renderer must leave (or enter) the workbench layout before the native window changes size.
+    this.presentationChanged=presentationChanged
+    this.workbenchPresented=false
+    this.orbVoiceBinding={conversation_id:'chat:main',voice_mode:'delegate'}
+    Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false,voiceState:null,voiceNotice:''})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
   get selectedConversation(){return this.snapshot?.conversations?.items?.find(item=>item.id===this.selectedId)??null}
@@ -48,7 +63,11 @@ export class PersonalController {
   async guardBuildSwitch(){const active=this.activeBuild;if(!active)return true;if(!await this.confirmBuildSwitch())return false;await this.command('build.stop',{id:active.id});return true}
   get voiceCapabilities(){return this.connected&&this.voiceId?this.state(this.voiceId).voiceCapabilities?.capabilities??null:null}
   get voiceId(){return this.snapshot?.conversations?.voice_id??null}
-  state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',submission:null});return this.drafts.get(id)}
+  state(id=this.selectedId){if(!this.drafts.has(id))this.drafts.set(id,{draft:'',error:'',notice:'',submission:null});return this.drafts.get(id)}
+  /** The voice transport is a distinct axis from text mode: the ChatPane and the orb read it for copy, never for input gating. */
+  get voicePhase(){return this.voiceState ?? (this.mode==='starting'?'starting':null)}
+  clearVoiceNotice(){this.voiceState=null;this.voiceNotice='';for(const state of this.drafts.values())state.notice=''}
+  setVoiceNotice(notice){this.voiceNotice=notice;const id=this.voiceId??this.selectedId;if(id!=null)this.state(id).notice=notice}
   /** The host just cleared or replaced this conversation's generation: its composer intent is stale. */
   resetDraftIntent(id){if(id!=null)dropDraftIntent(this.drafts.get(id))}
   /** A host snapshot is the sole owner of kind/mode; drop intents that contradict it or outlived it. */
@@ -92,7 +111,7 @@ export class PersonalController {
     }
     return this.send({type:'input.text',text:value.text,request_id:value.request_id,input_instance_id:value.instance,conversation_id:id,...(value.source_todo?{source_todo:value.source_todo}:{})})}
   restoreSubmission(state,request){
-    if(request.independent&&state.draft.trim())state.failed_card={...request}
+    if(request.independent&&hasDraftContent(state))state.failed_card={...request}
     else{state.draft=[request.text,state.draft].filter(Boolean).join('\n');state.source_todo=request.source_todo??null;state.references=request.references??[];request.restored_into_draft=true}
     request.restored=true
   }
@@ -110,13 +129,18 @@ export class PersonalController {
     const pending=this.changePresentation(mode,options).finally(()=>{if(this.presentationInFlight.get(mode)===pending)this.presentationInFlight.delete(mode)})
     this.presentationInFlight.set(mode,pending);return pending
   }
+  freezeOrbVoiceBinding(){
+    if(this.workbenchPresented&&this.presentationMode==='workbench'&&this.selectedId)this.orbVoiceBinding={conversation_id:this.selectedId,voice_mode:composerMode(this.selectedConversation,this.state())}
+  }
   async changePresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
     // A fresh return to the workbench retires the last handback notice; reconciling an earlier exit may post a new one.
     if(!request&&mode==='workbench'&&!this.presentationPending)this.taskNotice=''
     if(!request&&!this.presentationPending&&mode!=='background'){const outstanding=[...this.presentationRequests.values()];for(const prior of outstanding)if(prior.mode!==mode)await this.setPresentation(prior.mode,{activate:false,request:prior})}
-    request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID()}
+    if(mode!=='workbench')this.freezeOrbVoiceBinding()
+    request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID(),...(mode!=='workbench'?{voice_binding:{...this.orbVoiceBinding}}:{})}
+    if(request.voice_binding)this.orbVoiceBinding={...request.voice_binding}
     this.presentationRequests.set(request.request_id,request)
     const sequence=++this.presentationSequence
     if(!reconcileOnly)this.desiredPresentation=mode;this.presentationPending=true;// Only a client that may hold a task has anything to hand back.
@@ -124,7 +148,7 @@ export class PersonalController {
     try{
       const local=mode==='background'?this.applyMode(mode,{activate:false}):null
       if(!this.connected){if(local)await local;else await this.applyMode(mode,{activate});this.presentationReady=false;return}
-      const [,result]=await Promise.all([local,this.command('presentation.set',{mode},{request_id:request.request_id})])
+      const [,result]=await Promise.all([local,this.command('presentation.set',{mode,...(mode==='orb'?request.voice_binding:{})},{request_id:request.request_id})])
       if(result?.mode!==mode)throw new Error('显示模式未确认，请重试')
       this.presentationRequests.delete(request.request_id)
       if(result.returned_task_ids?.length&&result.returned_task_ids.every(id=>Number.isSafeInteger(result.task_control_revisions?.[id])))this.taskNotice='已交还 Nova，未发送的草稿已保留'
@@ -137,15 +161,23 @@ export class PersonalController {
     finally{if(sequence===this.presentationSequence)this.presentationPending=false;this.changed()}
   }
   async applyMode(mode,{activate=false}={}){
+    if(!this.presentationPending&&mode!=='workbench')this.freezeOrbVoiceBinding()
+    if(mode==='workbench')this.workbenchPresented=true
     this.presentationMode=mode;this.collapsed=mode!=='workbench'
+    // Publish before awaiting: main resizes the window as soon as the presentation IPC arrives, and that call may
+    // stall or fail afterwards. The window keeps its new size on failure, so the collapsed state is not rolled back.
     if(mode==='background'){
       this.generation++;if(this.dictationId)this.send({type:'input.dictation',id:this.dictationId,action:'cancel',conversation_id:this.dictationConversationId})
       this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text'
-      await Promise.all([this.stop(),this.applyPresentation?.(mode,{activate:false})])
-    }else await this.applyPresentation?.(mode,{activate})
-    this.changed()
+    }
+    this.presentationChanged(mode,this.collapsed);this.changed()
+    try{
+      if(mode==='background')await Promise.all([this.stop(),this.applyPresentation?.(mode,{activate:false})])
+      else await this.applyPresentation?.(mode,{activate})
+    }finally{this.changed()}
   }
   async resumeVoice({wake=true}={}){
+    this.clearVoiceNotice()
     const id=this.voiceId
     if(!id||!this.connected||!this.presentationReady||this.presentationMode==='background'||this.capturePending||this.mode!=='text')return
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
@@ -153,7 +185,7 @@ export class PersonalController {
     catch(error){this.captureConversationId=null;this.mode='text';await this.stop();throw error}
     finally{this.changed()}
   }
-  collapse(value){this.collapsed=value;if(value&&this.dictationId)void this.text();this.changed()}
+  collapse(value){this.collapsed=value;this.presentationChanged(this.presentationMode,value);if(value&&this.dictationId)void this.text();this.changed()}
   receive(frame){
     if(frame.type==='conversation.capabilities'&&frame.mode==='voice'&&typeof frame.conversation_id==='string'&&Number.isSafeInteger(frame.conversation_generation)&&frame.conversation_generation>=0){
       const caps=frame.capabilities
@@ -161,7 +193,26 @@ export class PersonalController {
       const state=this.state(frame.conversation_id)
       if(valid&&frame.conversation_generation>=(state.voiceCapabilities?.generation??-1))state.voiceCapabilities={generation:frame.conversation_generation,capabilities:caps}
     }
-    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.message==='string')this.state(frame.conversation_id).error=frame.message
+    // Voice transport notices carry their own lifecycle copy (reconnecting / recovered /
+    // failed) so a provider reconnect is never mistaken for an idle "listening" session.
+    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.code==='string'&&frame.code.startsWith('voice_provider_')){
+      const message=typeof frame.message==='string'?frame.message.trim():''
+      const state=this.state(frame.conversation_id)
+      if(frame.code==='voice_provider_reconnecting'){this.voiceState='reconnecting';if(message)this.setVoiceNotice(message)}
+      else if(frame.code==='voice_provider_recovered'){this.voiceState='recovered';this.setVoiceNotice(message||'语音连接已恢复，请再说一次')}
+      else if(frame.code==='voice_provider_failed'){
+        this.voiceState='failed';this.setVoiceNotice(message||'语音连接已断开，请重新开启语音；若仍失败，请在设置中检查语音服务配置')
+        state.error=this.voiceNotice
+        // A late failure from a replaced voice session must not cancel the dictation or
+        // transcription the user has already started: keep that capture and only show the copy.
+        const dictating=this.dictationId!=null||this.mode==='dictation'||this.mode==='transcribing'
+        if(!dictating){this.generation++;this.mode='text';this.captureConversationId=null;const id=frame.conversation_id;void this.stop();if(this.connected)void this.command('conversations.voice',{id,enabled:false}).catch(()=>{})}
+      }
+      this.changed()
+    }
+    // A fresh user utterance consumes a reconnect/recovery hint instead of leaving stale copy on screen.
+    if(frame.type==='caption'&&frame.role==='user'&&frame.final===true&&typeof frame.text==='string'&&frame.text.trim()){if(this.voiceState==='recovered'||this.voiceState==='reconnecting'){const id=this.voiceId??this.selectedId;if(id!=null)this.state(id).notice='';this.voiceNotice='';this.voiceState=null}}
+    if(frame.type==='conversation.notice'&&typeof frame.conversation_id==='string'&&typeof frame.message==='string'&&!(typeof frame.code==='string'&&frame.code.startsWith('voice_provider_')))this.state(frame.conversation_id).error=frame.message
     if(frame.type==='conversation.error'&&typeof frame.conversation_id==='string')this.state(frame.conversation_id).error=typeof frame.reason==='string'&&Object.hasOwn(MODEL_FAILURES,frame.reason)?MODEL_FAILURES[frame.reason]:typeof frame.reason==='string'&&/^model_protocol(?:_[a-z_]{1,64})?$/u.test(frame.reason)?'模型回复格式异常，请重试。':'回复失败，请重试。'
     if(frame.type==='input.text_result')for(const [id,state]of this.drafts){
       const request=state.submission
@@ -229,6 +280,7 @@ export class PersonalController {
     this.dictationId=null;this.dictationConversationId=null;this.captureConversationId=null;this.mode='text';await this.stop();this.changed()
   }
   async stopVoice(){
+    this.clearVoiceNotice()
     const id=this.voiceId??this.captureConversationId
     this.generation++;await this.stop();this.captureConversationId=null;this.mode='text'
     if(id&&this.connected)await this.command('conversations.voice',{id,enabled:false})
@@ -237,25 +289,33 @@ export class PersonalController {
   // `wake:false` opens the microphone without leaving sleep, so a sleeping orb keeps listening for its wake word.
   async startCapture(options){this.capturePending=true;try{await this.start(options)}finally{this.capturePending=false}}
   async voice({wake=true}={}){
-    const id=this.selectedId
+    this.clearVoiceNotice()
+    const {conversation_id:id,voice_mode}=this.presentationMode==='orb'?this.orbVoiceBinding:{conversation_id:this.selectedId,voice_mode:composerMode(this.selectedConversation,this.state())}
     if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束当前语音或录音')
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
+    let hostStarted=false
     try{
-      await this.command('conversations.voice',{id,enabled:true})
+      await this.command('conversations.voice',{id,enabled:true,voice_mode})
+      hostStarted=true
       if(generation!==this.generation)return
       await this.startCapture({wake})
       if(generation!==this.generation){await this.stop();return}
       if(!this.send({type:'input.audio',conversation_id:id}))throw new Error('连接已断开')
       this.mode='voice'
-    }catch(error){if(generation!==this.generation)return;this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
+    }catch(error){
+      // A newer action owns the voice state now. A host/provider start failure is still real and is reported;
+      // a stale local capture or the cancellation itself is not.
+      if(generation!==this.generation){if(hostStarted||supersededCancellation(error))return;throw error}
+      this.mode='text';this.captureConversationId=null;await this.stop();if(this.connected)await this.command('conversations.voice',{id,enabled:false}).catch(()=>{});throw error}
     finally{this.changed()}
   }
   async dictate(){
     const id=this.selectedId
     if(!this.presentationReady||this.presentationMode==='background'||!id||!this.connected||!this.capabilities.includes('dictation'))return
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束持续对话，再使用录音')
+    this.clearVoiceNotice()
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.dictationConversationId=id;this.dictationId=crypto.randomUUID();this.changed()
     if(!this.send({type:'input.dictation',id:this.dictationId,action:'start',conversation_id:id})){await this.text();throw new Error('发送失败')}
     try{await this.startCapture();if(generation!==this.generation){await this.stop();return}this.mode='dictation'}
@@ -269,17 +329,30 @@ export class PersonalController {
   async submit(){
     const id=this.selectedId,state=this.state(id)
     if(!this.presentationReady||!id||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||this.isVoiceConversation||this.dictationConversationId===id||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input')||!state.draft.trim()||state.draft.length>4000)return false
-    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,...(state.references?.length?{references:structuredClone(state.references)}:{}),...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
+    const request={request_id:crypto.randomUUID(),text:state.draft,instance:this.inputInstance,restored:false,created_at:new Date().toISOString(),...(state.references?.length?{references:structuredClone(state.references)}:{}),...(state.source_todo?{source_todo:{...state.source_todo}}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';this.changed();return false}
     state.submission=request;state.draft='';state.source_todo=null;state.references=[];state.error='';this.changed();return true
+  }
+  /**
+   * The message a reference-carrying request is still waiting on, shown at once so the click feels instant. It exists only while
+   * the request is unconfirmed (the host persists the real message under the same request_id) and only for the main conversation.
+   */
+  pendingUserMessage(id=this.selectedId){
+    const request=this.drafts.get(id)?.submission
+    if(id!=='chat:main'||!request?.references?.length||request.restored)return null
+    const rows=[...(this.snapshot?.conversations?.messages??[]),...(this.snapshot?.conversations?.home_messages??[])]
+    if(rows.some(message=>message.request_id===request.request_id))return null
+    // Relies on the host broadcasting the committed message (personal.state) before it answers the command, so the stored row exists
+    // by the time state.submission is cleared; carrying the references keeps the confirmed bubble from changing height on the swap.
+    return {id:'pending:'+request.request_id,conversation_id:id,role:'user',text:request.text,request_id:request.request_id,created_at:request.created_at??'',references:structuredClone(request.references),pending:true}
   }
   /** Sends a host-composed user message (e.g. a changed execution place) without touching the draft. */
   /** Sends text to conversation `id` without touching its draft; text that cannot be sent is left in that draft instead. */
   submitText(text,id=this.selectedId,references=[]){
-    const state=this.state(id),keep=()=>{if(!state.draft){state.draft=text;state.references=references;}this.changed();return false}
+    const state=this.state(id),keep=()=>{if(!hasDraftContent(state)){state.draft=text;state.references=references;}this.changed();return false}
     if(!id||!text.trim()||text.length>4000)return false
     if(!this.presentationReady||state.submission||this.isBuildFinished(id)||(this.buildWaitingApproval&&this.selectedId===id)||(id===this.selectedId?this.isVoiceConversation:this.voiceId===id)||!this.inputInstance||!this.connected||!this.capabilities.includes('text_input'))return keep()
-    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,...(references.length?{references:structuredClone(references)}:{})}
+    const request={request_id:crypto.randomUUID(),text,instance:this.inputInstance,restored:false,independent:true,created_at:new Date().toISOString(),...(references.length?{references:structuredClone(references)}:{})}
     if(!this.sendSubmission(id,request)){state.error='发送失败，草稿已保留';return keep()}
     state.submission=request;state.error='';this.changed();return true
   }

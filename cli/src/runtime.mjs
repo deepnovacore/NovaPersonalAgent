@@ -449,7 +449,6 @@ function voiceRequirement(document) {
   return {pipeline, keys: pipeline === 'integrated' ? ['dashscopeApiKey'] : [CASCADED_LLM_KEYS[llm], 'doubaoBigmodelApiKey']}
 }
 
-const DASHSCOPE_COMPATIBLE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u
 
 // Matches settings-store's validSecretEntry: anything else is dropped by the desktop and does not count as saved.
@@ -465,16 +464,8 @@ async function inspectVoiceKeys(document, environment, {online, fetchImpl}) {
   const sourceOf = (key, name) => savedSecret(document, key) ? 'settings' : environment[name]?.trim() ? 'environment' : null
   const entries = []
   for (const key of keys) {
-    let name = VOICE_KEYS[key]
-    let source = sourceOf(key, name)
-    // Integrated voice also accepts the generic model key while the model gateway stays on DashScope.
-    const savedBaseUrl = typeof document?.modelBaseUrl === 'string' ? document.modelBaseUrl.trim() : ''
-    const modelBaseUrl = savedBaseUrl || environment.MODEL_BASE_URL?.trim() || DASHSCOPE_COMPATIBLE_BASE_URL
-    if (source === null && key === 'dashscopeApiKey' && pipeline === 'integrated'
-      && (modelBaseUrl === '' || modelBaseUrl === DASHSCOPE_COMPATIBLE_BASE_URL) && sourceOf('modelApiKey', 'MODEL_API_KEY') !== null) {
-      name = 'MODEL_API_KEY'
-      source = sourceOf('modelApiKey', name)
-    }
+    const name = VOICE_KEYS[key]
+    const source = sourceOf(key, name)
     const probe = online && source === 'environment' ? (await probeApiKey(key, environment[name], {fetch: fetchImpl})).status : undefined
     entries.push(Object.freeze({name, source, ...(probe === undefined ? {} : {probe})}))
   }

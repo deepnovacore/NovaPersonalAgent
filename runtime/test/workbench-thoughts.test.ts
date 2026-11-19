@@ -10,6 +10,7 @@ import {
   MAX_WORKBENCH_THOUGHTS,
   WorkbenchStore,
   emptyWorkbenchCheckpoint,
+  workbenchCallPreview,
   type WorkbenchCall,
   type WorkbenchCheckpoint,
   type WorkbenchThought,
@@ -19,6 +20,15 @@ async function fixture(){const root=await mkdtemp(join(await realpath(tmpdir()),
 const checkpointFile=(root:string,id:string,generation:number)=>join(root,'build-'+createHash('sha256').update(id+':'+generation).digest('hex')+'.json')
 const thought=(id:string,text:string,created_at:string):WorkbenchThought=>({id,text,created_at})
 const call=(id:string,name:string,created_at:string,result?:unknown):WorkbenchCall=>({id,name,arguments:{path:id+'.txt'},state:'completed',created_at,...(result===undefined?{}:{result:result as never})})
+
+test('file summaries identify successful files across reads and edits and exclude directories',()=>{
+ const at='2026-01-01T00:00:00.000Z',path='/project/report.txt'
+ const read=workbenchCallPreview(call('read','file_read',at,{path,type:'file'}),0)
+ assert.ok(read.file_key)
+ assert.equal(workbenchCallPreview(call('edit','file_edit',at,{path,status:'completed'}),1).file_key,read.file_key)
+ assert.equal(workbenchCallPreview(call('directory','file_read',at,{path:'/project',type:'directory'}),2).file_key,null)
+ assert.equal(workbenchCallPreview(call('failed','file_write',at,{path,status:'failed'}),3).file_key,undefined)
+})
 
 test('an old checkpoint without thoughts still loads and defaults the array',async()=>{
  const f=await fixture()

@@ -134,11 +134,12 @@ final class WorkspaceDirectory {
       (_darwin ? 0x1000000 : 0x80000);
   static int get _nonblock => _darwin ? 4 : 0x800;
   static int get _createExclusive => _darwin ? 0x200 | 0x800 : 0x40 | 0x80;
-  static Never _fail([int? code]) => throw FileSystemException(
-    'Workspace filesystem operation failed',
-    '',
-    OSError('', code ?? _errno().value),
-  );
+  static Never _fail([int? code, String path = '']) =>
+      throw FileSystemException(
+        'Workspace filesystem operation failed',
+        path,
+        OSError('', code ?? _errno().value),
+      );
   static void _name(String name) {
     if (name.isEmpty ||
         name == '.' ||
@@ -153,17 +154,26 @@ final class WorkspaceDirectory {
     final text = name.toNativeUtf8();
     try {
       final result = _openat(parent, text, flags, 0x180); // owner read/write
-      if (result < 0) _fail();
+      if (result < 0) _fail(null, name);
       return result;
     } finally {
       calloc.free(text);
     }
   }
 
-  factory WorkspaceDirectory.openRoot(String path) => WorkspaceDirectory._(
-    _open(_darwin ? -2 : -100, path, _safe | _directory),
-  );
-  WorkspaceDirectory child(String name, {bool create = false}) {
+  // Picker URLs pass through OS-owned, search-only ancestors (/data on
+  // Android, container parents on iOS). Traversal must not require listing them.
+  static int _directoryFlags(bool searchOnly) =>
+      _safe | _directory | (searchOnly ? (_darwin ? 0x40000000 : 0x200000) : 0);
+  factory WorkspaceDirectory.openRoot(String path, {bool searchOnly = false}) =>
+      WorkspaceDirectory._(
+        _open(_darwin ? -2 : -100, path, _directoryFlags(searchOnly)),
+      );
+  WorkspaceDirectory child(
+    String name, {
+    bool create = false,
+    bool searchOnly = false,
+  }) {
     _name(name);
     if (create) {
       final text = name.toNativeUtf8();
@@ -173,7 +183,7 @@ final class WorkspaceDirectory {
         calloc.free(text);
       }
     }
-    return WorkspaceDirectory._(_open(fd, name, _safe | _directory));
+    return WorkspaceDirectory._(_open(fd, name, _directoryFlags(searchOnly)));
   }
 
   void close() {

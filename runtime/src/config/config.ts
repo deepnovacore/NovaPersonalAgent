@@ -1,8 +1,40 @@
+import {homedir} from 'node:os'
+import {resolve} from 'node:path'
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import {CODING_BACKEND_IDS} from './coding-backends.js'
+import {isIP} from 'node:net'
+import {
+  DASHSCOPE_COMPATIBLE_BASE_URL,
+  DEEPSEEK_BASE_URL,
+  GEMINI_BASE_URL,
+  MODEL_ROUTE_PROVIDER_METADATA,
+  OPENAI_BASE_URL,
+  STEPFUN_COMPATIBLE_BASE_URL,
+  ModelRoutesParseError,
+  modelRoutesSchema,
+  modelRouteProviders,
+  parseModelRoutes,
+  type ModelRouteLane,
+  type ModelRouteProvider,
+  type ModelRoutes,
+} from './model-routes.js'
 import { z } from 'zod'
 import { stripLikePython } from '../text/python-text.js'
 import {supportsVision} from '../model/vision-capability.js'
+
+export {
+  DASHSCOPE_COMPATIBLE_BASE_URL,
+  DEEPSEEK_BASE_URL,
+  GEMINI_BASE_URL,
+  MODEL_ROUTE_LANE_IDS,
+  MODEL_ROUTE_PROVIDER_METADATA,
+  OPENAI_BASE_URL,
+  STEPFUN_COMPATIBLE_BASE_URL,
+  parseModelRoutes,
+  type ModelRouteLane,
+  type ModelRouteProvider,
+  type ModelRoutes,
+} from './model-routes.js'
 
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
@@ -24,12 +56,6 @@ const embeddingProviderSchema = z.enum(['dashscope'])
 const memoryConnectionSchema = z.enum(['disabled', 'local', 'remote'])
 const searchProviderSchema = z.enum(['mcp', 'tavily'])
 const volcFloatSchema = z.custom<number>(value => typeof value === 'number')
-export const DASHSCOPE_COMPATIBLE_BASE_URL =
-  'https://dashscope.aliyuncs.com/compatible-mode/v1'
-export const DEEPSEEK_BASE_URL = 'https://api.deepseek.com'
-export const STEPFUN_COMPATIBLE_BASE_URL = 'https://api.stepfun.com/v1'
-export const OPENAI_BASE_URL = 'https://api.openai.com/v1'
-export const GEMINI_BASE_URL = 'https://generativelanguage.googleapis.com/v1beta/openai'
 const STEPFUN_SUPPORT_MODEL = 'step-3.7-flash'
 /** One default for the schema, the environment parser and the documentation. */
 export const DEFAULT_CASCADED_LLM_PROVIDER = 'deepseek' as const
@@ -87,16 +113,21 @@ function auxiliaryModelProfile(
 }
 
 export const settingsSchema = z.object({
-  model_base_url: z.url().default(DEEPSEEK_BASE_URL),
-  model_api_key: z.string().nullable().default(null),
+  /** Per-provider model endpoints: one provider never borrows another provider's URL or key. */
+  dashscope_model_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
+  deepseek_model_base_url: z.url().default(DEEPSEEK_BASE_URL),
+  openai_model_base_url: z.url().default(OPENAI_BASE_URL),
+  gemini_model_base_url: z.url().default(GEMINI_BASE_URL),
+  stepfun_model_base_url: z.url().default(STEPFUN_COMPATIBLE_BASE_URL),
   openrouter_api_key: z.string().nullable().default(null),
   tavily_api_key: z.string().nullable().default(null),
   fast_model: z.string().default('deepseek-flash'),
   watch_model: z.string().nullable().default(null),
-  conversation_vision_enabled: z.boolean().default(false),
   monitor_camera_device_id: z.string().max(256).refine(value => !/[\x00-\x1f]/u.test(value)).default(''),
   support_model: z.string().default('deepseek-flash'),
   compressor_model: z.string().default('deepseek-flash'),
+  /** Host-private per-lane routing; an absent lane keeps the historical default. */
+  model_routes: modelRoutesSchema,
   language: promptLanguageSchema.default('zh-CN'),
   news_language: promptLanguageSchema.default('en'),
   pipeline_mode: pipelineModeSchema.default('integrated'),
@@ -198,7 +229,7 @@ export const settingsSchema = z.object({
   local_tool_approval: z.enum(['ask','never']).default('ask'),
   clarification_depth: clarificationDepthSchema.default('balanced'),
   plan_readback: planReadbackSchema.default('summary'),
-  build_reasoning: z.boolean().default(false),
+  build_reasoning: z.boolean().default(true),
   generate_plan: z.boolean().default(true),
   progress_bubbles: progressBubblesSchema.default('milestones'),
   search_provider: searchProviderSchema.default('tavily'),
@@ -217,6 +248,8 @@ export const settingsSchema = z.object({
   memory_consolidation_timezone: z.string().refine(value=>{try{new Intl.DateTimeFormat('en',{timeZone:value});return true}catch{return false}},'invalid timezone').default('UTC'),
   memory_connection: memoryConnectionSchema.default('local'),
   memory_provider: z.enum(['voicemem', 'mem0']).nullable().default(null),
+  memory_recall_engine: z.enum(['ledger', 'voicemem', 'mem0']).nullable().default(null),
+  memory_extractors: z.array(z.enum(['ledger','voicemem'])).min(1).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
   memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
@@ -276,15 +309,9 @@ export interface CascadedCredentials {
   readonly ttsApiKey: string
 }
 
-export interface SupportModelConnection {
-  readonly source: 'generic' | 'selected_provider'
-  readonly baseUrl: string
-  readonly apiKey: string
-}
-
 export type PersonalMemoryConfig = {readonly connection: 'remote'; readonly url: string; readonly token: string} | LocalPersonalMemoryConfig
 
-interface LocalPersonalMemoryConfig {
+export interface LocalPersonalMemoryConfig {
   readonly connection: 'local'
   readonly provider: 'voicemem' | 'mem0'
   readonly extractionModel: string
@@ -311,8 +338,11 @@ const proactivityPresets: Readonly<Record<Settings['proactivity_preset'], Proact
   eager: {cooldown: 30, fresh_window: 45},
 }
 
+export type MemoryConfigurationVariable = 'MEMORY_PROVIDER'|'MEMORY_RECALL_ENGINE'|'MEMORY_EXTRACTORS'|'MEMORY_CONNECTION'|'MEMORY_URL'|'MEMORY_TOKEN'
+export interface MemoryStartupConfiguration {readonly code:'memory_provider_conflict'|'memory_configuration_invalid';readonly variables:readonly MemoryConfigurationVariable[]}
+const memoryConfigurationVariables:readonly string[]=['MEMORY_PROVIDER','MEMORY_RECALL_ENGINE','MEMORY_EXTRACTORS','MEMORY_CONNECTION','MEMORY_URL','MEMORY_TOKEN']
 export class ConfigurationError extends Error {
-  constructor(message: string, readonly code: 'invalid_configuration' = 'invalid_configuration') {
+  constructor(message: string, readonly code: 'invalid_configuration' = 'invalid_configuration', readonly startupConfiguration?: MemoryStartupConfiguration) {
     super(message)
     this.name = 'ConfigurationError'
   }
@@ -329,6 +359,24 @@ export class BlockingConfigurationError extends ConfigurationError {
 /** Environment names that were renamed without an alias; the old name is ignored, so its presence deserves a startup warning. */
 export const RENAMED_ENVIRONMENT: Readonly<Record<string, string>> = {SURROGATE_MODEL: 'SUPPORT_MODEL'}
 
+/**
+ * Generic cross-provider model overrides are gone: a model endpoint and credential always belong
+ * to one provider. Refuse the retired names instead of quietly sending one provider's request to
+ * another provider's URL or key.
+ */
+function rejectRemovedModelOverrides(environment: NodeJS.ProcessEnv): void {
+  const removed = ['MODEL_BASE_URL', 'MODEL_API_KEY']
+    .filter(name => stripLikePython(environment[name] ?? '') !== '')
+  if (removed.length === 0) return
+  throw new ConfigurationError(
+    `${removed.join(', ')} 已移除；模型地址和密钥按供应商分别配置：`
+    + 'DASHSCOPE_MODEL_BASE_URL/DASHSCOPE_API_KEY、DEEPSEEK_MODEL_BASE_URL/DEEPSEEK_API_KEY、'
+    + 'OPENAI_MODEL_BASE_URL/OPENAI_API_KEY、GEMINI_MODEL_BASE_URL/GEMINI_API_KEY、'
+    + 'STEPFUN_MODEL_BASE_URL/STEPFUN_API_KEY、VOLCENGINE_ARK_BASE_URL/ARK_API_KEY；'
+    + '兼容网关使用 OPENAI_COMPATIBLE_BASE_URL/API_KEY，自托管使用 SELF_HOSTED_LLM_BASE_URL/API_KEY',
+  )
+}
+
 /** One `[config-warning]` line per renamed variable still set in the environment. */
 export function renamedEnvironmentWarnings(environment: NodeJS.ProcessEnv): readonly string[] {
   return Object.entries(RENAMED_ENVIRONMENT)
@@ -336,18 +384,34 @@ export function renamedEnvironmentWarnings(environment: NodeJS.ProcessEnv): read
     .map(([removed, current]) => `[config-warning] ${removed} is no longer read; rename it to ${current}`)
 }
 
+/** Parse the host-private routing document; malformed input is a configuration error, never partial routing. */
+function loadModelRoutes(raw: string | undefined): ModelRoutes {
+  try {
+    return parseModelRoutes(raw)
+  } catch (error) {
+    if (error instanceof ModelRoutesParseError) throw new ConfigurationError('invalid configuration: MODEL_ROUTES')
+    throw error
+  }
+}
+
 export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textConversations = false): Settings {
+  rejectRemovedModelOverrides(environment)
   const pipelineMode = parsePipelineMode(environment.PIPELINE_MODE)
   const integratedProvider = pipelineMode === 'integrated'
     ? parseIntegratedProvider(environment.INTEGRATED_PROVIDER)
     : undefined
+  const modelRoutes = loadModelRoutes(environment.MODEL_ROUTES)
+  const routedProviders = modelRouteProviders(modelRoutes)
+  const routedText = modelRoutes.conversationText
   const cascadedProviders = pipelineMode === 'cascaded'
     ? {
       endpointing: parseCascadedEndpointingProvider(
         environment.CASCADE_ENDPOINTING_PROVIDER,
       ),
       asr: parseCascadedAsrProvider(environment.CASCADE_ASR_PROVIDER),
-      llm: parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER),
+      llm: routedText === undefined
+        ? parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER)
+        : routedText.provider as CascadedLlmProviderName,
       tts: parseCascadedTtsProvider(environment.CASCADE_TTS_PROVIDER),
     }
     : undefined
@@ -360,17 +424,24 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
   // integrated; auxiliary models must therefore follow whichever provider answers text.
   // Inactive selectors stay unread: integrated runtimes never touch the cascaded slots.
   const cascadeText = textConversations || pipelineMode === 'cascaded'
+  const routeConversationText = cascadeText ? routedText : undefined
+  const routedTextProvider = routeConversationText === undefined
+    ? undefined : routeConversationText.provider as CascadedLlmProviderName
   const effectiveTextProvider = cascadeText
-    ? parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER)
+    ? routedTextProvider ?? parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER)
     : integratedProvider
-  const configuredCascadeModel = cascadeText ? optionalString(environment.CASCADE_LLM_MODEL) ?? null : null
+  const configuredCascadeModel = cascadeText
+    ? routeConversationText?.model ?? optionalString(environment.CASCADE_LLM_MODEL) ?? null
+    : null
   const cascadeModel = configuredCascadeModel
     ?? (effectiveTextProvider === undefined || effectiveTextProvider === 'self-hosted' || effectiveTextProvider === 'openai-compatible'
       ? null : defaultCascadedLlmModel(effectiveTextProvider))
-  const genericModelKey = (optionalSecret(environment.MODEL_API_KEY) ?? '').trim() !== ''
-  const auxiliary = genericModelKey ? undefined : auxiliaryModelProfile(effectiveTextProvider, cascadeModel)
+  const auxiliary = auxiliaryModelProfile(effectiveTextProvider, cascadeModel)
   const auxiliaryDefault = (value: string | undefined, key: keyof AuxiliaryModelProfile): string | undefined =>
     value ?? auxiliary?.[key]
+  // A routed lane overrides its legacy default, and the route's provider credential is read
+  // even when no legacy selector would have needed it.
+  const routesRequireKey = (provider: ModelRouteProvider): boolean => routedProviders.has(provider)
   const candidate = {
     coding_backend: optionalString(environment.CODING_BACKEND),
     openai_compatible_base_url: optionalString(environment.OPENAI_COMPATIBLE_BASE_URL),
@@ -409,22 +480,28 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     deepseek_api_key: optionalSecret(environment.DEEPSEEK_API_KEY),
     embedding_base_url: optionalString(environment.EMBEDDING_BASE_URL),
     embedding_api_key: optionalSecret(environment.EMBEDDING_API_KEY),
-    model_base_url: optionalString(environment.MODEL_BASE_URL),
-    model_api_key: optionalSecret(environment.MODEL_API_KEY),
+    dashscope_model_base_url: optionalString(environment.DASHSCOPE_MODEL_BASE_URL),
+    deepseek_model_base_url: optionalString(environment.DEEPSEEK_MODEL_BASE_URL),
+    openai_model_base_url: optionalString(environment.OPENAI_MODEL_BASE_URL),
+    gemini_model_base_url: optionalString(environment.GEMINI_MODEL_BASE_URL),
+    stepfun_model_base_url: optionalString(environment.STEPFUN_MODEL_BASE_URL),
     openrouter_api_key: optionalSecret(environment.OPENROUTER_API_KEY),
     tavily_api_key: optionalSecret(environment.TAVILY_API_KEY),
-    fast_model: auxiliaryDefault(rawEnvironmentValue(environment.FAST_MODEL), 'fast'),
-    watch_model: auxiliaryDefault(emptyAsUnset(rawEnvironmentValue(environment.WATCH_MODEL)), 'watch'),
+    fast_model: modelRoutes.fast?.model ?? auxiliaryDefault(rawEnvironmentValue(environment.FAST_MODEL), 'fast'),
+    watch_model: modelRoutes.watch?.model ?? auxiliaryDefault(emptyAsUnset(rawEnvironmentValue(environment.WATCH_MODEL)), 'watch'),
     ...(supportsVision('qwen', environment.WATCH_MODEL ?? '')
+      || routesRequireKey('qwen') || routesRequireKey('dashscope')
       || environment.MEMORY_CONNECTION?.trim() === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
-    ...(supportsVision('ark', environment.WATCH_MODEL ?? '')
+    ...(supportsVision('ark', environment.WATCH_MODEL ?? '') || routesRequireKey('ark')
       ? {ark_api_key: optionalSecret(environment.ARK_API_KEY),
           volcengine_ark_base_url: rawEnvironmentValue(environment.VOLCENGINE_ARK_BASE_URL)} : {}),
-    conversation_vision_enabled: optionalBoolean(environment.CONVERSATION_VISION_ENABLED),
+    ...(routesRequireKey('stepfun')
+      ? {stepfun_api_key: optionalSecret(environment.STEPFUN_API_KEY)} : {}),
     monitor_camera_device_id: optionalString(environment.MONITOR_CAMERA_DEVICE_ID),
-    support_model: auxiliaryDefault(rawEnvironmentValue(environment.SUPPORT_MODEL), 'support'),
-    compressor_model: auxiliaryDefault(undefined, 'compressor'),
+    support_model: modelRoutes.support?.model ?? auxiliaryDefault(rawEnvironmentValue(environment.SUPPORT_MODEL), 'support'),
+    compressor_model: modelRoutes.compressor?.model ?? auxiliaryDefault(undefined, 'compressor'),
+    model_routes: modelRoutes,
     language: parsePromptLanguageSetting(environment.PROMPT_LANGUAGE),
     news_language: parseSelector(promptLanguageSchema, environment.NEWS_LANGUAGE, 'en', 'NEWS_LANGUAGE'),
     pipeline_mode: pipelineMode,
@@ -433,8 +510,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ),
     profile_participant_messages: optionalBoolean(environment.PROFILE_PARTICIPANT_MESSAGES),
     ...(pipelineMode === 'integrated' ? {
-      ...(textConversations ? {cascade_llm_provider: parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER),
-        cascade_llm_model: rawEnvironmentValue(environment.CASCADE_LLM_MODEL),
+      ...(textConversations ? {cascade_llm_provider: routedTextProvider ?? parseCascadedLlmProvider(environment.CASCADE_LLM_PROVIDER),
+        cascade_llm_model: routedText?.model ?? rawEnvironmentValue(environment.CASCADE_LLM_MODEL) ?? cascadeModel,
         ark_api_key: optionalSecret(environment.ARK_API_KEY), deepseek_api_key: optionalSecret(environment.DEEPSEEK_API_KEY),
         volcengine_ark_base_url: rawEnvironmentValue(environment.VOLCENGINE_ARK_BASE_URL)} : {}),
       integrated_provider: integratedProvider,
@@ -459,7 +536,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
       cascade_endpointing_provider: cascadedProviders!.endpointing,
       cascade_asr_provider: cascadedProviders!.asr,
       cascade_llm_provider: cascadedProviders!.llm,
-      cascade_llm_model: rawEnvironmentValue(environment.CASCADE_LLM_MODEL),
+      cascade_llm_model: routedText?.model ?? rawEnvironmentValue(environment.CASCADE_LLM_MODEL),
       cascade_tts_provider: cascadedProviders!.tts,
       ...(cascadedProviders!.llm === 'qwen'
         ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)}
@@ -533,7 +610,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     embedding_provider: parseEmbeddingProvider(
       environment.EMBEDDING_PROVIDER,
     ),
-    embedding_model: optionalString(environment.EMBEDDING_MODEL),
+    embedding_model: modelRoutes.embedding?.model ?? optionalString(environment.EMBEDDING_MODEL),
     blackboard_path: optionalString(environment.BLACKBOARD_PATH),
     blackboard_owner_id: optionalString(environment.BLACKBOARD_OWNER_ID),
     memory_prerecall_enabled: optionalBoolean(environment.MEMORY_PRERECALL_ENABLED),
@@ -544,6 +621,8 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     ...((optionalString(environment.MEMORY_CONNECTION) ?? 'local') === 'local'
       ? {dashscope_api_key: optionalSecret(environment.DASHSCOPE_API_KEY)} : {}),
     memory_provider: optionalString(environment.MEMORY_PROVIDER),
+    memory_recall_engine: optionalNonEmptyString(environment.MEMORY_RECALL_ENGINE),
+    memory_extractors: optionalNonEmptyString(environment.MEMORY_EXTRACTORS)?.split(',').map(value => value.trim()),
     memory_url: optionalString(environment.MEMORY_URL),
     memory_token: optionalSecret(environment.MEMORY_TOKEN),
     memory_path: optionalString(environment.MEMORY_PATH),
@@ -558,7 +637,7 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     const fields = [...new Set(result.error.issues.map(issue => String(issue.path[0] ?? 'settings')))]
       .sort(compareStrings)
       .map(configurationFieldName)
-    throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`)
+    throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`, 'invalid_configuration', fields.some(field=>memoryConfigurationVariables.includes(field)) ? {code:'memory_configuration_invalid',variables:fields.filter(field=>memoryConfigurationVariables.includes(field)) as MemoryConfigurationVariable[]} : undefined)
   }
   resolveMemoryConnection(result.data)
   return result.data
@@ -576,6 +655,118 @@ export function resolveProactivityPreset(preset: ProactivityPreset): Proactivity
   return proactivityPresets[preset]
 }
 
+export interface ResolvedModelRoute {
+  readonly provider: ModelRouteProvider
+  readonly model: string
+  readonly baseUrl: string
+  readonly apiKey: string
+  /** Environment variable still needed before the route can run, or null when usable. */
+  readonly missing: string | null
+}
+
+export interface ProviderModelConnection {
+  readonly provider: ModelRouteProvider
+  readonly baseUrl: string
+  readonly apiKey: string
+  /** Environment variable still needed before this connection can run, or null when usable. */
+  readonly missing: string | null
+}
+
+/** Provider model endpoints allow no credentials, query or fragment in addition to the TLS rule. */
+function secureModelEndpoint(value: string, name: string): string {
+  const endpoint = secureEndpoint(value, 'https', name)
+  if (new URL(endpoint).search !== '') throw new ConfigurationError(`${name} 禁止查询参数`)
+  return endpoint
+}
+
+/** The dedicated model endpoint for one provider; every provider owns its own address. */
+function providerModelEndpoint(settings: Settings, provider: ModelRouteProvider): string {
+  switch (provider) {
+    case 'qwen': return secureModelEndpoint(settings.dashscope_model_base_url, 'DASHSCOPE_MODEL_BASE_URL')
+    case 'deepseek': return secureModelEndpoint(settings.deepseek_model_base_url, 'DEEPSEEK_MODEL_BASE_URL')
+    case 'openai': return secureModelEndpoint(settings.openai_model_base_url, 'OPENAI_MODEL_BASE_URL')
+    case 'gemini': return secureModelEndpoint(settings.gemini_model_base_url, 'GEMINI_MODEL_BASE_URL')
+    case 'stepfun': return secureModelEndpoint(settings.stepfun_model_base_url, 'STEPFUN_MODEL_BASE_URL')
+    case 'ark': return secureModelEndpoint(settings.volcengine_ark_base_url, 'VOLCENGINE_ARK_BASE_URL')
+    default: throw new ConfigurationError('invalid configuration: MODEL_ROUTES')
+  }
+}
+
+/**
+ * Resolve one provider's own model endpoint and credential.
+ *
+ * There is deliberately no cross-provider fallback: an unselected provider's URL and key stay
+ * unread, and a missing key names that provider's variable instead of borrowing another key.
+ * `dashscope` is the embedding-only provider lane; it keeps EMBEDDING_BASE_URL's DashScope default,
+ * because the model URL does not own embeddings.
+ */
+export function resolveProviderModelConnection(
+  settings: Settings,
+  provider: string,
+): ProviderModelConnection | null {
+  if (!Object.hasOwn(MODEL_ROUTE_PROVIDER_METADATA, provider)) return null
+  const typed = provider as ModelRouteProvider
+  const metadata = MODEL_ROUTE_PROVIDER_METADATA[typed]
+  const apiKey = stripLikePython(settings[metadata.keyField] ?? '')
+  const keyMissing = apiKey === '' && !metadata.keyOptional ? metadata.keyName : null
+  if (typed === 'self-hosted' || typed === 'openai-compatible') {
+    const name = typed === 'self-hosted' ? 'SELF_HOSTED_LLM_BASE_URL' : 'OPENAI_COMPATIBLE_BASE_URL'
+    const raw = stripLikePython(typed === 'self-hosted'
+      ? settings.self_hosted_llm_base_url : settings.openai_compatible_base_url)
+    return {
+      provider: typed,
+      baseUrl: raw === '' ? '' : routeCompatibleEndpoint(raw, name),
+      apiKey,
+      missing: raw === '' ? name : keyMissing,
+    }
+  }
+  if (typed === 'dashscope') {
+    return {provider: typed, baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey, missing: keyMissing}
+  }
+  return {provider: typed, baseUrl: providerModelEndpoint(settings, typed), apiKey, missing: keyMissing}
+}
+
+/**
+ * Mirrors `selfHostedEndpoint`; importing it here would create a config <-> self-hosted cycle.
+ * TLS is required except for a literal loopback address, and URLs may not carry credentials,
+ * queries or fragments.
+ */
+function routeCompatibleEndpoint(value: string, name: string): string {
+  const normalized = stripLikePython(value)
+  let url: URL
+  try { url = new URL(normalized) } catch { throw new ConfigurationError(`${name} 地址无效`) }
+  const host = url.hostname.replace(/^\[|\]$/g, '')
+  const loopback = host === '::1' || (isIP(host) === 4 && host.startsWith('127.'))
+  const authority = normalized.split('://')[1]?.split(/[/?#]/)[0] ?? ''
+  const literal = authority.replace(/:\d+$/, '').replace(/^\[|\]$/g, '')
+  if (!(url.protocol === 'https:' || (url.protocol === 'http:' && loopback && isIP(literal)))
+    || url.username || url.password || normalized.includes('@') || normalized.includes('?') || normalized.includes('#')) {
+    throw new ConfigurationError(`${name} 必须使用 TLS；仅字面量回环地址可使用明文，且禁止 URL 凭据、查询和片段`)
+  }
+  return url.toString().replace(/\/$/, '')
+}
+
+/**
+ * Resolve one explicitly routed lane into a provider connection.
+ *
+ * Returns null when the lane is not routed, so every caller keeps its historical default.
+ * A routed model uses exactly its provider's endpoint and credential; no generic override and no
+ * other provider's configuration can retarget the lane.
+ */
+export function resolveModelRoute(settings: Settings, lane: ModelRouteLane): ResolvedModelRoute | null {
+  const route = settings.model_routes[lane]
+  if (route === undefined || route === null) return null
+  const connection = resolveProviderModelConnection(settings, route.provider)
+  if (connection === null) throw new ConfigurationError('invalid configuration: MODEL_ROUTES')
+  return Object.freeze({
+    provider: connection.provider,
+    model: route.model,
+    baseUrl: connection.baseUrl,
+    apiKey: connection.apiKey,
+    missing: connection.missing,
+  })
+}
+
 interface MemoryExtractionConnection {
   readonly baseUrl: string
   readonly apiKey: string
@@ -587,91 +778,63 @@ interface MemoryExtractionConnection {
 function extractionCandidate(
   settings: Settings,
   provider: string,
-): {readonly baseUrl: string; readonly apiKey: string; readonly model: string} | null {
-  if (provider === 'qwen') return {baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL, apiKey: stripLikePython(settings.dashscope_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.qwen.fast}
-  if (provider === 'stepfun') return {baseUrl: STEPFUN_COMPATIBLE_BASE_URL, apiKey: stripLikePython(settings.stepfun_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.stepfun.fast}
-  if (provider === 'openai') return {baseUrl: OPENAI_BASE_URL, apiKey: stripLikePython(settings.openai_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.openai.fast}
-  if (provider === 'gemini') return {baseUrl: GEMINI_BASE_URL, apiKey: stripLikePython(settings.gemini_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.gemini.fast}
-  if (provider === 'deepseek') return {baseUrl: DEEPSEEK_BASE_URL, apiKey: stripLikePython(settings.deepseek_api_key ?? ''), model: AUXILIARY_MODEL_PROFILES.deepseek.fast}
-  if (provider === 'ark') return {baseUrl: secureEndpoint(settings.volcengine_ark_base_url, 'https', 'VOLCENGINE_ARK_BASE_URL'), apiKey: stripLikePython(settings.ark_api_key ?? ''), model: settings.volcengine_ark_support_model}
-  if (provider === 'self-hosted') return {baseUrl: settings.self_hosted_llm_base_url, apiKey: stripLikePython(settings.self_hosted_llm_api_key ?? ''), model: settings.cascade_llm_model ?? settings.fast_model}
-  if (provider === 'openai-compatible') return {baseUrl: settings.openai_compatible_base_url, apiKey: stripLikePython(settings.openai_compatible_api_key ?? ''), model: settings.cascade_llm_model ?? settings.fast_model}
-  return null
-}
-
-function providerForFastModel(model: string): string | null {
-  for (const [provider, profile] of Object.entries(AUXILIARY_MODEL_PROFILES)) {
-    if (profile.fast === model) return provider
-  }
-  return null
+): {readonly baseUrl: string; readonly apiKey: string; readonly model: string; readonly missing: string | null} | null {
+  const connection = resolveProviderModelConnection(settings, provider)
+  if (connection === null) return null
+  const model = provider === 'ark' ? settings.volcengine_ark_support_model
+    : provider === 'self-hosted' || provider === 'openai-compatible' ? settings.cascade_llm_model ?? settings.fast_model
+      : AUXILIARY_MODEL_PROFILES[provider as keyof typeof AUXILIARY_MODEL_PROFILES]?.fast
+  if (model === undefined) return null
+  return {...connection, model}
 }
 
 /**
- * Extraction must reach the same provider that answers text. The paired fast model names that
- * provider; a custom fast model keeps its own name on the provider that owns the credential.
- * The configured generic model connection always wins over provider profiles.
+ * The provider that answers text and support. An explicit fast route is a separate lane and must
+ * not retarget support; model names never guess a provider. Text mode is the cascaded graph, or an
+ * integrated runtime with a configured cascaded text model (desktop text conversations set it).
  */
-function selectedTextProvider(settings: Settings): string {
-  // A local/compatible gateway is authoritative even if its model happens to share a public name.
-  if (settings.cascade_llm_provider === 'self-hosted' || settings.cascade_llm_provider === 'openai-compatible') {
-    return settings.cascade_llm_provider
+function effectiveTextProvider(settings: Settings): string {
+  if (settings.pipeline_mode !== 'cascaded' && settings.cascade_llm_model === null) {
+    return settings.integrated_provider
   }
-  const paired = providerForFastModel(settings.fast_model)
-  if (paired !== null) return paired
-  return settings.pipeline_mode === 'integrated' ? settings.integrated_provider : settings.cascade_llm_provider
+  const routed = settings.model_routes.conversationText
+  if (routed !== undefined && routed !== null) return routed.provider
+  return settings.cascade_llm_provider
+}
+
+/** The selected text provider's own model endpoint and credential; null for native realtime only. */
+export function resolveSelectedModelConnection(settings: Settings): ProviderModelConnection | null {
+  return resolveProviderModelConnection(settings, effectiveTextProvider(settings))
 }
 
 /**
  * Extraction must reach the same provider that answers text. A local gateway is never replaced by
  * a cloud provider with a matching model name; a missing local key stays local (self-hosted may be
- * keyless) instead of silently sending content elsewhere.
+ * keyless) instead of silently sending content elsewhere, and no other provider's key is borrowed.
  */
 export function resolveMemoryExtractionConnection(settings: Settings): MemoryExtractionConnection {
-  const genericKey = stripLikePython(settings.model_api_key ?? '')
-  if (genericKey !== '') return {baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'), apiKey: genericKey, model: settings.fast_model, missing: null}
-  const selected = selectedTextProvider(settings)
-  const primary = extractionCandidate(settings, selected)
-  const primaryBase = primary?.baseUrl ?? ''
-  if (primary !== null && primaryBase !== '' && (primary.apiKey !== '' || selected === 'self-hosted')) {
-    return {...primary, model: settings.fast_model, missing: null}
-  }
-  if (selected === 'self-hosted' || selected === 'openai-compatible') {
-    const missing = primaryBase === '' ? 'SELF_HOSTED_LLM_BASE_URL'
-      : selected === 'openai-compatible' && (primary?.apiKey ?? '') === '' ? 'OPENAI_COMPATIBLE_API_KEY'
-        : null
+  // The fast lane is the memory-extraction lane: an explicit route wins over the provider default.
+  const fastRoute = resolveModelRoute(settings, 'fast')
+  if (fastRoute !== null) {
     return {
-      baseUrl: primaryBase === '' ? settings.model_base_url : primaryBase,
-      apiKey: primary?.apiKey ?? '',
-      model: settings.fast_model,
-      missing,
+      baseUrl: fastRoute.baseUrl,
+      apiKey: fastRoute.apiKey,
+      model: fastRoute.model,
+      missing: fastRoute.missing,
     }
   }
-  for (const provider of [settings.cascade_llm_provider, settings.integrated_provider]) {
-    if (provider === selected) continue
-    const candidate = extractionCandidate(settings, provider)
-    if (candidate !== null && candidate.baseUrl !== '' && candidate.apiKey !== '') {
-      return {...candidate, missing: null}
-    }
+  const primary = extractionCandidate(settings, effectiveTextProvider(settings))
+  if (primary === null) {
+    // Native realtime providers have no model channel of their own; extraction needs an explicit lane.
+    return {baseUrl: '', apiKey: '', model: settings.fast_model, missing: 'MODEL_ROUTES'}
   }
-  const fallbackKey = resolveModelApiKey(settings) ?? ''
-  const missing = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY'
-    : settings.model_base_url === DEEPSEEK_BASE_URL ? 'DEEPSEEK_API_KEY' : 'MODEL_API_KEY'
-  return {
-    baseUrl: secureEndpoint(settings.model_base_url, 'https', 'MODEL_BASE_URL'),
-    apiKey: stripLikePython(fallbackKey),
-    model: settings.fast_model,
-    missing: fallbackKey === '' ? missing : null,
-  }
+  return {...primary, model: settings.fast_model}
 }
 
 export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig | null {
   const connection = resolveMemoryConnection(settings)
   if (connection === 'disabled') return null
-  if (connection === 'remote') return Object.freeze({
-    connection: 'remote',
-    url: requiredSetting(settings.memory_url, 'MEMORY_URL'),
-    token: requiredCredential(settings.memory_token, 'MEMORY_TOKEN'),
-  })
+  if (connection === 'remote') return remoteMemoryConfig(settings)
   // Local memory is optional: without its embedding and extraction credentials it stays off
   // instead of blocking the voice pipeline or silently failing every extraction request.
   if (!resolveEmbeddingConnection(settings).apiKey) return null
@@ -691,14 +854,34 @@ export function requirePersonalMemory(settings: Settings): PersonalMemoryConfig 
   })
 }
 
+export type MemoryComposition =
+  | {readonly kind: 'disabled'}
+  | {readonly kind: 'remote'; readonly config: Extract<PersonalMemoryConfig, {connection: 'remote'}>}
+  | {readonly kind: 'ledger'; readonly engine: 'ledger' | 'voicemem' | 'mem0'; readonly extractors: readonly ('ledger'|'voicemem')[]; readonly migrateLegacy?: {readonly path: string; readonly userId: string}; readonly local: LocalPersonalMemoryConfig}
+  | {readonly kind: 'standalone-mem0'; readonly config: LocalPersonalMemoryConfig}
+
+/** Pure plan: no stores, warnings, migrations or model calls happen during resolution. */
+export function resolveMemoryComposition(settings: Settings): MemoryComposition {
+  const configured = requirePersonalMemory(settings)
+  if (!configured) return {kind: 'disabled'}
+  if (configured.connection === 'remote') return {kind: 'remote', config: configured}
+  const path = resolve(configured.path.startsWith('~/') ? resolve(homedir(), configured.path.slice(2)) : configured.path)
+  const local = {...configured, path}
+  if (settings.memory_provider === 'mem0') return {kind: 'standalone-mem0', config: local}
+  const legacy = settings.memory_recall_engine === null && settings.memory_extractors === null
+  return {kind: 'ledger', engine: settings.memory_recall_engine ?? 'ledger', extractors: settings.memory_extractors ?? ['ledger'], local,
+    ...(legacy ? {migrateLegacy: {path, userId: local.userId}} : {})}
+}
+
 /** Module status in the shape of `modules.search`; local memory is off without both credentials. */
 export function memoryStatus(settings: Settings): {enabled: boolean; reason: string | null; fallback: null} {
   try {
     const connection = resolveMemoryConnection(settings)
     if (connection === 'disabled') return {enabled: false, reason: 'disabled', fallback: null}
-    if (connection === 'local' && !resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
-      reason: `missing_environment:${settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'}`, fallback: null}
     if (connection === 'local') {
+      const embeddingRoute = resolveModelRoute(settings, 'embedding')
+      if (!resolveEmbeddingConnection(settings).apiKey) return {enabled: false,
+        reason: `missing_environment:${embeddingRoute?.missing ?? (settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY')}`, fallback: null}
       const extraction = resolveMemoryExtractionConnection(settings)
       if (extraction.missing !== null) return {enabled: false, reason: `missing_environment:${extraction.missing}`, fallback: null}
     }
@@ -709,11 +892,28 @@ export function memoryStatus(settings: Settings): {enabled: boolean; reason: str
   }
 }
 
+function remoteMemoryConfig(settings:Settings):Extract<PersonalMemoryConfig,{connection:'remote'}> {
+  const invalid=(variables:readonly MemoryConfigurationVariable[])=>new ConfigurationError('invalid remote memory configuration','invalid_configuration',{code:'memory_configuration_invalid',variables})
+  const url=settings.memory_url.trim()
+  try {
+    const parsed=new URL(url)
+    if((parsed.protocol!=='https:'&&!(parsed.protocol==='http:'&&['127.0.0.1','[::1]'].includes(parsed.hostname)))||parsed.username||parsed.password||parsed.search||parsed.hash||(parsed.pathname!=='/'&&parsed.pathname!==''))throw Error()
+  }catch{throw invalid(['MEMORY_CONNECTION','MEMORY_URL'])}
+  const token=(settings.memory_token??'').trim()
+  if(!token||token.length>8192||/\s/u.test(token))throw invalid(['MEMORY_CONNECTION','MEMORY_TOKEN'])
+  return Object.freeze({connection:'remote',url,token})
+}
+
 function resolveMemoryConnection(settings: Settings): z.infer<typeof memoryConnectionSchema> {
   const connection = settings.memory_connection
+  const newSettings = settings.memory_recall_engine !== null || settings.memory_extractors !== null
+  if (newSettings && settings.memory_provider !== null) throw new ConfigurationError('MEMORY_PROVIDER conflicts with MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS','invalid_configuration',{code:'memory_provider_conflict',variables:['MEMORY_PROVIDER',...(settings.memory_recall_engine!==null?['MEMORY_RECALL_ENGINE' as const]:[]),...(settings.memory_extractors!==null?['MEMORY_EXTRACTORS' as const]:[])]})
+  if (newSettings && connection === 'remote') throw new ConfigurationError('MEMORY_RECALL_ENGINE/MEMORY_EXTRACTORS are only valid for a local memory connection','invalid_configuration',{code:'memory_configuration_invalid',variables:['MEMORY_CONNECTION',...(settings.memory_recall_engine!==null?['MEMORY_RECALL_ENGINE' as const]:[]),...(settings.memory_extractors!==null?['MEMORY_EXTRACTORS' as const]:[])]})
+  if (settings.memory_extractors !== null && (!settings.memory_extractors.includes('ledger') || new Set(settings.memory_extractors).size !== settings.memory_extractors.length)) throw new ConfigurationError('MEMORY_EXTRACTORS requires ledger and at most one voicemem','invalid_configuration',{code:'memory_configuration_invalid',variables:['MEMORY_EXTRACTORS']})
   if (settings.memory_provider !== null && connection !== 'local') {
-    throw new ConfigurationError('MEMORY_PROVIDER is only valid for a local memory connection; remote engines are selected by the service')
+    throw new ConfigurationError('MEMORY_PROVIDER is only valid for a local memory connection; remote engines are selected by the service','invalid_configuration',{code:'memory_configuration_invalid',variables:['MEMORY_PROVIDER','MEMORY_CONNECTION']})
   }
+  if(connection==='remote')remoteMemoryConfig(settings)
   return connection
 }
 
@@ -730,11 +930,9 @@ export function requireQwenRealtime(settings: Settings): QwenRealtimeConfig {
   if (voice === '') {
     throw new ConfigurationError('QWEN_REALTIME_VOICE 不能为空')
   }
-  const realtimeKey = stripLikePython(settings.dashscope_api_key ?? '')
-  const modelKey = stripLikePython(settings.model_api_key ?? '')
-  const apiKey = realtimeKey || modelKey
+  const apiKey = stripLikePython(settings.dashscope_api_key ?? '')
   if (apiKey === '') {
-    throw new ConfigurationError('缺少 DASHSCOPE_API_KEY 或 MODEL_API_KEY')
+    throw new ConfigurationError('缺少 DASHSCOPE_API_KEY')
   }
   return {url, model, voice, apiKey}
 }
@@ -775,24 +973,17 @@ export function requireIntegratedRealtime(settings: Settings): QwenRealtimeConfi
   if (voice === '') {
     throw new ConfigurationError('QWEN_REALTIME_VOICE 不能为空')
   }
-  const explicitKey = stripLikePython(settings.dashscope_api_key ?? '')
-  const compatibleGenericKey = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL
-    ? stripLikePython(settings.model_api_key ?? '')
-    : ''
-  const apiKey = explicitKey || compatibleGenericKey
+  const apiKey = stripLikePython(settings.dashscope_api_key ?? '')
   if (apiKey === '') {
     throw new ConfigurationError('缺少 DASHSCOPE_API_KEY')
   }
   return Object.freeze({url, model, voice, apiKey})
 }
 
-export function resolveModelApiKey(settings: Settings): string | null {
-  return stripLikePython(settings.model_api_key ?? '')
-    || (settings.model_base_url === DEEPSEEK_BASE_URL ? settings.deepseek_api_key
-      : settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.dashscope_api_key : null)
-}
-
 export function resolveEmbeddingConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} {
+  // Knowledge and local memory share one embedding lane; a routed lane pins its provider.
+  const embeddingRoute = resolveModelRoute(settings, 'embedding')
+  if (embeddingRoute !== null) return {baseUrl: embeddingRoute.baseUrl, apiKey: embeddingRoute.apiKey}
   return {baseUrl: secureEndpoint(settings.embedding_base_url, 'https', 'EMBEDDING_BASE_URL'),
     apiKey: stripLikePython(settings.embedding_api_key ?? '')
       || (settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? stripLikePython(settings.dashscope_api_key ?? '') : '')}
@@ -800,19 +991,26 @@ export function resolveEmbeddingConnection(settings: Settings): {readonly baseUr
 
 /** Preset monitor models keep their credential on their own provider endpoint. */
 export function resolveWatchModelConnection(settings: Settings): {readonly baseUrl: string; readonly apiKey: string} | null {
+  const watchRoute = resolveModelRoute(settings, 'watch')
+  if (watchRoute !== null) {
+    if (watchRoute.missing !== null) throw new ConfigurationError(`缺少 ${watchRoute.missing}`)
+    return {baseUrl: watchRoute.baseUrl, apiKey: watchRoute.apiKey}
+  }
   const model = stripLikePython(settings.watch_model ?? '')
-  if (supportsVision('deepseek', model)) return {baseUrl: DEEPSEEK_BASE_URL, apiKey: requiredCredential(settings.deepseek_api_key ?? (settings.model_base_url === DEEPSEEK_BASE_URL ? settings.model_api_key : null), 'DEEPSEEK_API_KEY')}
+  if (supportsVision('deepseek', model)) return {
+    baseUrl: secureModelEndpoint(settings.deepseek_model_base_url, 'DEEPSEEK_MODEL_BASE_URL'),
+    apiKey: requiredCredential(settings.deepseek_api_key, 'DEEPSEEK_API_KEY'),
+  }
   if (supportsVision('stepfun', model)) return {
-    baseUrl: STEPFUN_COMPATIBLE_BASE_URL,
+    baseUrl: secureModelEndpoint(settings.stepfun_model_base_url, 'STEPFUN_MODEL_BASE_URL'),
     apiKey: requiredCredential(settings.stepfun_api_key, 'STEPFUN_API_KEY'),
   }
   if (supportsVision('qwen', model)) return {
-    baseUrl: DASHSCOPE_COMPATIBLE_BASE_URL,
-    apiKey: requiredCredential(settings.dashscope_api_key
-      ?? (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null), 'DASHSCOPE_API_KEY'),
+    baseUrl: secureModelEndpoint(settings.dashscope_model_base_url, 'DASHSCOPE_MODEL_BASE_URL'),
+    apiKey: requiredCredential(settings.dashscope_api_key, 'DASHSCOPE_API_KEY'),
   }
   if (supportsVision('ark', model)) return {
-    baseUrl: secureEndpoint(settings.volcengine_ark_base_url, 'https', 'VOLCENGINE_ARK_BASE_URL'),
+    baseUrl: secureModelEndpoint(settings.volcengine_ark_base_url, 'VOLCENGINE_ARK_BASE_URL'),
     apiKey: requiredCredential(settings.ark_api_key, 'ARK_API_KEY'),
   }
   return null
@@ -820,19 +1018,21 @@ export function resolveWatchModelConnection(settings: Settings): {readonly baseU
 
 /** The credential a vision watch model still needs, or null when it has one (or needs none). */
 export function missingWatchModelCredential(settings: Settings): string | null {
+  const watchRoute = resolveModelRoute(settings, 'watch')
+  if (watchRoute !== null) return watchRoute.missing
   const model = stripLikePython(settings.watch_model ?? '')
   if (supportsVision('qwen', model)) {
-    return stripLikePython(settings.dashscope_api_key
-      ?? (settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null) ?? '') === ''
-      ? 'DASHSCOPE_API_KEY' : null
+    return stripLikePython(settings.dashscope_api_key ?? '') === '' ? 'DASHSCOPE_API_KEY' : null
   }
-  if (supportsVision('deepseek', model)) return stripLikePython(settings.deepseek_api_key ?? (settings.model_base_url === DEEPSEEK_BASE_URL ? settings.model_api_key : null) ?? '') === '' ? 'DEEPSEEK_API_KEY' : null
+  if (supportsVision('deepseek', model)) return stripLikePython(settings.deepseek_api_key ?? '') === '' ? 'DEEPSEEK_API_KEY' : null
   if (supportsVision('ark', model)) return stripLikePython(settings.ark_api_key ?? '') === '' ? 'ARK_API_KEY' : null
   return null
 }
 
 /** Embedding credentials are independent of text and vision models. */
 export function missingKnowledgeCredential(settings: Settings): string | null {
+  const embeddingRoute = resolveModelRoute(settings, 'embedding')
+  if (embeddingRoute !== null) return embeddingRoute.missing
   if (resolveEmbeddingConnection(settings).apiKey) return null
   return settings.embedding_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? 'DASHSCOPE_API_KEY' : 'EMBEDDING_API_KEY'
 }
@@ -856,8 +1056,7 @@ export function describeMissingBlockingCredentials(settings: Settings, textConve
     if (settings.integrated_provider === 'minicpm-o' || settings.integrated_provider === 'personaplex') return {pipeline:'integrated', missing:[]}
     if (settings.integrated_provider === 'openai' || settings.integrated_provider === 'gemini') return {pipeline: 'integrated', missing: present(settings[`${settings.integrated_provider}_api_key`]) ? [] : [`${settings.integrated_provider.toUpperCase()}_API_KEY`]}
     if (settings.integrated_provider === 'stepfun') return {pipeline: 'integrated', missing: present(settings.stepfun_api_key) ? [] : ['STEPFUN_API_KEY']}
-    const compatibleGenericKey = settings.model_base_url === DASHSCOPE_COMPATIBLE_BASE_URL ? settings.model_api_key : null
-    return {pipeline: 'integrated', missing: present(settings.dashscope_api_key) || present(compatibleGenericKey) ? [] : ['DASHSCOPE_API_KEY']}
+    return {pipeline: 'integrated', missing: present(settings.dashscope_api_key) ? [] : ['DASHSCOPE_API_KEY']}
   }
   const llmField = cascadedCredentialField(settings.cascade_llm_provider)
   return {pipeline: 'cascaded', missing: [...new Set([
@@ -880,29 +1079,6 @@ export function describeMissingBlockingEnvironment(environment: NodeJS.ProcessEn
 export function requireBlockingCredentials(settings: Settings): void {
   const {pipeline, missing} = describeMissingBlockingCredentials(settings)
   if (missing.length > 0) throw new BlockingConfigurationError(pipeline, missing)
-}
-
-/** Keeps a selected provider credential on its fixed compatible endpoint. */
-export function resolveSupportModelConnection(
-  settings: Settings,
-  selectedProvider: {readonly baseUrl: string; readonly apiKey: string},
-): SupportModelConnection {
-  const genericKey = stripLikePython(settings.model_api_key ?? '')
-  return genericKey === ''
-    ? Object.freeze({
-      source: 'selected_provider' as const,
-      baseUrl: selectedProvider.baseUrl,
-      apiKey: selectedProvider.apiKey,
-    })
-    : Object.freeze({
-      source: 'generic' as const,
-      baseUrl: secureEndpoint(
-        settings.model_base_url,
-        'https',
-        'MODEL_BASE_URL',
-      ),
-      apiKey: genericKey,
-    })
 }
 
 export function resolveCascadedSelection(settings: Settings): CascadedSelection {
@@ -1126,6 +1302,11 @@ function parseSelector<T extends string>(
 function optionalString(value: string | undefined): string | undefined {
   if (value === undefined) return undefined
   return stripLikePython(value)
+}
+
+function optionalNonEmptyString(value: string | undefined): string | undefined {
+  const parsed = optionalString(value)
+  return parsed === '' ? undefined : parsed
 }
 
 function optionalJsonStringArray(value: string | undefined): unknown {

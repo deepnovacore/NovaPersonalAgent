@@ -46,7 +46,7 @@ export function createKnowledgePanel({document, action}) {
   onButton(node('add-url'), () => run({action: 'url', url: node('url').value}))
   return {render(view) {
     const next = view.capabilities?.runtime?.modules?.knowledge?.enabled === true
-    const nextProvider = JSON.stringify([view.embeddingProvider, view.embeddingModel, view.modelBaseUrl])
+    const nextProvider = JSON.stringify([view.embeddingProvider, view.embeddingModel])
     if (next !== enabled || nextProvider !== provider) {
       epoch++; node('sources').replaceChildren(); node('status').textContent = t("点击刷新查看知识库。")
     }

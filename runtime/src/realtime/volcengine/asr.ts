@@ -20,6 +20,7 @@ import {
   type VolcBinarySocket,
 } from './websocket.js'
 
+import {rotatedCredential} from '../../config/credential-rotation.js'
 export const MAX_VOLCENGINE_JSON_BYTES = 1_024 * 1_024
 
 export type {AsrTranscript} from '../cascaded/ports.js'
@@ -182,7 +183,7 @@ export function asrHeaders(input: {
     throw new DoubaoAsrFailure('configuration')
   }
   return Object.freeze({
-    'X-Api-Key': input.apiKey,
+    'X-Api-Key': rotatedCredential(input.apiKey),
     'X-Api-Resource-Id': input.resourceId,
     'X-Api-Connect-Id': connectId,
   })

@@ -45,6 +45,11 @@ test('permission requests only open a fixed system pane after explicit action; u
  assert.equal(readDesktopPermissions({platform:'linux'}).screen,'unsupported')
  assert.equal(readDesktopPermissions({platform:'win32'}).accessibility,'not_required')
 })
+test('granted permissions still open their system settings pane',async()=>{
+ const opened=[],deps={platform:'darwin',systemPreferences:{isTrustedAccessibilityClient:()=>true,getMediaAccessStatus:()=> 'granted'},shell:{openExternal:async url=>opened.push(url)},desktopCapturer:{getSources:async()=>{throw Error('already granted: no capture needed')}}}
+ for(const kind of ['microphone','screen','accessibility'])await requestDesktopPermission(kind,deps)
+ assert.deepEqual(opened,['Privacy_Microphone','Privacy_ScreenCapture','Privacy_Accessibility'].map(pane=>'x-apple.systempreferences:com.apple.preference.security?'+pane))
+})
 test('first-run order is real startup, permissions, then chat; reconnect never reopens onboarding',()=>{
  assert.equal(welcomePhase({startup:{stage:'backend'},profile:{permissionsSeen:false},entered:false}),'loading')
  assert.equal(welcomePhase({startup:{stage:'ready'},profile:{permissionsSeen:false},entered:false}),'permissions')

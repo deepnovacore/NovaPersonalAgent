@@ -1,0 +1,638 @@
+/* Shared design tokens; existing window geometry remains in the original layout sheets. */
+:root{font-synthesis:none;text-rendering:optimizeLegibility;-webkit-font-smoothing:antialiased}
+html,body,#root{margin:0;width:100%;height:100%}
+body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+.nova-theme{--default-font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;--heading-font-family:var(--default-font-family);--cursor-button:pointer;min-height:100%;font-size:13px;line-height:1.6}
+.nova-transparent{background:transparent!important}
+.nova-transparent>div{min-height:0}
+[hidden]{display:none!important}
+button,input,textarea,select{font:inherit}
+button{touch-action:manipulation}
+button:disabled{cursor:not-allowed}
+button:focus-visible,a:focus-visible,summary:focus-visible{outline:2px solid var(--accent-9,#6366f1);outline-offset:3px}
+svg.lucide{flex-shrink:0;vertical-align:middle;stroke-width:1.7}
+.workbench{--accent:var(--iris-9,#6366f1);--accent-wash:var(--iris-a3);--radius:10px;--radius-sm:6px;--radius-lg:14px;--line:var(--slate-a5);--line-strong:var(--slate-a7);--surface:var(--slate-2);--surface-raised:var(--color-panel-solid);--surface-inset:var(--slate-3);--ink:var(--slate-12);--ink-dim:var(--slate-11);--ink-faint:var(--slate-10)}
+.workbench .workspace-tab{gap:7px;border-radius:8px;transition:background .15s,color .15s}
+.workbench .workspace-tab svg{width:17px;height:17px}
+.workbench .workspace-utility{display:inline-flex;align-items:center;justify-content:center;gap:6px;border-radius:7px}
+.workbench .workspace-utility svg{width:15px;height:15px}
+.workbench .personal-card,.workbench .timeline-card,.workbench .preference-card{border-radius:12px;border-color:var(--line);box-shadow:0 2px 6px #00000003}
+.workbench .composer{border-radius:14px;box-shadow:0 3px 14px #00000006}
+.workbench .composer textarea{line-height:1.7}
+.workbench .rt-Button{font-size:12px;font-weight:500;letter-spacing:0;box-shadow:none}
+.workbench .page-add{border-radius:8px}
+.workbench .message-body{line-height:1.75}
+.workspace-tabs .rt-Tooltip{min-width:0}
+.renderer-failure{max-width:640px;margin:12vh auto;padding:24px;user-select:text}
+.pending-group:empty{display:none}
+.workbench dialog{color:var(--ink);background:var(--surface-raised);border:1px solid var(--line);border-radius:16px;padding:24px;max-width:480px;box-shadow:0 16px 80px #0003}
+.workbench dialog::backdrop{background:#0004;backdrop-filter:blur(3px)}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:.01ms!important;transition-duration:.01ms!important;scroll-behavior:auto!important}}
+
+/* Root and theme preserve the grid/flex children of the existing native-window sheets. */
+body:not(.nova-window-index)>#root,body:not(.nova-window-index)>#root>.nova-theme{display:contents}
+body.computer-bar-page>#root,body.computer-bar-page .nova-theme{width:100%}
+
+.workspace-page-host{display:contents}
+/* Persistent page host is layout-transparent; mirror direct-child geometry selectors. */
+.workbench-page>.workspace-page-host>*{width:100%;max-width:760px;margin-inline:auto}
+.workbench-page>.workspace-page-host>button{width:auto;max-width:100%;margin-inline:0;align-self:flex-start}
+.workbench-page>.workspace-page-host>h2{display:none;font-size:15px;font-weight:600;color:var(--ink);margin-top:6px}
+.workbench-page>.workspace-page-host>h3{font-size:13px;font-weight:600;color:var(--ink-dim);margin-top:14px}
+.workbench-page>.workspace-page-host>p{font-size:12px;color:var(--ink-faint)}
+.workbench-page>.workspace-page-host>p:has(>button){display:flex;align-items:center;gap:8px}
+.workbench-page>.workspace-page-host>.timeline-content{max-width:920px}
+.workbench-page:has(>.workspace-page-host>.timeline-content){background:linear-gradient(165deg,var(--timeline-cool),var(--surface) 42%,var(--timeline-warm))}
+
+/* React settings use explicit icon headings instead of the legacy empty icon wells. */
+/* The rail owns its scroll so a short window never cuts the last category behind
+   the fixed footer. At the default 920x690 window the compact rows below fit all
+   categories without a scrollbar; shorter windows keep a correctly sized thumb. */
+.nova-window-settings .settings-nav{top:76px;max-height:calc(100vh - 168px);max-height:calc(100dvh - 168px);overflow-y:auto;overscroll-behavior:contain;scrollbar-gutter:stable;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;scroll-padding:4px 0;scroll-snap-type:y proximity;padding:4px 3px 10px}
+.nova-window-settings .settings-nav::-webkit-scrollbar{width:6px}
+.nova-window-settings .settings-nav::-webkit-scrollbar-track{background:transparent}
+.nova-window-settings .settings-nav::-webkit-scrollbar-thumb{border-radius:999px;background:var(--line-strong);background-clip:padding-box}
+.nova-window-settings .settings-nav::-webkit-scrollbar-thumb:hover{background:var(--ink-faint);background-clip:padding-box}
+.nova-window-settings .settings-nav .nav-item{flex-shrink:0;min-height:40px;scroll-snap-align:start}
+.nova-window-settings .settings-nav .nav-item>span{overflow:hidden;text-overflow:ellipsis}
+@media(max-height:780px){
+ .nova-window-settings .settings-nav{gap:1px;padding:4px 3px 8px}
+ .nova-window-settings .settings-nav .nav-item{height:34px;min-height:34px;padding:0 10px;gap:8px;font-size:13px;line-height:1.5}
+ .nova-window-settings .settings-nav .nav-item .ui-icon{width:16px;height:16px}
+ .nova-window-settings .settings-nav .nav-item[aria-current="true"]::after{top:7px;bottom:7px}
+}
+@media(prefers-color-scheme:dark){
+ /* The dark settings tokens keep accent contrast but inherit the light warning
+    colours; status and destructive actions need their own readable ramp. */
+ .nova-window-settings{--warn:#ff9b91;--warn-wash:rgba(255,155,145,.12);--ok:#7ad6a2;--ok-wash:rgba(122,214,162,.12)}
+}
+.nova-window-settings #im-section .im-card,.nova-window-settings #connections-section .im-card{padding:18px;margin-bottom:16px}
+.nova-window-settings #im-section .im-card::before,.nova-window-settings #connections-section .im-card::before{content:none}
+.nova-window-settings .settings-card-heading{display:grid;grid-template-columns:36px minmax(0,1fr);align-items:start;gap:12px;margin-bottom:14px}
+.nova-window-settings .settings-card-heading h3{margin:0;font-size:14px;line-height:1.6}
+.nova-window-settings .settings-card-heading p{margin:4px 0 0!important;font-size:12px;line-height:1.6;color:var(--ink-dim)}
+.nova-window-settings .settings-card-icon,.nova-window-settings .permission-icon{display:grid;place-items:center;flex:none;width:36px;height:36px;border-radius:8px;background:var(--accent-wash);color:var(--accent)}
+.nova-window-settings .permission-row{display:grid;grid-template-columns:36px minmax(0,1fr) auto;gap:12px;align-items:start;padding:18px 0;border-bottom:1px solid var(--line)}
+.nova-window-settings .permission-copy h3{margin:0 0 5px;font-size:14px}
+.nova-window-settings .permission-copy p{margin:0;color:var(--ink-dim);font-size:12px;line-height:1.65}
+.nova-window-settings .permission-aside{display:flex;flex-direction:column;align-items:flex-end;gap:8px;min-width:72px}
+.nova-window-settings .permission-state{padding:3px 8px;border-radius:6px;background:var(--surface);color:var(--ink-dim);font-size:11px;white-space:nowrap}
+.nova-window-settings .permission-state[data-status=granted]{color:var(--ok);background:var(--ok-wash)}
+.nova-window-settings .permission-note{margin:16px 0;color:var(--ink-dim);font-size:12px;line-height:1.65}
+.nova-window-settings .permission-icon svg{width:20px;height:20px}
+.nova-window-settings .permission-row button{padding:6px 10px;font-size:12px}
+.nova-window-settings .im-steps{display:flex;gap:12px;list-style:none;padding:0 0 16px;margin:16px 0;flex-wrap:wrap}
+.nova-window-settings .im-steps li{display:flex;align-items:center;gap:8px;font-size:12px}
+.nova-window-settings .im-step-index{display:grid;place-items:center;width:24px;height:24px;border:1px solid var(--line-strong);border-radius:50%;font-size:11px}
+.nova-window-settings .im-steps [aria-current=step] .im-step-index{background:var(--accent-wash);border-color:var(--accent);color:var(--accent)}
+.nova-window-settings [role=alert]:empty,.nova-window-settings .warning:empty{display:none}
+.nova-window-settings .toggle-row>span{display:inline-flex;align-items:center;gap:10px}
+.nova-window-settings .toggle-row>span svg{color:var(--ink-dim);flex:none}
+.nova-window-settings .news-preferences{margin-bottom:24px}
+.nova-window-settings .preference-card{padding:18px;margin-bottom:12px;background:var(--surface);border:1px solid var(--line);border-radius:12px}
+.nova-window-settings .preference-heading,.nova-window-settings .preference-row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.nova-window-settings .preference-heading h3{margin:0;font-size:14px}
+.nova-window-settings .preference-caption{color:var(--ink-dim);font-size:12px;line-height:1.65}
+.nova-window-settings .preference-row{padding:16px 0;border-top:1px solid var(--line);margin-top:16px}
+.nova-window-settings .preference-row h4,.nova-window-settings .preference-row p{margin:0}
+.nova-window-settings .interest-chips,.nova-window-settings .preference-actions,.nova-window-settings .preference-segments{display:flex;gap:8px;flex-wrap:wrap;margin:12px 0}
+.nova-window-settings .interest-tag{padding:5px 10px;border-radius:8px;color:var(--accent-strong);background:var(--accent-wash);font-size:12px;overflow-wrap:anywhere}
+.nova-window-settings .interest-add{display:flex;align-items:flex-end;gap:8px;margin:14px 0}
+.nova-window-settings .interest-add label{display:grid;gap:6px;flex:1;min-width:0;font-size:12px}
+.nova-window-settings .preference-error{color:var(--warn);font-size:12px;line-height:1.6}
+.nova-window-settings .preference-segments [aria-pressed=true]{outline:1px solid var(--accent);outline-offset:1px}
+.workbench .workspace-tab-label{max-width:120px;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:640px){.nova-window-settings .settings-nav{max-height:none;overflow-y:visible}.nova-window-settings .permission-row{grid-template-columns:36px minmax(0,1fr)}.nova-window-settings .permission-aside{grid-column:2;align-items:flex-start;flex-direction:row}}
+
+/* Compact workspace choice and composer chrome; legacy DOM controls keep their fallback masks. */
+.workbench .workspace-bar{margin:0 24px 4px;padding:4px 0;gap:10px;background:transparent;flex-wrap:wrap}
+.workbench .workspace-picker{position:relative;max-width:100%;min-width:0;display:inline-flex;align-items:center;border:1px solid transparent;border-radius:8px}
+.workbench .workspace-picker:hover{background:var(--surface-inset)}
+.workbench .workspace-picker:focus-within{outline:2px solid var(--accent);outline-offset:1px}
+.workbench .workspace-picker .workspace-folder{appearance:none;field-sizing:content;min-width:144px;max-width:min(300px,100%);height:32px;min-height:32px;padding:0 28px 0 34px;border:0;border-radius:8px;background:transparent;background-image:none;font:500 12px/1.4 var(--default-font-family);color:var(--ink);text-overflow:ellipsis;cursor:pointer}
+.workbench .workspace-picker .workspace-folder:focus-visible{outline:0}
+.workbench .workspace-folder-icon,.workbench .workspace-folder-caret{position:absolute;pointer-events:none;color:var(--ink-dim)}
+.workbench .workspace-folder-icon{left:9px}.workbench .workspace-folder-caret{right:8px}
+.workbench .workspace-bar .workspace-host{margin-left:0;font-size:11px;color:var(--ink-faint)}
+.workbench .composer{background:var(--surface-raised);box-shadow:none;padding:12px;border-radius:12px}
+.workbench .composer textarea{box-sizing:border-box;width:100%;padding:8px 4px 14px;min-height:96px;resize:vertical}
+.workbench .composer-actions{gap:6px;min-height:36px;flex-wrap:wrap;row-gap:8px}
+.workbench .composer-actions .composer-mode-active,.workbench .composer-actions .composer-approval,.workbench .composer-actions .computer-use-toggle{font-family:var(--default-font-family);font-size:12px;height:30px;line-height:30px;padding:0 8px;border-radius:8px}
+.workbench .composer-actions .composer-approval{gap:7px}
+.workbench .computer-use-toggle:has(>svg)::before{content:none}
+.workbench .composer-actions .composer-dictate,.workbench .composer-actions .composer-voice,.workbench .composer-actions .composer-submit{width:34px;height:34px;flex-basis:34px}
+.nova-window-settings .interest-chips button{max-width:100%;min-height:32px;height:auto;white-space:normal;overflow-wrap:anywhere;text-align:left;justify-content:flex-start}
+.nova-window-settings .interest-tag{max-width:100%;white-space:normal}
+@media(max-width:959px){.workbench .workspace-bar{margin-inline:12px}}
+@media(max-width:600px){.workbench .composer-hint{display:none}.workbench .workspace-picker .workspace-folder{max-width:220px}.workbench .composer textarea{min-height:80px}}
+
+/* ── Settings surface corrections (React window only) ──────────────────────
+   The legacy sheets own geometry and the light palette. These rules only fill
+   React-specific surfaces and keep hard-coded legacy demos layered on tokens. */
+.nova-window-settings #skills-section .im-card{margin:0 0 12px;padding:16px 18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings #skills-section .im-card .settings-card-heading{margin-bottom:8px}
+
+/* Coding: a normal settings page with one card per concern instead of the
+   legacy disclosure. The layout nodes keep their ids, validation and drafts. */
+.nova-window-settings .codex-page>.hint{margin:0 0 16px}
+.nova-window-settings .codex-card{margin:0 0 14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .codex-card:last-child{margin-bottom:0}
+.nova-window-settings .codex-card>h3{margin:0;font-size:14px;font-weight:620;line-height:1.6;color:var(--ink)}
+.nova-window-settings .codex-card>h3+.hint{margin:4px 0 14px}
+.nova-window-settings .codex-card .connection-status{margin:14px 0}
+.nova-window-settings #codex-status[data-ready="1"]::before{background:var(--ok)}
+.nova-window-settings #codex-status[data-ready="0"]::before{background:var(--ink-faint)}
+.nova-window-settings .codex-discovery{display:flex;align-items:center;gap:10px;margin:0 0 12px}
+.nova-window-settings .codex-discovery .segmented{flex:1 1 280px;max-width:360px;min-width:0;margin:0}
+.nova-window-settings .codex-discovery .icon-button{width:38px;height:38px;min-height:38px;flex:0 0 auto;border:1px solid var(--line);border-radius:10px;background:var(--surface-raised);color:var(--ink-dim)}
+.nova-window-settings .codex-discovery .icon-button:hover:not(:disabled){border-color:var(--line-strong);color:var(--ink)}
+
+/* 执行器: one page with 视觉监控 / 编程 sub-tabs. A segmented rail keeps both
+   executor cards in the same visual rhythm as the model page next to it. */
+.nova-window-settings .executor-page>.hint{margin:0 0 14px}
+.nova-window-settings .executor-subnav{display:inline-flex;gap:4px;margin:0 0 16px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--surface-raised)}
+.nova-window-settings .executor-tab{display:inline-flex;align-items:center;gap:8px;min-height:34px;padding:0 16px;border:0;border-radius:9px;background:transparent;color:var(--ink-dim);font:inherit;font-size:12.5px;font-weight:560;cursor:pointer;transition:background 120ms ease,color 120ms ease,box-shadow 120ms ease}
+.nova-window-settings .executor-tab:hover{background:var(--surface);color:var(--ink)}
+.nova-window-settings .executor-tab[aria-selected="true"]{background:var(--plate);color:var(--ink);box-shadow:var(--shadow-1)}
+.nova-window-settings .executor-tab[aria-selected="true"] svg{color:var(--accent)}
+.nova-window-settings .executor-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nova-window-settings .executor-pane{margin:0}
+.nova-window-settings .executor-pane-caption{margin:0 0 12px;color:var(--ink-dim);font-size:12.5px;line-height:1.6}
+.nova-window-settings .executor-pane .executor-card{margin:0 0 14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .executor-pane .executor-card:last-child{margin-bottom:0}
+.nova-window-settings .executor-pane .checkbox-field{padding:0 0 12px;margin:0 0 12px;border-bottom:1px solid var(--line)}
+.nova-window-settings .executor-pane .field:last-child{padding-bottom:0;border-bottom:0}
+.nova-window-settings .mcp-page>.hint{margin:0 0 16px}
+.nova-window-settings .mcp-page .mcp-module{margin:0 0 14px;padding:18px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .mcp-page details[data-server]{margin:0 0 12px;padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .mcp-page details[data-server]>summary{font-weight:560;cursor:pointer}
+.nova-window-settings .codex-card .field:last-child{padding-bottom:0;border-bottom:0}
+.nova-window-settings .codex-card #projects-repair{display:inline-flex;margin:0 0 4px}
+.nova-window-settings .codex-workspace-card .workspace-actions h3{display:none}
+.nova-window-settings .codex-workspace-card .workspace-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:0;padding:0;border-top:0}
+.nova-window-settings .codex-workspace-card .workspace-actions .rt-Button{min-height:32px;height:32px;padding:0 12px;font-size:12px;font-weight:550}
+.nova-window-settings #workspace-open-current{color:var(--ink);background:var(--surface-raised);border:1px solid var(--line)}
+.nova-window-settings #workspace-open-current:hover:not(:disabled){background:var(--surface-active);border-color:var(--line-strong);color:var(--ink)}
+.nova-window-settings #workspace-clear-current,.nova-window-settings #workspace-clear-all{color:var(--warn);background:transparent;border:1px solid color-mix(in srgb,var(--warn) 45%,transparent)}
+.nova-window-settings #workspace-clear-current:hover:not(:disabled),.nova-window-settings #workspace-clear-all:hover:not(:disabled){background:var(--warn-wash);border-color:var(--warn);color:var(--warn)}
+.nova-window-settings #workspace-clear-all{margin-left:auto}
+.nova-window-settings .workspace-action-status{margin:10px 0 0}
+@media(max-width:600px){
+ .nova-window-settings .codex-discovery{align-items:stretch}
+ .nova-window-settings .codex-discovery .segmented{flex:1 1 auto;max-width:none}
+ .nova-window-settings #workspace-clear-all{margin-left:0}
+ .nova-window-settings .executor-subnav{display:flex;width:100%}
+ .nova-window-settings .executor-tab{flex:1 1 0;justify-content:center;padding:0 10px}
+}
+@media(forced-colors:active){
+ .nova-window-settings .codex-card{border:1px solid CanvasText}
+ .nova-window-settings .executor-subnav,.nova-window-settings .executor-pane .executor-card,.nova-window-settings .mcp-page .mcp-module{border:1px solid CanvasText}
+ .nova-window-settings .executor-tab[aria-selected="true"]{outline:2px solid Highlight;color:Highlight}
+}
+
+/* IM: one Feishu card, with proactive delivery as a nested section. */
+.nova-window-settings .im-feishu-state{margin:0 0 8px;color:var(--ink);font-size:13px;font-weight:550}
+.nova-window-settings .im-proactive{margin-top:18px;padding-top:16px;border-top:1px solid var(--line)}
+.nova-window-settings .im-proactive-heading{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap;margin-bottom:10px}
+.nova-window-settings .im-proactive-heading h4{margin:0;font-size:14px;font-weight:620;line-height:1.6;color:var(--ink)}
+.nova-window-settings .im-proactive-channel{margin:0;padding:3px 9px;border-radius:999px;background:var(--surface-raised);color:var(--ink-dim);font-size:11px;white-space:nowrap}
+.nova-window-settings .im-proactive-channel[data-channel=feishu]{background:var(--accent-wash);color:var(--accent-strong)}
+.nova-window-settings .im-proactive-actions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin:0 0 10px}
+.nova-window-settings .im-proactive-actions .personal-hint{margin:0}
+.nova-window-settings .im-delivery-counts{display:flex;flex-wrap:wrap;gap:6px;list-style:none;margin:0 0 8px;padding:0}
+.nova-window-settings .im-delivery-chip{display:inline-flex;align-items:baseline;gap:5px;padding:4px 9px;border:1px solid var(--line);border-radius:999px;background:var(--surface);color:var(--ink-dim);font-size:11px}
+.nova-window-settings .im-delivery-chip[data-status=accepted]{border-color:color-mix(in srgb,var(--ok) 35%,transparent);background:var(--ok-wash);color:var(--ok)}
+.nova-window-settings .im-delivery-chip[data-status=blocked],.nova-window-settings .im-delivery-chip[data-status=unknown]{border-color:color-mix(in srgb,var(--warn) 40%,transparent);background:var(--warn-wash);color:var(--warn)}
+.nova-window-settings .im-delivery-chip[data-status=pending],.nova-window-settings .im-delivery-chip[data-status=retry_wait]{border-color:color-mix(in srgb,var(--accent) 35%,transparent);background:var(--accent-wash);color:var(--accent-strong)}
+.nova-window-settings .im-delivery-chip[data-status=cancelled],.nova-window-settings .im-delivery-chip[data-status=expired],.nova-window-settings .im-delivery-chip[data-status=superseded]{color:var(--ink-faint)}
+.nova-window-settings .im-delivery-chip-count{font-weight:650;color:var(--ink);font-variant-numeric:tabular-nums}
+.nova-window-settings .im-delivery-list{display:grid;gap:8px;list-style:none;margin:0 0 10px;padding:0}
+.nova-window-settings .im-delivery-row{padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface)}
+.nova-window-settings .im-delivery-title{margin:0 0 4px;color:var(--ink);font-size:12px}
+.nova-window-settings .im-delivery-note{margin:0 0 8px;color:var(--ink-dim);font-size:11px;line-height:1.6}
+.nova-window-settings .im-proactive-help{margin-top:8px}
+.nova-window-settings .im-proactive-help summary,.nova-window-settings .im-bot-setup summary{cursor:pointer;color:var(--ink-dim);font-size:12px}
+.nova-window-settings .im-proactive-help .personal-hint{margin:6px 0 0}
+.nova-window-settings .im-proactive-footer{display:flex;justify-content:flex-end;margin-top:8px}
+.nova-window-settings .im-proactive-footer .rt-Button,.nova-window-settings .im-feishu-actions .rt-Button,.nova-window-settings .im-sync-actions .rt-Button{min-height:30px;height:30px;padding:0 10px;font-size:12px}
+.nova-window-settings .im-feishu-actions{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line)}
+.nova-window-settings .im-delete-history{flex-basis:100%;padding:12px;border:1px solid color-mix(in srgb,var(--warn) 40%,transparent);border-radius:10px;background:var(--warn-wash)}
+.nova-window-settings .im-delete-history p{margin:0 0 8px}
+.nova-window-settings .im-sync-actions{display:flex;flex-wrap:wrap;gap:8px;margin:8px 0}
+.nova-window-settings .im-bot-setup{margin-top:12px}
+.nova-window-settings .im-chat-selection{margin:14px 0}
+.nova-window-settings .im-step-label{font-size:12px}
+@media(forced-colors:active){
+ .nova-window-settings .im-proactive{border-top-color:CanvasText}
+ .nova-window-settings .im-delivery-chip,.nova-window-settings .im-delivery-row{border:1px solid CanvasText}
+}
+
+/* Usage: a compact scope/dimension/purpose hierarchy with formatted money. */
+.nova-window-settings .usage-overview{margin:14px 0 12px}
+.nova-window-settings .usage-scope{min-height:96px;border:1px solid var(--line);transition:border-color .12s,background-color .12s}
+.nova-window-settings .usage-scope[aria-pressed=true]{border-color:var(--accent);background:var(--accent-wash)}
+.nova-window-settings .usage-scope strong{max-width:100%;font-size:22px;line-height:1.25;overflow-wrap:anywhere}
+.nova-window-settings .usage-scope-money{display:block;min-width:0}
+.nova-window-settings .usage-money-lines{display:flex;flex-direction:column;align-items:flex-start;gap:1px;min-width:0;line-height:1.22}
+.nova-window-settings .usage-money-line{display:block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums}
+.nova-window-settings .usage-scope-money .usage-money-lines{gap:2px}
+.nova-window-settings .usage-amount{align-items:flex-end}
+.nova-window-settings .usage-amount .usage-money-lines{align-items:flex-end}
+.nova-window-settings .usage-amount .usage-money-line{color:var(--accent-strong);font-weight:650;font-size:13px}
+.nova-window-settings .usage-feature-tab-cost .usage-money-lines{gap:0}
+.nova-window-settings .usage-feature-tab-cost .usage-money-line{font-size:12.5px}
+
+.nova-window-settings .usage-scope span{color:var(--ink-dim);font-size:12px}
+.nova-window-settings .usage-scope:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nova-window-settings #frontend-usage-section>p[role=status]{margin:0 0 4px;color:var(--ink-dim);font-size:12px;line-height:1.65}
+.nova-window-settings .usage-note{margin:2px 0;color:var(--ink-faint);font-size:11px}
+.nova-window-settings .usage-dimension-tabs{display:inline-flex;max-width:100%;flex-wrap:wrap;gap:4px;margin:14px 0 12px;padding:4px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .usage-dimension-tabs [role=tab]{min-height:30px;padding:0 14px;border:0;border-radius:9px;background:transparent;color:var(--ink-dim);font:inherit;font-size:12px;font-weight:550;cursor:pointer}
+.nova-window-settings .usage-dimension-tabs [role=tab]:hover{background:var(--surface-raised);color:var(--ink)}
+.nova-window-settings .usage-dimension-tabs [role=tab][aria-selected=true]{background:var(--plate);color:var(--ink);box-shadow:var(--shadow-1)}
+.nova-window-settings .usage-dimension-tabs [role=tab]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nova-window-settings .usage-panel-body{min-width:0}
+.nova-window-settings .usage-feature-tabs{display:flex;align-items:stretch;gap:8px;overflow-x:auto;overscroll-behavior-x:contain;scrollbar-width:thin;scrollbar-color:var(--line-strong) transparent;padding:2px 2px 8px;margin:0 0 12px}
+.nova-window-settings .usage-feature-tabs::-webkit-scrollbar{height:6px}
+.nova-window-settings .usage-feature-tabs::-webkit-scrollbar-track{background:transparent}
+.nova-window-settings .usage-feature-tabs::-webkit-scrollbar-thumb{border-radius:999px;background:var(--line-strong)}
+.nova-window-settings .usage-feature-tab{position:relative;display:flex;flex:0 0 auto;flex-direction:column;align-items:flex-start;gap:1px;min-width:126px;min-height:90px;max-width:210px;padding:9px 12px;border:1px solid var(--line);border-radius:10px;background:var(--surface);color:var(--ink-dim);font:inherit;text-align:left;cursor:pointer}
+.nova-window-settings .usage-feature-tab:hover{border-color:var(--line-strong);background:var(--surface-raised)}
+.nova-window-settings .usage-feature-tab[aria-selected=true]{border-color:var(--accent);background:var(--accent-wash);box-shadow:inset 0 0 0 1px var(--accent)}
+.nova-window-settings .usage-feature-tab:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.nova-window-settings .usage-feature-tab-label{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--ink);font-size:12px;font-weight:600;line-height:1.5}
+.nova-window-settings .usage-feature-tab-cost{color:var(--accent-strong);font-size:13px;font-weight:650;font-variant-numeric:tabular-nums;line-height:1.4}
+.nova-window-settings .usage-feature-tab-count{margin-top:auto;padding-top:2px;color:var(--ink-faint);font-size:10.5px;font-variant-numeric:tabular-nums}
+.nova-window-settings .usage-feature-tab[aria-selected=true] .usage-feature-tab-label{color:var(--accent-strong)}
+.nova-window-settings .usage-feature-tab-partial{position:absolute;top:7px;right:7px;width:6px;height:6px;border-radius:50%;background:var(--warn)}
+.nova-window-settings .usage-purpose-detail{padding:14px 16px;border:1px solid var(--line);border-radius:12px;background:var(--surface)}
+.nova-window-settings .usage-purpose-detail h3{margin:0 0 10px;color:var(--ink);font-size:14px;font-weight:620;line-height:1.6}
+.nova-window-settings .usage-purpose-body .usage-incomplete{display:inline-block;margin:0 0 10px}
+.nova-window-settings .usage-costs{grid-template-columns:repeat(2,minmax(0,1fr));margin-bottom:10px}
+.nova-window-settings .usage-costs .usage-metric strong{color:var(--accent-strong);font-variant-numeric:tabular-nums;font-size:18px}
+.nova-window-settings .usage-purpose-body .usage-stats{grid-template-columns:repeat(auto-fit,minmax(96px,1fr));margin-bottom:10px}
+.nova-window-settings .usage-purpose-body .usage-metric{padding:9px 12px;border-radius:10px;background:var(--plate)}
+.nova-window-settings .usage-purpose-body .usage-metric span{color:var(--ink-dim);font-size:11px}
+.nova-window-settings .usage-purpose-body .usage-metric strong{color:var(--ink);font-size:15px;font-variant-numeric:tabular-nums}
+.nova-window-settings .usage-purpose-body .usage-grid{margin:0;padding-top:10px}
+.nova-window-settings .usage-cards{display:grid;gap:10px}
+.nova-window-settings .usage-card{padding:14px 16px;background:var(--surface)}
+.nova-window-settings .usage-card-header{gap:10px}
+.nova-window-settings .usage-service strong,.nova-window-settings .usage-amount strong{font-variant-numeric:tabular-nums}
+.nova-window-settings .usage-amount strong{color:var(--accent-strong)}
+.nova-window-settings .usage-model{color:var(--ink-faint);font-size:11px;overflow-wrap:anywhere}
+.nova-window-settings .usage-recent{margin-top:10px}
+.nova-window-settings .usage-recent summary{cursor:pointer;color:var(--ink-dim);font-size:12px}
+.nova-window-settings .usage-call{padding:10px 0;border-bottom:1px solid var(--line)}
+.nova-window-settings .usage-call:last-child{border-bottom:0}
+.nova-window-settings .usage-call p{margin:2px 0;color:var(--ink-dim);font-size:11px}
+.nova-window-settings .usage-call strong{font-size:12px;font-weight:600;color:var(--ink)}
+@media(max-width:600px){
+ .nova-window-settings .usage-dimension-tabs{display:flex}
+ .nova-window-settings .usage-dimension-tabs [role=tab]{flex:1 1 0}
+ .nova-window-settings .usage-costs{grid-template-columns:1fr}
+ .nova-window-settings .usage-scope strong{font-size:19px}
+}
+@media(forced-colors:active){
+ .nova-window-settings .usage-feature-tab[aria-selected=true],.nova-window-settings .usage-dimension-tabs [role=tab][aria-selected=true]{border:1px solid Highlight;color:Highlight}
+ .nova-window-settings .usage-feature-tab-partial{background:Highlight}
+}
+
+/* ── First-run setup window ────────────────────────────────────────────────
+   A quiet, cool split screen built around the real Nova orb. Radix handles the
+   interactive chrome; this block owns the onboarding composition, the orb
+   halo, and the light/dark palette shared by the rail and the decision column. */
+body.nova-window-setup{
+ --setup-bg:#f4f5f8;--setup-panel:#fbfbfc;--setup-card:#fff;--setup-soft:#f2f4f7;
+ --setup-line:rgba(15,23,42,.1);--setup-line-strong:rgba(15,23,42,.18);
+ --setup-ink:#141822;--setup-dim:#5b6472;--setup-faint:#8b94a3;
+ --setup-accent:#5b5bd6;--setup-accent-strong:#4747c7;--setup-glow:rgba(91,91,214,.14);
+ --setup-success:#177a47;--setup-warn:#b42318;
+ --setup-rail:linear-gradient(158deg,#08090d 0%,#0d1018 48%,#131627 100%);
+ --setup-rail-ink:#f3f4f8;--setup-rail-dim:#9ba4b5;--setup-rail-line:rgba(255,255,255,.09);
+ display:block;height:100%;min-height:0;padding:0;overflow:hidden;color:var(--setup-ink);
+ background:radial-gradient(940px 620px at 100% 0%,rgba(91,91,214,.1),transparent 62%),var(--setup-bg)
+}
+body.nova-window-setup::before{position:fixed;inset:0;z-index:0;pointer-events:none;background:radial-gradient(420px 420px at 88% 94%,rgba(255,170,80,.07),transparent 62%);content:""}
+.setup-shell{position:relative;z-index:1;display:grid;grid-template-columns:242px minmax(0,1fr);height:100dvh;min-height:0;overflow:hidden}
+.setup-rail{position:relative;display:flex;flex-direction:column;min-height:0;padding:28px 24px 22px;overflow:hidden;border-right:1px solid var(--setup-rail-line);background:var(--setup-rail);color:var(--setup-rail-ink)}
+.setup-rail::before{position:absolute;inset:-22% -40% auto;height:86%;background:radial-gradient(circle,rgba(104,104,232,.2),transparent 64%);content:""}
+.setup-brand{position:relative;display:flex;align-items:center;gap:9px;color:var(--setup-rail-ink);font-size:11.5px;font-weight:700;letter-spacing:.24em}
+.setup-brand::before{width:5px;height:5px;border-radius:50%;background:#b8b8ff;box-shadow:0 0 10px #7d7dff;content:""}
+.setup-orb{position:relative;width:176px;height:176px;flex:none;margin:32px 0 26px;border-radius:50%;filter:drop-shadow(0 26px 46px rgba(255,151,68,.2))}
+.setup-orb::before{position:absolute;inset:-16%;border-radius:50%;background:radial-gradient(circle,rgba(255,174,96,.16),rgba(103,103,232,.12) 44%,transparent 70%);content:"";filter:blur(9px)}
+.setup-orb::after{position:absolute;inset:-11px;border:1px solid rgba(255,255,255,.12);border-radius:50%;box-shadow:0 0 0 18px rgba(255,255,255,.022);content:""}
+.setup-orb canvas{position:relative;display:block;width:100%!important;height:100%!important;border-radius:50%}
+.setup-pet{position:relative;width:184px;height:184px;flex:none;margin:30px 0 26px;border:1px solid rgba(255,255,255,.16);border-radius:30px;overflow:hidden;background:#fbf4e8;box-shadow:0 1px 0 rgba(255,255,255,.2) inset,0 26px 52px -24px rgba(0,0,0,.7);transform:rotate(-1.4deg);animation:setup-float 7s ease-in-out infinite}
+.setup-pet::after{position:absolute;inset:0;border-radius:inherit;background:linear-gradient(145deg,rgba(255,255,255,.22),transparent 34%,transparent 66%,rgba(20,16,38,.08));pointer-events:none;content:""}
+.setup-pet img{display:block;width:100%;height:100%;object-fit:cover;animation:setup-pet-in .35s ease-out both}
+.setup-pet-placeholder{position:absolute;inset:0;background:radial-gradient(circle at 34% 30%,rgba(255,255,255,.9),transparent 46%),#fbf4e8}
+@keyframes setup-float{0%,100%{transform:rotate(-1.4deg) translateY(0)}50%{transform:rotate(-1.4deg) translateY(-6px)}}
+@keyframes setup-pet-in{from{opacity:0;transform:scale(1.025)}to{opacity:1;transform:scale(1)}}
+.setup-rail-copy{position:relative;margin-bottom:24px}
+.setup-rail-eyebrow{margin:0 0 8px;color:#b9b9ff;font-size:9.5px;font-weight:750;letter-spacing:.18em;text-transform:uppercase}
+.setup-rail-copy h1{margin:0 0 8px;color:var(--setup-rail-ink);font-size:25px;font-weight:640;line-height:1.22;letter-spacing:-.025em}
+.setup-rail-copy p{margin:0;color:var(--setup-rail-dim);font-size:12px;line-height:1.68}
+.setup-steps{position:relative;display:grid;gap:1px;margin:0;padding:0;list-style:none}
+.setup-steps li{display:flex;align-items:center;gap:10px;padding:7px 0;color:rgba(205,212,224,.58);font-size:11.5px;line-height:1.4;transition:color .15s}
+.setup-step-index{display:grid;place-items:center;width:21px;height:21px;flex:none;border:1px solid rgba(255,255,255,.16);border-radius:50%;color:inherit;font-size:10px;font-weight:650}
+.setup-steps li[data-state=done]{color:rgba(235,239,246,.9)}
+.setup-steps li[data-state=done] .setup-step-index{border-color:rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff}
+.setup-steps li[data-state=current]{color:var(--setup-rail-ink);font-weight:550}
+.setup-steps li[data-state=current] .setup-step-index{border-color:#8f8ff2;background:#6d6de6;color:#fff;box-shadow:0 0 0 4px rgba(109,109,230,.16)}
+.setup-rail-foot{display:flex;align-items:center;gap:7px;margin:auto 0 0;padding-top:18px;border-top:1px solid var(--setup-rail-line);color:var(--setup-rail-dim);font-size:10.5px}
+.setup-main{display:flex;flex-direction:column;min-width:0;min-height:0;border-left:1px solid rgba(255,255,255,.04);background:var(--setup-panel)}
+.setup-head{flex:none;padding:30px 32px 16px}
+.setup-eyebrow{margin:0 0 7px;color:var(--setup-accent-strong);font-size:9.5px;font-weight:750;letter-spacing:.16em;text-transform:uppercase}
+.setup-head h2{margin:0 0 7px;color:var(--setup-ink);font-size:24px;font-weight:640;line-height:1.2;letter-spacing:-.03em}
+.setup-lead{margin:0;color:var(--setup-dim);font-size:12.5px;line-height:1.6}
+.setup-content{flex:1;min-height:0;overflow-y:auto;scrollbar-width:thin;scrollbar-color:var(--setup-line-strong) transparent;padding:0 32px 20px}
+.setup-content::-webkit-scrollbar{width:7px}
+.setup-content::-webkit-scrollbar-track{background:transparent}
+.setup-content::-webkit-scrollbar-thumb{border-radius:999px;background:var(--setup-line-strong)}
+.nova-window-setup .paths{display:grid;grid-template-columns:1fr;gap:9px;margin:0 0 13px}
+.nova-window-setup .path{position:relative;display:grid;grid-template-columns:38px minmax(0,1fr) 22px;align-items:start;gap:12px;padding:12px 14px;border:1px solid var(--setup-line);border-radius:14px;background:var(--setup-card);box-shadow:0 1px 2px rgba(15,23,42,.035);cursor:pointer;transition:border-color .15s,background-color .15s,box-shadow .15s,transform .15s}
+.nova-window-setup .path:hover{border-color:var(--setup-line-strong);transform:translateY(-1px)}
+.nova-window-setup .path:has(input:checked){border-color:color-mix(in srgb,var(--setup-accent) 52%,var(--setup-line));background:linear-gradient(135deg,color-mix(in srgb,var(--setup-accent) 7%,var(--setup-card)),var(--setup-card) 74%);box-shadow:0 0 0 1px color-mix(in srgb,var(--setup-accent) 18%,transparent) inset,0 12px 28px -25px rgba(45,45,140,.5)}
+.nova-window-setup .path:has(input:focus-visible){outline:2px solid var(--setup-accent);outline-offset:2px}
+.nova-window-setup .path input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.nova-window-setup .path-icon{display:grid;place-items:center;width:38px;height:38px;border:1px solid color-mix(in srgb,var(--setup-accent) 16%,transparent);border-radius:11px;background:color-mix(in srgb,var(--setup-accent) 8%,var(--setup-card));color:var(--setup-accent-strong)}
+.nova-window-setup .path:nth-child(2) .path-icon{border-color:var(--setup-line);background:var(--setup-soft);color:var(--setup-dim)}
+.nova-window-setup .path:has(input:checked) .path-icon{border-color:color-mix(in srgb,var(--setup-accent) 32%,transparent);background:color-mix(in srgb,var(--setup-accent) 11%,var(--setup-card));color:var(--setup-accent-strong)}
+.nova-window-setup .path-copy{display:flex;min-width:0;flex-direction:column;gap:3px;padding-top:1px}
+.nova-window-setup .path-title{display:flex;align-items:center;gap:8px;flex-wrap:wrap;color:var(--setup-ink);font-size:13px;font-weight:620;line-height:1.4}
+.nova-window-setup .path-badge{padding:1px 7px;font-size:9.5px;font-weight:600;letter-spacing:.01em;line-height:1.5}
+.nova-window-setup .path-body{color:var(--setup-dim);font-size:11px;line-height:1.55}
+.nova-window-setup .path-check{display:grid;place-items:center;width:21px;height:21px;margin-top:1px;border:1px solid var(--setup-line-strong);border-radius:50%;color:transparent;transition:background-color .15s,border-color .15s,color .15s}
+.nova-window-setup .path:has(input:checked) .path-check{border-color:var(--setup-accent);background:var(--setup-accent);color:#fff}
+.nova-window-setup .setup-provider{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:0 0 11px;padding:9px 13px;border:1px solid var(--setup-line);border-radius:12px;background:var(--setup-card);cursor:pointer}
+.nova-window-setup .setup-field-label{color:var(--setup-dim);font-size:12px;font-weight:550}
+.nova-window-setup .setup-provider select{min-width:190px;background-color:var(--setup-soft);font-size:12px}
+.nova-window-setup .setup-keys.rt-Card{margin:0;overflow:visible;padding:13px 15px 4px;border:1px solid var(--setup-line);border-radius:16px;background:var(--setup-card);box-shadow:0 1px 2px rgba(15,23,42,.035)}
+.nova-window-setup .setup-section-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:2px}
+.nova-window-setup .setup-section-head h3{margin:0 0 3px;color:var(--setup-ink);font-size:13.5px;font-weight:620;line-height:1.4}
+.nova-window-setup .setup-section-head p{margin:0;color:var(--setup-faint);font-size:11px;line-height:1.5}
+.nova-window-setup .setup-secure{padding:1px 8px;font-size:9.5px;font-weight:600;white-space:nowrap}
+.nova-window-setup .setup-secure svg{flex:none}
+.nova-window-setup .setup-keys .key-row{padding:11px 0 8px;border-top:1px solid var(--setup-line);margin-top:10px}
+.nova-window-setup .setup-keys .key-row:first-of-type{margin-top:0}
+.nova-window-setup .key-label{display:flex;align-items:center;gap:7px;margin-bottom:7px;color:var(--setup-dim)}
+.nova-window-setup .key-label svg{color:var(--setup-accent)}
+.nova-window-setup .key-label label{margin:0;color:var(--setup-ink);font-size:12px;font-weight:600}
+.nova-window-setup .key-input{display:flex;align-items:center;gap:7px}
+.nova-window-setup .key-input input{flex:1;min-width:0;height:40px;padding:0 12px;border:1px solid var(--setup-line-strong);border-radius:10px;background:var(--setup-soft);color:var(--setup-ink);font:inherit;font-size:12.5px;transition:border-color .15s,background-color .15s,box-shadow .15s}
+.nova-window-setup .key-input input:focus{outline:0;border-color:var(--setup-accent);background:var(--setup-card);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-accent) 13%,transparent)}
+.nova-window-setup .key-input input::placeholder{color:var(--setup-faint)}
+.nova-window-setup .key-reveal.rt-IconButton{width:40px;height:40px;min-height:40px;flex:none;border:1px solid var(--setup-line);border-radius:10px;background:transparent;color:var(--setup-faint);box-shadow:none}
+.nova-window-setup .key-reveal.rt-IconButton:hover:not(:disabled){border-color:var(--setup-line-strong);background:var(--setup-soft);color:var(--setup-dim)}
+.nova-window-setup .key-input .key-test.rt-Button{height:40px;min-height:40px;padding:0 14px;border:1px solid var(--setup-line);border-radius:10px;background:var(--setup-soft);color:var(--setup-ink);font-size:12px;font-weight:600;box-shadow:none;flex:none}
+.nova-window-setup .key-input .key-test.rt-Button:hover:not(:disabled){border-color:var(--setup-line-strong);background:var(--setup-card)}
+.nova-window-setup .key-input .key-test.rt-Button:disabled{opacity:.55}
+.nova-window-setup .key-meta{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:6px 0 0;color:var(--setup-faint);font-size:10.5px}
+.nova-window-setup .key-meta a{display:inline-flex;align-items:center;gap:4px;color:var(--setup-accent-strong);text-decoration:none}
+.nova-window-setup .key-meta a:hover{text-decoration:underline}
+.nova-window-setup .key-result{display:inline-flex;align-items:center;gap:5px;min-height:17px;color:var(--setup-faint)}
+.nova-window-setup .key-result:empty{display:none}
+.nova-window-setup .key-result[data-status=ok]{color:var(--setup-success)}
+.nova-window-setup .key-result[data-status=warn]{color:var(--setup-warn)}
+.nova-window-setup .key-result[data-status=testing]{color:var(--setup-accent-strong)}
+.nova-window-setup .key-result[data-status=ok]::before,.nova-window-setup .key-result[data-status=warn]::before,.nova-window-setup .key-result[data-status=testing]::before{width:5px;height:5px;flex:none;border-radius:50%;background:currentColor;content:""}
+.nova-window-setup .setup-note.rt-CalloutRoot{display:flex;align-items:flex-start;gap:9px;margin:9px 0 0;padding:10px 12px;border:1px solid var(--setup-line);border-radius:12px;background:var(--setup-soft);color:var(--setup-faint);font-size:10.5px;line-height:1.6;box-shadow:none}
+.nova-window-setup .setup-note .rt-CalloutIcon{display:grid;place-items:center;flex:none;margin:0;color:var(--setup-accent)}
+.nova-window-setup .setup-note .rt-CalloutText{min-width:0;color:inherit;font-size:10.5px;line-height:1.6}
+.nova-window-setup .setup-note-extra{display:block;margin-top:2px}
+.setup-foot{display:flex;align-items:center;justify-content:space-between;gap:14px;flex:none;padding:12px 30px 14px;border-top:1px solid var(--setup-line);background:color-mix(in srgb,var(--setup-panel) 92%,transparent);backdrop-filter:blur(16px) saturate(120%)}
+.setup-status{display:flex;align-items:center;gap:8px;min-width:0;color:var(--setup-dim);font-size:11.5px;line-height:1.5}
+.setup-status-dot{width:6px;height:6px;flex:none;border-radius:50%;background:var(--setup-faint)}
+.setup-status-dot[data-tone=ok]{background:var(--setup-success);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-success) 13%,transparent)}
+.setup-status-dot[data-tone=warn]{background:var(--setup-warn);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-warn) 13%,transparent)}
+.setup-status-dot[data-tone=ready]{background:var(--setup-accent);box-shadow:0 0 0 3px color-mix(in srgb,var(--setup-accent) 13%,transparent)}
+.setup-status-dot[data-tone=busy]{background:var(--setup-accent);animation:setup-pulse 1.2s ease-in-out infinite}
+@keyframes setup-pulse{50%{opacity:.35}}
+#status{min-width:0;overflow-wrap:anywhere}
+#status[data-tone=warn]{color:var(--setup-warn)}
+#status[data-tone=ok]{color:var(--setup-success)}
+.nova-window-setup #start.rt-Button{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:42px;min-height:42px;padding:0 20px;border:1px solid color-mix(in srgb,var(--setup-accent-strong) 55%,transparent);border-radius:12px;background:linear-gradient(135deg,#7373ee 0%,#5454d8 100%);color:#fff;font-size:12.5px;font-weight:680;letter-spacing:.01em;box-shadow:0 12px 28px -15px rgba(58,58,190,.6),0 1px 0 rgba(255,255,255,.22) inset;transition:filter .15s,transform .15s,box-shadow .15s}
+.nova-window-setup #start.rt-Button:hover:not(:disabled){filter:brightness(1.06);box-shadow:0 14px 32px -14px rgba(58,58,190,.68),0 1px 0 rgba(255,255,255,.26) inset;transform:translateY(-1px)}
+.nova-window-setup #start.rt-Button:active:not(:disabled){transform:translateY(0)}
+.nova-window-setup #start.rt-Button:disabled{opacity:.55;box-shadow:none;transform:none}
+.nova-window-setup #start.rt-Button[aria-busy=true]{opacity:.92}
+.setup-spinner{animation:setup-spin 1s linear infinite}
+@keyframes setup-spin{to{transform:rotate(360deg)}}
+.setup-spinner:not(:only-child){flex:none}
+@media(max-width:640px){
+ .setup-shell{grid-template-columns:1fr;grid-template-rows:auto minmax(0,1fr);height:100dvh;min-height:0;overflow:hidden}
+ .setup-rail{display:grid;grid-template-columns:auto minmax(0,1fr);align-items:center;gap:0 16px;padding:18px 20px;border-right:0;border-bottom:1px solid var(--setup-rail-line)}
+ .setup-brand{grid-column:1/-1;margin-bottom:12px}
+ .setup-orb{width:60px;height:60px;margin:0;grid-row:2/4;filter:drop-shadow(0 12px 24px rgba(255,151,68,.17))}
+ .setup-pet{width:62px;height:62px;margin:0;grid-row:2/4;border-radius:18px}
+ .setup-pet img{object-fit:cover}
+ .setup-orb::before{inset:-12%;filter:blur(5px)}
+ .setup-orb::after{inset:-6px;box-shadow:0 0 0 8px rgba(255,255,255,.02)}
+ .setup-rail-copy{margin:0;min-width:0}
+ .setup-rail-copy h1{margin:0 0 2px;font-size:19px}
+ .setup-rail-copy p{font-size:11px;line-height:1.45}
+ .setup-rail-eyebrow{margin-bottom:3px;font-size:8.5px}
+ .setup-steps,.setup-rail-foot{display:none}
+ .setup-main{min-height:0}
+ .setup-head{padding:22px 20px 14px}
+ .setup-head h2{font-size:21px}
+ .setup-content{padding:0 20px 18px}
+ .setup-foot{padding:12px 20px 14px}
+}
+@media(max-width:480px){
+ .setup-foot{flex-wrap:wrap}
+ .setup-status{width:100%}
+ .nova-window-setup #start.rt-Button{width:100%}
+ .nova-window-setup .path{grid-template-columns:36px minmax(0,1fr);gap:10px}
+ .nova-window-setup .path-icon{width:36px;height:36px}
+ .nova-window-setup .path-check{display:none}
+ .nova-window-setup .key-input{flex-wrap:wrap}
+ .nova-window-setup .key-input input{flex-basis:calc(100% - 47px)}
+ .nova-window-setup .setup-provider{align-items:stretch;flex-direction:column;gap:7px}
+ .nova-window-setup .setup-provider select{width:100%;min-width:0}
+}
+@media(max-height:680px){.nova-window-setup .setup-note-extra{display:none}}
+@media(prefers-reduced-motion:reduce){
+ .setup-status-dot[data-tone=busy],.setup-spinner,.setup-pet,.setup-pet img{animation:none}
+ .nova-window-setup #start.rt-Button,.nova-window-setup .path{transition:none}
+}
+@media(prefers-color-scheme:dark){
+ body.nova-window-setup{
+  --setup-bg:#0a0c10;--setup-panel:#101318;--setup-card:#161a21;--setup-soft:#1b2029;
+  --setup-line:rgba(235,240,248,.1);--setup-line-strong:rgba(235,240,248,.2);
+  --setup-ink:#f2f4f8;--setup-dim:#a9b2c0;--setup-faint:#7e8795;
+  --setup-accent:#9a9af2;--setup-accent-strong:#bcbcff;--setup-glow:rgba(120,120,230,.14);
+  --setup-success:#67d39d;--setup-warn:#ffaaa2;
+  --setup-rail:linear-gradient(158deg,#060709 0%,#0b0e14 48%,#101322 100%);
+  --setup-rail-ink:#f3f4f8;--setup-rail-dim:#929cab;--setup-rail-line:rgba(255,255,255,.09);
+  background:radial-gradient(940px 620px at 100% 0%,rgba(110,110,230,.12),transparent 62%),var(--setup-bg)
+ }
+ body.nova-window-setup::before{background:radial-gradient(420px 420px at 88% 94%,rgba(255,170,80,.06),transparent 62%)}
+ .nova-window-setup #start.rt-Button{background:linear-gradient(135deg,#8d8df8 0%,#6464e4 100%);border-color:rgba(180,180,255,.34);color:#0b0d18;text-shadow:none;box-shadow:0 12px 30px -15px rgba(90,90,240,.55),0 1px 0 rgba(255,255,255,.25) inset}
+}
+@media(forced-colors:active){
+ .nova-window-setup .path,body.nova-window-setup .setup-keys,body.nova-window-setup .setup-foot,body.nova-window-setup .setup-provider{border:1px solid CanvasText}
+ .nova-window-setup .path:has(input:checked){border-color:Highlight;outline:1px solid Highlight}
+ .nova-window-setup .key-input input{background:Canvas;color:CanvasText;border:1px solid CanvasText}
+ .nova-window-setup #start.rt-Button{background:Highlight;color:HighlightText;border:1px solid HighlightText}
+}
+
+/* ── Settings window app frame (React window) ─────────────────────────────
+   The legacy sheet keeps a fixed footer with a body padding-bottom that a
+   fixed 100%-height body cannot turn into trailing scroll space, so the last
+   row of a long page stayed under the footer. Make the window a three-row
+   frame instead: header/nav fixed, main owns the scroll, footer is a normal
+   grid row that can never cover content. */
+body.nova-window-settings {
+  height: 100vh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  padding-bottom: 0;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+}
+body.nova-window-settings header {
+  position: static;
+  flex: none;
+  margin-bottom: 8px;
+}
+body.nova-window-settings .settings-nav {
+  position: static;
+  align-self: stretch;
+  min-height: 0;
+  max-height: none;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 4px 3px 10px;
+}
+body.nova-window-settings main {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  padding: 0 6px 32px 0;
+  scroll-padding-bottom: 24px;
+}
+body.nova-window-settings main > :last-child { margin-bottom: 8px; }
+body.nova-window-settings footer {
+  position: static;
+  z-index: auto;
+  margin: 0;
+  padding: 12px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--page);
+  backdrop-filter: none;
+  box-shadow: none;
+}
+@media (max-width: 640px) {
+  body.nova-window-settings { padding: 0 14px; }
+  body.nova-window-settings .settings-nav {
+    align-self: start;
+    overflow-x: auto;
+    overflow-y: hidden;
+    padding: 0 0 2px;
+  }
+  body.nova-window-settings main { padding: 0 0 24px; }
+  body.nova-window-settings footer { padding: 12px 14px; }
+}
+@media (prefers-contrast: more) {
+  body.nova-window-settings footer { border-top-color: var(--line-strong); }
+}
+@media (forced-colors: active) {
+  body.nova-window-settings footer { border-top: 1px solid CanvasText; }
+}
+
+/* ── Buttons and action groups ────────────────────────────────────────────
+   One chrome for every settings action: neutral secondary by default, a
+   single accent primary (page-add / save), quiet for tertiary, destructive
+   for removal. Rows share a gap so buttons stop stacking with legacy margins. */
+.nova-window-settings .rt-Button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 30px;
+  height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-raised);
+  color: var(--ink);
+  font-family: var(--default-font-family);
+  font-size: 12.5px;
+  font-weight: 550;
+  line-height: 1;
+  letter-spacing: 0;
+  box-shadow: none;
+  cursor: pointer;
+  transition: background-color .12s ease, border-color .12s ease, color .12s ease, opacity .12s ease;
+}
+.nova-window-settings .rt-Button:hover:not(:disabled) {
+  border-color: var(--line-strong);
+  background: var(--surface-active);
+  color: var(--ink);
+}
+.nova-window-settings .rt-Button:active:not(:disabled) { background: var(--surface); }
+.nova-window-settings .rt-Button:disabled { opacity: .45; cursor: default; }
+.nova-window-settings .rt-Button[aria-busy="true"] { cursor: progress; opacity: .8; }
+.nova-window-settings .rt-Button:focus-visible {
+  outline: var(--focus-ring-width, 2px) solid var(--accent);
+  outline-offset: var(--focus-ring-offset, 2px);
+}
+.nova-window-settings .rt-Button svg { width: 15px; height: 15px; flex: none; }
+/* Radix solid/soft variants both start from the neutral chrome; intent comes
+   from the explicit classes below so a page with many actions stays calm. */
+.nova-window-settings .rt-Button.rt-variant-solid,
+.nova-window-settings .rt-Button.rt-variant-soft { background: var(--surface-raised); color: var(--ink); }
+.nova-window-settings .rt-Button.soft,
+.nova-window-settings .rt-Button.rt-variant-soft.soft {
+  border-color: transparent;
+  background: var(--accent-wash);
+  color: var(--accent-strong, var(--accent));
+}
+.nova-window-settings .rt-Button.soft:hover:not(:disabled) { background: color-mix(in srgb, var(--accent) 16%, transparent); border-color: transparent; }
+.nova-window-settings .rt-Button.ghost {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-dim);
+}
+.nova-window-settings .rt-Button.ghost:hover:not(:disabled) { border-color: transparent; background: var(--surface); color: var(--ink); }
+.nova-window-settings .rt-Button.quiet {
+  border-color: transparent;
+  background: transparent;
+  color: var(--ink-faint);
+}
+.nova-window-settings .rt-Button.quiet:hover:not(:disabled) { border-color: transparent; background: transparent; color: var(--ink); text-decoration: underline; }
+.nova-window-settings .rt-Button.page-add,
+.nova-window-settings .rt-Button.primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: var(--accent-ink, #fff);
+}
+.nova-window-settings .rt-Button.page-add:hover:not(:disabled),
+.nova-window-settings .rt-Button.primary:hover:not(:disabled) { background: var(--accent-strong); border-color: transparent; color: var(--accent-ink, #fff); }
+.nova-window-settings .rt-Button.destructive { border-color: color-mix(in srgb, var(--warn) 45%, transparent); background: transparent; color: var(--warn); }
+.nova-window-settings .rt-Button.destructive:hover:not(:disabled) { border-color: var(--warn); background: var(--warn-wash); color: var(--warn); }
+
+.nova-window-settings #settings-save.rt-Button { background: var(--accent); border-color: transparent; color: var(--accent-ink, #fff); }
+.nova-window-settings #settings-save.rt-Button:hover:not(:disabled) { background: var(--accent-strong); color: var(--accent-ink, #fff); }
+.nova-window-settings #settings-restart.rt-Button { background: var(--surface-raised); border-color: var(--line); color: var(--ink); }
+.nova-window-settings #settings-restore.rt-Button { background: transparent; border-color: transparent; color: var(--accent-strong, var(--accent)); }
+
+/* Every action row shares one alignment and gap; legacy per-card margins are
+   dropped inside these rows so the buttons read as one group. */
+.nova-window-settings :is(.preference-actions, .card-actions, .page-toolbar-actions, .timeline-actions, .knowledge-actions, .actions, .im-feishu-actions, .im-sync-actions, .site-actions) {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.nova-window-settings :is(.preference-actions, .card-actions, .page-toolbar-actions, .timeline-actions, .knowledge-actions, .actions, .im-feishu-actions, .im-sync-actions) > .rt-Button,
+.nova-window-settings :is(.preference-actions, .card-actions, .page-toolbar-actions, .timeline-actions, .knowledge-actions, .actions, .im-feishu-actions, .im-sync-actions) > button { margin: 0; }
+.nova-window-settings :is(.im-card, .preference-card) :is(p[role="status"], .preference-caption) { margin-bottom: 10px; }
+
+/* Workbench buttons keep their own compact chrome, aligned with settings. */
+.workbench .rt-Button { min-height: 30px; border-radius: 8px; font-weight: 550; }
+.workbench .rt-Button.page-add { background: var(--accent); color: var(--accent-ink, #fff); border-color: transparent; }

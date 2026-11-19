@@ -2,15 +2,12 @@ import {mountWorkspaceBar} from './workspace-bar.mjs'
 import {t} from './locale.mjs'
 import {renderMarkdown} from './markdown.mjs'
 import {iconNode,withIcon} from './icons.mjs'
+import {BUILD_REASONS,buildReasonText} from './build-steps.mjs'
+
+export {BUILD_REASONS}
 
 const folderName=path=>String(path??'').split(/[\\/]+/).filter(Boolean).at(-1)??''
-/** Why a Build is paused, in words the user can act on. Unknown codes stay hidden rather than leaking a raw identifier. */
 export const BUILD_STATUS_LABELS=Object.freeze({running:'执行中',awaiting_approval:'待确认',paused:'已暂停',completed:'已完成',finished:'已锁定',failed:'失败',outcome_unknown:'结果不确定',idle:'就绪'})
-export const BUILD_REASONS=Object.freeze({
- model_timeout:'模型等待数据超时',model_overflow:'模型回复超出流容量限制',model_network:'模型连接中断',round_limit:'已达到本次工具调用上限',
- restart_requires_resume:'已暂停，点击继续恢复任务',approval_denied:'你拒绝了一次操作，补充新的要求后继续',
- cleanup_unknown:'上一步的清理结果不确定，请核实后继续',outcome_unknown:'上一步的结果不确定，请核实后继续',new_user_input_received:'收到新消息，已暂停当前步骤',
-})
 
 /** Bounded snapshots carry only status. Full plans and logs are fetched in small pages. */
 export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
@@ -111,7 +108,7 @@ export function mountWorkbenchAgent(parent,{c,el,run,api,planHost}){
   status.setAttribute('data-state',build?.status??'')
   // The path is one ellipsized line; the full value stays reachable on hover.
   project.textContent=folderName(build?.project);project.title=folderName(build?.project);project.hidden=!project.textContent
-  reason.textContent=build?.reason&&build.reason!=='stopped'&&BUILD_REASONS[build.reason]?t(BUILD_REASONS[build.reason]):'';reason.hidden=!reason.textContent;reason.title=reason.textContent
+  reason.textContent=buildReasonText(build);reason.hidden=!reason.textContent;reason.title=reason.textContent
   stop.hidden=!build||!active;resume.hidden=!build||active||['completed','finished'].includes(build.status);details.hidden=!build
   stop.disabled=resume.disabled=details.disabled=!ready
   approval.hidden=!build?.approval;deny.disabled=!ready

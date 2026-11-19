@@ -1,9 +1,10 @@
 import {fileURLToPath} from 'node:url'
-const HELP = `Usage: novapersonal-server [--env-file PATH] [start|token-init|pair WSS_URL|--help]
+const HELP = `Usage: novapersonal-server [--env-file PATH] [start|token-init|pair WSS_URL|space ARGS...|--help]
 
   start          Run the headless service in the foreground
   token-init     Create the configured private host credential file
   pair WSS_URL   Show a one-use pairing QR in an interactive terminal
+  space ARGS...  Space Host admin (same as nova-space-host): init, resume, status, pair, devices, revoke
 
 Requires SERVER_PORT and SERVER_TOKEN_FILE.
 Configure model credentials and workspace in the environment or --env-file.
@@ -12,6 +13,7 @@ const modules = {
   entry: '../runtime/dist/src/server-entry.js',
   config: '../runtime/dist/src/server/server-config.js',
   pair: '../runtime/scripts/pair-device.mjs',
+  space: '../runtime/dist/src/space-host/cli.js',
 }
 
 export async function main(argv, {
@@ -29,6 +31,11 @@ export async function main(argv, {
   }
   const command = args.shift() ?? 'start'
   if (command === '--help' && args.length === 0) { write(HELP); return 0 }
+  if (command === 'space') {
+    if (args.length === 0) { write(HELP); return 2 }
+    try { return await (await load('space')).main(args) }
+    catch (error) { process.stderr.write(`nova-space-host: ${error instanceof Error ? error.message : 'command_failed'}\n`); return 1 }
+  }
   if (!['start', 'token-init', 'pair'].includes(command)
     || args.length !== (command === 'pair' ? 1 : 0)) { write(HELP); return 2 }
   if (envFile) loadEnvFile(envFile)

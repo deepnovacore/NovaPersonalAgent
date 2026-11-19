@@ -1,6 +1,7 @@
 import Flutter
 import UIKit
 import SafariServices
+import UserNotifications
 #if NOVA_WORKSPACE_ACCEPTANCE
 import Network
 #endif
@@ -10,6 +11,8 @@ import Network
   private var chatGptBrowser: SFSafariViewController?
   private var chatGptBrowserChannel: FlutterMethodChannel?
   private var localAgent: AnyObject?
+  private var scopeObserver: NSObjectProtocol?
+  private var spaceTools: NovaSpaceTools?
   private var workspace: NovaWorkspaceBridge?
   private var artifactHost: ArtifactWebHost?
   #if NOVA_WORKSPACE_ACCEPTANCE
@@ -28,7 +31,17 @@ import Network
     DispatchQueue.main.asyncAfter(deadline: .now() + 600) { application.isIdleTimerDisabled = false }
     #endif
     NovaScheduleBridge.register()
+    UNUserNotificationCenter.current().delegate = self
     return super.application(application, didFinishLaunchingWithOptions: launchOptions)
+  }
+
+  override func application(_ application: UIApplication, didRegisterForRemoteNotificationsWithDeviceToken deviceToken: Data) {
+    NovaSpacePush.shared.registered(deviceToken)
+    super.application(application, didRegisterForRemoteNotificationsWithDeviceToken: deviceToken)
+  }
+  override func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
+    NovaSpacePush.shared.opened(response.notification.request.content.userInfo)
+    super.userNotificationCenter(center, didReceive: response, withCompletionHandler: completionHandler)
   }
 
   override func application(_ application: UIApplication, handleEventsForBackgroundURLSession identifier: String, completionHandler: @escaping () -> Void) {
@@ -38,6 +51,8 @@ import Network
 
   func didInitializeImplicitFlutterEngine(_ engineBridge: FlutterImplicitEngineBridge) {
     GeneratedPluginRegistrant.register(with: engineBridge.pluginRegistry)
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaSpacePush") { NovaSpacePush.shared.install(registrar.messenger()) }
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaSpaceTools") { spaceTools = NovaSpaceTools(registrar: registrar) }
     #if NOVA_WORKSPACE_ACCEPTANCE
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaAcceptanceNetwork") {
       let channel = FlutterMethodChannel(name: "nova/acceptance_network/v1", binaryMessenger: registrar.messenger())
@@ -116,15 +131,24 @@ import Network
     if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaArtifacts") {
       artifactHost = ArtifactWebHost(messenger: registrar.messenger())
     }
-    if #available(iOS 15.0, *), let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaLocalAgent") {
-      do { localAgent = try LocalAgentHost(messenger: registrar.messenger()) }
-      catch {
-        let channel = FlutterMethodChannel(name: "nova/local_agent/v1", binaryMessenger: registrar.messenger())
-        channel.setMethodCallHandler { _, reply in
-          reply(FlutterError(code: "native_task_store_unavailable", message: "本机任务记录无法打开，未覆盖已有数据。", details: nil))
+    if let registrar = engineBridge.pluginRegistry.registrar(forPlugin: "NovaLocalAgent") {
+      let messenger = registrar.messenger()
+      let updateScope: () -> Void = { [weak self] in
+        guard let self else { return }
+        (self.localAgent as? LocalAgentHost)?.close(); self.localAgent = nil
+        do {
+          let id = try NovaSpaceScope.standaloneID()
+          self.localAgent = try LocalAgentHost(messenger: messenger, spaceId: id)
+        } catch {
+          let channel = FlutterMethodChannel(name: "nova/local_agent/v1", binaryMessenger: messenger)
+          channel.setMethodCallHandler { _, reply in reply(FlutterError(code: "local_runtime_unavailable", message: nil, details: nil)) }
+          self.localAgent = channel
         }
-        localAgent = channel
       }
+      if let observer = scopeObserver { NotificationCenter.default.removeObserver(observer) }
+      scopeObserver = NotificationCenter.default.addObserver(forName: NovaSpaceScope.changed, object: nil, queue: .main) { _ in updateScope() }
+      updateScope()
+      NovaSpaceScope.install(messenger: messenger)
     }
   }
 }

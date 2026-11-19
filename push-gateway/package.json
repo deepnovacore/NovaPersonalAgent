@@ -1,0 +1,25 @@
+{
+  "name": "@nova-personal-agent/push-gateway",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Token-isolating, quota-enforced APNs/FCM/MiPush gateway",
+  "engines": {
+    "node": ">=22.13.0"
+  },
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node scripts/test.mjs",
+    "build": "tsc -p tsconfig.json --noEmit false --outDir dist"
+  },
+  "dependencies": {
+    "jose": "6.2.10"
+  },
+  "license": "GPL-3.0-or-later",
+  "files": [
+    "dist/src"
+  ],
+  "bin": {
+    "nova-push-gateway": "dist/src/cli.js"
+  }
+}

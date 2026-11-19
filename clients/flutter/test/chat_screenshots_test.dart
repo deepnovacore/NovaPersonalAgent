@@ -106,6 +106,9 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
+      // The shell must not blur its backdrop: iOS keeps stale samples from the
+      // previous tab behind a bottom BackdropFilter.
+      expect(find.byType(BackdropFilter), findsNothing);
       await precachePetAvatar(tester);
       await expectLater(
         find.byType(NovaApp),
@@ -120,7 +123,7 @@ void main() {
       });
       await tester.tap(find.text('Me'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Settings'));
+      await tester.tap(find.byTooltip('Settings'));
       await tester.pumpAndSettle();
       await expectLater(
         find.byType(NovaApp),

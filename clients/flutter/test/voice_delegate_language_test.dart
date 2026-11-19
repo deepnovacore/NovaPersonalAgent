@@ -22,8 +22,10 @@ class _ToolThenSummary extends ModelClient {
     this.summary, {
     this.tool = 'web_fetch',
     this.arguments = const {'url': 'https://example.com'},
+    this.rawArguments,
   });
   final String tool;
+  final String? rawArguments;
   final Map<String, dynamic> arguments;
   String summary;
   final rounds = <List<Map<String, dynamic>>>[];
@@ -41,7 +43,10 @@ class _ToolThenSummary extends ModelClient {
           {
             'index': 0,
             'id': 'lookup',
-            'function': {'name': tool, 'arguments': jsonEncode(arguments)},
+            'function': {
+              'name': tool,
+              'arguments': rawArguments ?? jsonEncode(arguments),
+            },
           },
         ],
       };
@@ -116,11 +121,13 @@ void main() {
         expect(worker.error, allowed ? isNull : 'tool_denied');
         expect(
           update.text,
-          contains(allowed ? 'Weather lookup completed' : 'tool_denied'),
+          contains(allowed ? 'Weather lookup completed' : '你未允许，未执行'),
         );
+        expect(update.text, isNot(contains('tool_denied')));
         expect(nativePrompts, native ? 1 : 0);
         expect(fetches, allowed ? 1 : 0);
-        expect(model.rounds, hasLength(allowed ? 2 : 1));
+        // A stopped tool gets one extra tool-free round to explain itself.
+        expect(model.rounds, hasLength(2));
         final messages = workerStore.conversations.single['messages'] as List;
         expect(
           jsonDecode(
@@ -133,7 +140,138 @@ void main() {
   }
 
   test(
-    'follow-up delegates retain same-chat task context without replay or cross-chat leakage',
+    'invalid device arguments stop before dispatch and are explained, not shown as raw codes',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      final workerStore = ConversationStore(MemoryPersistence());
+      await store.open();
+      await workerStore.open();
+      final conversation = await store.create();
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      var executions = 0;
+      final model = _ToolThenSummary(
+        '参数不符合要求，手机上没有执行任何操作。',
+        tool: 'device_run_task',
+        arguments: {
+          'goal': '打开小红书，搜索申琼星',
+          'app_name': '小红书',
+          'target_package': null,
+          'acceptance': ['小红书已打开', '搜索结果包含申琼星'],
+        },
+      );
+      final primary = AgentCoreHost(store: store, settings: _Settings());
+      final worker = AgentCoreHost(
+        store: workerStore,
+        settings: primary.settings,
+        tools: ToolRunner(
+          journal: journal,
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            automaticExecution: true,
+            requestDeviceTask: (_, _) async {
+              executions++;
+              return {'status': 'completed'};
+            },
+          ),
+        ),
+        clientFactory: () => model,
+      );
+      final bridge = VoiceDelegateBridge(primary: primary, worker: worker);
+      addTearDown(bridge.dispose);
+      addTearDown(primary.dispose);
+      final finished = bridge.updates.firstWhere((u) => u.terminal);
+      await bridge.start(
+        conversation: conversation,
+        callId: 'invalid-call',
+        request: '打开小红书，搜索申琼星',
+      );
+      final update = await finished;
+      expect(executions, 0);
+      expect(worker.error, 'tool_rejected');
+      expect(worker.errorDetail, 'invalid_tool_arguments');
+      expect(update.text, contains('任务参数不符合工具要求，这次调用没有执行'));
+      expect(update.text, isNot(contains('tool_rejected')));
+      expect(update.text, isNot(contains('invalid_tool_arguments')));
+      final tool = jsonDecode(
+        (workerStore.conversations.single['messages'] as List).singleWhere(
+          (m) => m['role'] == 'tool',
+        )['content'],
+      );
+      expect(tool['executed'], false);
+      expect(tool['error'], 'invalid_tool_arguments');
+      expect(
+        {for (final issue in tool['issues']) issue['field']: issue['type']},
+        {'target_package': 'null', 'acceptance': 'array'},
+      );
+      // Diagnostics name fields and types only, never the user's words.
+      expect(jsonEncode(tool), isNot(contains('申琼星')));
+      // One explanation round, without tools, told not to guess permissions.
+      expect(model.rounds, hasLength(2));
+      expect(
+        model.rounds.last
+            .where((m) => m['role'] == 'system')
+            .map((m) => m['content'])
+            .join('\n'),
+        contains('executed is false'),
+      );
+    },
+  );
+
+  test(
+    'malformed tool JSON is an invalid-arguments stop, not a refusal',
+    () async {
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final conversation = await store.create();
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      var executions = 0;
+      final model = _ToolThenSummary(
+        '没有执行。',
+        tool: 'device_run_task',
+        rawArguments: '["打开小红书"]',
+      );
+      final host = AgentCoreHost(
+        store: store,
+        settings: _Settings(),
+        tools: ToolRunner(
+          journal: journal,
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            automaticExecution: true,
+            requestDeviceTask: (_, _) async {
+              executions++;
+              return {'status': 'completed'};
+            },
+          ),
+        ),
+        clientFactory: () => model,
+      );
+      addTearDown(host.dispose);
+      await host.send(conversation, '打开小红书', approve: (_) async => true);
+      expect(executions, 0);
+      expect(host.error, 'tool_rejected');
+      expect(host.errorDetail, 'invalid_tool_arguments');
+      final tool = jsonDecode(
+        (store.conversation(conversation)['messages'] as List).singleWhere(
+          (m) => m['role'] == 'tool',
+        )['content'],
+      );
+      expect(tool['issues'], [
+        {'field': 'arguments', 'problem': 'not_json_object'},
+      ]);
+    },
+  );
+
+  test(
+    'explicit task follow-ups retain context while independent requests stay separate',
     () async {
       final store = ConversationStore(MemoryPersistence());
       final workerStore = ConversationStore(MemoryPersistence());
@@ -183,7 +321,11 @@ void main() {
       }
 
       await delegate(conversation, 'open', '打开小红书');
-      await delegate(conversation, 'search', '搜索今天天气');
+      final context =
+          (store.conversation(conversation)['messages'] as List)
+                  .first['delegate_context']
+              as String;
+      await bridge.continueTask(context, '搜索今天天气', approve: (_) async => true);
       final followup = model.rounds.last;
       expect(
         followup.where((m) => m['role'] == 'user').map((m) => m['content']),
@@ -197,11 +339,22 @@ void main() {
         reason: 'carrying context must not replay the prior app launch',
       );
       model.summary = '';
-      await delegate(conversation, 'empty', '继续搜索明天天气');
+      await bridge.continueTask(
+        context,
+        '继续搜索明天天气',
+        approve: (_) async => true,
+      );
       final last = (store.conversation(conversation)['messages'] as List).last;
       expect(last['content'], contains('没有可确认的完成结果'));
       expect(last['content'], isNot(contains('小红书已打开')));
       model.summary = '独立查询完成';
+      await delegate(conversation, 'same-chat-independent', '另一个独立任务');
+      expect(
+        model.rounds.last
+            .where((m) => m['role'] == 'user')
+            .map((m) => m['content']),
+        ['另一个独立任务'],
+      );
       await delegate(other, 'other', '独立查询');
       expect(
         model.rounds.last
@@ -210,7 +363,7 @@ void main() {
         ['独立查询'],
       );
       expect(model.rounds.last.where((m) => m['role'] == 'tool'), isEmpty);
-      expect(workerStore.conversations, hasLength(2));
+      expect(workerStore.conversations, hasLength(3));
     },
   );
 

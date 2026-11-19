@@ -44,9 +44,9 @@ export function validateMemoryFiles(db:LedgerDatabase):void{
  memoryDocuments(storedRevisions(db))
 }
 /** Publication may fail after SQL commit. The durable outbox remains until Git is complete. */
-export function flushMemoryFiles(db:LedgerDatabase):void{
- const state=authorities.get(db);if(!state)return
- const raw=db.prepare('SELECT payload_json FROM memory_file_outbox WHERE slot=1').get();if(!raw)return
+export function flushMemoryFiles(db:LedgerDatabase):boolean{
+ const state=authorities.get(db);if(!state)return false
+ const raw=db.prepare('SELECT payload_json FROM memory_file_outbox WHERE slot=1').get();if(!raw)return false
  const pending=JSON.parse(String(raw.payload_json)) as Pending
  const repository=state.repository,journal=repository.pendingOperationId()
  if(journal!==null){if(journal!==pending.operation_id)throw Error('MEMORY_MARKDOWN_CONFLICT');repository.recover(journal,pending.revisions)}
@@ -56,6 +56,7 @@ export function flushMemoryFiles(db:LedgerDatabase):void{
  }
  db.prepare('DELETE FROM memory_file_outbox WHERE slot=1').run()
  state.snapshot=repository.read()
+ return true
 }
 /** Called under the store's path lock; finding an existing authority must precede legacy bootstrap. */
 export function hasMemoryFileAuthority(db:LedgerDatabase,path:string):boolean {

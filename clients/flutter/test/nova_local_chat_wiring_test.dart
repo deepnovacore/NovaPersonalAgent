@@ -60,12 +60,12 @@ void main() {
     );
     await tester.tap(find.text('Me'));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Settings'));
+    await tester.tap(find.byTooltip('Settings'));
     await tester.pumpAndSettle();
-    expect(find.text('Model provider'), findsOneWidget);
+    expect(find.text('Model services'), findsOneWidget);
     await tester.tap(find.text('Devices'));
     await tester.pumpAndSettle();
-    expect(find.text('This phone'), findsOneWidget);
+    expect(find.text('This device'), findsOneWidget);
     expect(find.text('Computer & voice'), findsNothing);
     // Disconnected from the computer, so a fresh conversation is local.
     expect(store.conversations.single['backend'], 'local');
@@ -100,7 +100,8 @@ void main() {
       expect(find.text('新对话'), findsNothing);
       expect(find.text('我的'), findsOneWidget);
       expect(find.byType(LocalChatPanel), findsOneWidget);
-      expect(find.text('Nova'), findsNWidgets(2));
+      expect(find.text('NovaCore'), findsOneWidget);
+      expect(find.text('Nova'), findsOneWidget);
       expect(find.text('时间线'), findsOneWidget);
       expect(find.text('任务'), findsOneWidget);
       expect(find.text('资讯'), findsNothing);

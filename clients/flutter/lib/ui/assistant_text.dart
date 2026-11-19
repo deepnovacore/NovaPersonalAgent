@@ -13,27 +13,39 @@ class AssistantText extends StatelessWidget {
   Iterable<Uri> get _previewLinks sync* {
     final seen = <String>{};
     for (final match in RegExp(
-      r'''nova-file:///workspace/[^\s`<>"\[\]，。；：！？、（）]+''',
+      r'''nova-file:///workspace/[^\s`<>"*\[\]，。；：！？、（）]+''',
     ).allMatches(text)) {
-      final url = match[0]!.replaceFirst(RegExp(r'[).,;:!]+$'), '');
-      if (!seen.add(url) ||
-          text.contains(']($url)') ||
-          text.contains('](<$url>)') ||
-          text.contains('<$url>')) {
-        continue;
-      }
+      // Markdown emphasis and quotes may hug a link; `_` stays legal inside
+      // a name and is only trimmed at the end.
+      final url = match[0]!.replaceFirst(RegExp(r"[)_~'.,;:!?]+$"), '');
+      if (!seen.add(url)) continue;
       try {
         final uri = Uri.parse(url);
         if (uri.host.isEmpty &&
             !uri.hasQuery &&
             !uri.hasFragment &&
             uri.path.startsWith('/workspace/') &&
-            !uri.pathSegments.contains('..') &&
-            RegExp(r'\.html?$', caseSensitive: false).hasMatch(uri.path)) {
+            !Uri.decodeComponent(uri.path).contains('\u0000') &&
+            !Uri.decodeComponent(
+              // Preserve raw escapes/dot segments while encoding Unicode.
+              Uri.encodeFull(url).replaceAll('%25', '%'),
+            ).split('/').any((part) => part == '..' || part == '.')) {
+          final html = RegExp(
+            r'\.html?$',
+            caseSensitive: false,
+          ).hasMatch(uri.path);
+          if (html &&
+              (text.contains(']($url)') ||
+                  text.contains('](<$url>)') ||
+                  text.contains('<$url>'))) {
+            continue;
+          }
           yield uri;
         }
       } on FormatException {
         // Malformed model output stays visible as text.
+      } on ArgumentError {
+        // Streaming may end in an incomplete percent escape or UTF-8 sequence.
       }
     }
   }
@@ -73,7 +85,12 @@ class AssistantText extends StatelessWidget {
         for (final uri in _previewLinks)
           TextButton.icon(
             onPressed: () => onArtifactLink!(uri.toString()),
-            icon: const Icon(Icons.open_in_new, size: 18),
+            icon: Icon(
+              RegExp(r'\.html?$', caseSensitive: false).hasMatch(uri.path)
+                  ? Icons.open_in_new
+                  : Icons.insert_drive_file_outlined,
+              size: 18,
+            ),
             label: Text(uri.pathSegments.last),
           ),
     ],

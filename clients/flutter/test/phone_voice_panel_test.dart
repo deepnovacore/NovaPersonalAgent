@@ -13,7 +13,8 @@ import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/ui/theme.dart';
 import 'package:nova_mobile/voice/phone_voice_panel.dart';
 import 'package:nova_mobile/voice/phone_voice_session.dart';
-import 'package:nova_mobile/voice/voice_call_visual.dart';
+import 'package:nova_mobile/ui/pet_avatar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:nova_mobile/voice/voice_delegate.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'support/fake_audio.dart';
@@ -104,6 +105,7 @@ Widget panelHost(
   VoidCallback? onExpand,
   VoidCallback? onEnd,
   ThemeData? theme,
+  PetAvatarStore? petAvatar,
 }) => MaterialApp(
   theme: theme ?? novaTheme(),
   home: RepaintBoundary(
@@ -118,6 +120,7 @@ Widget panelHost(
         ),
         child: PhoneVoicePanel(
           session: session,
+          petAvatar: petAvatar ?? PetAvatarStore(),
           onSettings: () {},
           onStart: () {},
           compact: compact,
@@ -131,6 +134,80 @@ Widget panelHost(
 );
 
 void main() {
+  testWidgets('silent input notice appears without stopping the call', (
+    tester,
+  ) async {
+    final session = PanelSession()..microphoneSilent = true;
+    addTearDown(session.dispose);
+    await tester.pumpWidget(panelHost(session, reduced: true));
+    expect(find.textContaining('未采集到麦克风声音'), findsOneWidget);
+    expect(session.active, isTrue);
+    session.microphoneSilent = false;
+    session.notifyListeners();
+    await tester.pump();
+    expect(find.textContaining('未采集到麦克风声音'), findsNothing);
+  });
+  testWidgets(
+    'voice stage uses the loaded selected pet across all call states',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync(
+        'voice-selected-pet-',
+      );
+      final custom = File('${directory.path}/selected.png');
+      custom.writeAsBytesSync(File('assets/pets/nova.png').readAsBytesSync());
+      SharedPreferences.setMockInitialValues({
+        petAvatarPreferenceKey: jsonEncode({
+          'mode': 'custom',
+          'path': custom.path,
+        }),
+      });
+      final avatar = PetAvatarStore(supportDirectory: () async => directory);
+      await tester.runAsync(avatar.load);
+      final session = PanelSession();
+      addTearDown(() async {
+        session.dispose();
+        avatar.dispose();
+        directory.deleteSync(recursive: true);
+      });
+      await tester.pumpWidget(
+        panelHost(session, petAvatar: avatar, reduced: true),
+      );
+      expect(
+        tester.widget<PetAvatar>(find.byType(PetAvatar)).store,
+        same(avatar),
+      );
+      expect(avatar.customPath, custom.path);
+      for (final entry in {
+        'connecting': const Color(0xffb8a7ff),
+        'thinking': const Color(0xffb8a7ff),
+        'listening': const Color(0xff86e5ff),
+        'speaking': const Color(0xffffb46b),
+        'error': const Color(0xffff7b83),
+        'muted': const Color(0xffcdd0da),
+      }.entries) {
+        session.phase = entry.key;
+        session.notifyListeners();
+        await tester.pump();
+        final aura = tester.widget<DecoratedBox>(
+          find.byKey(ValueKey('voice-pet-${entry.key}')),
+        );
+        final decoration = aura.decoration as BoxDecoration;
+        expect((decoration.border as Border).top.color, entry.value);
+        final provider = tester.widget<Image>(find.byType(Image)).image;
+        final fileImage = provider is ResizeImage
+            ? provider.imageProvider
+            : provider;
+        expect((fileImage as FileImage).file.path, custom.path);
+      }
+      await tester.runAsync(avatar.resetToDefault);
+      await tester.pump();
+      final provider = tester.widget<Image>(find.byType(Image)).image;
+      final asset = provider is ResizeImage ? provider.imageProvider : provider;
+      expect((asset as AssetImage).assetName, petAvatarAsset);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'iOS PiP failure keeps the call and shows a non-permission error',
     (tester) async {
@@ -147,6 +224,33 @@ void main() {
     variant: TargetPlatformVariant.only(TargetPlatform.iOS),
   );
 
+  for (final code in ['idle_timeout', 'provider_response_idle_timeout']) {
+    testWidgets('$code reads as a quiet end, not a failure', (tester) async {
+      final session = PanelSession()..error = code;
+      await tester.pumpWidget(panelHost(session, reduced: true));
+      expect(find.text('通话因长时间静音已自动结束，可随时重新开始。'), findsOneWidget);
+      expect(find.textContaining('通话失败'), findsNothing);
+      expect(isVoiceIdleEnd(code), isTrue);
+      await tester.pumpWidget(const SizedBox());
+      session.dispose();
+    });
+  }
+  test('other provider errors are not idle ends', () {
+    expect(isVoiceIdleEnd('provider_disconnected'), isFalse);
+    expect(isVoiceIdleEnd(null), isFalse);
+  });
+
+  testWidgets('handshake rejection shows status and an actionable reason', (
+    tester,
+  ) async {
+    final session = PanelSession()..error = 'connection_http_401';
+    await tester.pumpWidget(panelHost(session, reduced: true));
+    expect(find.textContaining('401'), findsOneWidget);
+    expect(find.textContaining('密钥'), findsOneWidget);
+    expect(find.text('请检查语音设置或网络，再重新通话。'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    session.dispose();
+  });
   testWidgets('capture failure is not mislabeled as a network failure', (
     tester,
   ) async {
@@ -156,6 +260,7 @@ void main() {
         home: Scaffold(
           body: PhoneVoicePanel(
             session: session,
+            petAvatar: PetAvatarStore(),
             onSettings: () {},
             onStart: () {},
           ),
@@ -176,6 +281,7 @@ void main() {
         home: Scaffold(
           body: PhoneVoicePanel(
             session: session,
+            petAvatar: PetAvatarStore(),
             onSettings: () {},
             onStart: () {},
           ),
@@ -220,6 +326,19 @@ void main() {
             final packages =
                 jsonDecode(await config.readAsString())['packages'] as List;
             final flutter = packages.singleWhere((p) => p['name'] == 'flutter');
+            final cupertino = packages.singleWhere(
+              (p) => p['name'] == 'cupertino_icons',
+            );
+            final cupertinoRoot = Directory.fromUri(
+              config.absolute.uri.resolve(cupertino['rootUri'] as String),
+            ).path;
+            await (FontLoader('packages/cupertino_icons/CupertinoIcons')
+                  ..addFont(
+                    File(
+                      '$cupertinoRoot/assets/CupertinoIcons.ttf',
+                    ).readAsBytes().then(ByteData.sublistView),
+                  ))
+                .load();
             final sdk = Directory.fromUri(
               config.absolute.uri.resolve(flutter['rootUri'] as String),
             ).parent.parent.path;
@@ -250,6 +369,13 @@ void main() {
             theme: theme,
           ),
         );
+        if (path != null && path.isNotEmpty) {
+          await tester.runAsync(() async {
+            for (final element in find.byType(Image).evaluate()) {
+              await precacheImage((element.widget as Image).image, element);
+            }
+          });
+        }
         await tester.pump();
         expect(find.byKey(const ValueKey('voice-captions')), findsOneWidget);
         expect(find.text(session.caption), findsOneWidget);
@@ -293,7 +419,7 @@ void main() {
       expect(find.byKey(const ValueKey('voice-compact-bar')), findsOneWidget);
       expect(find.byKey(const ValueKey('voice-captions')), findsNothing);
       expect(find.text(session.caption), findsNothing);
-      expect(find.byType(VoiceCallVisual), findsNothing);
+      expect(find.byType(VoicePetVisual), findsNothing);
       expect(find.byKey(const ValueKey('voice-task')), findsNothing);
       await tester.tap(find.textContaining('Nova ·'));
       expect(expansions, 1);
@@ -390,7 +516,7 @@ void main() {
     session.level.value = .27;
     await tester.pump();
     expect(
-      tester.widget<VoiceCallVisual>(find.byType(VoiceCallVisual)).inputLevel,
+      tester.widget<VoicePetVisual>(find.byType(VoicePetVisual)).inputLevel,
       .27,
     );
     await tester.pumpWidget(panelHost(session, reduced: true));
@@ -424,7 +550,7 @@ void main() {
     expect(find.text('正在编写文件'), findsOneWidget);
     expect(find.textContaining('file_write'), findsNothing);
     await tester.tap(find.text('正在编写文件'));
-    await tester.pumpAndSettle();
+    await tester.pump(const Duration(milliseconds: 300));
     expect(find.textContaining('file_write'), findsNothing);
     expect(find.text('正在整理内容'), findsNothing);
     expect(find.text('停止任务'), findsOneWidget);

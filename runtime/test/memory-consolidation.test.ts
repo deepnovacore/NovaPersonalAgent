@@ -88,3 +88,16 @@ test('a rewritten amount or date is rejected against the full cited text, not th
  const dated=prepareConsolidation([budget('报销截止 2026-10-12')],null,{now})!
  await assert.rejects(generateConsolidation(dated,{gateway:gateway({profile_derived:[{text:'报销截止 2026-10-21',refs:[{id:'budget',revision:1}]}],one_page:output('x').one_page}),model:'fixture'}),/STORE_SUMMARY_FACT_MISMATCH/)
 })
+
+
+test('memoryReadContext excludes general facts only from voice and preserves user and legacy scope',()=>{
+ const legacy=fact('legacy',1,'Legacy preference'),user={...fact('user'),content:{text:'User preference',memory_scope:'user'}},general={...fact('general'),content:{text:'Project constraint',memory_scope:'general'}}
+ const rows=[legacy,user,general]
+ const voice=memoryReadContext(rows,null,{now,mode:'voice'})
+ assert.match(voice,/Legacy preference/);assert.match(voice,/User preference/);assert.doesNotMatch(voice,/Project constraint/)
+ assert.equal(memoryReadContext([general],null,{now,mode:'voice'}),'')
+ const text=memoryReadContext(rows,null,{now,mode:'text'}),[userContext,directory]=text.split('Memory directory')
+ assert.match(userContext!,/User preference/);assert.doesNotMatch(userContext!,/Project constraint/)
+ assert.match(directory!,/Project constraint/)
+ assert.equal(voice,memoryReadContext([legacy,user],null,{now,mode:'voice'}))
+})

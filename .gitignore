@@ -23,9 +23,11 @@ dist/
 # JavaScript and Electron
 node_modules/
 build/
+.build/
 /clients/desktop/build
 /clients/desktop/dist
 /runtime/dist
+/relay/dist
 
 # Runtime state and local media
 data/
@@ -107,3 +109,30 @@ references/
 # Private device acceptance journal
 /docs/testing/mobile-authority-acceptance-2026-10-17.zh-CN.md
 /docs/plans/2026-10-15-unified-understanding.md
+
+# Per-task scratch, local review logs and generated integration fixtures
+/work/
+
+# Release-excluded deployment and unreviewed media
+/deploy/novacore-beta/
+/assets/gallery/stills/phone-docx.webp
+/assets/gallery/stills/phone-dual-brain.webp
+/clients/flutter/test/goldens/chat-conversation.png
+/clients/flutter/test/goldens/chat-home-empty.png
+/clients/flutter/test/goldens/chat-home.png
+/clients/flutter/test/goldens/chat-personal.png
+/clients/flutter/test/goldens/chat-settings.png
+/clients/flutter/test/goldens/chat-task-draft.png
+/clients/flutter/test/goldens/chat-tasks.png
+/clients/flutter/test/goldens/workbench-feeds.png
+/clients/flutter/test/goldens/workbench-goals.png
+/clients/flutter/test/goldens/workbench-ideas.png
+/clients/flutter/test/goldens/workbench-nova.png
+/clients/flutter/test/goldens/workbench-profile.png
+/clients/flutter/test/goldens/workbench-todos.png
+/website/public/media/clips/phone-feed.mp4
+/website/public/media/clips/phone-feed.webp
+/website/public/media/clips/timeline-memory.mp4
+/website/public/media/clips/timeline-memory.webp
+/website/public/media/gallery/phone-docx.webp
+/website/public/media/gallery/phone-dual-brain.webp

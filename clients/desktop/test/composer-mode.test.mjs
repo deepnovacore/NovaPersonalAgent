@@ -12,6 +12,15 @@ class Element{
 const el=(name,text)=>new Element(name,text)
 const flush=async()=>{for(let i=0;i<10;i++)await new Promise(resolve=>setTimeout(resolve,0))}
 
+test('React controls use the same composer mode helper as voice and the legacy composer',async()=>{
+ const {register}=await import('tsx/esm/api'),loader=register({namespace:'composer-mode-test'})
+ try{
+  const {modeOf}=await loader.import('../src/renderer/react/chat/controls.tsx',import.meta.url)
+  const shared=await loader.import('../src/renderer/composer-mode.mjs',import.meta.url)
+  assert.equal(modeOf,shared.composerMode)
+ }finally{await loader.unregister()}
+})
+
 function fixture(item){
  const commands=[],drafts=new Map()
  const c={connected:true,isVoiceConversation:false,selectedConversation:item,changed(){},

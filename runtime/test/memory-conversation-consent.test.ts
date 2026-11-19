@@ -1,3 +1,5 @@
+import {configuredDiscoveryConsumer,configuredMemoryConsumers,configuredTaskVerifierConsumer} from '../src/memory/consumer.js'
+import {settingsSchema} from '../src/config/config.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,readdir,readFile,writeFile} from 'node:fs/promises'
@@ -50,4 +52,41 @@ test('manual corrections inherit only the intersection of current source destina
   memoryOperation(db,'source_grant',{source_id:'second',expected_revision:1,grant:{...grant([]),revision:2,extraction_provider:null}})
   assert.equal(correctionProcessingGrant(db,['first','second']),null)
  }finally{db.close()}
+})
+
+
+test('discovery consumer follows the actual support route and is included in admission grants',()=>{
+ const legacy=settingsSchema.parse({executors:[],dashscope_api_key:'test',support_model:'legacy-support'})
+ const configured=settingsSchema.parse({...legacy,openai_compatible_base_url:'https://example.invalid/v1',openai_compatible_api_key:'test',model_routes:{support:{provider:'openai-compatible',model:'routed-support'}}})
+ const consumer=configuredDiscoveryConsumer(configured)!
+ assert.ok(consumer)
+ assert.ok(configuredMemoryConsumers(configured).includes(consumer))
+ assert.ok(consumer===configuredTaskVerifierConsumer(configured),'verification and discovery use the same routed support destination')
+ assert.ok(configuredDiscoveryConsumer(legacy)===configuredTaskVerifierConsumer(legacy))
+ for(const overrides of [{openai_compatible_base_url:'https://other.invalid/v1'},{model_routes:{support:{provider:'openai-compatible',model:'changed-support'}}}]){
+  assert.ok(configuredDiscoveryConsumer(settingsSchema.parse({...configured,...overrides}))!==consumer,'endpoint or model changes require a new grant')
+ }
+})
+
+test('ledger host discovery, evidence citations, delivered feed and expired-history preference retain existing behavior',async()=>{
+ const {PersonalAgentHost}=await import('../src/personal-agent/host.js'),{SuggestionPool}=await import('../src/core/suggestions.js'),{UnifiedRetrieval}=await import('../src/memory/retrieval.js')
+ const root=await mkdtemp(join(tmpdir(),'nova-ledger-host-control-')),client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'scope',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a']})
+ let consumer='consumer-a'
+ const host=new PersonalAgentHost({path:join(root,'host.json'),userScope:'scope',memory:()=>resource,pool:new SuggestionPool(),evidence:()=>null,discoveryMemoryConsumer:()=>consumer})
+ host.setRetrieval(new UnifiedRetrieval({memory:()=>resource}))
+ try{
+  await resource.open();await resource.remember({sourceId:'control',sessionId:'fixture',sequence:1,text:'我不吃辣',occurredAt:now(),confirmed:true});await resource.flush();await host.open()
+  assert.equal(host.snapshot().capabilities.memory.includeExpired,true)
+  await host.refreshMemory(undefined,100,true);await host.refreshMemory()
+  assert.equal(host.snapshot().memory.include_expired,true)
+  const snapshot=await host.discoverySnapshot(),entry=snapshot.memory[0]!,ref=entry.evidence_refs![0]!
+  assert.equal(await host.admit({kind:'notify',summary:'Control',why_now:'Control reminder',evidence_refs:[ref],memory_refs:[{entry_id:entry.id,version:entry.version}]},{...snapshot,evidence_refs:[ref]}),'admitted')
+  await host.action({id:host.snapshot().feed[0]!.id,action:'presented'})
+  const before=await host.discoverySnapshot(),dailyBefore=await host.dailyBriefSnapshot()
+  consumer='consumer-b'
+  assert.deepEqual((await host.discoverySnapshot()).recent_delivery,before.recent_delivery)
+  assert.deepEqual((await host.dailyBriefSnapshot()).recent_delivery,dailyBefore.recent_delivery)
+  assert.deepEqual((await host.discoverySnapshot()).memory,before.memory)
+  await host.revalidate();assert.equal(host.snapshot().feed[0]!.lifecycle,'active')
+ }finally{await host.close();await resource.close();await rm(root,{recursive:true,force:true})}
 })

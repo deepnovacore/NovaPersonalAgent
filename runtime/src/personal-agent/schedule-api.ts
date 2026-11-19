@@ -23,12 +23,6 @@ export async function executeScheduleCommand(host:PersonalAgentHost,method:strin
  if(method==='schedules.open_result'){const q=z.object({run_id:id}).strict().parse(params);return host.openScheduledResult(q.run_id)}
  if(method==='schedules.adopt_result')return host.adoptScheduledResult(requestId,params as Parameters<PersonalAgentHost['adoptScheduledResult']>[1])
  if(method==='schedules.create'||method==='schedules.update'){
-  if(method==='schedules.create'&&z.object({shared:z.literal(true)}).safeParse(params).success){
-   const q=z.object({input:scheduleInputSchema,shared:z.literal(true)}).strict().parse(params)
-   const item=await service.createShared(requestId,q.input,{...source,allowed_context:allowedContext??q.input.context})
-   void host.scheduledTaskTick().catch(()=>{/* Registered rule remains pending until its owner can run. */})
-   return scheduleView(item)
-  }
   const q=method==='schedules.create'?{...z.object({input:scheduleInputSchema}).strict().parse(params),id:null,expected_revision:null}:z.object({id,expected_revision:revision,input:scheduleInputSchema}).strict().parse(params)
   const authority={...source,allowed_context:allowedContext??q.input.context}
   const result=q.id!==null?await service.update(requestId,q.id,q.expected_revision,q.input,authority):await service.create(requestId,q.input,authority)

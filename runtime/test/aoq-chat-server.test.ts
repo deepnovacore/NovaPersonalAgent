@@ -87,7 +87,7 @@ test('AOQ hello, one credential allocation, chat-only session and repeat fence',
     clientRelayCertFingerprint: 'sha256/test-fingerprint',
     clientRelayEndpoints: [{endpoint: '127.0.0.2', port: 8443, routeIndex: 0}], extraInfo: {workspaceIdHash: 'test-workspace'}})
   assert.deepEqual(reply.session, {modalities: ['text', 'audio'], voice: 'longanqian', input_audio_format: 'pcm', output_audio_format: 'pcm',
-    instructions: '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。',
+    instructions: '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。',
     turn_detection: {type: 'smart_turn'}})
   connect(client.socket, ready.connection_id)
   assert.deepEqual(await client.next(), {type: 'aoq.error', code: 'credential_unavailable'})
@@ -96,7 +96,7 @@ test('AOQ hello, one credential allocation, chat-only session and repeat fence',
 })
 
 test('chat-only instructions follow hello language, else the host-configured default', {timeout: 5000}, async t => {
-  const ZH = '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行主机工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。'
+  const ZH = '你是Nova，一个自然、友好的语音聊天助手。仅进行纯聊天，不执行工具，不操作文件、终端、项目或设备，也不声称已执行这些操作。'
   // Per docs/en/protocols/client-v1.md, omitting `language` restores the host default rather than zh-CN.
   for (const [configured, sent, expectEnglish] of [
     [undefined, undefined, false], [undefined, 'en', true],

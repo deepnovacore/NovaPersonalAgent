@@ -37,8 +37,11 @@ const _en = <String, String>{
   'origin:inferred': 'Inferred',
 };
 const _zh = <String, String>{
-  'Add your introduction here. Information from Feishu appears below.':
-      '这里可以补充个人介绍，飞书整理的信息会显示在下方。',
+  'Interests': '关注方向',
+  'Add interest': '添加关注词',
+  'Remove interest': '移除关注',
+  'Add your introduction here. Information from connected sources appears below.':
+      '这里可以补充个人介绍，连接器整理的信息会显示在下方。',
   "This schedule changed. Load its latest version before saving.":
       "规则已更新，请载入最新版本后再保存。",
   "Choose a future execution time.": "请选择未来的执行时间。",

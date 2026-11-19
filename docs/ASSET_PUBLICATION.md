@@ -66,3 +66,159 @@ The UI review polish merges the approved Nova avatar with the "Nova" app-bar tit
 `chat-tasks.png` also reflects the Tasks-tab restyle (Tasks/Schedules segmented control, Today/Earlier sections and session-duration labels) added in the same polish pass; the fixture text is still synthetic and no character or organization data was added.
 
 `chat-home-empty.png` and `workbench-nova.png` share a hash because both capture the same empty Nova chat screen. `chat-task-draft.png` matches the 2026-10-19 approved version again: the task chat has no pet avatar in its app bar, and the old body avatar is gone. The pet avatar photo library permission string in `clients/flutter/ios/Runner/Info.plist` is generic; user-chosen photos stay in the app-support directory and are never bundled or synced.
+
+## Mobile document font feasibility review (2026-11-04; not bundled)
+
+Historical pre-bake feasibility record (superseded for new images by the exact
+subset approval below): the earlier document acceptance fixture downloaded a
+public upstream font only into its isolated test workspace; no font or derivative is added to source, defaults or
+packages by this change. This is licence/compatibility evidence, **not owner
+publication approval** for a future bundled subset.
+
+- Source: Google Fonts commit `2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc`,
+  [`ofl/notosanssc/NotoSansSC[wght].ttf`](https://github.com/google/fonts/blob/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf).
+- Name/version read from the font's name table: Noto Sans SC Thin;
+  `Version 2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603` (variable TrueType).
+- Original bytes: 17,772,300; SHA-256
+  `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
+- Licence: [OFL.txt at the same commit](https://github.com/google/fonts/blob/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/OFL.txt),
+  SHA-256 `1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9`.
+  Reviewed text states SIL OFL 1.1, Copyright 2014–2021 Adobe, reserved font name
+  “Source”. It permits bundling/embedding/redistribution with the copyright and
+  licence, forbids selling fonts alone, and constrains reserved names for
+  modifications. A bundled derivative would need its own exact hash, retained
+  licence and publication review; this record does not approve one.
+- Compatibility: the original TrueType font round-trips Chinese PDF text through
+  ReportLab 4.4.4 and pypdf 6.1.1 on Android PRoot and iOS iSH simulators.
+  fpdf2 2.8.4 incorrectly drops `fvar` while leaving `avar`; this variable font
+  fails its subset path. Static instantiation is diagnostic only, not shipped.
+
+At that earlier measurement no CJK font was guaranteed in production. New baked
+images now include the approved subset below; older installed rootfs images
+still require availability checks.
+
+## Approved mobile document font subset (2026-11-04)
+
+Approval evidence: **仓库所有者（用户），会话内口头批准** on 2026-11-04
+explicitly authorized the renamed common-character Noto Sans SC subset to be
+baked into both mobile rootfs images by default. No personal name or ticket was
+provided. This approval covers **only the exact derivative below**, not a new
+weight, character set, font revision or unrelated asset. Those require renewed
+owner approval. This records permission; it does not initiate a push/release or
+establish App Store policy compliance.
+
+- Source/version and source SHA-256: the 2.004-H2 variable TrueType at Google
+  Fonts commit `2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc` recorded above,
+  SHA-256 `a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da`.
+- Derivative: **Nova Document Sans SC Regular**, PostScript name
+  `NovaDocumentSansSC-Regular`, static `wght=400`; 2,357,940 bytes (original
+  17,772,300 bytes). No 700 weight is bundled. Generated with fontTools 4.68.0,
+  locked in `clients/flutter/tool/linux/documents/locks/wheels.json`.
+- Approved derivative SHA-256:
+  `88f7c79e5b9b132c8b455ad2ff8e943d36b5f65aef653c6327e604646f0617e9`.
+- Character input: all valid GB2312 characters, ASCII U+0020–007E, U+00A0–024F,
+  U+2000–206F, U+3000–303F, U+FF00–FFEF; sorted unique codepoints, UTF-8 with
+  trailing newline in `clients/flutter/tool/linux/documents/font-charset.txt`.
+  SHA-256 `9bc10dc9de455e72e726e756d8923f6f470d2e39bc3691e17e8c588f860de4b7`.
+  This is a common-character subset, not full CJK coverage; missing glyphs must
+  not be represented as successfully rendered text.
+- Licence/copyright: SIL OFL 1.1, Copyright 2014–2021 Adobe, reserved name
+  “Source”. Renamed derivative does not use “Source” in family/full/PostScript
+  names; original copyright and licence name records are retained. The exact
+  upstream OFL text SHA-256 remains
+  `1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9`.
+  Retain that text/copyright alongside the font and in the app licence list;
+  do not sell the font alone. Font binaries remain generated build outputs,
+  not checked-in media.
+- Review evidence: static instantiation + subset + name-table rewrite in
+  `prepare_font.py`; both digest-pinned ARM64 Alpine containers generated the
+  same derivative hash and ReportLab 4.4.4 → pypdf 6.1.1 read back
+  `中文汇总：总和 1001000` offline. This is compatibility/licence evidence in
+  addition to, not a replacement for, the owner approval above.
+- Installed path: `/usr/share/fonts/nova/NovaDocumentSansSC-Regular.ttf`;
+  licence alongside it and `/usr/share/licenses/nova-document-font/OFL.txt`.
+
+The ReportLab default-font `sitecustomize` hook is code, not a new font asset;
+the approved font bytes, character subset, weight and SHA-256 above are unchanged.
+
+## Approved Eclipse mobile launcher icon (2026-11-06)
+
+The project owner supplied and reviewed the silver-white Eclipse artwork and authorized its inclusion in the public `v1.0.0dev` source. Android uses the same bytes as the iOS default appearance. This approval covers the exact launcher assets below.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
+| `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-dark.png` | `986850bb2f3a892349fbcce6711b05c461a27d0fad30e3e911b0eccd5d4a4e97` |
+| `clients/flutter/ios/Runner/Assets.xcassets/AppIcon.appiconset/AppIcon-tinted.png` | `fd33021cb8e7ab29162b784fbff3b055463575d60db5a46ba77fb0d787d1d8d2` |
+| `clients/flutter/android/app/src/main/res/mipmap-nodpi/ic_launcher.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
+
+## Nova Personal Agent desktop Eclipse launcher icon (2026-11-08)
+
+The owner confirmed the desktop display name as Nova Personal Agent (NPA), the mobile display name as NovaCore, and the existing approved white Eclipse logo on all three platforms. Desktop icon sizes below are mechanical resizes of the approved mobile default PNG (`eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152`), without new character artwork. Application/storage identifiers remain unchanged.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/desktop/resources/icon-source/1024x1024.png` | `eb8c6a9d101491d0729f2d8e1de6895e8ed172302e8aaaf05cd2687fc8def152` |
+| `clients/desktop/resources/icon-source/128x128.png` | `a5eec4ef43bd53590b4302afb6b33eb6fe4e480ec67f58bafe87cdfcec0eefb4` |
+| `clients/desktop/resources/icon-source/16x16.png` | `070260a06a4ca6bb9fc4d6434867cafcb8b6672967b1baa1b8e45efe91e76b31` |
+| `clients/desktop/resources/icon-source/22x22.png` | `5e7b3f30bb651a97f56bdf48b50e4d66511ba8c0c0934ca256a78d9f8353755e` |
+| `clients/desktop/resources/icon-source/24x24.png` | `efac9cdf8215f289e90a52ad0544890b87a807087878399d9500a5f36006c9b9` |
+| `clients/desktop/resources/icon-source/256x256.png` | `247f378b51691c92d0c954be05ea5b9be874ecef6ffcc67d611b664c75d351b5` |
+| `clients/desktop/resources/icon-source/32x32.png` | `7f7191f25c333ba99960947febf23e472ebdffed2abc7fab55033a730675fc6d` |
+| `clients/desktop/resources/icon-source/44x44.png` | `9db6c945971f84b28c2def6c2de980502f9445aae3f163b60481b13a52510d96` |
+| `clients/desktop/resources/icon-source/48x48.png` | `f31b4cc0dd5f94b843c998d86c1ace0e5b65d33412ae899cc39c3f576e52cb67` |
+| `clients/desktop/resources/icon-source/512x512.png` | `9f193cf98e4c9381eada1e49d71f3282be8e240a1647a1539756e260adc0051d` |
+| `clients/desktop/resources/icon-source/64x64.png` | `9a5da61f89f89a68a39ba7196d0a68438ea3c832ac5ee12532303a95492fcd6e` |
+
+## Public 1.0 documentation media
+
+The owner approved the exact media linked by the release documentation, including the film and gallery sections it links to, on 2026-11-19. Identical copies are listed alongside their source files.
+
+| File | SHA-256 |
+| --- | --- |
+| `assets/gallery/stills/iphone-feed.webp` | `ad49f0e5e69287254add58ee26e104d6169c89f389bf7f988fc3ac019ddf1b91` |
+| `assets/gallery/stills/iphone-morning.webp` | `dd63c33a06af139e72969e3127849c296957b6675b806bf3e7905421c04b77e0` |
+| `assets/gallery/stills/pc-build-receipt.webp` | `7f1224ca92329c53812fba0471659f08fad6fec5f8f4665b405320cbc6203fc2` |
+| `assets/gallery/stills/pc-computer-use.webp` | `afd07f0c7f79fd0fb5690da98311bb000f3bf48e17808538d839f5a9a6611e8e` |
+| `assets/gallery/stills/pc-draft-unsent.webp` | `44afb1013c87757af6cfd3c409fb0996c18aa9c02f47344aaea4e18744213ad0` |
+| `assets/gallery/stills/pc-morning-brief.webp` | `812f736d6a2235cafe25f1df9e3790317abb140152b6873f20832fb996ea1272` |
+| `assets/gallery/stills/pc-proactive-invite.webp` | `cc9a85f230379a1d85d7e76207795543cee25d04ff0af254dd9688e02dfe4928` |
+| `assets/gallery/stills/pc-timeline-cited.webp` | `cf149898bbb72e4408e6839879611b0510d466c681875201df913e17c968776e` |
+| `assets/gallery/stills/phone-mobile-result.webp` | `232d5570f0db7019627518319b4970946a4d6ce39d4998dfd4e165bf825d65eb` |
+| `assets/gallery/stills/phone-site-dark.webp` | `0da4696d031e13c5abec3ee8dc1ec618f41233e3ac686e76bd65e1fb88eb4edb` |
+| `assets/gallery/stills/phone-site-file.webp` | `643b831fa33fffdeaa2a9ab343493e98e5c298836c78d5b29b6bc30399c57e7e` |
+| `assets/gallery/stills/phone-site-result.webp` | `192f49e3675c11c7f5f98d7f88a881c21aadc6b618f95df3b9186c9166cf6eaa` |
+| `assets/gallery/stills/phone-voice-site.webp` | `a5299cd7362a917a9a2154ca72b2b4f31da2daeaa824f8b1fd79796b32c6bfbe` |
+| `website/public/media/clips/ask-first.mp4` | `42921959a9e9475d5724541d5bb5c29bb6122f773731187878f2923c0c841911` |
+| `website/public/media/clips/ask-first.webp` | `ada51bcae9cd0f178e4b55034859d8df51d647b4f91c8e59abc06e07c1290973` |
+| `website/public/media/clips/computer-use.mp4` | `28b45eef8dba7d62499dd8046051acd7233bd625a9ed0990d60a913e0c44e8ef` |
+| `website/public/media/clips/computer-use.webp` | `a910416ceba090497ea800b1237a1174dd008ef8f8ddf263ef999c90f87d7380` |
+| `website/public/media/clips/handoff-iphone.mp4` | `1503d710f2b4b20aedc518cecddc6e1ad4c8aff192b1f776f2596c9eb8b1f7d0` |
+| `website/public/media/clips/handoff-iphone.webp` | `53cae162bed337329ce0bc7bb5f29fbaf5455e7009018d496620609a19646b6f` |
+| `website/public/media/clips/handoff-mac.mp4` | `eb657bce266f656d334f971cfacec3163094f97a64ec875b2857127dfa696918` |
+| `website/public/media/clips/handoff-mac.webp` | `d06fb8733d52fb4309277ee88cfbd8fc75270c63a34ddc7bb1ecb4d133fbf9f2` |
+| `website/public/media/clips/mobile-use.mp4` | `09f8f2330589cbc9f26fd02be441daa0d6522e4c468c9efc149a60581a7aaf3b` |
+| `website/public/media/clips/mobile-use.webp` | `2345e590b4afbaa62237b9f1b23ae018531d181dda0cf88bccc314bb65ec0d35` |
+| `website/public/media/clips/morning-brief.mp4` | `6d610f10011d00e681f1a4099e73d4896fdbd0d7c7e19f29b01f0685107222c3` |
+| `website/public/media/clips/morning-brief.webp` | `7ab05c0d7eb9f4925bcb949d78499f1ee3441c8528253e8290f6086f26300084` |
+| `website/public/media/clips/phone-docx.mp4` | `da7b32057a68bd96c0a6ba5d9a4bffcdcb9d7027ba518b2a7d366ad7bd55720d` |
+| `website/public/media/clips/phone-docx.webp` | `fefc26588ea84573e732dac0ca552ac342626b3cbbede4bb6498b94a974c451d` |
+| `website/public/media/clips/phone-site.mp4` | `303113355d9aaa82b53fc7ff997c5972d9b2233e181bf6b8df4e18a7df0838ba` |
+| `website/public/media/clips/phone-site.webp` | `9258db9fa56937d82b0bcee9a5d4807ee548b7f78dde3a11c074be50eb5d7584` |
+| `website/public/media/clips/proactive-draft.mp4` | `3dbc63d9421c6aee425d50b33c1c83b597dcf001deb2ace862086895c18916ff` |
+| `website/public/media/clips/proactive-draft.webp` | `aa8fac099a7a207edefc9c81224dccfe16fdb5e7c6ee47cd148768af4dd4c93f` |
+| `website/public/media/film/nova-launch-720p.mp4` | `3e225c67494f91cafbaf884487eaad6c0148a334737e321444045975b860c8e1` |
+| `website/public/media/film/nova-launch-720p.webp` | `f667dc93f6a772801c4be4f73b460f9ad117cea70d687dbb6dea6c1a9d281791` |
+| `website/public/media/gallery/iphone-feed.webp` | `ad49f0e5e69287254add58ee26e104d6169c89f389bf7f988fc3ac019ddf1b91` |
+| `website/public/media/gallery/iphone-morning.webp` | `dd63c33a06af139e72969e3127849c296957b6675b806bf3e7905421c04b77e0` |
+| `website/public/media/gallery/pc-build-receipt.webp` | `7f1224ca92329c53812fba0471659f08fad6fec5f8f4665b405320cbc6203fc2` |
+| `website/public/media/gallery/pc-computer-use.webp` | `afd07f0c7f79fd0fb5690da98311bb000f3bf48e17808538d839f5a9a6611e8e` |
+| `website/public/media/gallery/pc-draft-unsent.webp` | `44afb1013c87757af6cfd3c409fb0996c18aa9c02f47344aaea4e18744213ad0` |
+| `website/public/media/gallery/pc-morning-brief.webp` | `812f736d6a2235cafe25f1df9e3790317abb140152b6873f20832fb996ea1272` |
+| `website/public/media/gallery/pc-proactive-invite.webp` | `cc9a85f230379a1d85d7e76207795543cee25d04ff0af254dd9688e02dfe4928` |
+| `website/public/media/gallery/pc-timeline-cited.webp` | `cf149898bbb72e4408e6839879611b0510d466c681875201df913e17c968776e` |
+| `website/public/media/gallery/phone-mobile-result.webp` | `232d5570f0db7019627518319b4970946a4d6ce39d4998dfd4e165bf825d65eb` |
+| `website/public/media/gallery/phone-site-dark.webp` | `0da4696d031e13c5abec3ee8dc1ec618f41233e3ac686e76bd65e1fb88eb4edb` |
+| `website/public/media/gallery/phone-site-file.webp` | `643b831fa33fffdeaa2a9ab343493e98e5c298836c78d5b29b6bc30399c57e7e` |
+| `website/public/media/gallery/phone-site-result.webp` | `192f49e3675c11c7f5f98d7f88a881c21aadc6b618f95df3b9186c9166cf6eaa` |
+| `website/public/media/gallery/phone-voice-site.webp` | `a5299cd7362a917a9a2154ca72b2b4f31da2daeaa824f8b1fd79796b32c6bfbe` |

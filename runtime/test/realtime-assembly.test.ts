@@ -2,6 +2,7 @@ import {hostWorkspacePath} from '../src/executors/codex/process-owner.js'
 import {CodingTargetController} from '../src/personal-agent/coding-targets.js'
 import {fixture as projectFixture} from './fixtures/codex/project-adapter-fixture.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
+import {FULL_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
 import assert from 'node:assert/strict'
 import {mkdtemp, realpath, rm, writeFile, readFile, stat} from 'node:fs/promises'
 import {once} from 'node:events'
@@ -2664,7 +2665,7 @@ test('personal learning uses host session identity and only the accepted user ev
   }
 })
 
-test('personal reply preferences refresh response style without invoking recall', async () => {
+test('personal reply preferences are read once per voice session and not refreshed per audio frame', async () => {
   const provider = new ResponseAdaptationProvider()
   let recallCalls = 0
   let adaptation = {
@@ -2697,16 +2698,11 @@ test('personal reply preferences refresh response style without invoking recall'
     assert.equal(provider.adaptations[0]!.content?.includes('source:'), false)
     assert.equal(recallCalls, 0)
 
-    await new Promise<void>(resolve => setImmediate(resolve))
+    // The context is read once per session: later audio never waits for, or triggers, another memory read.
     adaptation = {revision: 8, replyPreferences: []}
     await realtime.service.sendAudio(new Uint8Array([2, 3]))
     await new Promise<void>(resolve => setImmediate(resolve))
-    assert.deepEqual(provider.adaptations.at(-1), {revision: 2, content: null})
-    adaptation = {revision: 0, replyPreferences: [{id: 'reset', text: 'New preference after reopening.', evidenceIds: []}]}
-    await realtime.service.sendAudio(new Uint8Array([2, 3]))
-    await new Promise<void>(resolve => setImmediate(resolve))
-    assert.equal(provider.adaptations.at(-1)?.revision, 3)
-    assert.ok(provider.adaptations.at(-1)?.content?.includes('New preference'))
+    assert.equal(provider.adaptations.length, 1)
   } finally { await realtime.stop() }
 })
 
@@ -2744,12 +2740,10 @@ test('memory reading modes select bounded low-trust snapshots without invoking r
    assert.ok(content.includes(context[mode]));assert.ok(!content.includes(context[mode==='text'?'voice':'text']))
    assert.match(content,/untrusted|low.trust/i);assert.match(content,/cannot authorize/)
    assert.equal(recalled,0)
+   assert.ok(content.length<(mode==='text'?6500:4500),'the snapshot is bounded');assert.ok(!content.includes('OMITTED_TAIL'))
    context={text:'x'.repeat(10000)+'OMITTED_TAIL',voice:'y'.repeat(10000)+'OMITTED_TAIL'}
    await realtime.service.sendAudio(new Uint8Array([2,3]));await new Promise<void>(resolve=>setImmediate(resolve))
-   const bounded=provider.adaptations.at(-1)?.content??''
-   assert.ok(bounded.length<(mode==='text'?6500:4500));assert.ok(!bounded.includes('OMITTED_TAIL'))
-   context={text:'',voice:''};await realtime.service.sendAudio(new Uint8Array([2,3]));await new Promise<void>(resolve=>setImmediate(resolve))
-   assert.equal(provider.adaptations.at(-1)?.content,null)
+   assert.equal(provider.adaptations.length,1,'later audio does not re-read memory')
   }finally{await realtime.stop()}
  }
 })
@@ -3446,7 +3440,7 @@ test('service close failure still stops core and preserves the first actual fail
 test('knowledge forced close fits the outer core shutdown budget without requiring another stop', async t => {
   const directory = await mkdtemp(join(await realpath(tmpdir()), 'knowledge-realtime-close-'))
   const capabilities = parseCapabilityRegistry({version: 1, modules: {search: {enabled: false}, coding: {enabled: false}, knowledge: {enabled: true}}}, {})
-  const settings = settingsSchema.parse({executors: [], model_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'knowledge.sqlite')})
+  const settings = settingsSchema.parse({executors: [], deepseek_api_key: 'test-key', embedding_api_key: 'embedding-key', knowledge_path: join(directory, 'knowledge.sqlite')})
   const knowledge = await prepareKnowledge(settings, capabilities)
   assert.ok(knowledge)
   const frame = new RecordingFrameSource()
@@ -3629,6 +3623,18 @@ test('failed provider connect keeps recovered blackboard owned until retry or fi
   } finally { await realtime.stop(); await rm(directory, {recursive: true, force: true}) }
 })
 
+test('a sanitized realtime connect code survives the provider session wrapper', async () => {
+  const directory = await mkdtemp(join(await realpath(tmpdir()), 'nova-board-code-'))
+  const frame = new RecordingFrameSource()
+  const core = realCore(frame, {path: join(directory, 'board.sqlite'), ownerId: 'local'})
+  const provider = new AbortAwareProvider()
+  provider.connectSteps.push(() => Promise.reject(new Error('realtime_auth_rejected')))
+  const realtime = buildRealtimeAssembly({core, provider, onDiagnostic: () => undefined})
+  try {
+    await assert.rejects(realtime.start(), (error: unknown) => error instanceof Error && error.message === 'realtime_auth_rejected')
+  } finally { await realtime.stop(); await rm(directory, {recursive: true, force: true}) }
+})
+
 test('personal host shares opened memory, persists configuration and closes with production owner', {timeout:5000}, async () => {
   const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-personal-assembly-'))
   let opens=0,closes=0,lists=0,release!:()=>void
@@ -3655,11 +3661,14 @@ test('personal host shares opened memory, persists configuration and closes with
 test('knowledge-only composition opens canonical originals without enabling personal capture', async () => {
   const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-knowledge-only-'))
   const capabilities=parseCapabilityRegistry({version:1,modules:{search:{enabled:false},coding:{enabled:false},knowledge:{enabled:true}}},{})
-  const settings=settingsSchema.parse({executors:[],model_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const settings=settingsSchema.parse({executors:[],pipeline_mode:'cascaded',cascade_llm_provider:'deepseek',deepseek_api_key:'test-key',embedding_api_key:'embedding-key',knowledge_path:join(directory,'knowledge.sqlite'),workspace_graph_path:join(directory,'memory.sqlite'),memory_connection:'disabled'})
+  const {configuredMemoryConsumer}=await import('../src/memory/consumer.js')
+  const consumer=configuredMemoryConsumer(settings,'text')
+  assert.ok(consumer,'knowledge evidence requires a configured receiving model')
   const knowledge=await prepareKnowledge(settings,capabilities)
   assert.ok(knowledge)
   const core=buildAssembly({settings,capabilities,knowledge,frameSource:new RecordingFrameSource(),gateway:new NeverCalledGateway()})
-  const realtime=composeRealtime(core,new AbortAwareProvider(),{settings,idFactory:()=> 'knowledge-only-id'},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:2})
+  const realtime=composeRealtime(core,new AbortAwareProvider(),{settings,memoryReadMode:'text',idFactory:()=> 'knowledge-only-id'},{controlledPreemptiveAlertReconnect:false,preemptiveAlertHistoryRecovery:'none',preemptiveAlertHistoryPairs:2})
   try {
     await realtime.start()
     const memory=realtime.personalMemory
@@ -3667,16 +3676,82 @@ test('knowledge-only composition opens canonical originals without enabling pers
     assert.equal(memory.remember,undefined)
     assert.equal(memory.list,undefined)
     assert.equal(memory.responseAdaptation,undefined)
-    const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
-    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence?.text,'Demo notes')
-    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true})
+    assert.ok(memory.processingGrant)
+    const processingConsent=memory.processingGrant(true)
+    assert.ok(processingConsent.conversation_providers?.includes(consumer),'knowledge ingestion grants the actual receiving model')
+    const saved=await memory.recordEvidence({sourceId:'knowledge:document',locator:'notes/demo',text:'Demo notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true,processingConsent})
+    assert.equal(realtime.memoryConsumerFingerprint,consumer)
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id,{consumer})).evidence?.text,'Demo notes')
+    assert.deepEqual(await realtime.retrieval.evidence(saved.evidence_id),{state:'unavailable',evidence:null},'an absent consumer cannot read canonical originals')
+    assert.deepEqual(await realtime.retrieval.evidence(saved.evidence_id,{consumer:'unconfigured-recipient'}),{state:'gone',evidence:null},'an ungranted consumer cannot read canonical originals')
+    const second=await memory.recordEvidence({sourceId:'knowledge:document-two',locator:'notes/second',text:'More notes',observedAt:new Date().toISOString(),kind:'file',embeddingConsent:true,processingConsent})
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id,{consumer})).evidence?.text,'More notes')
     assert.ok(memory.forgetSources,'knowledge-only facade exposes batched source erasure')
     await memory.forgetSources(['knowledge:document','knowledge:document-two'])
-    assert.equal((await realtime.retrieval.evidence(saved.evidence_id)).evidence,null)
-    assert.equal((await realtime.retrieval.evidence(second.evidence_id)).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(saved.evidence_id,{consumer})).evidence,null)
+    assert.equal((await realtime.retrieval.evidence(second.evidence_id,{consumer})).evidence,null)
     assert.deepEqual((await memory.recall('demo')).hits,[])
   } finally {await realtime.stop();await knowledge.close();await rm(directory,{recursive:true,force:true})}
 })
+for(const [recipient,scenario] of [['provider-a','immediate'],['provider-b','immediate'],['provider-a','valid'],['provider-a','revoked'],['provider-a','receiver'],['provider-a','reconnect'],['provider-a','shutdown']] as const)test(`primary nonpooled personal delivery authorizes actual receiving provider (${recipient}, ${scenario})`,async t=>{
+ const directory=await realpath(await mkdtemp(join(tmpdir(),'nova-primary-recipient-'))),core=realCore(),provider=new RecordingProgressProvider()
+ const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),canReadConversationEvidence:(_ref:string,consumer:string)=>Promise.resolve(consumer==='provider-a')} as unknown as PersonalMemoryResource
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:core.runtime.core.suggestions,evidence:()=>null,now:()=>new Date('2026-11-02T12:00:00Z')})
+ let selected:Parameters<typeof core.runtime.bindSuggestionSelected>[0]|undefined
+ t.mock.method(core.runtime,'bindSuggestionSelected',(observer:Parameters<typeof core.runtime.bindSuggestionSelected>[0])=>{selected=observer;return ()=>{/* isolated binding */}})
+ const realtime=buildRealtimeAssembly({core,provider,sharedPersonal:{host,memory},memoryConsumerFingerprint:recipient,onDiagnostic:()=>undefined})
+ try{
+  await host.open();await host.scheduledTaskTick()
+  await host.life.mutate({op:'from_suggestion',kind:'todo',title:'Private receiving-provider fact',note:'Private receiving-provider body',suggestion_id:'derived',due:null,todo_id:null,sources:[],provenance_refs:['source:private']},'derived')
+  const context={todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}
+  const schedule=await host.schedules.create('create',{title:'Private receiving-provider fact',goal:'Review',acceptance:['Report'],rule:{kind:'daily',timezone:'UTC',time:'09:00'},context},{user_scope:'test',source:'ui',origin_ref:'ui:create',source_refs:[],allowed_context:context})
+  const run=await host.schedules.runNow('run',schedule.id,1),task=await host.tasks.delegate('scheduled:'+run.run_id,run.input),fence={task_id:task.id,control_revision:task.control_revision,goal_revision:task.goal_revision}
+  await host.schedules.bindTask(run.run_id,task.id);await host.schedules.markPrepared(run.run_id,'schedule-run:'+run.run_id)
+  const page=await host.readAppContext('todos',null,host.scheduledRunGrant(run.run_id,new AbortController().signal,'provider-a'))
+  await host.tasks.recordDelivery(fence,'answer','Private receiving-provider body');await host.tasks.applyDecision(fence,{kind:'complete',evidence_refs:['task-delivery:answer'],criteria:[{index:0,evidence_refs:['task-delivery:answer']}]})
+  await host.schedules.markFinished(run.run_id,{outcome:'completed',text:'Private receiving-provider body',evidence_refs:page.evidence_refs,consumer:'provider-a',published:false})
+  await host.publishScheduledResult(run.run_id);await realtime.start()
+  const feed=host.snapshot().feed.find(item=>item.schedule_ref?.run_id===run.run_id)!
+  assert.equal(await host.canDeliver(feed.id),true,'saved producer remains authorized in both controls')
+  let authorizationFinished=false
+  const originalAuthorization=host.productFeedAuthorized.bind(host)
+  const delivered=t.mock.method(realtime.service,'onSuggestionSelected',realtime.service.onSuggestionSelected.bind(realtime.service))
+  const checked=t.mock.method(host,'productFeedAuthorized',async(id:string,consumer:string|null)=>{try{return await originalAuthorization(id,consumer)}finally{authorizationFinished=true}})
+  const suggestion=core.runtime.core.suggestions.add({origin:'surrogate',kind:'notify',content:{summary:feed.title,why_now:feed.prepared!.text,personal_feed_id:feed.id}})
+  if(scenario!=='immediate')await realtime.session.accept({kind:'user_speech_started',session_epoch:1,speech_id:'held-floor',provider_item_id:'held-user'})
+  assert.ok(selected);selected(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+  await waitNamed('actual receiving-provider authorization',()=>authorizationFinished)
+  if(scenario!=='immediate'){
+   await waitNamed('personal item accepted into busy-floor queue',()=>delivered.mock.callCount()===1)
+   await realtime.service.flushHostItems()
+   assert.ok(provider.injected.every(item=>!item.content.includes('Private receiving-provider')),'admission is not provider delivery while the floor is busy')
+   if(scenario==='revoked')await host.life.mutate({op:'create',kind:'todo',title:'Changed collection after queue admission'},'change-after-queue')
+   if(scenario==='receiver')Object.defineProperty(realtime,'memoryConsumerFingerprint',{value:'provider-b'})
+   let guardEntered=false,releaseGuard=()=>{/* assigned below */}
+   if(scenario==='reconnect'){const gate=new Promise<void>(resolve=>{releaseGuard=resolve});let held=false;checked.mock.mockImplementation(async(id,consumer)=>{const allowed=await originalAuthorization(id,consumer);if(!held){held=true;guardEntered=true;await gate}return allowed})}
+   if(scenario==='shutdown')checked.mock.mockImplementation(()=>{guardEntered=true;return new Promise<boolean>(()=>{/* deliberately uncooperative source */})})
+   await realtime.session.accept({kind:'user_speech_ended',session_epoch:1,speech_id:'held-floor',provider_item_id:'held-user'})
+   await realtime.session.accept({kind:'user_transcript_failed',session_epoch:1,item_id:'held-user'})
+   const flushing=realtime.service.flushHostItems()
+   if(scenario==='reconnect'){await waitNamed('old-session authorization held',()=>guardEntered);await realtime.session.reconnect({tools:core.tools.schemas});await host.life.mutate({op:'create',kind:'todo',title:'Changed during reconnect'},'reconnect-change');releaseGuard()}
+   if(scenario==='shutdown'){
+    await waitNamed('queued authorization began',()=>guardEntered)
+    const {abortable}=await import('../src/core/camera-session.js')
+    await abortable(realtime.stop(),AbortSignal.timeout(1000))
+   }
+   const {abortable}=await import('../src/core/camera-session.js')
+   await abortable(flushing,AbortSignal.timeout(1000))
+   if(scenario==='reconnect'){await realtime.service.flushHostItems();assert.equal(realtime.session.sessionEpoch,2)}
+  }else await realtime.service.flushHostItems()
+  if(recipient==='provider-a'&&(scenario==='immediate'||scenario==='valid'))await waitNamed('authorized primary delivery',()=>provider.injected.some(item=>item.content.includes('Private receiving-provider fact')))
+  else {for(let i=0;i<10;i++)await yieldImmediate();assert.ok(provider.injected.every(item=>!item.content.includes('Private receiving-provider')))}
+  assert.equal(delivered.mock.callCount(),recipient==='provider-a'?1:0)
+  assert.ok(checked.mock.calls.some(call=>call.arguments[1]===recipient))
+  if(scenario==='receiver')assert.ok(checked.mock.calls.some(call=>call.arguments[1]==='provider-b'),'the queued guard reads the actual replacement receiver')
+  assert.ok(!JSON.stringify(provider.injected).includes('authorizeBeforeInject'),'authorization callbacks never enter provider content')
+ }finally{await realtime.stop();await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
 }
 
 {
@@ -3897,7 +3972,7 @@ async function exerciseGateway(gateway: ModelGateway): Promise<void> {
 test('Qwen factory and plain assembly both leave the fast slot to the realtime owner', () => {
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     connector.connector,
   ))
   const qwenBindings = realtime.tools.bindings
@@ -3912,7 +3987,7 @@ test('Qwen factory and plain assembly both leave the fast slot to the realtime o
   // There is no second mode left: plain assembly wires no text front brain either, so a
   // user turn cannot take the fast slot out from under the realtime provider.
   const ordinary = buildAssembly({
-    settings: settings({MODEL_API_KEY: 'model-key'}),
+    settings: settings({DASHSCOPE_API_KEY: 'model-key'}),
     gateway: new NeverGateway(),
     searchTransport: new NeverSearch(),
   })
@@ -3941,7 +4016,7 @@ test('Qwen production composition derives cameraModuleEnabled from Settings', ()
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
     settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       CAMERA_MODULE_ENABLED: 'false',
     }), connector.connector,
   ))
@@ -3956,7 +4031,7 @@ test('Qwen production composition forwards the personal memory owner', async () 
   let created = 0
   let closed = 0
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     recordingConnector().connector,
     {createPersonalMemory: () => {
       created += 1
@@ -3979,7 +4054,7 @@ test('Qwen factory construction does not invoke an unrelated LiveKit agents load
   let agentsLoaderCalls = 0
   const input = {
     ...qwenOptions(
-      settings({MODEL_API_KEY: 'model-key'}),
+      settings({DASHSCOPE_API_KEY: 'model-key'}),
       connector.connector,
     ),
     agentsLoader: () => {
@@ -4052,7 +4127,7 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
     apiKey: 'fixture', maxSteps: 3, budgetMs: 1000, lockRoot: '/tmp/phone-locks'}, approvalController)
   const input = {
     ...qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       EXECUTORS: 'codex,autoglm',
     }), connector.connector),
     codexResource: resource,
@@ -4088,7 +4163,7 @@ test('Qwen composition exposes approval only for the exact controller-bearing re
   }
   const neverRealtime = buildQwenRealtimeAssembly({
     ...qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       EXECUTOR: 'codex',
     }), neverConnector.connector),
     codexResource: neverResource,
@@ -4121,7 +4196,7 @@ test('Qwen realtime composition rejects a live Codex fallback', () => {
 
   assert.throws(() => buildQwenRealtimeAssembly({
     ...qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       EXECUTOR: 'codex',
     }), recordingConnector().connector),
     codexResource: resource,
@@ -4141,7 +4216,6 @@ test('Qwen factory preserves resource identity, explicit Guard settings, and one
   const ids = new RecordingIds()
   const frame = new RecordingFrameSource()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
-    MODEL_API_KEY: 'model-key',
     DASHSCOPE_API_KEY: 'dash-key',
     QWEN_REALTIME_URL: 'wss://qwen.example/realtime',
     QWEN_REALTIME_MODEL: 'qwen-test',
@@ -4226,7 +4300,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
     buildRealtime: (callbacks, transport) => {
       source = new ChromiumFrameSource({source: 'file', transport, clock})
       return buildQwenRealtimeAssembly(qwenOptions(
-        settings({MODEL_API_KEY: 'model-key'}),
+        settings({DASHSCOPE_API_KEY: 'model-key'}),
         connector.connector,
         {clock, frameSource: source, ...callbacks},
       ))
@@ -4249,7 +4323,7 @@ test('desktop Qwen composition shares one clock, Chromium source, and camera ser
 
 test('Qwen factory maps legacy history settings to the generic preemptive-alert service seam', () => {
   const defaults = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     recordingConnector().connector,
   ))
   assert.deepEqual(defaults.service.preemptiveAlertConfiguration, {
@@ -4259,7 +4333,7 @@ test('Qwen factory maps legacy history settings to the generic preemptive-alert 
   })
   for (const pairs of ['1', '2', '4']) {
     const realtime = buildQwenRealtimeAssembly(qwenOptions(settings({
-      MODEL_API_KEY: 'model-key',
+      DASHSCOPE_API_KEY: 'model-key',
       QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
       QWEN_GUARD_HISTORY_RECOVERY: 'packed',
       QWEN_GUARD_HISTORY_PAIRS: pairs,
@@ -4272,82 +4346,48 @@ test('Qwen factory maps legacy history settings to the generic preemptive-alert 
   }
 })
 
-test('Qwen factory keeps websocket and model-gateway credential priorities distinct', async () => {
-  const cases = [
-    {
-      name: 'both',
-      environment: {
-        DASHSCOPE_API_KEY: 'dash-key',
-        MODEL_API_KEY: 'model-key',
-      },
-      websocket: 'dash-key',
-      gateway: 'model-key',
-    },
-    {
-      name: 'model only',
-      environment: {MODEL_API_KEY: 'model-key'},
-      websocket: 'model-key',
-      gateway: 'model-key',
-    },
-    {
-      name: 'DashScope only',
-      environment: {DASHSCOPE_API_KEY: 'dash-key'},
-      websocket: 'dash-key',
-      gateway: 'dash-key',
-    },
-    {
-      name: 'Python-whitespace DashScope',
-      environment: {
-        DASHSCOPE_API_KEY: '\u001c\u0085',
-        MODEL_API_KEY: 'model-key',
-      },
-      websocket: 'model-key',
-      gateway: 'model-key',
-    },
-  ] as const
-  for (const scenario of cases) {
-    const authorizations: string[] = []
-    const restoreFetch = installRecordingFetch(authorizations)
-    const connector = recordingConnector()
-    let realtime
-    try {
-      realtime = buildQwenRealtimeAssembly(qwenOptions(
-        settings(scenario.environment),
-        connector.connector,
-      ))
-    } finally {
-      restoreFetch()
-    }
+test('Qwen websocket and support gateway share DASHSCOPE_API_KEY and never borrow another key', async () => {
+  const authorizations: string[] = []
+  const restoreFetch = installRecordingFetch(authorizations)
+  const connector = recordingConnector()
+  const realtime = buildQwenRealtimeAssembly(qwenOptions(
+    settings({DASHSCOPE_API_KEY: 'dash-key'}),
+    connector.connector,
+  ))
+  try {
     await exerciseGateway(realtime.core.gateway)
-    await settleNamed(`${scenario.name} start`, realtime.start())
-    assert.equal(connector.calls[0]?.headers.Authorization, `Bearer ${scenario.websocket}`)
-    assert.deepEqual(authorizations, [`Bearer ${scenario.gateway}`])
-    await settleNamed(`${scenario.name} stop`, realtime.stop())
+    await settleNamed('shared key start', realtime.start())
+    assert.equal(connector.calls[0]?.headers.Authorization, 'Bearer dash-key')
+    assert.deepEqual(authorizations, ['Bearer dash-key'])
+    await settleNamed('shared key stop', realtime.stop())
+  } finally {
+    restoreFetch()
   }
+  assert.throws(() => buildQwenRealtimeAssembly(qwenOptions(
+    settings({DEEPSEEK_API_KEY: 'foreign-key'}),
+    recordingConnector().connector,
+  )), /DASHSCOPE_API_KEY/u)
+  assert.throws(() => buildQwenRealtimeAssembly(qwenOptions(
+    settings({DASHSCOPE_API_KEY: '\u001c\u0085'}),
+    recordingConnector().connector,
+  )), /DASHSCOPE_API_KEY/u)
 })
 
-test('integrated Qwen support requests never send DashScope credentials to a generic override',
+test('integrated Qwen support requests use only DashScope URL and credential',
   async () => {
-    const sentinel = 'hostile-support-route-secret'
     const cases = [
       {
-        name: 'DashScope fallback',
-        environment: {
-          DASHSCOPE_API_KEY: 'dash-support-key',
-          MODEL_BASE_URL: `https://hostile.example/private?sentinel=${sentinel}`,
-        },
+        name: 'default endpoint',
+        environment: {DASHSCOPE_API_KEY: 'dash-support-key'},
         endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
-        authorization: 'Bearer dash-support-key',
       },
       {
-        name: 'generic override',
+        name: 'provider model endpoint',
         environment: {
-          DASHSCOPE_API_KEY: 'dash-provider-key',
-          MODEL_API_KEY: 'generic-support-key',
-          MODEL_BASE_URL: 'https://generic.example/compatible/v9',
+          DASHSCOPE_API_KEY: 'dash-support-key',
+          DASHSCOPE_MODEL_BASE_URL: 'https://qwen-model.example/compatible/v9',
         },
-        endpoint: 'https://generic.example/compatible/v9/chat/completions',
-        authorization: 'Bearer generic-support-key',
+        endpoint: 'https://qwen-model.example/compatible/v9/chat/completions',
       },
     ] as const
 
@@ -4380,19 +4420,18 @@ test('integrated Qwen support requests never send DashScope credentials to a gen
       await exerciseGateway(realtime.core.gateway)
       assert.deepEqual(requests.map(({endpoint, authorization}) => ({endpoint, authorization})), [{
         endpoint: scenario.endpoint,
-        authorization: scenario.authorization,
+        authorization: 'Bearer dash-support-key',
       }], scenario.name)
-      assert.doesNotMatch(requests[0]?.body ?? '',
-        /dash-support-key|dash-provider-key|generic-support-key|hostile-support-route-secret/u)
-      assert.doesNotMatch(JSON.stringify(requests),
-        scenario.name === 'DashScope fallback' ? /hostile\.example|hostile-support-route-secret/u : /never-match/u)
+      assert.doesNotMatch(requests[0]?.body ?? '', /dash-support-key/u)
     }
+    assert.throws(() => settings({MODEL_API_KEY: 'generic-key'}), /MODEL_API_KEY 已移除/u)
+    assert.throws(() => settings({MODEL_BASE_URL: 'https://generic.example/v9'}), /MODEL_BASE_URL 已移除/u)
   })
 
 test('Qwen factory forwards only the reviewed provider tool subset', async () => {
   const connector = recordingConnector()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     connector.connector,
     {providerToolView: tools => ({...tools, schemas: tools.schemas.slice(0, 2)})},
   ))
@@ -4410,7 +4449,7 @@ test('Qwen factory forwards only the reviewed provider tool subset', async () =>
   })
   assert.throws(
     () => buildQwenRealtimeAssembly(qwenOptions(
-      settings({MODEL_API_KEY: 'model-key'}),
+      settings({DASHSCOPE_API_KEY: 'model-key'}),
       connector.connector,
       {providerToolView: copiedBindings},
     )),
@@ -4424,7 +4463,7 @@ test('Qwen factory validates synchronously without connecting or leaking secrets
   const sentinel = 'synchronous-sentinel-secret'
   assert.throws(
     () => buildQwenRealtimeAssembly(qwenOptions(settings({
-      MODEL_API_KEY: sentinel,
+      DASHSCOPE_API_KEY: sentinel,
       QWEN_REALTIME_URL: `https://invalid/?secret=${sentinel}`,
     }), connector.connector)),
     error => error instanceof ConfigurationError
@@ -4441,7 +4480,7 @@ test('Qwen connector failure rolls core back safely and permits one later retry'
   )})
   const frame = new RecordingFrameSource()
   const realtime = buildQwenRealtimeAssembly(qwenOptions(
-    settings({MODEL_API_KEY: 'model-key'}),
+    settings({DASHSCOPE_API_KEY: 'model-key'}),
     connector.connector,
     {frameSource: frame},
   ))
@@ -4469,7 +4508,7 @@ test('qwen rejects the final tool budget after evaluating the provider view once
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   let views = 0
   assert.throws(() => buildQwenRealtimeAssembly({
-    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+    settings: configured, capabilities, memoryTools: FULL_MEMORY_TOOLS, providerToolView: tools => { views++; return tools },
   }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 7, toolBudget: 1})
   assert.equal(views, 1)
 })
@@ -5053,7 +5092,6 @@ test('cascaded assembly preserves one graph, shared resources, and frozen Guard 
   const mediaStore = new MediaStore()
   let telemetryCloses = 0
   const configured = settings({
-    MODEL_API_KEY: 'generic-model-key',
     CASCADE_LLM_MODEL: 'ark-realtime-distinct',
     QWEN_CONTROLLED_GUARD_RECONNECT: 'true',
     QWEN_GUARD_HISTORY_RECOVERY: 'packed',
@@ -5237,40 +5275,39 @@ test('cascaded composition forwards an explicit generic controller for a renamed
   }
 })
 
-test('core gateway preserves compressor choices and falls back for provider defaults immutably',
+test('core gateway uses each provider model endpoint and keeps model choices immutable',
   async () => {
     const cases = [
       {
-        name: 'generic',
-        environment: {
-          MODEL_API_KEY: 'generic-safe-key',
-          MODEL_BASE_URL: 'https://generic.example/v9',
-        },
-        endpoint: 'https://generic.example/v9/chat/completions',
-        authorization: 'Bearer generic-safe-key',
-        models: {watch: 'watch-original', surrogate: 'surrogate-original', compressor: 'deepseek-flash'},
-      },
-      {
-        name: 'Python-whitespace Ark fallback',
-        environment: {
-          MODEL_API_KEY: '\u001c\u0085',
-          MODEL_BASE_URL: 'https://generic.example/v9',
-        },
+        name: 'Ark provider endpoint',
+        environment: {},
         endpoint: 'https://ark-support.example/api/v3/chat/completions',
         authorization: 'Bearer ark-test-key',
         models: {watch: 'watch-original', surrogate: 'ark-selected', compressor: 'ark-selected'},
       },
       {
-        name: 'Qwen fallback',
+        name: 'Qwen provider endpoint',
         environment: {
           CASCADE_LLM_PROVIDER: 'qwen',
           CASCADE_LLM_MODEL: 'qwen3-max',
           DASHSCOPE_API_KEY: 'dash-support-key',
-          MODEL_API_KEY: '\u001c\u0085',
+          DASHSCOPE_MODEL_BASE_URL: 'https://qwen-support.example/v1',
         },
-        endpoint: 'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions',
+        endpoint: 'https://qwen-support.example/v1/chat/completions',
         authorization: 'Bearer dash-support-key',
         models: {watch: 'watch-original', surrogate: 'qwen3-max', compressor: 'qwen3-max'},
+      },
+      {
+        name: 'OpenAI provider endpoint',
+        environment: {
+          CASCADE_LLM_PROVIDER: 'openai',
+          CASCADE_LLM_MODEL: 'gpt-support-model',
+          OPENAI_API_KEY: 'openai-support-key',
+          OPENAI_MODEL_BASE_URL: 'https://openai-support.example/v1',
+        },
+        endpoint: 'https://openai-support.example/v1/chat/completions',
+        authorization: 'Bearer openai-support-key',
+        models: {watch: 'watch-original', surrogate: 'gpt-support-model', compressor: 'gpt-support-model'},
       },
     ] as const
     for (const scenario of cases) {
@@ -5331,8 +5368,10 @@ test('cascaded rejects the final tool budget after evaluating the provider view 
   const capabilities = parseCapabilityRegistry({version: 1, frontbrainToolBudget: 1, modules: {search: {enabled: false}}})
   let views = 0
   assert.throws(() => buildCascadedRealtimeAssembly({
-    settings: configured, capabilities, providerToolView: tools => { views++; return tools },
+    settings: configured, capabilities, memoryTools: FULL_MEMORY_TOOLS, providerToolView: tools => { views++; return tools },
   }), {code: 'frontbrain_tool_budget_exceeded', toolCount: 7, toolBudget: 1})
   assert.equal(views, 1)
 })
+
+
 }

@@ -183,3 +183,47 @@ test('Qwen Plus thinking pricing is explicit and embedding requires only input',
  assert.equal(priceUsage({...plus,reasoningMode:undefined}).costCny,null)
  assert.equal(priceUsage({...report,service:'embedding',model:'text-embedding-v4',inputTokens:1000,outputTokens:undefined}).costCny,.0005)
 })
+
+test('usage cost values keep exactly the coin components and inclusion rules of usageCostText',async()=>{
+ const {usageCostValues,formatUsageMoney,usageCostText}=await import('../src/renderer/frontend-usage.mjs')
+ const views=[
+  {},
+  {costCny:0,pricedReports:0,estimatedCostReports:0,reportedCostReports:0},
+  {costCny:.0006,pricedReports:1,estimatedCostReports:1,reportedCostReports:0},
+  {costCny:0,pricedReports:2,estimatedCostReports:undefined,reportedCostReports:0},
+  {costCny:0,pricedReports:2,estimatedCostReports:1,reportedCostReports:1},
+  {costCny:.0001,reportedCostReports:1,costUsd:0},
+  {costUsd:.02,pricedReports:1,reportedCostReports:1},
+  {costUsd:.00005,costCny:0,pricedReports:0,estimatedCostReports:0,reportedCostReports:0},
+  {requests:2,pricedReports:2,costCny:.5},
+ ]
+ for(const view of views){
+  const values=usageCostValues(view)
+  // usageCostText stays the byte-for-byte contract; only formatting separators differ in the new helper.
+  const mirrored=values.map(({value,currency})=>formatUsageMoney(value,currency)).join(' + ')||usageCostText({})
+  assert.equal(mirrored,usageCostText(view),JSON.stringify(view))
+  assert.deepEqual(values.map(({currency})=>currency),usageCostValues(view).map(({currency})=>currency))
+ }
+ assert.deepEqual(usageCostValues({costCny:0,reportedCostReports:1,costUsd:.02}),[{currency:'USD',value:.02}])
+ assert.deepEqual(usageCostValues({costCny:.1,reportedCostReports:1}),[{currency:'CNY',value:.1},{currency:'USD',value:0}])
+ assert.deepEqual(usageCostValues(undefined),[])
+})
+
+test('usage money formatting groups thousands, keeps four decimals and never displays zero for tiny charges',async()=>{
+ const {formatUsageMoney}=await import('../src/renderer/frontend-usage.mjs')
+ assert.equal(formatUsageMoney(1234.5678,'CNY'),'¥1,234.5678')
+ assert.equal(formatUsageMoney(1234567.8912,'USD'),'$1,234,567.8912')
+ assert.equal(formatUsageMoney(0,'CNY'),'¥0.0000')
+ assert.equal(formatUsageMoney(.0001,'CNY'),'¥0.0001')
+ assert.equal(formatUsageMoney(.00005,'CNY'),'< ¥0.0001')
+ assert.equal(formatUsageMoney(.00005,'USD'),'< $0.0001')
+ assert.equal(formatUsageMoney(undefined,'CNY'),'¥0.0000')
+})
+
+test('usage count formatting uses zh-CN thousands separators',async()=>{
+ const {formatUsageCount}=await import('../src/renderer/frontend-usage.mjs')
+ assert.equal(formatUsageCount(0),'0')
+ assert.equal(formatUsageCount(25),'25')
+ assert.equal(formatUsageCount(1234567),'1,234,567')
+ assert.equal(formatUsageCount(NaN),'0')
+})

@@ -204,3 +204,29 @@ test('a fresh name can replace an existing name only while its source grant perm
   assert.equal((await f.memory.writeExplicit(fresh,'fresh',name('kay'),'chat')).current?.text,'kay')
  }finally{await f.close()}
 })
+
+test('explicit admission, writes and awaited refreshes stay interactive, including receipt replay',async(t)=>{
+ const f=await fixture(),client=f.memory.options.client,original=client.memory.bind(client)
+ const calls:{operation:string;priority:string|undefined}[]=[]
+ let release:(()=>void)|undefined,hold=false
+ t.mock.method(client,'memory',async(...args:Parameters<typeof client.memory>)=>{
+  calls.push({operation:args[0],priority:args[2]?.priority})
+  if(hold&&args[0]==='list')await new Promise<void>(resolve=>{release=resolve})
+  return original(...args)
+ })
+ try{
+  const turn=await f.memory.beginExplicitTurn({sourceId:'priority',text:'叫我 kant',occurredAt:new Date().toISOString()})
+  assert.deepEqual(calls.shift(),{operation:'explicit_begin',priority:'interactive'})
+  await f.memory.writeExplicit(turn,'priority',name('kant'),'chat')
+  assert.deepEqual(calls.filter(call=>['explicit_write','list','processing_stamp'].includes(call.operation)),['explicit_write','list','processing_stamp'].map(operation=>({operation,priority:'interactive'})))
+  calls.length=0;hold=true
+  let settled=false
+  const replay=f.memory.writeExplicit(turn,'priority',name('kant'),'chat').then(receipt=>{settled=true;return receipt})
+  while(!release)await new Promise(resolve=>setImmediate(resolve))
+  assert.equal(settled,false,'replayed receipts must await refresh, not leave stale adaptation')
+  hold=false;release();assert.equal((await replay).replayed,true)
+  assert.deepEqual(calls.filter(call=>['explicit_write','list','processing_stamp'].includes(call.operation)),['explicit_write','list','processing_stamp'].map(operation=>({operation,priority:'interactive'})))
+  calls.length=0;await f.memory.diaries()
+  assert.equal(calls.find(call=>call.operation==='list')?.priority,undefined,'ordinary reads are not promoted')
+ }finally{hold=false;release?.();await f.close()}
+})

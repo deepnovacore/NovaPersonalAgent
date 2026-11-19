@@ -208,11 +208,15 @@ export class MemoryLedgerStoreError extends Error {
   }
 }
 
+export type LifeAuthorizationRevision = readonly [number|null,number,number,readonly (readonly [string,number])[]]
+
 export class MemoryLedgerStore {
   readonly #path: string
   readonly #databaseFactory: LedgerDatabaseFactory
   #database: LedgerDatabase | undefined
   #memoryLockHeld = false
+  #recallAuthorityRevision = 0
+  #recallAuthorityEpoch = 0
   readonly #fileRepository: MarkdownRepository
 
   constructor(
@@ -230,12 +234,15 @@ export class MemoryLedgerStore {
   #openLocked(): void {
     if (this.#database !== undefined) throw new MemoryLedgerStoreError('STORE_ALREADY_OPEN')
     let database: LedgerDatabase | undefined
+    let trackingAuthority = false
     try {
       database = this.#databaseFactory(this.#path)
       database.exec('PRAGMA busy_timeout=1000')
       database.exec('PRAGMA foreign_keys=ON')
       this.#migrate(database)
       initializeMemory(database)
+      this.#trackRecallAuthority(database)
+      trackingAuthority = true
       recoverMemoryPurges(database,this.#path)
       const authoritative=hasMemoryFileAuthority(database,this.#path+'.memory')
       if(authoritative){enableMemoryFiles(database,this.#path+'.memory',{alreadyLocked:true});reconcileMemoryFiles(database)}
@@ -258,6 +265,10 @@ export class MemoryLedgerStore {
       this.#database = database
     } catch (error) {
       try {
+        if (database && trackingAuthority) {
+          this.#recallAuthorityRevision = this.#readRecallAuthorityRevision(database)
+          this.#recallAuthorityEpoch = this.#readRecallAuthorityEpoch(database)
+        }
         database?.close()
       } catch {
         // The stable migration error below is the only failure exposed across RPC.
@@ -268,6 +279,76 @@ export class MemoryLedgerStore {
     }
   }
 
+  /** Shared transactional epoch; older clients' writes also fire these persistent triggers. */
+  #trackRecallAuthority(db: LedgerDatabase): void {
+    db.exec('BEGIN IMMEDIATE')
+    try {
+      db.exec(`CREATE TABLE IF NOT EXISTS recall_authority_epoch(
+        slot INTEGER PRIMARY KEY CHECK(slot=1), value INTEGER NOT NULL
+      ) STRICT;
+      INSERT OR IGNORE INTO recall_authority_epoch VALUES(1,0)`)
+      const tables = [
+        'memory_evidence', 'memory_message_heads', 'memory_revisions', 'memory_suppressed',
+        'memory_deleted_sources', 'memory_legacy_suppressed', 'memory_purged_ids',
+        'source_grants', 'source_connections', 'source_objects', 'processing_profiles',
+      ]
+      for (const table of tables) this.#createAuthorityTriggers(db, table, false)
+      db.exec('COMMIT')
+    } catch (error) { rollback(db); throw error }
+    // Session consent is genuinely connection-local and cannot use a persistent trigger.
+    db.exec(`CREATE TEMP TABLE recall_authority_revision(value INTEGER NOT NULL);
+      INSERT INTO recall_authority_revision VALUES(${this.#recallAuthorityRevision})`)
+    this.#createAuthorityTriggers(db, 'source_session_consents', true)
+  }
+
+  #createAuthorityTriggers(db: LedgerDatabase, table: string, temporary: boolean): void {
+    const changed = db.prepare(`PRAGMA table_info(${table})`).all()
+      .map(column => `OLD.${String(column.name)} IS NOT NEW.${String(column.name)}`).join(' OR ')
+    for (const event of ['INSERT', 'UPDATE', 'DELETE']) db.exec(`
+      CREATE ${temporary ? 'TEMP' : ''} TRIGGER IF NOT EXISTS recall_authority_${table}_${event}
+      AFTER ${event} ON ${temporary ? 'temp' : 'main'}.${table}
+      ${event === 'UPDATE' ? `WHEN ${changed}` : ''}
+      BEGIN UPDATE ${temporary ? 'recall_authority_revision' : 'recall_authority_epoch'} SET value=value+1; END`)
+  }
+
+  #readRecallAuthorityEpoch(db: LedgerDatabase): number {
+    return Number(db.prepare('SELECT value FROM main.recall_authority_epoch WHERE slot=1').get()?.value ?? this.#recallAuthorityEpoch)
+  }
+
+  recallAuthorityEpoch(): number {
+    return this.#database ? this.#readRecallAuthorityEpoch(this.#database) : this.#recallAuthorityEpoch
+  }
+
+  #readRecallAuthorityRevision(db: LedgerDatabase): number {
+    return Number(db.prepare('SELECT value FROM temp.recall_authority_revision').get()?.value ?? this.#recallAuthorityRevision)
+  }
+
+  recallAuthorityRevision(): number {
+    return this.#database ? this.#readRecallAuthorityRevision(this.#database) : this.#recallAuthorityRevision
+  }
+
+  /** Indexed metadata only; consumers must separately revalidate purely time-sensitive evidence eligibility. */
+  lifeAuthorizationRevision(namespace: string): LifeAuthorizationRevision {
+    z.string().min(1).max(256).endsWith(':life:').parse(namespace)
+    try {
+      const row = this.#requireDatabase().prepare(`SELECT
+        EXISTS(SELECT 1 FROM memory_life_meta WHERE namespace=?) AS life_present,
+        (SELECT json_type(payload_json,'$.revision') FROM memory_life_meta WHERE namespace=?) AS life_type,
+        (SELECT json_extract(payload_json,'$.revision') FROM memory_life_meta WHERE namespace=?) AS life_revision,
+        (SELECT value FROM main.recall_authority_epoch WHERE slot=1) AS authority_epoch,
+        (SELECT value FROM temp.recall_authority_revision) AS session_revision,
+        (SELECT json_group_array(json_array(provider,revision)) FROM
+          (SELECT provider,revision FROM processing_profiles WHERE prefix=? ORDER BY provider LIMIT 257)) AS products
+      `).get(namespace,namespace,namespace,namespace.slice(0,-'life:'.length))
+      const counter=(value:unknown):value is number=>typeof value==='number'&&Number.isSafeInteger(value)&&value>=0
+      if (!row||!counter(row.authority_epoch)||!counter(row.session_revision)
+        ||(row.life_present===1?(!['integer','real'].includes(String(row.life_type))||!counter(row.life_revision)):row.life_revision!==null)) throw Error('invalid_authority')
+      const products:unknown=JSON.parse(String(row.products))
+      if(!Array.isArray(products)||products.length>256||!products.every((item:unknown)=>Array.isArray(item)&&item.length===2&&typeof item[0]==='string'&&item[0].length>0&&item[0].length<=512&&!item[0].includes('\0')&&counter(item[1])))throw Error('invalid_product_authority')
+      return [row.life_present===1?row.life_revision as number:null,row.authority_epoch,row.session_revision,products as [string,number][]]
+    }catch{throw new MemoryLedgerStoreError('STORE_READ_FAILED')}
+  }
+
   memory(operation: MemoryOperation, input: unknown, openLegacy?: LedgerDatabaseFactory): unknown {
     return this.withMemoryFilesLock(()=>{
       if(operation==='enable_files'){
@@ -275,9 +356,14 @@ export class MemoryLedgerStore {
         reconcileMemoryFiles(this.#requireDatabase());return {enabled:true}
       }
       try {
+      if(operation==='flush_files'){
+        z.object({}).strict().parse(input)
+        this.#joinMemoryFileAuthority()
+        return {flushed:flushMemoryFiles(this.#requireDatabase())}
+      }
       if(operation==='purge')return purgeEntry(this.#requireDatabase(),this.#path,input)
       if(operation==='purge_index_complete')return completePurgeIndex(this.#requireDatabase(),this.#path,input)
-      if(operation==='purge_status')return purgeStatus(this.#requireDatabase(),z.object({entry_prefix:z.string().min(1)}).strict().parse(input).entry_prefix)
+      if(operation==='purge_status')return purgeStatus(this.#requireDatabase(),z.object({entry_prefix:z.string().min(1)}).strict().parse(input).entry_prefix,this.#path)
       this.#joinMemoryFileAuthority()
       return operation === 'migrate_legacy' ? migrateLegacyMemory(this.#requireDatabase(), input, openLegacy ?? (() => {throw new Error('STORE_INVALID_OPERATION')})) : memoryOperation(this.#requireDatabase(), operation, input) }
       catch (error) {
@@ -306,6 +392,8 @@ export class MemoryLedgerStore {
   close(): void {
     if (this.#database === undefined) return
     const database = this.#database
+    this.#recallAuthorityRevision = this.#readRecallAuthorityRevision(database)
+    this.#recallAuthorityEpoch = this.#readRecallAuthorityEpoch(database)
     this.#database = undefined
     try {
       database.close()

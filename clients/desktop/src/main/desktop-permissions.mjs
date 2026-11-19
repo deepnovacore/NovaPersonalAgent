@@ -15,8 +15,8 @@ export async function requestDesktopPermission(kind,{platform,systemPreferences,
  if(platform==='darwin'){
   if(kind==='microphone'&&systemPreferences.getMediaAccessStatus('microphone')==='not-determined')await systemPreferences.askForMediaAccess('microphone')
   else if(kind==='screen'&&desktopCapturer){
-   try{await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:1,height:1},fetchWindowIcons:false})}catch{/* Denied capture still offers the privacy pane. */}
-   if(systemPreferences.getMediaAccessStatus('screen')!=='granted')await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?'+PANES.screen)
+   try{if(systemPreferences.getMediaAccessStatus('screen')!=='granted')await desktopCapturer.getSources({types:['screen'],thumbnailSize:{width:1,height:1},fetchWindowIcons:false})}catch{/* Denied capture still offers the privacy pane. */}
+   await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?'+PANES.screen)
   }
   else if(kind==='accessibility'){systemPreferences.isTrustedAccessibilityClient(true);await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?'+PANES[kind])}
   else await shell.openExternal('x-apple.systempreferences:com.apple.preference.security?'+PANES[kind])

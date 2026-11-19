@@ -43,7 +43,7 @@ void main() {
     c.dispose();
   });
   testWidgets(
-    'empty working state is truthful and budget block has no retry action',
+    'empty working state is truthful and unavailable budget blocks retry',
     (tester) async {
       final entered = Completer<void>(), release = Completer<void>();
       final c = ProfileGenerationCoordinator(
@@ -60,7 +60,7 @@ void main() {
             ({required savedObservationsOnly, required maxNewBatches}) async {
               entered.complete();
               await release.future;
-              throw 'profile_budget_exhausted';
+              throw 'profile_budget_unavailable';
             },
         cancel: () {},
         failureCode: (e) => '$e',
@@ -79,10 +79,30 @@ void main() {
       await tester.pump();
       expect(find.text('整理好后会自动显示在这里。'), findsOneWidget);
       expect(find.textContaining('先查看已有内容'), findsNothing);
+      expect(find.byType(LinearProgressIndicator), findsOneWidget);
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileGenerationStatus(
+              generation: c,
+              empty: true,
+              compact: true,
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(
+        find.byKey(const ValueKey('feishu.generation.spinner')),
+        findsOneWidget,
+      );
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.text('暂停'), findsOneWidget);
+      expect(find.text('整理好后会自动显示在这里。'), findsOneWidget);
       release.complete();
       await run;
       await tester.pump();
-      expect(find.text('本次整理已暂停'), findsOneWidget);
+      expect(find.text('暂时无法继续整理'), findsOneWidget);
       expect(find.text('重试'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
@@ -170,4 +190,120 @@ void main() {
       c.dispose();
     },
   );
+
+  testWidgets(
+    'waiting hint replaces the default copy and offers an optional action',
+    (tester) async {
+      final c = ProfileGenerationCoordinator(
+        persistence: MemoryLifePersistence(),
+        autoSchedule: false,
+        inspect: () async => null,
+        generate:
+            ({required savedObservationsOnly, required maxNewBatches}) async =>
+                fail('UI test must not generate'),
+        cancel: () {},
+        failureCode: (e) => '$e',
+      );
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileGenerationStatus(
+              generation: c,
+              waitingHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+              onOpenConnectors: () => opened++,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
+      expect(find.text('消息同步后，会自动整理到这里'), findsNothing);
+      await tester.tap(find.text('打开连接器'));
+      expect(opened, 1);
+      await tester.pumpWidget(const SizedBox());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(body: ProfileGenerationStatus(generation: c)),
+        ),
+      );
+      expect(find.text('消息同步后，会自动整理到这里'), findsOneWidget);
+      expect(find.text('打开连接器'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      c.dispose();
+    },
+  );
+
+  testWidgets('connect action is not shown outside the waiting phase', (
+    tester,
+  ) async {
+    final c = ProfileGenerationCoordinator(
+      persistence: MemoryLifePersistence(),
+      autoSchedule: false,
+      inspect: () async => null,
+      generate:
+          ({required savedObservationsOnly, required maxNewBatches}) async =>
+              fail('UI test must not generate'),
+      cancel: () {},
+      failureCode: (e) => '$e',
+    );
+    var opened = 0;
+    for (final phase in [
+      ProfileGenerationPhase.working,
+      ProfileGenerationPhase.ready,
+      ProfileGenerationPhase.paused,
+    ]) {
+      c.phase = phase;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ProfileGenerationStatus(
+              generation: c,
+              empty: true,
+              onOpenConnectors: () => opened++,
+            ),
+          ),
+        ),
+      );
+      expect(find.text('打开连接器'), findsNothing, reason: '$phase');
+      await tester.pumpWidget(const SizedBox());
+    }
+    expect(opened, 0);
+    c.dispose();
+  });
+  testWidgets('partial timeline reports kept updates and stops paid retries', (
+    tester,
+  ) async {
+    var calls = 0;
+    final c = ProfileGenerationCoordinator(
+      persistence: MemoryLifePersistence(),
+      autoSchedule: false,
+      inspect: () async => const ProfileGenerationSnapshot(
+        scope: 's',
+        complete: false,
+        hasResult: true,
+        covered: 10,
+        total: 10,
+      ),
+      generate:
+          ({required savedObservationsOnly, required maxNewBatches}) async {
+            calls++;
+            throw 'profile_timeline_partial';
+          },
+      cancel: () {},
+      failureCode: (e) => '$e',
+    );
+    await c.start();
+    await c.poll();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(body: ProfileGenerationStatus(generation: c)),
+      ),
+    );
+    expect(find.text('已保存部分近况'), findsOneWidget);
+    expect(find.text('部分内容未通过核对，已保留合格内容并停止自动重试。'), findsOneWidget);
+    await c.poll();
+    expect(calls, 1);
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 }

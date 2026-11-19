@@ -1,0 +1,24 @@
+{
+  "schema": 1,
+  "name": "Nova Document Sans SC",
+  "weight": 400,
+  "source": {
+    "filename": "NotoSansSC-variable.ttf",
+    "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/NotoSansSC%5Bwght%5D.ttf",
+    "sha256": "a3041811a78c361b1de50f953c805e0244951c21c5bd412f7232ef0d899af0da"
+  },
+  "license": {
+    "filename": "OFL.txt",
+    "url": "https://raw.githubusercontent.com/google/fonts/2fe1e8c6b137fb13041a7cfca6fdcd8a910ea4dc/ofl/notosanssc/OFL.txt",
+    "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+  },
+  "publication_approved": true,
+  "charset_sha256": "9bc10dc9de455e72e726e756d8923f6f470d2e39bc3691e17e8c588f860de4b7",
+  "subset_sha256": "88f7c79e5b9b132c8b455ad2ff8e943d36b5f65aef653c6327e604646f0617e9",
+  "source_version": "2.004-H2;hotconv 1.0.118;makeotfexe 2.5.65603",
+  "approval": {
+    "by": "Repository owner (user), verbal approval in session",
+    "date": "2026-11-04",
+    "scope": "Only the exact subset SHA-256 recorded here; new character sets or weights require renewed approval"
+  }
+}

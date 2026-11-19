@@ -12,7 +12,8 @@ import {promisify} from 'node:util'
 import {logicalSwipeDistance, type GuiProgress} from './gui-runner.js'
 
 const exec = promisify(execFile)
-export interface ComputerTarget {displayId: string; width: number; height: number; target: string}
+/** `visible` is false when the focused window's centre lies outside the captured (primary) display. */
+export interface ComputerTarget {displayId: string; width: number; height: number; target: string; visible?: boolean}
 export interface ComputerGuardOptions {
   displayId: string
   signal: AbortSignal
@@ -53,7 +54,11 @@ export async function computerWrite(action: () => Promise<unknown>, budgetMs: nu
     await Promise.race([action(), new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error('cleanup_unknown')), Math.min(budgetMs, 30_000))
     })])
-  } catch(error) { throw new Error('cleanup_unknown',{cause:error}) }
+  } catch(error) {
+    // Only the helper's proven pre-dispatch refusal stays recoverable.
+    if (error instanceof Error && error.message === 'screen_changed' && error.cause instanceof Error && error.cause.message === 'native_gui:editor_unavailable') throw error
+    throw new Error('cleanup_unknown',{cause:error})
+  }
   finally { clearTimeout(timer) }
 }
 
@@ -93,6 +98,8 @@ export async function guardComputerDevice(raw: AbstractInterface, target: () => 
         if (action.name === 'Scroll' && (input.scrollType !== 'singleAction' || (input.distance != null
           && (typeof input.distance !== 'number' || !Number.isFinite(input.distance) || input.distance <= 0
             || input.distance > Math.max(baseline.width, baseline.height))))) throw new Error('needs_user_action')
+        // Keys and text go to the focused window; never into one the model cannot see on the captured display.
+        if ((action.name === 'Input' || action.name === 'KeyboardPress') && baseline.visible === false) throw new Error('needs_user_action', {cause: new Error('worker:focused window is outside the primary display; click the target on the primary display first')})
         await fresh(baseline)
         options.progress({phase: 'action_pending', steps, actionName: action.name})
         if (!await guiApproval(options.approve(action.name, params), options.signal)) throw new Error('declined')
@@ -104,9 +111,8 @@ export async function guardComputerDevice(raw: AbstractInterface, target: () => 
         planned = undefined
         options.progress({phase: 'action_returned', steps, actionName: action.name})
         check()
-        // Observation is retained in memory; model Finished alone is never verification.
-        const observed = await device.screenshotBase64()
-        options.capture?.(observed, steps)
+        // Build takes a fresh observation explicitly, which may now be in a different window.
+        if (options.capture) options.capture(await device.screenshotBase64(), steps)
       } catch (error) {
         const reason = error instanceof Error ? error.message : ''
         failure ??= ['cleanup_unknown', 'cancelled', 'step_limit', 'screen_changed', 'needs_user_action', 'declined'].includes(reason) ? reason : 'action_failed'
@@ -132,20 +138,24 @@ const pid = Number(app.processIdentifier);
 const windows = ObjC.deepUnwrap(ObjC.castRefToObject($.CGWindowListCopyWindowInfo(17, 0)));
 const window = windows.find(w => w.kCGWindowOwnerPID === pid && w.kCGWindowLayer === 0);
 if (!window) throw new Error('no foreground window');
-if (Number($.NSScreen.screens.count) !== 1) throw new Error('multiple displays');
-const frame = $.NSScreen.mainScreen.frame;
+// screens[0] is the primary display (menu bar, origin 0,0); mainScreen follows keyboard focus.
+const frame = $.NSScreen.screens.objectAtIndex(0).frame;
+const b = window.kCGWindowBounds;
+// The window counts as visible when its centre lies on the primary display.
+const cx = b.X + b.Width / 2, cy = b.Y + b.Height / 2;
+const visible = cx >= 0 && cx < frame.size.width && cy >= 0 && cy < frame.size.height;
 JSON.stringify({target: [pid, ObjC.unwrap(app.bundleIdentifier), window.kCGWindowNumber, window.kCGWindowBounds],
-  width: frame.size.width, height: frame.size.height});`
+  width: frame.size.width, height: frame.size.height, visible});`
 
 export async function macForeground(signal: AbortSignal): Promise<Omit<ComputerTarget, 'displayId'>> {
   const {stdout} = await exec('/usr/bin/osascript', ['-l', 'JavaScript', '-e', foregroundScript],
     {signal, timeout: 5000, maxBuffer: 16_384})
-  const value = JSON.parse(stdout.trim()) as {target?: unknown; width?: unknown; height?: unknown}
+  const value = JSON.parse(stdout.trim()) as {target?: unknown; width?: unknown; height?: unknown; visible?: unknown}
   const identity = value.target
   if (!Array.isArray(identity) || identity.length !== 4 || typeof identity[0] !== 'number'
     || typeof identity[1] !== 'string' || typeof identity[2] !== 'number' || !identity[3]
     || typeof value.width !== 'number' || typeof value.height !== 'number') throw new Error('invalid_configuration')
-  return {target: JSON.stringify(identity), width: value.width, height: value.height}
+  return {target: JSON.stringify(identity), width: value.width, height: value.height, ...(typeof value.visible === 'boolean' ? {visible: value.visible} : {})}
 }
 
 export function validComputerDisplayId(value: string, platform: NodeJS.Platform = process.platform): boolean {
@@ -166,28 +176,28 @@ public static class NovaWindow {
 '@
 if ([NovaWindow]::SetThreadDpiAwarenessContext([IntPtr](-4)) -eq [IntPtr]::Zero) {throw 'dpi_unavailable'}
 Add-Type -AssemblyName System.Windows.Forms
-$screens = [System.Windows.Forms.Screen]::AllScreens
-if ($screens.Count -ne 1) {throw 'screen_changed'}
-$bounds = $screens[0].Bounds
+$bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
 if ($bounds.X -ne 0 -or $bounds.Y -ne 0) {throw 'screen_changed'}
 $window = [NovaWindow]::GetForegroundWindow()
 $processId = [uint32]0
 $rect = New-Object NovaWindow+Rect
 [void][NovaWindow]::GetWindowThreadProcessId($window, [ref]$processId)
 if ($window -eq [IntPtr]::Zero -or ![NovaWindow]::GetWindowRect($window, [ref]$rect)) {throw 'window_unavailable'}
-@{target = @($processId, $window.ToInt64(), @($rect.Left, $rect.Top, $rect.Right, $rect.Bottom)); width=$bounds.Width; height=$bounds.Height} | ConvertTo-Json -Compress -Depth 4`
+$cx = ($rect.Left + $rect.Right) / 2; $cy = ($rect.Top + $rect.Bottom) / 2
+$visible = ($cx -ge 0) -and ($cx -lt $bounds.Width) -and ($cy -ge 0) -and ($cy -lt $bounds.Height)
+@{target = @($processId, $window.ToInt64(), @($rect.Left, $rect.Top, $rect.Right, $rect.Bottom)); width=$bounds.Width; height=$bounds.Height; visible=$visible} | ConvertTo-Json -Compress -Depth 4`
 
 export async function computerForeground(signal: AbortSignal): Promise<Omit<ComputerTarget, 'displayId'>> {
   if (process.platform === 'darwin') return macForeground(signal)
   if (process.platform !== 'win32') throw Error('invalid_configuration')
   const {stdout} = await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-EncodedCommand', Buffer.from(windowsForegroundScript, 'utf16le').toString('base64')],
     {signal, timeout: 5000, maxBuffer: 16_384})
-  const value = JSON.parse(stdout.trim()) as {target?: unknown; width?: unknown; height?: unknown}
+  const value = JSON.parse(stdout.trim()) as {target?: unknown; width?: unknown; height?: unknown; visible?: unknown}
   if (!Array.isArray(value.target) || value.target.length !== 3 || typeof value.target[0] !== 'number' || typeof value.target[1] !== 'number'
     || !Array.isArray(value.target[2]) || value.target[2].length !== 4 || !value.target[2].every(Number.isFinite)
     || typeof value.width !== 'number' || !Number.isFinite(value.width) || value.width <= 0
     || typeof value.height !== 'number' || !Number.isFinite(value.height) || value.height <= 0) throw Error('invalid_configuration')
-  return {target: JSON.stringify(value.target), width: value.width, height: value.height}
+  return {target: JSON.stringify(value.target), width: value.width, height: value.height, ...(typeof value.visible === 'boolean' ? {visible: value.visible} : {})}
 }
 
 /** Both planners share connection consent and target checks; callers retain their resource lease. */
@@ -198,9 +208,12 @@ export async function connectComputerDevice(backend: Awaited<ReturnType<typeof s
   const target = async (): Promise<ComputerTarget> => {
     options.signal.throwIfAborted()
     if (config.macWindow) return {displayId: config.displayId, ...await backend.windowTarget()}
+    // With several displays Nova sees and drives only the primary one (or the configured display).
     const displays = await backend.listDisplays()
-    if (displays.length !== 1 || (config.displayId!=='primary'&&displays[0]?.id !== config.displayId)) throw Error('screen_changed')
-    return {displayId: displays[0]!.id, ...await (options.foreground ?? computerForeground)(options.signal)}
+    // Worker taps use global coordinates without a display offset, so a configured secondary display is only safe alone.
+    const display = config.displayId === 'primary' ? displays.find(item => item.primary) ?? displays[0] : displays.length === 1 ? displays.find(item => item.id === config.displayId) : undefined
+    if (!display) throw Error('screen_changed')
+    return {displayId: display.id, ...await (options.foreground ?? computerForeground)(options.signal)}
   }
   const baseline = await target()
   if (!await guiApproval(options.approve('Connect', config.macWindow

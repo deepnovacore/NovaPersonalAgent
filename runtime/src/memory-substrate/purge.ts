@@ -138,6 +138,8 @@ function finish(db:LedgerDatabase,path:string,intent:Intent):PurgeResult{
   intent.backups=pending
  }
  if(intent.pending_index_evidence_ids.length)unresolved.push('knowledge_index_cleanup_pending')
+ const scope=intent.entry_id.split(':').slice(0,2).join(':')+':'
+ if(db.prepare('SELECT 1 FROM memory_engine_outbox WHERE scope=? AND generation>completed LIMIT 1').get(scope))unresolved.push('memory_engine_cleanup_pending')
  const result:PurgeResult={status:unresolved.length?'incomplete':'complete',operation_id:intent.operation_id,removed_entries:intent.removed_entries,removed_evidence:intent.removed_evidence,removed_entry_ids:intent.removed_entry_ids,removed_evidence_ids:intent.removed_evidence_ids,index_evidence_ids:intent.pending_index_evidence_ids,backup_cleanup:{status:unresolved.some(item=>item.includes('backup'))?'incomplete':'complete',unresolved:[...new Set(unresolved)]}}
  // A crash before/during compaction must retain an incomplete receipt, never a premature success.
  intent.result={...result,status:'incomplete',backup_cleanup:{...result.backup_cleanup,unresolved:[...result.backup_cleanup.unresolved,'ledger_compaction_pending']}};save(db,intent)
@@ -149,7 +151,7 @@ function finish(db:LedgerDatabase,path:string,intent:Intent):PurgeResult{
 export function recoverMemoryPurges(db:LedgerDatabase,path:string):void{
  for(const intent of intents(db))if(!intent.repository_done||intent.result?.backup_cleanup.unresolved.includes('ledger_compaction_pending')){finish(db,path,intent);if(!intent.repository_done)throw Error('MEMORY_MARKDOWN_PURGE_PENDING')}
 }
-export function purgeStatus(db:LedgerDatabase,prefix:string):unknown[]{return intents(db).filter(intent=>intent.entry_id.startsWith(prefix)&&intent.result?.status==='incomplete').map(intent=>({...intent.result,entry_id:intent.entry_id,expected_revision:intent.expected_revision}))}
+export function purgeStatus(db:LedgerDatabase,prefix:string,path?:string):unknown[]{if(path)for(const intent of intents(db))if(intent.entry_id.startsWith(prefix)&&intent.result?.backup_cleanup.unresolved.includes('memory_engine_cleanup_pending'))finish(db,path,intent);return intents(db).filter(intent=>intent.entry_id.startsWith(prefix)&&intent.result?.status==='incomplete').map(intent=>({...intent.result,entry_id:intent.entry_id,expected_revision:intent.expected_revision}))}
 export function purgeEntry(db:LedgerDatabase,path:string,input:unknown):PurgeResult{
  const q=inputSchema.parse(input);if(!q.selection.id.startsWith(q.entry_prefix))throw Error('STORE_INVALID_OPERATION')
  const saved=intents(db);if(saved.some(intent=>intent.entry_id!==q.selection.id&&intent.request_ids.includes(q.request_id)))throw Error('STORE_IDEMPOTENCY_CONFLICT')

@@ -1,4 +1,5 @@
 import {t} from './locale.mjs'
+import {memoryEngineLabel} from './memory-engine-label.mjs'
 export function personalMemoryBoard(root, request) {
   const controls = document.createElement('div')
   controls.className = 'board-actions'
@@ -57,7 +58,7 @@ export function personalMemoryBoard(root, request) {
       }
       cursor = nextCursor
       next.hidden = cursor === null
-      status.textContent = entries.length ? t("mem0 · 本页 {0} 条", entries.length) : t("没有找到记忆")
+      status.textContent = entries.length ? t('{0} · 本页 {1} 条', memoryEngineLabel(result.personal), entries.length) : t("没有找到记忆")
     } catch { list.replaceChildren(); next.hidden = true; status.textContent = t("暂时无法读取，请重试") }
     finally { busy = false; submit.disabled = next.disabled = false }
   }

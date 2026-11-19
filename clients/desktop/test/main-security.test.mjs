@@ -1,10 +1,44 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import {Linter} from 'eslint'
 import { acceptanceWakeSettings } from '../src/main/workbench-native-acceptance.mjs'
 import { createWorkbenchFrame } from '../src/main/workbench-frame.mjs'
 import * as settingsCategories from '../src/renderer/settings-categories.mjs'
 import { createContext, runInContext } from 'node:vm'
+
+test('desktop main has no unresolved globals after module removal', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const globals = Object.fromEntries(Object.getOwnPropertyNames(globalThis).map(name => [name, 'readonly']))
+  const diagnostics = new Linter().verify(source, {
+    languageOptions: {ecmaVersion: 'latest', sourceType: 'module', globals},
+    rules: {'no-undef': 'error'},
+  })
+  assert.deepEqual(diagnostics.map(({line, column, message}) => ({line, column, message})), [])
+})
+
+test('notification preferences accept only main frames in main and settings windows; notify stays main-only', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const handlers = {}, main = {mainFrame: {}}, settings = {mainFrame: {}}, stranger = {mainFrame: {}}
+  const currentSettings = {systemNotifications: true}, writes = []
+  const start = source.indexOf("  ipcMain.handle('nova:personal:notify'")
+  runInContext(source.slice(start, source.indexOf("  ipcMain.handle('nova:personal:unread'", start)), createContext({
+    ipcMain: {handle: (name, handler) => {handlers[name] = handler}},
+    mainWindow: {webContents: main}, settingsWindow: {webContents: settings}, currentSettings, process,
+    systemNotifier: {status: () => ({enabled: currentSettings.systemNotifications}), openSystemSettings: () => true, notify: () => 'shown'},
+    accessCredentials: fn => fn(), settingsWriter: async patch => {writes.push(patch);Object.assign(currentSettings, patch)},
+  }))
+  for (const name of ['status', 'enabled', 'settings']) {
+    const handler = handlers['nova:personal:notifications-' + name]
+    for (const sender of [main, settings]) await handler({sender, senderFrame: sender.mainFrame}, false)
+    for (const sender of [main, settings, stranger]) await assert.rejects(async () => handler({sender, senderFrame: {}}, false), /rejected/)
+    await assert.rejects(async () => handler({sender: stranger, senderFrame: stranger.mainFrame}, false), /rejected/)
+  }
+  assert.equal(writes.length, 1)
+  await assert.rejects(() => handlers['nova:personal:notifications-enabled']({sender: settings, senderFrame: settings.mainFrame}, 'yes'), /invalid/)
+  assert.throws(() => handlers['nova:personal:notify']({sender: settings}, {}), /rejected/)
+  assert.equal(handlers['nova:personal:notify']({sender: main}, {}), 'shown')
+})
 
 test('main owns single-instance lifecycle and denies renderer escape', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
@@ -43,7 +77,6 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:confirmation-mode',
     'nova:confirmation-placement',
     'nova:executor-result:open',
-    'nova:hub:action',
     'nova:knowledge:action',
     'nova:memory-board:clear',
     'nova:memory-board:copy-json',
@@ -70,12 +103,15 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:personal:feishu-verification',
     'nova:personal:local-tool-approval',
     'nova:personal:maximized',
+    'nova:personal:notifications-enabled',
+    'nova:personal:notifications-settings',
+    'nova:personal:notifications-status',
+    'nova:personal:notify',
     'nova:personal:presentation',
     'nova:personal:presentation-error',
     'nova:personal:presentation-request',
     'nova:personal:unread',
     'nova:personal:wake',
-    'nova:phone:action',
     'nova:projects:repair',
     'nova:release-camera:result',
     'nova:settings:changed',
@@ -85,6 +121,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:settings:open',
     'nova:settings:personal',
     'nova:settings:set',
+    'nova:settings:test-key',
     'nova:settings:voice-preset',
     'nova:settings:voiceprint',
     'nova:setup:changed',
@@ -92,6 +129,7 @@ test('preload exposes only bounded bootstrap native-audio menu and board channel
     'nova:setup:save',
     'nova:setup:status',
     'nova:setup:test-key',
+    'nova:space:create',
     'nova:visor:configure',
     'nova:visor:get',
     'nova:visor:refresh',
@@ -197,6 +235,14 @@ test('owner replacement during clear confirmation prevents the actual main handl
   assert.equal((await pending).error, 'unavailable')
   assert.equal(requests, 0)
   assert.equal(context.clearingConversation, null)
+})
+
+test('only a microphone grant is cached; a denial is re-read so a fix in System Settings takes effect', async () => {
+  const main = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const handler = main.slice(main.indexOf("ipcMain.handle('nova:microphone:permission'"))
+  const body = handler.slice(0, handler.indexOf('\n  })'))
+  assert.match(body, /if \(microphoneSystemStatus === 'granted'\) \{\n\s*return Object\.freeze\(\{ status: microphoneSystemStatus \}\)/)
+  assert.doesNotMatch(body, /\['granted', 'denied', 'restricted'\]\.includes\(microphoneSystemStatus\)/)
 })
 
 test('microphone permission starts from the ready orb and every IPC edge is sender-bound', async () => {
@@ -914,12 +960,11 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
   let beforeQuit, releaseMaintenanceDeadline, releaseBackend, timeout
-  let prevented = 0, quits = 0, backendStops = 0, hubCancels = 0
+  let prevented = 0, quits = 0, backendStops = 0
   const event = {preventDefault() { prevented++ }}
   const context = vm.createContext({
     computerOverlay: null,
-    desktopHubConnection: {action: async action => { assert.equal(action, 'cancel'); hubCancels++ }},
-    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}}, cancelPhonePairing: async () => {}, managedPhone: {stop: async () => {}},
+    sourceSmokeStage() {}, feishuSetupOwner: {release: async () => {}},
     app: {
       on: (name, handler) => { if (name === 'before-quit') beforeQuit = handler },
       quit() { quits++; beforeQuit(event) },
@@ -945,7 +990,6 @@ for (const hasBackend of [true, false]) test(`quit drains once before normal win
   await context.quitDrain
   assert.equal(quits, 1)
   assert.equal(prevented, 2, 'the resumed quit must reach normal window shutdown')
-  assert.equal(hubCancels, 1, 'quitting cancels pairing without stopping the background Hub')
   assert.equal(backendStops, Number(hasBackend))
 })
 
@@ -953,6 +997,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
   const {default: vm} = await import('node:vm')
   const {backendSettings, DEFAULT_SETTINGS} = await import('../src/main/settings-store.mjs')
+  const {planSecretChange} = await import('../src/main/credential-hot-apply.mjs')
   const start = source.indexOf("  ipcMain.handle('nova:settings:set'")
   const sharedStart = source.indexOf('async function applyDesktopSettings')
   const sharedSource = source.slice(sharedStart, source.indexOf('\n}', sharedStart) + 2)
@@ -969,7 +1014,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
     const sender = {}
     const context = vm.createContext({
       ipcMain: {handle: (_name, value) => { handler = value }}, settingsWindow: {webContents: sender},
-      currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
+      configuredSpaceModelsPath: () => null, currentSettings: {...DEFAULT_SETTINGS}, settingsApplyStatus: 'applied', settingsRestartPending: false, backendSettings, lifecycleCoordinator: {},
       applySettingsTransaction: async options => { await options.write(payload); restart = options.needsBackendRestart(); return {} },
       parseSettingsCommit: value => value,
       accessCredentials: operation => operation(), refreshSettingsCapabilities: async () => {},
@@ -982,6 +1027,7 @@ test('settings IPC restarts for capability commits while wake-only updates stay 
       readCapabilityDocument: () => ({}), decryptSecretsForSpawn: () => ({}), secretCodec: {},
       capabilityEnvironment: () => ({}), prepareCapabilityCommit() {}, process: {env: {}},
       commitDesktopConfiguration() {}, discardDesktopConfiguration() {}, publishSettingsApplyStatus() {},
+      planSecretChange, backendControl: null, backendStatus: {state: 'stopped'}, applyLiveCredentials: async () => {},
       settingsView: () => ({}), console, settingsRecoveryAvailable: pendingRecovery,
       publishCommittedSettings() {}, rollbackSettings() {}, completeSettings() {}, restartSettingsBackend() {},
     })
@@ -1180,23 +1226,6 @@ test('sleep and wake IPC reject other windows and unexpected arguments', async (
   }
 })
 
-test('phone actions require the settings sender and restrict actions and device identifiers', async () => {
-  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const {default: vm} = await import('node:vm')
-  const body = source.slice(source.indexOf("  ipcMain.handle('nova:phone:action'"), source.indexOf("  ipcMain.on('nova:setup:open'"))
-  let handler
-  const sender = {}, calls = []
-  vm.runInNewContext(body, {ipcMain: {handle: (_channel, fn) => {handler = fn}}, settingsWindow: {webContents: sender},
-    phoneEpoch: 0, phoneQueue: Promise.resolve(), phoneAction: async (...args) => {calls.push(args); return {state: 'ready'}}})
-  assert.equal((await handler({sender: {}}, 'enable')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'exec')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'status', 'extra')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'revoke', '../token')).state, 'unavailable')
-  assert.equal((await handler({sender}, 'enable')).state, 'ready')
-  assert.equal(calls.length, 1)
-})
-
-
 test('unsupported embedding in recovery reaches startup diagnostics without mutating either file', async () => {
   const {mkdtemp, writeFile, rm} = await import('node:fs/promises')
   const {tmpdir} = await import('node:os')
@@ -1286,7 +1315,7 @@ test('background return reconciles unchanged renderer dormancy with native show 
  const source=await readFile(new URL('../src/renderer/index.mjs',import.meta.url),'utf8')
  const main=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const applyBody=source.slice(source.indexOf('applyPresentation: async ')+19,source.indexOf('\n  taskAction:',source.indexOf('applyPresentation: async '))).replace(/,\s*$/,'')
- const reportBody=source.slice(source.indexOf('  const dormant = orbDormant('),source.indexOf('\n  const activeDecision',source.indexOf('  const dormant = orbDormant(')))
+ const reportBody=source.slice(source.indexOf('  const dormant = orbDormant('),source.indexOf('\n  const decisionEnabled',source.indexOf('  const dormant = orbDormant(')))
  const showBody=main.match(/mainWindow\.on\('show', (\(\) => \{[^\n]+\})\)/)[1]
  for(const surface of ['resting','bubble','task','confirmation']){
   let bounds={x:500,y:400,width:160,height:160},visible=true

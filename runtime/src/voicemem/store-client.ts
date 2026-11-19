@@ -24,6 +24,8 @@ export interface PersonalMemoryStoreClientOptions {
   readonly extractionModel?: string
   /** Only workers implementing durable source tombstones may enable this capability. */
   readonly supportsForget?: boolean
+  /** Host-configured model destinations, snapshotted by the mem0 worker at admission. */
+  readonly conversationProviders?: readonly string[]
   /** Test seam. Production uses a Node Worker. */
   readonly workerFactory?: (url: URL, options: WorkerOptions) => PersonalMemoryStoreWorker
 }
@@ -72,6 +74,7 @@ export interface VoiceMemOpenResult {
 }
 
 export type PersonalMemoryStoreErrorCode =
+  | 'STORE_STALE_REVISION'
   | 'STORE_CONFLICT'
   | 'STORE_NOT_FOUND'
   | 'STORE_ALREADY_OPEN'
@@ -95,7 +98,7 @@ export type PersonalMemoryStoreClientErrorCode = PersonalMemoryStoreErrorCode
 
 export class PersonalMemoryStoreClientError extends PersonalMemoryError {
   constructor(readonly code: PersonalMemoryStoreClientErrorCode) {
-    super(['STORE_CONFLICT', 'STORE_NOT_FOUND', 'STORE_READ_FAILED', 'STORE_RECALL_FAILED', 'STORE_INVALID_INPUT'].includes(code) ? 'error' : 'unavailable')
+    super(['STORE_STALE_REVISION', 'STORE_CONFLICT', 'STORE_NOT_FOUND', 'STORE_READ_FAILED', 'STORE_RECALL_FAILED', 'STORE_INVALID_INPUT'].includes(code) ? 'error' : 'unavailable')
     this.name = 'PersonalMemoryStoreClientError'
   }
 }
@@ -144,6 +147,8 @@ const MAX_REPLY_PREFERENCE_TEXT_CHARS = 1_000
  * bounded request/result values over the Worker boundary; it never opens the personal SQLite path.
  */
 export class PersonalMemoryStoreClient implements PersonalMemoryResource {
+  readonly maxRecallLimit = MAX_LIMIT
+  readonly recallEngine = 'voicemem' as const
   readonly #workerFactory: (url: URL, options: WorkerOptions) => PersonalMemoryStoreWorker
   readonly #workerOptions: WorkerOptions
   declare readonly remember?: (turn: PersonalMemoryRememberTurn) => Promise<PersonalMemoryAdmissionReceipt>
@@ -177,6 +182,7 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
       path: options.path,
       userId: options.userId,
       embedding: {...options.embedding},
+      ...(options.conversationProviders === undefined ? {} : {conversationProviders: [...options.conversationProviders]}),
       ...(options.extraction === undefined ? {} : {extraction: {...options.extraction}}),
       ...(options.extractionModel === undefined ? {} : {extractionModel: options.extractionModel}),
     }}
@@ -194,6 +200,16 @@ export class PersonalMemoryStoreClient implements PersonalMemoryResource {
   }
   async get(id:string):Promise<MemoryEntry|null> {
     return this.#entryRequest('get',{id:this.#entryId(id)},MemoryEntrySchema.nullable())
+  }
+  async getMem0Many(ids:readonly string[]) {
+    return this.#entryRequest('getMany', {ids:z.array(z.string().min(1).max(256)).max(100).parse(ids)}, z.array(MemoryEntrySchema.nullable()).max(100))
+  }
+  async readMem0Evidence(id:string) {
+    return this.#entryRequest('readEvidence', {id:this.#entryId(id)}, z.object({evidence_id:z.string(),locator:z.string(),text:z.string().max(40_000),source_kind:z.literal('conversation'),observed_at:z.string(),trust:z.literal('untrusted_external')}).strict().nullable())
+  }
+  async canReadMem0ConversationEvidence(id:string,consumer:string) {
+    if (!nonempty(consumer,256)) return false
+    return this.#entryRequest('canReadConversationEvidence', {id:this.#entryId(id),consumer}, z.boolean())
   }
   async correct(id:string,expectedVersion:MemoryVersion,content:string,userSource:MemorySourceRef) {
     return this.#entryRequest('correct',{id:this.#entryId(id),expectedVersion:MemoryVersionSchema.parse(expectedVersion),content:z.string().trim().min(1).max(500).refine(v=>!v.includes('\0')).parse(content),userSource:MemorySourceRefSchema.parse(userSource)},z.object({previous:MemoryEntrySchema,entry:MemoryEntrySchema}).strict())
@@ -595,7 +611,7 @@ function parseResponse(value: unknown): WorkerResponse | undefined {
 }
 
 function isStoreCode(value: unknown): value is PersonalMemoryStoreErrorCode {
-  return value === 'STORE_CONFLICT' || value === 'STORE_NOT_FOUND' || value === 'STORE_ALREADY_OPEN' || value === 'STORE_CLOSED' || value === 'STORE_INVALID_INPUT'
+  return value === 'STORE_STALE_REVISION' || value === 'STORE_CONFLICT' || value === 'STORE_NOT_FOUND' || value === 'STORE_ALREADY_OPEN' || value === 'STORE_CLOSED' || value === 'STORE_INVALID_INPUT'
     || value === 'STORE_READ_FAILED' || value === 'STORE_WRITE_FAILED' || value === 'STORE_RECALL_FAILED'
 }
 

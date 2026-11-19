@@ -1,6 +1,7 @@
+import {DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
 export function updateTrayUnread(tray, count, platform = process.platform) {
   if (platform === 'darwin') tray?.setTitle(count ? String(count) : '')
-  tray?.setToolTip(count ? `Nova · ${count} 条未读提醒` : 'Nova Personal Agent Desktop')
+  tray?.setToolTip(count ? `${DESKTOP_PRODUCT_NAME} · ${count} 条未读提醒` : DESKTOP_PRODUCT_NAME)
 }
 // A badge on the tray means something wants the user, so the click must lead
 // there; only an empty tray keeps the show/hide toggle.

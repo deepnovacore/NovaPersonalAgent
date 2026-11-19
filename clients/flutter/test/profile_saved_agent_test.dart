@@ -12,7 +12,7 @@ import 'package:nova_mobile/context/profile_evidence.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/secure_persistence.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 class _Models extends ModelSettings {
@@ -53,6 +53,7 @@ void main() {
             'facts': [
               {
                 'text': '【事】提出项目计划',
+                'relevance': 'ongoing_work',
                 'refs': [id],
               },
             ],
@@ -83,6 +84,7 @@ void main() {
                     'why_now': '这是本人正在协调的项目安排。',
                     'next_steps': [],
                     'uncertainty': '',
+                    'temporal': {'kind': 'unknown', 'dates': []},
                   },
                   'evidence_ids': ['e1'],
                   'time_ref': 'e1',
@@ -165,21 +167,21 @@ void main() {
         'profile',
         true,
       );
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final host = FeishuHost(auth: auth, sources: sources);
       addTearDown(host.dispose);
       final agent = ProfileAgent(
         host,
-        authority,
+        publication,
         models,
         useTimelinePipeline: false,
       );
       await expectLater(agent.run(), throwsA(isA<AgentFailure>()));
       expect(observationCalls, 2);
       expect(finalCalls, 0);
-      const checkpoint = SecureContextPersistence(
-        ProfileObservationCheckpoint.storageKey,
+      final checkpoint = SecureContextPersistence(
+        ProfileObservationCheckpoint.incrementalStorageKey,
       );
       final saved = await checkpoint.read();
       expect((jsonDecode(saved!)['batches'] as Map).length, 1);
@@ -194,13 +196,13 @@ void main() {
         1,
       );
       final receipt = jsonDecode(
-        (await const SecureContextPersistence(ProfileAgent.receiptKey).read())!,
+        (await SecureContextPersistence(ProfileAgent.receiptKey).read())!,
       );
       expect(receipt['status'], 'partial');
       expect(receipt['coverage']['unobserved_records'], 1);
       // Invalid JSON has no safe parsed selection to repair. It must not
       // trigger transport retries or erase the saved result/checkpoint.
-      final beforeMalformed = await const SecureContextPersistence(
+      final beforeMalformed = await SecureContextPersistence(
         'nova.profile.local.v1',
       ).read();
       malformedSelection = true;
@@ -218,7 +220,7 @@ void main() {
       expect(observationCalls, 2);
       expect(await checkpoint.read(), saved);
       expect(
-        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        await SecureContextPersistence('nova.profile.local.v1').read(),
         beforeMalformed,
       );
       malformedSelection = false;
@@ -239,8 +241,8 @@ void main() {
         'source_generation': sources.generation,
         'source_revision': sources.revision,
         'consent_revision': sources.processingRevision,
-        'authority': authority.record,
-        'publication_generation': authority.publicationGeneration,
+        'space': publication.spaceId,
+        'publication_scope': publication.spaceId,
         'corrections': agent.corrections.context(
           agent.repository.correctionScope,
           provider,
@@ -253,7 +255,7 @@ void main() {
       );
       await agent.repository.publish(
         legacyEntries,
-        epoch: authority.epoch,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: provider,
@@ -294,11 +296,17 @@ void main() {
         completedScope!.scope,
       );
 
-      expect(await checkpoint.read(), 'null');
-      final completeProjection = await const SecureContextPersistence(
+      expect(
+        (jsonDecode((await checkpoint.read())!)['batches'] as Map).length,
+        2,
+      );
+      final completeProjection = await SecureContextPersistence(
         'nova.profile.local.v1',
       ).read();
       final completeRevision = agent.repository.value!['revision'];
+      // Simulate lost working cache, retaining the complete published result.
+      // A smaller resumed attempt must still be rejected before model spending.
+      await ProfileObservationCheckpoint.invalidate(checkpoint);
       failMissing = true;
       await expectLater(agent.run(), throwsA(isA<AgentFailure>()));
       final smallerCheckpoint = await checkpoint.read();
@@ -316,7 +324,7 @@ void main() {
       expect(finalCalls, 13); // Reject before spending on another draft.
       expect(await checkpoint.read(), smallerCheckpoint);
       expect(
-        await const SecureContextPersistence('nova.profile.local.v1').read(),
+        await SecureContextPersistence('nova.profile.local.v1').read(),
         completeProjection,
       );
       expect(agent.repository.value!['revision'], completeRevision);
@@ -339,7 +347,7 @@ void main() {
               .where((e) => e['explicit'] != true)
               .toList(),
         ),
-        epoch: authority.epoch,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: '${models.configuration.endpoint}|fixture',

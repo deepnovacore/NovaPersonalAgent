@@ -40,16 +40,19 @@ export const RUNTIME_DEFAULTS = Object.freeze({
   cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
   codexApprovalMode: 'ask',
   localToolApproval: 'ask',
+  systemNotifications: true,
   clarificationDepth: 'balanced',
   planReadback: 'summary',
   generatePlan: true,
-  buildReasoning: false,
+  buildReasoning: true,
   profileParticipantMessages: false,
   progressBubbles: 'milestones',
   embeddingProvider: 'dashscope',
   embeddingModel: 'text-embedding-v4',
   capabilitiesConfigPath: '',
   knowledgePath: '',
+  // Written only by main after the settings page creates a Host Space; never in publicSettings.
+  spaceHostConfigPath: '',
 })
 
 // Node refuses a C0 control character in a child's environment value and throws

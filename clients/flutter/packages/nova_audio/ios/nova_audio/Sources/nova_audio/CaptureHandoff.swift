@@ -1,5 +1,25 @@
 import Foundation
 
+struct StartupInputCheck {
+    private var silentMS = 0.0
+    private var warned = false
+    private var finished = false
+    mutating func observe(allZero: Bool, durationMS: Double) -> String? {
+        guard !finished, durationMS.isFinite, durationMS > 0 else { return nil }
+        if !allZero {
+            finished = true
+            return warned ? "microphone.recovered" : nil
+        }
+        guard !warned else { return nil }
+        silentMS += durationMS
+        guard silentMS >= 1000 else { return nil }
+        warned = true
+        return "microphone.silent"
+    }
+    mutating func pause() { silentMS = 0 }
+}
+
+
 /// Single in-flight capture buffer; resetting invalidates a delayed Dart reply.
 struct CaptureHandoff {
     private var serial = 0

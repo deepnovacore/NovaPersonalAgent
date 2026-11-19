@@ -62,7 +62,7 @@ html, body {
   padding: 6px 12px;
   overflow: hidden;
   border: 1px solid rgba(255, 255, 255, .18);
-  border-radius: 14px;
+  border-radius: var(--radius-lg);
   background: #13161f;
   color: #f5f5f7;
   font: 500 11px/1.5 system-ui, sans-serif;
@@ -71,7 +71,7 @@ html, body {
   pointer-events: auto;
 }
 .progress-bubble[data-level='milestone'] { border-color: rgba(137, 194, 175, .6); }
-.progress-bubble:focus-visible, #last-result:focus-visible { outline: 2px solid #a6d6ff; outline-offset: -2px; }
+.progress-bubble:focus-visible, #last-result:focus-visible { outline: var(--focus-ring-width) solid #a6d6ff; outline-offset: -2px; }
 #last-result[hidden] { display: none; }
 #shell[data-bubbles='true'] { display: block; }
 #shell[data-bubbles='true'] #orb {
@@ -262,7 +262,7 @@ body[data-opaque="1"] {
   transition: opacity 140ms ease;
 }
 
-#orb:focus-visible { outline: 2px solid #a6d6ff; outline-offset: 2px; }
+#orb:focus-visible { outline: var(--focus-ring-width) solid #a6d6ff; outline-offset: var(--focus-ring-offset); }
 
 /* Keyboard focus (:focus-visible) keeps the rail open; plain click focus must
    not, or one click would pin the rail visible after the pointer leaves. */
@@ -336,7 +336,7 @@ body:hover #orb-rail,
   white-space: nowrap;
   text-overflow: ellipsis;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(23, 23, 29, .88);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
   color: #f5f5f7;
@@ -363,7 +363,7 @@ body:hover #orb-rail,
   cursor: pointer;
   border-color: rgba(255, 196, 120, .5);
 }
-#state-label[data-action='setup']:focus-visible { outline: 2px solid #a6d6ff; outline-offset: 1px; }
+#state-label[data-action='setup']:focus-visible { outline: var(--focus-ring-width) solid #a6d6ff; outline-offset: 1px; }
 #aec-label {
   color: #d6d6d6;
   font-size: 10px;
@@ -375,7 +375,7 @@ body:hover #orb-rail,
   max-width: 153px;
   padding: 3px 8px;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(23, 23, 29, .88);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
   color: #f5f5f7;
@@ -596,7 +596,6 @@ body:hover #orb-rail,
 
 #codex-confirmation-actions[hidden] { display: none; }
 #codex-confirmation-actions button[hidden] { display: none; }
-#codex-confirmation-actions #codex-allow-session { width: auto; padding: 0 7px; font-size: 10px; }
 
 #codex-confirmation-actions button {
   width: 20px;
@@ -627,7 +626,7 @@ body:hover #orb-rail,
   max-width: calc(100vw - 12px);
   padding: 3px 8px;
   border: 1px solid rgba(255, 255, 255, .12);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: rgba(23, 23, 29, .88);
   box-shadow: 0 4px 12px rgba(0, 0, 0, .28);
   color: rgba(255, 255, 255, .82);
@@ -798,3 +797,109 @@ body:hover #last-result, #last-result:focus-visible { opacity: 1; pointer-events
 
 /* Keep the result entry out of the orb until its interaction is redesigned. */
 #last-result { display: none; }
+
+/* ── Companion form (pet vs floating orb) ─────────────────────────────────
+   The floating window follows the same form setting: pet keeps a portrait in
+   the disc, orb keeps the particle canvas. The pet borrows the orb's own state
+   vocabulary for a small aura ring, so listening/speaking read at a glance
+   without pretending to be a second particle field. */
+#shell[data-companion-form=pet] .orb-canvas{display:none!important}
+#shell[data-companion-form=pet] .orb-idle-avatar img{object-fit:cover;background:#fbf4e8;animation:companion-float 5.5s ease-in-out infinite}
+#shell[data-companion-form=pet][data-state=listening] .orb-idle-avatar img{animation:companion-listen 1.5s ease-in-out infinite}
+#shell[data-companion-form=pet][data-state=speaking] .orb-idle-avatar img{animation:companion-speak .9s ease-in-out infinite}
+#shell[data-companion-form=pet] .orb-idle-avatar::after{
+  content:"";position:absolute;inset:0;border-radius:inherit;pointer-events:none;
+  border:2px solid var(--companion-ring);box-shadow:inset 0 0 18px var(--companion-glow);
+  opacity:var(--companion-aura-opacity);
+  animation:var(--companion-aura-animation) var(--companion-aura-duration) ease-in-out infinite;
+  transition:opacity .35s ease,border-color .35s ease,box-shadow .35s ease;
+}
+@keyframes companion-float{0%,100%{transform:translateY(0)}50%{transform:translateY(-2.5px)}}
+@keyframes companion-listen{0%,100%{transform:scale(1)}50%{transform:scale(1.02)}}
+@keyframes companion-speak{0%,100%{transform:scale(1)}45%{transform:scale(1.04)}}
+@keyframes companion-aura-breathe{0%,100%{opacity:var(--companion-aura-opacity);transform:scale(.996)}50%{opacity:calc(var(--companion-aura-opacity) + .12);transform:scale(1.004)}}
+@keyframes companion-aura-pulse{0%,100%{opacity:var(--companion-aura-opacity);transform:scale(.994)}50%{opacity:1;transform:scale(1.012)}}
+@media(prefers-reduced-motion:reduce){
+  #shell[data-companion-form=pet] .orb-idle-avatar img{animation:none!important}
+  #shell[data-companion-form=pet] .orb-idle-avatar::after{animation:none!important}
+}
+@media(forced-colors:active){
+  #shell[data-companion-form=pet] .orb-idle-avatar::after{border-color:CanvasText;box-shadow:none;opacity:1}
+}
+
+
+/* ── Companion state aura ─────────────────────────────────────────────────
+   One state vocabulary, two consumers: the floating window (#shell) and the
+   chat pane. Fixed semantic colors match the state-label treatment: an error
+   must not rotate hue with the skin palette, and listening/speaking must stay
+   legible over every pet portrait. The aura is decorative; the existing
+   role=status labels remain the accessible source of truth. */
+:where(#shell, .chat-pane){
+  --companion-ring:rgba(255,228,194,.46);
+  --companion-glow:rgba(255,197,135,.16);
+  --companion-aura-animation:companion-aura-breathe;
+  --companion-aura-duration:5.2s;
+  --companion-aura-opacity:.55;
+}
+[data-companion-state='idle'],[data-companion-state='inactive']{
+  --companion-ring:rgba(255,228,194,.46);--companion-glow:rgba(255,197,135,.16);
+  --companion-aura-animation:companion-aura-breathe;--companion-aura-duration:5.2s;--companion-aura-opacity:.55;
+}
+[data-companion-state='candidate'],[data-companion-state='listening']{
+  --companion-ring:#86e5ff;--companion-glow:rgba(93,210,255,.34);
+  --companion-aura-animation:companion-aura-pulse;--companion-aura-duration:1.7s;--companion-aura-opacity:.92;
+}
+[data-companion-state='speaking']{
+  --companion-ring:#ffb46b;--companion-glow:rgba(255,164,88,.36);
+  --companion-aura-animation:companion-aura-pulse;--companion-aura-duration:.98s;--companion-aura-opacity:.96;
+}
+[data-companion-state='booting'],[data-companion-state='reconnecting']{
+  --companion-ring:#b8a7ff;--companion-glow:rgba(146,127,255,.26);
+  --companion-aura-animation:companion-aura-pulse;--companion-aura-duration:2.4s;--companion-aura-opacity:.68;
+}
+[data-companion-state='muted']{
+  --companion-ring:rgba(205,208,218,.34);--companion-glow:transparent;
+  --companion-aura-animation:none;--companion-aura-duration:5.2s;--companion-aura-opacity:.34;
+}
+[data-companion-state='disconnected']{
+  --companion-ring:#f0c07a;--companion-glow:rgba(240,192,122,.22);
+  --companion-aura-animation:companion-aura-breathe;--companion-aura-duration:4.4s;--companion-aura-opacity:.62;
+}
+[data-companion-state='error'],[data-companion-state='configuration-required'],
+[data-companion-state='authentication-failed'],[data-companion-state='backend-unavailable'],
+[data-companion-state='permission-denied'],[data-companion-state='microphone-restricted'],
+[data-companion-state='microphone-no-device'],[data-companion-state='microphone-busy'],
+[data-companion-state='microphone-unavailable'],[data-companion-state='audio-pipeline-error']{
+  --companion-ring:#ff7b83;--companion-glow:rgba(255,90,105,.24);
+  --companion-aura-animation:none;--companion-aura-duration:4s;--companion-aura-opacity:.78;
+}
+
+/* Collapsed orb: the task summary moves to the window's top edge, which is empty
+   in the pet form, so it can never cover the status label under the orb. The
+   confirmation banner keeps priority (the extras are already hidden then). */
+body[data-presentation-mode='orb'] #personal-orb-host .personal-orb-extras {
+  top: 6px;
+  bottom: auto;
+  left: 8px;
+  right: 8px;
+}
+/* While a task chip is visible the extra top inset keeps it clear of the unread
+   dot and of the orb itself on the shortest collapsed windows. */
+body[data-presentation-mode='orb'] #personal-orb-host .personal-orb-task {
+  box-shadow: 0 4px 12px rgba(0, 0, 0, .22);
+}
+/* Bubble mode is an absolute, orb-relative layout: the bubble stack owns the window's top edge
+   (its bottom is --bubble-orb-y - 55px) and the task banner starts at --bubble-orb-y + 125px. The
+   chip therefore leaves the top edge and takes the free slot under the status label (label ends
+   at +74px; the project label that normally uses +87px is hidden while the chip shows), centred on
+   the orb so left/right/center alignment all follow it. 160px keeps it inside the window because
+   main keeps the orb at least 80 CSS px from either side. */
+body[data-presentation-mode='orb'] #shell[data-bubbles='true'] #personal-orb-host .personal-orb-extras {
+  top: calc(var(--bubble-orb-y) + 87px);
+  bottom: auto;
+  left: var(--bubble-orb-x);
+  right: auto;
+  width: max-content;
+  max-width: 160px;
+  transform: translateX(-50%);
+}

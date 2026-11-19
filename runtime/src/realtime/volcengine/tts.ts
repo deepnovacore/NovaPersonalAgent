@@ -14,6 +14,7 @@ import {
   type VolcBinarySocket,
 } from './websocket.js'
 
+import {rotatedCredential} from '../../config/credential-rotation.js'
 const boundaries = new Set([...`，。！？；：,.!?;:\n`])
 
 export class TextChunker {
@@ -107,7 +108,7 @@ export function ttsHeaders(input: {
     throw new DoubaoTtsFailure('configuration')
   }
   return Object.freeze({
-    'X-Api-Key': input.apiKey,
+    'X-Api-Key': rotatedCredential(input.apiKey),
     'X-Api-Resource-Id': input.resourceId,
     'X-Api-Connect-Id': connectId,
   })
