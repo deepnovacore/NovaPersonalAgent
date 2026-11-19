@@ -116,13 +116,15 @@ v1.0.0 还包括：
 
 | 平台 | 下载 |
 | --- | --- |
-| macOS · Apple Silicon（arm64） | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64-app.zip) |
-| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [便携版 ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
-| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
+| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
+| Windows · x64 | [EXE（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-unsigned.exe) |
+| Android · arm64 | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
-手机端：<!-- TODO(v1.0.0): 发布前补充 TestFlight 邀请与 Android APK 链接 -->iOS TestFlight 与 Android APK 链接将在发布时补充。环境要求：Node.js 22.13+ 与 npm。编码任务需安装并登录所选编码后端；Codex 使用 app-server。
+手机端：iOS 外测通过 TestFlight 分发。
 
-可直接用 npm 安装。
+从源码或 npm 运行的环境要求：Node.js 22.13+ 与 npm。编码任务需安装并登录所选编码后端；Codex 使用 app-server。
+
+如需使用 npm 上的旧版（0.4.1），可安装以下命令行工具。
 
 ```bash
 # 全局安装
@@ -138,7 +140,7 @@ novapersonal doctor
 自 v0.4 起使用 Nova Personal Agent 新包名。已发布的 v0.3.x 仍使用旧包名和 `novaaudio`；新包保留该命令别名，并继续读取原有数据与设置。迁移已有全局安装时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server`，避免命令链接冲突；这不会删除用户数据。
 
 
-升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级保留设置与数据。状态文件带版本号，旧版本可能拒绝读取新文件；降级前请先备份，再运行 `novapersonal reset-state`。
+升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@0.4.1`。升级保留设置与数据。状态文件带版本号，旧版本可能拒绝读取新文件；降级前请先备份，再运行 `novapersonal reset-state`。
 
 Nova 使用 Space / Host / Client。按 [Space 设置指南](docs/zh-CN/space-host-client.md)配置桌面 Host，部署或选择加密 [relay](relay/README.md)。Runtime 与 context 留在 Host，relay 只转发密文。Client 聊天需要 Host 在线，不会接管后台任务；独立 Space 在本机运行，无需 relay。Host 损坏即 Space 丢失；切换模式需要新建 Space，旧数据不迁移。从 v0.4 升级请见[升级说明](docs/releases/v1.0.0.md)。
 

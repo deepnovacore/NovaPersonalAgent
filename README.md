@@ -116,13 +116,15 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 
 | Platform | Download |
 | --- | --- |
-| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64-app.zip) |
-| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [Portable ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
-| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
+| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
+| Windows · x64 | [EXE (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-unsigned.exe) |
+| Android · arm64 | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
-Mobile: <!-- TODO(v1.0.0): fill in the TestFlight invitation and Android APK links before release --> iOS TestFlight and Android APK links are added at release. Requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
+Mobile: iOS external testing uses TestFlight.
 
-Install the release with npm.
+Source and CLI requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
+
+For the older npm release (0.4.1), use the CLI below.
 
 ```bash
 npm install --global nova-personal-agent@latest
@@ -137,7 +139,7 @@ novapersonal doctor
 v0.4 introduces the Nova Personal Agent package names. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
 
 
-Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@1.0.0`. Upgrades keep your settings and data. State files are versioned, so an older build may refuse a newer file; run `novapersonal reset-state` (after backing up) before downgrading.
+Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@0.4.1`. Upgrades keep your settings and data. State files are versioned, so an older build may refuse a newer file; run `novapersonal reset-state` (after backing up) before downgrading.
 
 Nova uses Space / Host / Client. Configure a desktop Host with the [Space setup guide](docs/en/space-host-client.md) and deploy or select an encrypted [relay](relay/README.md). Runtime and context stay on the Host; the relay forwards ciphertext. A Client needs its Host online for chat and never takes over background work. Independent Spaces run locally without a relay. Host loss means Space loss; changing modes creates a new Space without migrating old data. Coming from v0.4? See the [upgrade notes](docs/releases/v1.0.0.md).
 
