@@ -2,10 +2,7 @@
 
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
-  <img src="assets/brand/npa-header-light.svg" alt="Nova Personal Agent — Understands you. Interacts in real time." width="100%">
-</picture>
+<img src="assets/brand/npa-header.svg" alt="Nova Personal Agent — Understands you. Interacts in real time." width="100%">
 
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
@@ -17,11 +14,11 @@
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![Film](https://img.shields.io/badge/观看-宣传片-2f6fde.svg)](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)
 
-**开源、语音优先的个人 Agent：边干活边聊天，越聊越懂你，数据留在你的设备上。**
+**语音优先、本地优先的开源个人 Agent：边干活边聊天，越聊越懂你，数据留在你的设备上。**
 
 桌面应用名为 **Nova Personal Agent（NPA）**；Android 和 iOS 应用名为 **NovaCore**。
 
-Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如何、何时澄清意图、征求批准，再推进工作。前后双脑协作，让后台 Agent 执行长任务时，前台依然能流畅交流。你可以边聊边调整目标，随时回看结果，始终掌握主动权。
+不用你问，Nova 先想到；边聊天，边干活；电脑聊一半，手机接着聊；越聊越懂你。它记得你、懂当下，再替你在电脑和手机上动手：要紧的事先问你，数据只留在你自己的设备上。
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)**
 
@@ -31,9 +28,9 @@ Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如
 
 ---
 
-[![看剧时 Nova 主动开口，起草回复但不代发](assets/gallery/stills/pc-proactive-invite.webp)](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)
+https://github.com/user-attachments/assets/daaa20e3-2abb-4ed3-8db5-2278375bca3b
 
-<sub>真实录屏，使用人设账号。查看[画廊与短片](#22-画廊)，或观看[宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)。</sub>
+<sub>产品宣传片，使用人设账号录制。更多截图见[画廊](#22-画廊)，短片见[官网](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)。</sub>
 
 ## News
 
@@ -67,18 +64,7 @@ Nova 结合你的上下文与私有记忆，理解你关心什么。它知道如
 - **语音优先。** 全双工语音：前脑负责说，后脑负责做。
 - **本地优先。** Space 住在你掌控的 Host 上，设备通过端到端加密的 relay 或 Tailscale 同步。
 
-v1.0.0 还包括：
-
-- **你的主动式个人 Agent。** 时间线、想法、目标、资讯和 Profile，把 Nova 对你的了解变成可以行动的建议。
-- **理解广泛、非结构化的上下文。** 接入文件夹、邮件、日历、对话和文档；个人记忆可追溯、可编辑、可删除。
-- **常驻语音助手，前后双脑协作。** 前脑陪你交流，后脑处理长时间运行的工作。
-- **薄而清晰的前台任务协调层。** 问清目标、确认授权，再委派给 coding agent；按标准核对证据，随时接管和交还。
-- **主动有分寸。** Nova 判断什么值得提醒、什么时候开口。琐碎更新保持安静，不抢你的话。
-
-- **更多执行器。** 编码代理、电脑操作与受监督的手机操作共享审批、取消和证据核验，详见[执行器](docs/zh-CN/executors/overview.md)。
-- **更多编码执行器。** 新会话也可以通过 ACP 交给 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness；每个会话始终沿用创建时的执行器。执行中追加要求目前只有 Codex 支持。详见 [Coding](docs/zh-CN/executors/coding.md)。
-
-[工作原理](docs/zh-CN/architecture.md) · [任务控制](docs/zh-CN/tasks.md) · [资料授权](docs/zh-CN/sources-and-connectors.md)
+[工作原理](docs/zh-CN/architecture.md) · [任务控制](docs/zh-CN/tasks.md) · [执行器](docs/zh-CN/executors/overview.md) · [资料授权](docs/zh-CN/sources-and-connectors.md)
 
 ## 2. 和 Nova 一起做事
 
@@ -93,18 +79,18 @@ v1.0.0 还包括：
 
 ### 2.2 画廊
 
-均为真实录屏，使用人设账号。短片与宣传片见[官网画廊](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)。
+更多短片与宣传片见[官网](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)
 
 <table>
   <tr>
     <td width="33%" valign="top"><a href="assets/gallery/stills/pc-computer-use.webp"><img src="assets/gallery/stills/pc-computer-use.webp" alt="Nova 在 Mac 上搜索视频并点赞" width="100%"></a><br><b>操作你的电脑</b><br>搜索视频并点赞，全程可见。</td>
-    <td width="33%" valign="top"><a href="assets/gallery/stills/phone-mobile-result.webp"><img src="assets/gallery/stills/phone-mobile-result.webp" alt="Nova 在虚拟手机屏幕上浏览应用" width="100%"></a><br><b>在手机上办事</b><br>在虚拟屏幕里浏览，不经你同意不下单。</td>
-    <td width="33%" valign="top"><a href="assets/gallery/stills/phone-voice-site.webp"><img src="assets/gallery/stills/phone-voice-site.webp" alt="手机上用语音描述并生成网站" width="100%"></a><br><b>边干活边聊天</b><br>语音描述网站，边聊边做。</td>
-  </tr>
-  <tr>
     <td width="33%" valign="top"><a href="assets/gallery/stills/pc-timeline-cited.webp"><img src="assets/gallery/stills/pc-timeline-cited.webp" alt="带 Timeline 出处的回答" width="100%"></a><br><b>越聊越懂你</b><br>回答带着出处。</td>
     <td width="33%" valign="top"><a href="assets/gallery/stills/pc-draft-unsent.webp"><img src="assets/gallery/stills/pc-draft-unsent.webp" alt="回复存入草稿箱，未发送" width="100%"></a><br><b>只起草，不替你发</b><br>回复存进草稿箱，发不发由你决定。</td>
-    <td width="33%" valign="top"><a href="assets/gallery/stills/iphone-feed.webp"><img src="assets/gallery/stills/iphone-feed.webp" alt="Nova 判断值得推送的 iPhone 通知" width="100%"></a><br><b>主动</b><br>值得看的才推。</td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top" align="center"><a href="assets/gallery/stills/phone-mobile-result.webp"><img src="assets/gallery/stills/phone-mobile-result.webp" alt="Nova 在虚拟手机屏幕上浏览应用" height="400"></a><br><b>在手机上办事</b><br>在虚拟屏幕里浏览，不经你同意不下单。</td>
+    <td width="33%" valign="top" align="center"><a href="assets/gallery/stills/phone-voice-site.webp"><img src="assets/gallery/stills/phone-voice-site.webp" alt="手机上用语音描述并生成网站" height="400"></a><br><b>边干活边聊天</b><br>语音描述网站，边聊边做。</td>
+    <td width="33%" valign="top" align="center"><a href="assets/gallery/stills/iphone-feed.webp"><img src="assets/gallery/stills/iphone-feed.webp" alt="Nova 判断值得推送的 iPhone 通知" height="400"></a><br><b>主动</b><br>值得看的才推。</td>
   </tr>
 </table>
 
@@ -112,7 +98,7 @@ v1.0.0 还包括：
 
 ### 3.1 安装与启动
 
-**快捷下载 · v1.0.0** — [发布说明与 SHA-256 校验文件](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0) · [最新版本](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+**v1.0.0 下载** — [发布说明与 SHA-256 校验文件](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0) · [全部版本](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 
 | 平台 | 下载 |
 | --- | --- |
@@ -120,9 +106,9 @@ v1.0.0 还包括：
 | Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [便携版 ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
 | Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
 
-手机端：<!-- TODO(v1.0.0): 发布前补充 TestFlight 邀请与 Android APK 链接 -->iOS TestFlight 与 Android APK 链接将在发布时补充。环境要求：Node.js 22.13+ 与 npm。编码任务需安装并登录所选编码后端；Codex 使用 app-server。
+**手机端（NovaCore）：**<!-- TODO(v1.0.0): 发布前补充 TestFlight 邀请与 Android APK 链接 -->iOS TestFlight 与 Android APK 链接会发布在 Release 页面。
 
-可直接用 npm 安装。
+**也可以用 npm 安装**（需要 Node.js 22.13+）：
 
 ```bash
 # 全局安装
@@ -135,12 +121,13 @@ novapersonal config
 novapersonal doctor
 ```
 
-自 v0.4 起使用 Nova Personal Agent 新包名。已发布的 v0.3.x 仍使用旧包名和 `novaaudio`；新包保留该命令别名，并继续读取原有数据与设置。迁移已有全局安装时，先运行 `npm uninstall --global nova-audio-agent nova-audio-agent-server`，避免命令链接冲突；这不会删除用户数据。
+编码任务需要先安装并登录你选用的编码 Agent（默认 Codex）。
 
+**升级。** 退出 Nova，重新运行上面的安装命令，设置与数据都会保留。如需固定版本，使用 `nova-personal-agent@1.0.0`。状态文件带版本号，旧版本可能拒绝读取新文件；降级前请先备份，再运行 `novapersonal reset-state`。
 
-升级前先退出 Nova，再运行上面的安装命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级保留设置与数据。状态文件带版本号，旧版本可能拒绝读取新文件；降级前请先备份，再运行 `novapersonal reset-state`。
+**配置你的 Space。** Host（你的桌面电脑或无头服务器）保存 runtime、密钥和记忆；Client（另一台电脑、iOS、Android）通过端到端加密的 relay 或 Tailscale 连接 Host，relay 只转发密文。独立 Space 在本机运行，无需 relay。详见 [Space 设置指南](docs/zh-CN/space-host-client.md)与 [relay 部署说明](relay/README.md)。
 
-Nova 使用 Space / Host / Client。按 [Space 设置指南](docs/zh-CN/space-host-client.md)配置桌面 Host，部署或选择加密 [relay](relay/README.md)。Runtime 与 context 留在 Host，relay 只转发密文。Client 聊天需要 Host 在线，不会接管后台任务；独立 Space 在本机运行，无需 relay。Host 损坏即 Space 丢失；切换模式需要新建 Space，旧数据不迁移。从 v0.4 升级请见[升级说明](docs/releases/v1.0.0.md)。
+> Client 聊天需要 Host 在线，也不会接管后台任务。Host 丢失即 Space 丢失；切换模式会新建 Space，旧数据不迁移。从 v0.4 升级请先看[升级说明](docs/releases/v1.0.0.md)。
 
 ### 3.2 从源码开发
 
@@ -191,12 +178,14 @@ node runtime/dist/src/cli.js demo all
 
 | 读这篇 | 目的 |
 |---|---|
-| [架构](docs/zh-CN/architecture.md) | 模块与边界 |
-| [术语与不变量](docs/zh-CN/glossary.md) | 核心常量 |
-| [上手指南](docs/zh-CN/getting-started.md) | 安装与集成 |
-| [Workbench](docs/zh-CN/workbench.md) · [任务](docs/zh-CN/tasks.md) · [资料来源与连接器](docs/zh-CN/sources-and-connectors.md) | 主窗口、交办的任务，以及 Nova 能读取哪些资料 |
+| [文档首页](docs/zh-CN/README.md) | 完整文档地图 |
+| [上手指南](docs/zh-CN/getting-started.md) | 安装、凭据配置与源码运行 |
+| [Space / Host / Client](docs/zh-CN/space-host-client.md) · [Relay](relay/README.md) · [NovaCore 手机端](docs/zh-CN/iphone.md) | 设备配对与 Host 部署 |
+| [Workbench](docs/zh-CN/workbench.md) · [任务](docs/zh-CN/tasks.md) · [个人记忆](docs/zh-CN/personal-memory.md) | 主窗口、交办的任务与记忆管理 |
+| [执行器](docs/zh-CN/executors/overview.md) · [编码 Agent](docs/zh-CN/executors/coding.md) · [资料来源与连接器](docs/zh-CN/sources-and-connectors.md) | Nova 能做什么、能读取哪些资料 |
+| [支持矩阵](docs/zh-CN/support-matrix.md) · [设置](docs/zh-CN/settings.md) | 服务商、模型与配置 |
+| [架构](docs/zh-CN/architecture.md) · [安全与隐私](docs/zh-CN/security.md) · [术语表](docs/zh-CN/glossary.md) | 工作原理与系统保证 |
 | [语音助手什么时候该开口？](docs/zh-CN/blog/2026-08-proactive-voice-agent-design-space.md) | 语音交互设计 |
-| [Node runtime 迁移归档](https://github.com/deepnovacore/NovaPersonalAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | `v0.1.0` tag 历史中的迁移期计划 |
 
 ## 5. 路线图
 

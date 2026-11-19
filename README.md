@@ -2,10 +2,7 @@
 
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="assets/brand/npa-header-dark.svg">
-  <img src="assets/brand/npa-header-light.svg" alt="Nova Personal Agent — Understands you. Interacts in real time." width="100%">
-</picture>
+<img src="assets/brand/npa-header.svg" alt="Nova Personal Agent — Understands you. Interacts in real time." width="100%">
 
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
@@ -17,11 +14,10 @@
 [![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![Film](https://img.shields.io/badge/Watch-the%20film-2f6fde.svg)](https://deepnovacore.github.io/NovaPersonalAgent/#film)
 
-**Nova Personal Agent (NPA) is a voice-first, open-source personal agent. It talks while it works, understands you over time, and keeps your data on your devices.**
+**Nova Personal Agent (NPA) is a voice-first and local-first open-source personal agent. It talks while it works, understands you over time, runs locally and freely on your own devices (mobile-native and pc-native, no cloud computer required).**
 
-The desktop app is **Nova Personal Agent (NPA)**; the Android and iOS apps are **NovaCore**.
 
-Nova draws on your context and private memory to understand what matters to you. It knows how and when to clarify, ask for approval, and move work forward. Its dual brains keep the conversation responsive while background agents handle longer tasks. Refine your goals as work progresses, revisit the results, and stay in control.
+Nova thinks ahead before you ask, keeps talking while it works, picks up on your phone where your computer left off, and gets to know you better with every conversation. It remembers you, understands the moment, then acts for you on your computer and phone, asking before anything consequential and keeping your data on devices you own.
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://deepnovacore.github.io/NovaPersonalAgent/#film)**
 
@@ -31,9 +27,9 @@ Nova draws on your context and private memory to understand what matters to you.
 
 ---
 
-[![Nova speaks up while you watch, then drafts a reply without sending it](assets/gallery/stills/pc-proactive-invite.webp)](https://deepnovacore.github.io/NovaPersonalAgent/#gallery)
+https://github.com/user-attachments/assets/daaa20e3-2abb-4ed3-8db5-2278375bca3b
 
-<sub>Real recording, persona account. Browse the [gallery and clips](#22-gallery) or watch [the film](https://deepnovacore.github.io/NovaPersonalAgent/#film).</sub>
+<sub>Product film, recorded on persona accounts. More stills in the [gallery](#22-gallery); clips on the [website](https://deepnovacore.github.io/NovaPersonalAgent/#gallery).</sub>
 
 ## News
 
@@ -67,18 +63,7 @@ Your context informs the conversation; the front brain coordinates work with the
 - **Voice-first.** Full-duplex voice: a front brain that talks and a back brain that works.
 - **Local-first.** Your Space lives on a Host you control; devices sync through an end-to-end encrypted relay or Tailscale.
 
-Also in v1.0.0:
-
-- **Your proactive personal agent.** Timeline, Ideas, Goals, Feeds and Profile turn what Nova knows about you into suggestions you can act on.
-- **Wide and unstructured context.** Bring folders, mail, calendars, conversations and documents; keep personal memory traceable, editable and removable.
-- **Always-on voice assistant with dual brains.** The front brain stays in conversation while the back brain handles long-running work.
-- **A thin frontend task coordinator.** Clarify, authorize and delegate to a coding agent; check evidence against your criteria, take over and hand control back.
-- **Restrained proactivity.** Nova chooses what matters and when to speak. Routine updates stay quiet, and reminders respect your turn.
-
-- **More executors.** Coding agents, computer use and supervised mobile use share approvals, cancellation and evidence checks. See [Executors](docs/en/executors/overview.md).
-- **More coding agents.** New sessions can also run on OpenCode, CodeBuddy, Pi or DeepSeek Harness over ACP; each session keeps the agent it started with. Live steering stays a Codex feature. See [Coding](docs/en/executors/coding.md).
-
-[How Nova works](docs/en/architecture.md) · [Task controls](docs/en/tasks.md) · [Source permissions](docs/en/sources-and-connectors.md)
+[How Nova works](docs/en/architecture.md) · [Task controls](docs/en/tasks.md) · [Executors](docs/en/executors/overview.md) · [Source permissions](docs/en/sources-and-connectors.md)
 
 ## 2. Work with Nova
 
@@ -98,13 +83,13 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 <table>
   <tr>
     <td width="33%" valign="top"><a href="assets/gallery/stills/pc-computer-use.webp"><img src="assets/gallery/stills/pc-computer-use.webp" alt="Nova searching a video and liking it on a Mac" width="100%"></a><br><b>Works your computer</b><br>Searches a video and likes it, in plain view.</td>
-    <td width="33%" valign="top"><a href="assets/gallery/stills/phone-mobile-result.webp"><img src="assets/gallery/stills/phone-mobile-result.webp" alt="Nova browsing apps on a virtual phone screen" width="100%"></a><br><b>Works your phone</b><br>Browses on a virtual screen. Nothing is ordered without you.</td>
-    <td width="33%" valign="top"><a href="assets/gallery/stills/phone-voice-site.webp"><img src="assets/gallery/stills/phone-voice-site.webp" alt="A website requested by voice on a phone" width="100%"></a><br><b>Chat while it works</b><br>Describe a site by voice; keep talking while it builds.</td>
-  </tr>
-  <tr>
     <td width="33%" valign="top"><a href="assets/gallery/stills/pc-timeline-cited.webp"><img src="assets/gallery/stills/pc-timeline-cited.webp" alt="An answer with citations from the Timeline" width="100%"></a><br><b>Learns you over time</b><br>Answers come with sources.</td>
     <td width="33%" valign="top"><a href="assets/gallery/stills/pc-draft-unsent.webp"><img src="assets/gallery/stills/pc-draft-unsent.webp" alt="A reply saved to Drafts and not sent" width="100%"></a><br><b>Drafts, never sends</b><br>The reply lands in Drafts. Sending is your call.</td>
-    <td width="33%" valign="top"><a href="assets/gallery/stills/iphone-feed.webp"><img src="assets/gallery/stills/iphone-feed.webp" alt="iPhone notifications that Nova judged worth sending" width="100%"></a><br><b>Proactive</b><br>Only what is worth a nudge.</td>
+  </tr>
+  <tr>
+    <td width="33%" valign="top" align="center"><a href="assets/gallery/stills/phone-mobile-result.webp"><img src="assets/gallery/stills/phone-mobile-result.webp" alt="Nova browsing apps on a virtual phone screen" height="400"></a><br><b>Works your phone</b><br>Browses on a virtual screen. Nothing is ordered without you.</td>
+    <td width="33%" valign="top" align="center"><a href="assets/gallery/stills/phone-voice-site.webp"><img src="assets/gallery/stills/phone-voice-site.webp" alt="A website requested by voice on a phone" height="400"></a><br><b>Chat while it works</b><br>Describe a site by voice; keep talking while it builds.</td>
+    <td width="33%" valign="top" align="center"><a href="assets/gallery/stills/iphone-feed.webp"><img src="assets/gallery/stills/iphone-feed.webp" alt="iPhone notifications that Nova judged worth sending" height="400"></a><br><b>Proactive</b><br>Only what is worth a nudge.</td>
   </tr>
 </table>
 
@@ -112,7 +97,7 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 
 ### 3.1 Install and run
 
-**Quick downloads · v1.0.0** — [Release notes and SHA-256 checksums](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0) · [Latest release](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+**v1.0.0 downloads** — [Release notes and SHA-256 checksums](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0) · [All releases](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 
 | Platform | Download |
 | --- | --- |
@@ -120,9 +105,9 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 | Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [Portable ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
 | Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
 
-Mobile: <!-- TODO(v1.0.0): fill in the TestFlight invitation and Android APK links before release --> iOS TestFlight and Android APK links are added at release. Requirements: Node.js 22.13+ and npm. For coding tasks, install and authenticate your chosen coding backend; Codex uses its app-server transport.
+**Mobile (NovaCore):** <!-- TODO(v1.0.0): fill in the TestFlight invitation and Android APK links before release --> iOS TestFlight and Android APK links will be posted on the release page.
 
-Install the release with npm.
+**Or install with npm** (Node.js 22.13+):
 
 ```bash
 npm install --global nova-personal-agent@latest
@@ -134,12 +119,13 @@ novapersonal config
 novapersonal doctor
 ```
 
-v0.4 introduces the Nova Personal Agent package names. Published v0.3.x versions retain the old package names and `novaaudio` command. The new package keeps that command alias and reuses existing data and settings. When migrating an existing global install, first run `npm uninstall --global nova-audio-agent nova-audio-agent-server` to avoid command-link collisions; this leaves user data intact.
+For coding tasks, install and sign in to the coding agent you choose (Codex by default).
 
+**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. Pin a version with `nova-personal-agent@1.0.0`. State files are versioned, so an older build may refuse a newer file: back up, then run `novapersonal reset-state` before downgrading.
 
-Quit Nova before upgrading, then rerun the install command above. To pin a version, use `nova-personal-agent@1.0.0`. Upgrades keep your settings and data. State files are versioned, so an older build may refuse a newer file; run `novapersonal reset-state` (after backing up) before downgrading.
+**Set up your Space.** A Host (your desktop or a headless server) keeps the runtime, keys and memory. Clients (another desktop, iOS, Android) reach it through an end-to-end encrypted relay or Tailscale; the relay only forwards ciphertext. A standalone Space runs locally with no relay. See the [Space setup guide](docs/en/space-host-client.md) and the [relay guide](relay/README.md).
 
-Nova uses Space / Host / Client. Configure a desktop Host with the [Space setup guide](docs/en/space-host-client.md) and deploy or select an encrypted [relay](relay/README.md). Runtime and context stay on the Host; the relay forwards ciphertext. A Client needs its Host online for chat and never takes over background work. Independent Spaces run locally without a relay. Host loss means Space loss; changing modes creates a new Space without migrating old data. Coming from v0.4? See the [upgrade notes](docs/releases/v1.0.0.md).
+> Clients need their Host online to chat and never take over background work. Losing the Host loses the Space, and switching modes creates a new Space without migrating data. Upgrading from v0.4? Read the [upgrade notes](docs/releases/v1.0.0.md).
 
 ### 3.2 Develop from source
 
@@ -163,7 +149,7 @@ node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
 
-The client includes microphone, camera, sound, settings and external MCP controls. 
+The client includes microphone, camera, sound, settings and external MCP controls.
 
 ### 3.3 Support matrix
 
@@ -188,12 +174,14 @@ Models, credentials and per-provider limits: [support matrix](docs/en/support-ma
 
 | Read this | For |
 |---|---|
-| [Architecture](docs/en/architecture.md) | Modules and boundaries |
-| [Glossary and invariants](docs/en/glossary.md) | Vocabulary and rules |
-| [Getting started](docs/en/getting-started.md) | Setup and integrations |
-| [Workbench](docs/en/workbench.md) · [Tasks](docs/en/tasks.md) · [Sources and connectors](docs/en/sources-and-connectors.md) | The main window, delegated work, and what Nova may read |
+| [Documentation home](docs/en/README.md) | The full documentation map |
+| [Getting started](docs/en/getting-started.md) | Install, credentials and running from source |
+| [Space / Host / Client](docs/en/space-host-client.md) · [Relay](relay/README.md) · [NovaCore mobile](docs/en/iphone.md) | Pairing devices and running a Host |
+| [Workbench](docs/en/workbench.md) · [Tasks](docs/en/tasks.md) · [Personal memory](docs/en/personal-memory.md) | The main window, delegated work and memory controls |
+| [Executors](docs/en/executors/overview.md) · [Coding agents](docs/en/executors/coding.md) · [Sources and connectors](docs/en/sources-and-connectors.md) | What Nova can do and what it may read |
+| [Support matrix](docs/en/support-matrix.md) · [Settings](docs/en/settings.md) | Providers, models and configuration |
+| [Architecture](docs/en/architecture.md) · [Security and privacy](docs/en/security.md) · [Glossary](docs/en/glossary.md) | How Nova works and what it guarantees |
 | [When should a voice agent speak?](docs/en/blog/2026-08-proactive-voice-agent-design-space.md) | Voice interaction design |
-| [Node runtime migration archive](https://github.com/deepnovacore/NovaPersonalAgent/tree/20a0812c0acb83b53cbad4b415d637dafff3c7f6/docs/archs/node-runtime-migration) | Migration-era plans in the history of tag `v0.1.0` |
 
 ## 5. Roadmap
 

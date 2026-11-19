@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/brand/npa-header-dark.svg">
-  <img src="../../assets/brand/npa-header-light.svg" alt="Nova Personal Agent — 使用文档" width="100%">
-</picture>
+<img src="../../assets/brand/npa-header.svg" alt="Nova Personal Agent — 使用文档" width="100%">
 
 <a href="../en/README.md"><ins>English</ins></a> | <a href="README.md"><ins>简体中文</ins></a> · <a href="../../README.zh-CN.md">仓库首页</a>
 
