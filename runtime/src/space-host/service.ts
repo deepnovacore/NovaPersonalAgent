@@ -7,6 +7,7 @@ import {link,mkdir,open as openFile,rm} from 'node:fs/promises';
 import {createHash,createHmac,randomBytes,randomUUID} from 'node:crypto';
 import {dirname} from 'node:path';
 import {z} from 'zod';
+import {loadWindowsSpaceSecretKey} from './windows-secret-key.js';
 import {BoundedJsonStore} from '../storage/bounded-json.js';
 import type {PersonalAgentHost} from '../personal-agent/host.js';
 import {canonicalJson} from '../text/canonical-json.js';
@@ -44,6 +45,7 @@ export class SpaceHost {
  async #loadSecretKey():Promise<string>{
   const cached=this.#secretKey;if(cached)return cached
   const path=this.options.path+'.key'
+  if(process.platform==='win32')return this.#secretKey=await loadWindowsSpaceSecretKey(path)
   // Only a missing key is created. A damaged key fails closed and is never deleted or replaced: it may be the last copy that can still authenticate existing tags, and a starter that recovers "late" must not remove the complete key another starter just published.
   const existing=await this.#readSecretKey(path).catch((error:NodeJS.ErrnoException)=>{if(error.code==='ENOENT')return undefined;throw error})
   if(existing!==undefined)return this.#secretKey=existing

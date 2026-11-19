@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import {mkdtemp, mkdir, rm, stat, writeFile, chmod, readdir, readFile} from 'node:fs/promises'
 import {readFileSync} from 'node:fs'
+import {assertPrivatePath} from '../../../runtime/dist/test/helpers/assert-private-path.js'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {parseSpaceCreateRequest, createSpaceCreateHandler, spaceCreateErrorCode} from '../src/main/space-create.mjs'
@@ -82,7 +83,7 @@ test('a new Space is created at the fixed private path and the reply carries no 
   assert.deepEqual(result, {ok: true})
   assert.deepEqual(h.calls.map(([name]) => name), ['load', 'init'])
   assert.deepEqual(h.calls[1][1], {configPath: join(h.directory, 'config.json'), personalPath: join(h.directory, 'personal.json'), relayUrl: 'https://relay.example', bootstrapToken: TOKEN})
-  assert.equal((await stat(h.directory)).mode & 0o777, 0o700)
+  await assertPrivatePath(h.directory, 0o700)
   assert.deepEqual(h.persisted, [join(h.directory, 'config.json')])
   assert.ok(!logs.join('\n').includes(TOKEN))
 })
@@ -160,10 +161,10 @@ test('an unregistered config pinned to a different relay is archived unread and 
   const names = await readdir(h.directory)
   const archived = names.filter(name => /^config\.unfinished-\d+\.json$/u.test(name))
   assert.equal(archived.length, 1)
-  assert.equal((await stat(join(h.directory, archived[0]))).mode & 0o777, 0o600)
+  await assertPrivatePath(join(h.directory, archived[0]), 0o600)
   assert.match(await readFile(join(h.directory, archived[0]), 'utf8'), /typo\.example/u)
   assert.ok(!JSON.stringify(result).includes(secret) && !logs.join('\n').includes(secret))
-  assert.equal((await stat(h.directory)).mode & 0o777, 0o700)
+  await assertPrivatePath(h.directory, 0o700)
   assert.deepEqual(h.persisted, [join(h.directory, 'config.json')])
 })
 
