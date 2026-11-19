@@ -108,8 +108,9 @@ const until=async(check:()=>boolean)=>{for(let i=0;i<300&&!check();i++)await new
 test('the summary waits for the first foreground moment plus the date jitter, lands once in chat:main and counts toward the daily allowance',async()=>{
  const f=await fixture();try{
   const a=await f.life({op:'create',kind:'goal',title:'学英语口语',cadence:'daily'}),b=await f.life({op:'create',kind:'goal',title:'做完个人网站',cadence:'progress'}),off=await f.life({op:'create',kind:'goal',title:'没有节奏',cadence:'off'})
-  // Life stamps goals with the wall clock, so the host clock moves a week past it: the progress goal has been quiet for a week.
-  f.clock.value=Date.parse(f.host.snapshot().life.goals[0]!.created_at)+8*DAY;const date=localDateOf(tz,f.clock.value)
+  // Leave a full quiet week after creation and keep the jitter and repeat ticks on the same Shanghai date.
+  const weekLater=Date.parse(f.host.snapshot().life.goals[0]!.created_at)+8*DAY
+  f.clock.value=localDateEnd(tz,weekLater)-DAY/2;const date=localDateOf(tz,f.clock.value)
   assert.equal(await f.host.runGoalCheckins(),'waiting','not before the user is in the foreground');assert.equal(f.calls.length,0)
   await f.online();if(goalCheckinJitterMs(date)>0)assert.equal(await f.host.runGoalCheckins(),'waiting','not before the jitter elapses')
   f.afterJitter();assert.equal(await f.host.runGoalCheckins(),'admitted');assert.equal(f.calls.length,1)
