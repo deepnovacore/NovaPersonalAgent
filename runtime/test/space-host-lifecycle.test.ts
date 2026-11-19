@@ -12,7 +12,7 @@ test('a retired transport cursor cannot write over the replacement Host journal'
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-cursor-retired-')),path=join(dir,'journal.json');
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  const cursors:Parameters<SpaceHostTransport['start']>[1][]=[];
- const transport=():SpaceHostTransport=>({clients:()=>['phone'],start:(_receive,cursor)=>{cursors.push(cursor);return Promise.resolve(()=>{})},send:()=>Promise.resolve(),stream:()=>Promise.resolve()});
+ const transport=():SpaceHostTransport=>({clients:()=>['phone'],start:(_receive,cursor)=>{cursors.push(cursor);return Promise.resolve(()=>undefined)},send:()=>Promise.resolve(),stream:()=>Promise.resolve()});
  const old=new SpaceHost({path,space:'fixture-space',host,transport:transport()}),replacement=new SpaceHost({path,space:'fixture-space',host,transport:transport()});
  try{
   await old.open();await cursors[0]!.save(7);
@@ -22,6 +22,7 @@ test('a retired transport cursor cannot write over the replacement Host journal'
   await replacement.receive('phone',{v:1,type:'intent',op_id:'replacement-only',kind:'snapshot.request',input:{},created_at:Date.now()});
   await cursors[1]!.save(12);
   const before=await readFile(path,'utf8');
+// eslint-disable-next-line @typescript-eslint/unbound-method -- the wrapper supplies the original receiver with .call(this)
   const originalWrite=BoundedJsonStore.prototype.write;let lateWrites=0;
   const watch=t.mock.method(BoundedJsonStore.prototype,'write',function(this:BoundedJsonStore<unknown>,value:unknown){if(this.path===path)lateWrites++;return originalWrite.call(this,value)});
   // This is the old RelayClient's saveCursor after receive rotated keys and replaced its service.

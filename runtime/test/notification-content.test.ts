@@ -22,8 +22,8 @@ test('task notification content preserves human clarification requests',()=>{
 test('persisted task waiting codes are translated for display only while natural and unrelated bodies are untouched',async()=>{
  const {NotificationService}=await import('../src/notifications/service.js');
  const {mkdtemp,readFile,realpath,rm}=await import('node:fs/promises');
- const {tmpdir}=await import('node:os');const {join}=await import('node:path');
- const dir=await mkdtemp(join(await realpath(tmpdir()),'notification-waiting-display-')),path=join(dir,'notifications.json');
+ const os=await import('node:os');const pathModule=await import('node:path');
+ const dir=await mkdtemp(pathModule.join(await realpath(os.tmpdir()),'notification-waiting-display-')),path=pathModule.join(dir,'notifications.json');
  let service=new NotificationService({path,userScope:'u',adapters:[]});
  const natural='请确认文件 task_runtime_unavailable.txt 的内容。';
  try{

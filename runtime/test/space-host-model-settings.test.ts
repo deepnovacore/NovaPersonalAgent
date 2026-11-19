@@ -51,9 +51,10 @@ test('sparse/null patches, serialized CAS, durable replay after intervening edit
       store.configure({expected_version: 1, routes: {support: null}}, 'b'),
       store.configure({expected_version: 1, routes: {fast: null}}, 'c'),
     ])
-    assert.equal(outcomes[0]!.status, 'fulfilled')
-    assert.equal(outcomes[1]!.status, 'rejected')
-    assert.equal((outcomes[1] as PromiseRejectedResult).reason.message, 'version_conflict')
+    assert.equal(outcomes[0].status, 'fulfilled')
+    assert.equal(outcomes[1].status, 'rejected')
+    assert.ok(outcomes[1].reason instanceof Error)
+    assert.equal(outcomes[1].reason.message, 'version_conflict')
     assert.equal(store.view().routes.support, undefined)
     assert.deepEqual(store.view().routes.fast, route)
     assert.equal(store.view().applied_version, 0)

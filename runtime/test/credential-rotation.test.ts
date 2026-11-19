@@ -23,11 +23,11 @@ test('unsafe or empty values are refused', () => {
 
 test('a gateway built with the old key sends the new one on its next request', async () => {
   const seen: string[] = []
-  const fetch = (async (_url: unknown, init: {headers: Record<string, string>}) => {
-    seen.push(init.headers.authorization ?? '')
-    return new Response(JSON.stringify({choices: [{finish_reason: 'stop', message: {content: 'ok'}}], usage: {prompt_tokens: 1, completion_tokens: 1}}), {status: 200, headers: {'content-type': 'application/json'}})
-  }) as unknown as typeof globalThis.fetch
-  const gateway = new OpenAIModelGateway({baseUrl: 'https://example.invalid/v1', apiKey: 'old-key', clock: {now: () => 0, monotonic: () => 0, sleep: async () => undefined} as never, fetch})
+  const fetch: typeof globalThis.fetch = (_url, init) => {
+    seen.push(new Headers(init?.headers).get('authorization') ?? '')
+    return Promise.resolve(new Response(JSON.stringify({choices: [{finish_reason: 'stop', message: {content: 'ok'}}], usage: {prompt_tokens: 1, completion_tokens: 1}}), {status: 200, headers: {'content-type': 'application/json'}}))
+  }
+  const gateway = new OpenAIModelGateway({baseUrl: 'https://example.invalid/v1', apiKey: 'old-key', clock: {now: () => 0, monotonic: () => 0, sleep: () => Promise.resolve()} as never, fetch})
   const request = {usage: {feature: 'test', operation: 'x'}, model: 'm', prompt: 'p', system: 's', signal: new AbortController().signal} as never
   await gateway.complete(request)
   rotateCredential('old-key', 'new-key')
@@ -36,9 +36,9 @@ test('a gateway built with the old key sends the new one on its next request', a
 })
 
 test('the desktop control port applies a rotation and refuses malformed requests without echoing a value', async () => {
-  const sent: any[] = []
+  const sent: {id?: string; error?: string}[] = []
   const handlers: ((event: unknown) => void)[] = []
-  const port = {postMessage: (message: unknown) => sent.push(message), on: (_event: string, handler: (event: unknown) => void) => handlers.push(handler), off: () => undefined}
+  const port = {postMessage: (message: {id?: string; error?: string}) => sent.push(message), on: (_event: string, handler: (event: unknown) => void) => handlers.push(handler), off: () => undefined}
   const stop = new AbortController()
   const control = installDesktopControl({parentPort: port as never, signal: stop.signal, status: () => undefined})
   const call = async (id: string, params: unknown) => { handlers[0]!({data: {type: 'nova.control.request', id, method: 'credentials.rotate', params}}); await new Promise(resolve => setImmediate(resolve)); return sent.find(m => m.id === id) }
@@ -47,7 +47,7 @@ test('the desktop control port applies a rotation and refuses malformed requests
   assert.equal(rotatedCredential('secret-old'), 'secret-new')
   for (const [id, params] of [['b', {rotations: []}], ['c', {rotations: [{from: 'x'}]}], ['d', {rotations: [{from: 'x', to: 'bad\n'}]}], ['e', {other: 1}]] as const) {
     const reply = await call(id, params)
-    assert.equal(reply.error, 'unavailable')
+    assert.equal(reply?.error, 'unavailable')
   }
   assert.ok(!JSON.stringify(sent).includes('secret-new'))
   control.dispose();stop.abort()

@@ -445,7 +445,7 @@ test('a model write surviving before its service receipt replays after a newer e
 });
 
 test('only owner can revoke another device and completion requires observed membership removal',async()=>{
- let revoked:string|undefined;const f=await fixture({owner:'phone',revokeDevice:async device=>{revoked=device}});
+ let revoked:string|undefined;const f=await fixture({owner:'phone',revokeDevice:device=>{revoked=device;return Promise.resolve()}});
  try{
   assert.equal((await f.send('other','bad-revoke','device.revoke',{device:'phone'})).status,'rejected');
   assert.equal((await f.send('phone','self-revoke','device.revoke',{device:'phone'})).status,'rejected');

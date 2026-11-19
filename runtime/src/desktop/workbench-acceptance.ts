@@ -105,7 +105,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
    const urlPort=url?.port===''?undefined:url?.port
    const port=options?.port??urlPort??(protocol==='https:'?443:80)
    const path=options?.path??(url?url.pathname+url.search:'/'),target=new URL(path,protocol+'//'+host+':'+String(port));
-   if(transport===https&&protocol==='https:'&&!options?.socketPath&&options?.rejectUnauthorized!==false&&relayUrl(target)&&target.pathname==='/v1/live'&&(options?.method??'GET').toUpperCase()==='GET'&&Object.entries(options?.headers??{}).some(([key,value])=>key.toLowerCase()==='upgrade'&&String(value).toLowerCase()==='websocket'))return fetchOrigin.run(target.origin,()=>Reflect.apply(originalRequest,transport,args)) as http.ClientRequest
+   if(transport===https&&protocol==='https:'&&!options?.socketPath&&options?.rejectUnauthorized!==false&&relayUrl(target)&&target.pathname==='/v1/live'&&(options?.method??'GET').toUpperCase()==='GET'&&Object.entries(options?.headers??{}).some(([key,value])=>key.toLowerCase()==='upgrade'&&String(value).toLowerCase()==='websocket'))return fetchOrigin.run(target.origin,()=>Reflect.apply(originalRequest,transport,args) as http.ClientRequest)
    if(options?.socketPath||protocol!=='http:'||host!=='127.0.0.1'||!loopback.has(host+':'+String(port))){blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unapproved_http_transport')}
    return Reflect.apply(originalRequest,transport,args) as http.ClientRequest
   }

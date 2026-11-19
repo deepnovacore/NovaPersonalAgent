@@ -1,3 +1,4 @@
+import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath} from 'node:fs/promises'
@@ -17,10 +18,10 @@ import {SuggestionPool} from '../src/core/suggestions.js'
 
 test('discovery reads newly synced invitations using its authorized model consumer',async()=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-mail-discovery-'))
- const gateway:ModelGateway={async *stream(){throw Error('unused')},complete:()=>Promise.reject(Error('no extraction needed'))}
+ const gateway:ModelGateway={stream(){throw Error('unused')},complete:()=>Promise.reject(Error('no extraction needed'))}
  const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'memory.sqlite')),userId:'fixture',gateway,model:'fixture',personalMemoryEnabled:false,conversationProviders:['discovery']})
  let consumer='discovery',discoveries=0
- const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'fixture',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,discoveryMemoryConsumer:()=>consumer,discoveryWindow:{quietMs:0,maxMs:0},discover:async snapshot=>{assert.ok(snapshot.retrieval?.snippets.length);discoveries++;return [{kind:'question',summary:'邀请需要回复',why_now:'回复截止日期临近',evidence_refs:[snapshot.retrieval!.snippets[0]!.evidence_id],memory_refs:[]}]},onTick:()=>{assert.equal(host.snapshot().feed.length,1,'speech arbitration runs only after the candidate is admitted')}})
+ const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'fixture',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,discoveryMemoryConsumer:()=>consumer,discoveryWindow:{quietMs:0,maxMs:0},discover:snapshot=>{assert.ok(snapshot.retrieval?.snippets.length);discoveries++;return Promise.resolve([{kind:'question',summary:'邀请需要回复',why_now:'回复截止日期临近',evidence_refs:[snapshot.retrieval.snippets[0]!.evidence_id],memory_refs:[]}])},onTick:()=>{assert.equal(host.snapshot().feed.length,1,'speech arbitration runs only after the candidate is admitted')}})
  try{
   await memory.open()
   await memory.ingestEvidence({sourceId:'mail-fixture',locator:'mail://fixture/invitation',kind:'mail',text:'设计周邀请，请于周四回复。',observedAt:new Date().toISOString(),embeddingConsent:false,processingConsent:memory.processingGrant(true)})
@@ -33,7 +34,7 @@ test('discovery reads newly synced invitations using its authorized model consum
   await host.sourceChanged({revision:2,phase:'invalidated'})
   await host.sourceChanged({revision:2,phase:'ready'})
   assert.equal(discoveries,1,'unchanged source polling must not restart the discovery window')
-  host.setPrefetchedRetrieval(snapshot.retrieval!.snippets[0]!.text.slice(0,200),snapshot.retrieval!)
+  host.setPrefetchedRetrieval(snapshot.retrieval.snippets[0]!.text.slice(0,200),snapshot.retrieval)
   consumer='unapproved'
   assert.deepEqual((await host.discoverySnapshot()).retrieval?.snippets,[],'cached evidence must be reauthorized for the current destination')
  }finally{await host.close();await memory.close();await rm(root,{recursive:true,force:true})}
@@ -92,7 +93,7 @@ test('discovery recall queries the newest authorized arrival and includes config
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-discovery-query-'))
  const queries:string[]=[]
  const rows=[{id:'older',text:'older calendar',kind:'calendar',observed_at:'2026-11-14T03:00:00Z'},{id:'latest',text:'new invitation '.repeat(30),kind:'mail',observed_at:'2026-11-14T04:00:00Z'},{id:'denied',text:'unauthorized private arrival',kind:'mail',observed_at:'2026-11-14T05:00:00Z'}]
- const memory={productSurfaces:true,list:()=>Promise.resolve({entries:[],cursor:null}),timelineEvidence:()=>Promise.resolve(rows.map(row=>({...row,version:'v1',history_only:false,group:'fixture',author:{key:'sender',kind:'unknown',is_user:false},relation:'participant',source:{evidence_id:row.id,type:row.kind,observed_at:row.observed_at,summary:row.text}})))} as unknown as import('../src/memory/personal-memory.js').PersonalMemoryResource
+ const memory={productSurfaces:true,list:()=>Promise.resolve({entries:[],cursor:null}),timelineEvidence:()=>Promise.resolve(rows.map(row=>({...row,version:'v1',history_only:false,group:'fixture',author:{key:'sender',kind:'unknown',is_user:false},relation:'participant',source:{evidence_id:row.id,type:row.kind,observed_at:row.observed_at,summary:row.text}})))} as unknown as PersonalMemoryResource
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'fixture',memory:()=>memory,pool:new SuggestionPool(),evidence:()=>null,now:()=>new Date('2026-11-14T05:42:00Z'),discoveryMemoryConsumer:()=> 'authorized'})
  const retrieval=new UnifiedRetrieval({memory:()=>memory})
  retrieval.evidence=(id)=>Promise.resolve({state:id==='denied'?'gone':'ok',evidence:id==='denied'?null:{evidence_id:id,source_kind:rows.find(r=>r.id===id)!.kind,locator:id,text:rows.find(r=>r.id===id)!.text,observed_at:rows.find(r=>r.id===id)!.observed_at,trust:'untrusted_external'}})

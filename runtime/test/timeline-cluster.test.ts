@@ -6,7 +6,7 @@ import {join} from 'node:path'
 import {clusterCards,titleSimilarity} from '../src/personal-agent/timeline-cluster.js'
 import {TimelineBrief,type TimelineInput} from '../src/personal-agent/timeline-brief.js'
 
-type TestCard={title:string;refs:string[];facts:number[];prior_id?:string;time?:{as_of?:string}}
+interface TestCard {title:string;refs:string[];facts:number[];prior_id?:string;time?:{as_of?:string}}
 const card=(title:string,refs:string[],extra:{prior_id?:string;time?:{as_of?:string}}={}):TestCard=>({title,refs,facts:[1,2],...extra})
 
 test('cards fold only when they cite the same message and describe the same matter',()=>{

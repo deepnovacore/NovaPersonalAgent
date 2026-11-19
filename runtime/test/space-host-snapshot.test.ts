@@ -14,7 +14,7 @@ test('unchanged Host notifications skip scheduled snapshots per recipient while 
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-snapshot-dedupe-'));
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  const sent:{to:string;body:Record<string,unknown>}[]=[];let owner='phone';
- const transport:SpaceHostTransport={clients:()=>['phone','tablet'],start:()=>Promise.resolve(()=>{}),send:(to,body)=>{sent.push({to,body});return Promise.resolve()},stream:()=>Promise.resolve()};
+ const transport:SpaceHostTransport={clients:()=>['phone','tablet'],start:()=>Promise.resolve(()=>undefined),send:(to,body)=>{sent.push({to,body});return Promise.resolve()},stream:()=>Promise.resolve()};
  const space=new SpaceHost({path:join(dir,'space.json'),space:'test',host,transport,owner:()=>owner});
  const snapshots=(to:string)=>sent.filter(row=>row.to===to&&row.body.type==='snapshot');
  try{
@@ -41,7 +41,7 @@ test('unchanged scheduled snapshots still retry a durable pending delivery witho
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-snapshot-retry-'));
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  let offline=true;const attempts:string[]=[];
- const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{}),send:(_to,_body,id)=>{attempts.push(id);return offline?Promise.reject(Error('offline')):Promise.resolve()},stream:()=>Promise.resolve()};
+ const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>undefined),send:(_to,_body,id)=>{attempts.push(id);return offline?Promise.reject(Error('offline')):Promise.resolve()},stream:()=>Promise.resolve()};
  const path=join(dir,'space.json'),space=new SpaceHost({path,space:'test',host,transport});
  try{
   await host.open({deferBackground:true});await space.open();
@@ -59,7 +59,7 @@ test('offline snapshots stay bounded and preserve operation receipts across rest
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-snapshot-bounded-'));
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
  const path=join(dir,'space.json');let offline=true;const delivered:Record<string,unknown>[]=[];
- const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{}),send:(_to,body)=>{if(offline)return Promise.reject(Error('offline'));delivered.push(body);return Promise.resolve()},stream:()=>Promise.resolve()};
+ const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>undefined),send:(_to,body)=>{if(offline)return Promise.reject(Error('offline'));delivered.push(body);return Promise.resolve()},stream:()=>Promise.resolve()};
  let space=new SpaceHost({path,space:'test',host,transport});
  try{
   await host.open({deferBackground:true});await space.open();

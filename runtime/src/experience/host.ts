@@ -72,18 +72,18 @@ export async function createExperienceHost(options:ExperienceHostOptions){
  }
  const publish=()=>{if(!closed)options.emit(snapshot())}
  host.subscribe(publish)
- host.setConversationRuntime(async(conversation,_emit,mode)=>{
-  if(mode==='voice')throw Error('experience_text_only')
+ host.setConversationRuntime((conversation,_emit,mode)=>{
+  if(mode==='voice')return Promise.reject(Error('experience_text_only'))
   const history=conversation.messages.filter(message=>message.role==='assistant'||message.generation_status==='completed').map(message=>({role:message.role,content:message.text}))
-  return {runTurn:async(text,signal,context)=>{
+  return Promise.resolve({runTurn:async(text,signal,context)=>{
    const contextProjection={...projection,timeline:projection.timeline.map(row=>({title:row.title,summary:row.why_now??row.summary??row.text,refs:row.refs,time:row.time,status_label:row.status_label,next_steps:row.next_steps,uncertainty:row.uncertainty}))}
    const messages=[{role:'system',content:'You are NovaCore. This is a synthetic experience Space. Answer using its supplied context only. Do not claim that you performed actions.\n'+JSON.stringify({profile:options.profile,memory:options.memory,profile_snapshot:contextProjection,referenced_material:context?.prepared,life:host.life.snapshot(),sources:contextRecords})},...history.slice(-30),{role:'user',content:text}]
    while(messages.length>2&&Buffer.byteLength(JSON.stringify({model:'deepseek-flash',messages,stream:false}))>124*1024)messages.splice(1,1)
    if(Buffer.byteLength(JSON.stringify({model:'deepseek-flash',messages,stream:false}))>128*1024)throw Error('experience_context_too_large')
    const assistant=await options.complete(messages,signal);history.push({role:'user',content:text},{role:'assistant',content:assistant});return {assistant}
-  },close:async()=>{}}
+  },close:()=>Promise.resolve()})
  },frame=>options.emit(frame.type==='conversation.error'?{...frame,reason:'experience_unavailable'}:frame))
- try{await host.open({deferBackground:true})}catch(error){closed=true;await host.close().catch(()=>{});throw error}
+ try{await host.open({deferBackground:true})}catch(error){closed=true;await host.close().catch(()=>undefined);throw error}
  const command=async(raw:unknown)=>{
   const request=z.object({type:z.literal('personal.command'),request_id:z.string(),method:z.string(),params:z.record(z.string(),z.unknown())}).parse(raw)
   const result=(data:unknown)=>({type:'personal.result',request_id:request.request_id,ok:true,data})

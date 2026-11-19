@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {providerFixture,settle} from './memory-engine-provider-fixture.js'
-import {mkdtemp,rm,readdir} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,readdir} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
@@ -15,7 +15,7 @@ import {deriveMemoryToolCapabilities} from '../src/memory/tool-capabilities.js'
 
 // Identical paired behavior runs through production SDK workers and deterministic provider HTTP, not fake engine ports.
 for(const backend of ['ledger','mem0','voicemem'] as const)test(`production ${backend}: paired quality, authority, restart and forget`,{timeout:60_000},async()=>{
-  const root=await mkdtemp(join(tmpdir(),'nova-production-engines-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
+  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-production-engines-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
   const create=(userId='owner')=>new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId,
     gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',
     embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'fixture-embedding',extractionFingerprint:'fixture-extraction',
@@ -80,7 +80,7 @@ for(const backend of ['ledger','mem0','voicemem'] as const)test(`production ${ba
 })
 
 for(const backend of ['mem0','voicemem'] as const)test(`production ${backend}: outbox failure/restart/backfill and bounded abort`,{timeout:60_000},async()=>{
-  const root=await mkdtemp(join(tmpdir(),'nova-engine-retry-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
+  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-engine-retry-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
   const create=(engine:boolean)=>new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},...(engine?{engine:{recall:backend,styles:false,consumer:'consumer',config:{path:join(root,'engines'),embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}}}:{})})
   let memory=create(false)
   try{

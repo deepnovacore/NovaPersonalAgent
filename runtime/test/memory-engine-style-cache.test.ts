@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,rm} from 'node:fs/promises'
+import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
@@ -18,7 +18,7 @@ const signal=()=>AbortSignal.timeout(8000)
 const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done});return {promise,resolve}}
 
 test('production cached style inventory: contradiction, async mutation and other-client discovery preserve independent facts',{timeout:40_000},async t=>{
-  const root=await mkdtemp(join(tmpdir(),'style-cache-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
+  const root=await mkdtemp(join(await realpath(tmpdir()),'style-cache-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
   const client=new MemoryLedgerClient(path)
   const memory=new SubstrateMemoryResource({client,userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},engine:{recall:'voicemem',styles:true,consumer:'consumer',config:{path:join(root,'engines'),embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}}})
   let owner:PersonalMemoryResource|undefined=memory

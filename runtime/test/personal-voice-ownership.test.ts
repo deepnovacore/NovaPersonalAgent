@@ -47,8 +47,8 @@ test('starting a local Build ends voice ownership instead of leaving a ghost own
 for(const mode of ['chat','plan','build','delegate'] as const)test(`orb announcement and microphone share the frozen ${mode} workbench binding`,async()=>{
  const f=await fixture(),created:{id:string;overrides:unknown}[]=[],delivered:string[]=[]
  const service={} as never
- let emitVoice:(frame:Record<string,unknown>)=>void=()=>{}
- f.host.setConversationRuntime((item,emit,_mode,_lifetime,_recovery,_execution,overrides)=>{emitVoice=emit;created.push({id:item.id,overrides});return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:()=>{delivered.push(item.id)},bridgeService:service,close:()=>Promise.resolve()})},()=>{})
+ let emitVoice:(frame:Record<string,unknown>)=>void=()=>undefined
+ f.host.setConversationRuntime((item,emit,_mode,_lifetime,_recovery,_execution,overrides)=>{emitVoice=emit;created.push({id:item.id,overrides});return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:()=>{delivered.push(item.id)},bridgeService:service,close:()=>Promise.resolve()})},()=>undefined)
  try{
   await f.command('conversations.voice',{id:'chat:main',enabled:false})
   await f.command('conversations.create',{title:'Frozen source'})
@@ -78,7 +78,7 @@ test('direct orb announcement defaults to delegate but an explicit Chat binding 
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'local-test',memory:()=>undefined,pool,evidence:()=>null})
  let request=0,delivered=0
  const command=(method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id:'orb-'+request++,method,params},{client_id:'desktop:local'}) as Promise<{ok:boolean;error?:string}>
- host.setConversationRuntime((_item,_emit,_mode,_lifetime,_recovery,_execution,overrides)=>{created.push(overrides);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:()=>{delivered++},close:()=>Promise.resolve()})},()=>{})
+ host.setConversationRuntime((_item,_emit,_mode,_lifetime,_recovery,_execution,overrides)=>{created.push(overrides);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:''}),deliverSuggestion:()=>{delivered++},close:()=>Promise.resolve()})},()=>undefined)
  const announce=async()=>{const before=delivered,suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15});host.routePersonalSuggestion(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id});for(let i=0;i<100&&delivered===before;i++)await new Promise(resolve=>setTimeout(resolve,10));assert.equal(delivered,before+1)}
  try{
   await host.open();assert.equal((await command('presentation.set',{mode:'orb'})).ok,true)

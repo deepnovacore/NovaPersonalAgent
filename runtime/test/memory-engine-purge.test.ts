@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,rm,readdir,readFile} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,readdir,readFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
@@ -22,7 +22,7 @@ async function containsSentinel(root:string,sentinel:string):Promise<boolean>{
 }
 
 for(const backend of ['mem0','voicemem'] as const)test(`production ${backend}: retired index reactivation and physical purge acknowledgement`,{timeout:45_000},async()=>{
-  const root=await mkdtemp(join(tmpdir(),'nova-engine-purge-')),provider=await providerFixture(),path=join(root,'ledger.sqlite'),enginePath=join(root,'engines'),sentinel='PURGE_SENTINEL_'+backend.toUpperCase()
+  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-engine-purge-')),provider=await providerFixture(),path=join(root,'ledger.sqlite'),enginePath=join(root,'engines'),sentinel='PURGE_SENTINEL_'+backend.toUpperCase()
   const create=(recall:'mem0'|'voicemem'|'ledger')=>new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},engine:{recall,styles:recall!=='ledger',consumer:'consumer',config:{path:enginePath,embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}}})
   let memory=create(backend)
   const locks:DatabaseSync[]=[]

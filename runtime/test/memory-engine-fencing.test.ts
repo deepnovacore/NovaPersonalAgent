@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,rm,readdir} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,readdir} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
@@ -19,7 +19,7 @@ async function lockFiles(root:string):Promise<string[]>{
 }
 
 for(const backend of ['mem0','voicemem'] as const)test(`production ${backend}: processing revoke fences still-present SDK candidates and styles`,{timeout:25_000},async()=>{
-  const root=await mkdtemp(join(tmpdir(),'nova-engine-fencing-')),provider=await providerFixture(),enginePath=join(root,'engines')
+  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-engine-fencing-')),provider=await providerFixture(),enginePath=join(root,'engines')
   const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'ledger.sqlite')),userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},engine:{recall:backend,styles:true,consumer:'consumer',config:{path:enginePath,embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}}})
   const locks:DatabaseSync[]=[]
   try{
