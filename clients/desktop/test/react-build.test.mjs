@@ -3,7 +3,7 @@ import assert from 'node:assert/strict'
 import {cp, mkdtemp, readFile, mkdir, symlink, writeFile, rm, realpath} from 'node:fs/promises'
 import {spawnSync} from 'node:child_process'
 import {tmpdir} from 'node:os'
-import {join} from 'node:path'
+import {join,relative,sep} from 'node:path'
 import {fileURLToPath} from 'node:url'
 import {buildRenderer, rendererEntries} from '../scripts/build-renderer.mjs'
 
@@ -32,7 +32,7 @@ test('renderer builder refuses the source tree and preserves unrelated output fi
  const directory=await mkdtemp(join(tmpdir(),'nova-react-build-test-'))
  try {
   await writeFile(join(directory,'unrelated.txt'),'keep')
-  await assert.rejects(buildRenderer({outputRoot:new URL('../src/renderer',import.meta.url).pathname}), /source|output/i)
+  await assert.rejects(buildRenderer({outputRoot:fileURLToPath(new URL('../src/renderer',import.meta.url))}), /source|output/i)
   // Missing dependencies or component entry points must fail rather than serve a blank legacy fallback.
   assert.equal(await readFile(join(directory,'unrelated.txt'),'utf8'),'keep')
  } finally {await rm(directory,{recursive:true,force:true})}
@@ -67,7 +67,8 @@ test('complete built renderer graph includes the bundled capture worklet and onl
 test('release camera graph is isolated to its bundled page dependencies',async()=>{
  const {buildRendererAssetGraph}=await import('../src/main/app-protocol.mjs')
  const files=new Map([['/release-camera.html','<script src="./react/release-camera.mjs"></script><link href="./react/release-camera.css">'],['/react/release-camera.mjs','import "../chunks/camera.mjs"'],['/react/release-camera.css',''],['/chunks/camera.mjs','export const camera=true']])
- const graph=await buildRendererAssetGraph('/fixture',path=>{const route=path.slice('/fixture'.length);assert.ok(files.has(route),`unrelated entry read: ${route}`);return files.get(route)},['/release-camera.html'])
+ const fixture=join(tmpdir(),'renderer-fixture')
+ const graph=await buildRendererAssetGraph(fixture,path=>{const route='/'+relative(fixture,path).split(sep).join('/');assert.ok(files.has(route),`unrelated entry read: ${route}`);return files.get(route)},['/release-camera.html'])
  assert.deepEqual(graph,[...files.keys()].sort())
 })
 test('packaged desktop includes compiled renderer files at the path loaded by main',async()=>{

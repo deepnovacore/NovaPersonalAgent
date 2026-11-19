@@ -1,7 +1,10 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
+import {execFile} from 'node:child_process';
+import {promisify} from 'node:util';
 import {createHash,randomUUID} from 'node:crypto';
 import {chmod,realpath,mkdtemp,readdir,rm,readFile,stat,symlink,writeFile} from 'node:fs/promises';
+import {assertPrivatePath} from './helpers/assert-private-path.js';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -13,6 +16,13 @@ import {HostModelRoutesStore} from '../src/space-host/model-settings.js';
 import {environmentContract} from '../src/config/environment-contract.js';
 import {describeHostBlockingEnvironment as describeDesktopEnvironment} from '../src/desktop.js';
 import './helpers/space-host-sync-open.js'
+
+const run=promisify(execFile);
+async function setKeyReadableByOthers(path:string,wide:boolean){
+ if(process.platform!=='win32'){await chmod(path,wide?0o644:0o600);return}
+ const tool=join(process.env.SystemRoot??'C:\\Windows','System32','icacls.exe');
+ await run(tool,[path,...(wide?['/grant','*S-1-1-0:R']:['/remove:g','*S-1-1-0'])]);
+}
 
 async function fixture(options:{owner?:string;env?:NodeJS.ProcessEnv;feishu?:boolean;feishuConnector?:Parameters<PersonalAgentHost['setFeishu']>[0];memory?:unknown;feishuPollMs?:number;revokeDevice?:(device:string)=>Promise<unknown>}={}){
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-admin-')),sent:Record<string,unknown>[]=[];const calls:string[]=[];
@@ -74,7 +84,7 @@ test('secrets: allowlist, 0600 store, env wins, snapshot has fingerprints only, 
  try{const r=await f.send('phone','put','secret.put',{name:'OPENAI_API_KEY',value:secret});assert.deepEqual([r.status,r.applies,r.shadowed_by_environment],['accepted','restart',false]);
   const g=await f.send('phone','put2','secret.put',{name:'GEMINI_API_KEY',value:'phone-gem'});assert.equal(g.shadowed_by_environment,true);
   assert.equal((await f.send('phone','bad','secret.put',{name:'DESKTOP_TOKEN',value:'x'})).status,'rejected');
-  const path=join(f.dir,'config.json.secrets.json');assert.equal((await stat(path)).mode&0o777,0o600);
+  const path=join(f.dir,'config.json.secrets.json');await assertPrivatePath(path);
   const snap=JSON.stringify(f.space.snapshot('phone')),creds=(f.space.snapshot('phone') as unknown as {host_credentials:{credentials:{name:string;source:string;fingerprint:string}[]}}).host_credentials.credentials;
   assert.equal(snap.includes(secret),false);assert.equal(snap.includes('phone-gem'),false);assert.equal(creds.find(c=>c.name==='OPENAI_API_KEY')!.source,'space');assert.equal(creds.find(c=>c.name==='GEMINI_API_KEY')!.source,'environment');assert.match(creds.find(c=>c.name==='OPENAI_API_KEY')!.fingerprint,/^[0-9a-f]{8}$/);
   await f.send('phone','reg','push.register',{handle:'h',credential:'push-credential-xyz'}).catch(()=>undefined);
@@ -167,7 +177,7 @@ test('a secret replayed with another value conflicts after a SpaceHost restart',
   assert.equal(journal.includes('sk-first-value'),false);assert.equal(journal.includes('sk-second-value'),false);
   assert.equal(journal.includes(rawHash),false);assert.equal(journal.includes(createHash('sha256').update('sk-first-value').digest('hex')),false);
   const key=await readFile(join(dir,'space.json.key'),'utf8');
-  assert.equal((await stat(join(dir,'space.json.key'))).mode&0o777,0o600);assert.match(key,/^[a-f0-9]{64}$/);assert.equal(key.includes('sk-first-value'),false);
+  await assertPrivatePath(join(dir,'space.json.key'));assert.match(key,/^[a-f0-9]{64}$/);assert.equal(key.includes('sk-first-value'),false);
   assert.equal(journal.includes(key.trim()),false);
  }finally{await space.close();await host.close();await rm(dir,{recursive:true,force:true})}
 });
@@ -235,7 +245,7 @@ test('concurrent starters publish one complete key file and every starter reads 
   // No starter may observe a half-written key: the name only appears once its contents are complete.
   await Promise.all(started.rows.map(row=>row.space.open()));
   const keyFile=join(dir,'space.json.key'),key=await readFile(keyFile,'utf8');
-  assert.match(key,/^[a-f0-9]{64}$/u);assert.equal((await stat(keyFile)).mode&0o777,0o600);
+  assert.match(key,/^[a-f0-9]{64}$/u);await assertPrivatePath(keyFile);
   assert.deepEqual((await readdir(dir)).filter(name=>name.endsWith('.tmp')),[],'publishing must not leave a temp file behind');
   await started.rows[0]!.space.receive('phone',secretRaceIntent('sk-raced-value'));assert.equal(receipt().status,'accepted');
   // A starter that lost the race tags the same operation identically only if it read the winner's key.
@@ -253,7 +263,7 @@ test('a zero-length key is refused by every starter and the file is left in plac
   // Empty is a damaged key like a bad length: fail closed, because this file may be the only copy that can still authenticate existing tags.
   for(const row of started.rows)await assert.rejects(row.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_empty');
   // Concurrent starters must not delete or replace it behind each other's back; an operator inspects these exact bytes.
-  assert.equal(await readFile(keyFile,'utf8'),'');assert.equal((await stat(keyFile)).mode&0o777,0o600);
+  assert.equal(await readFile(keyFile,'utf8'),'');await assertPrivatePath(keyFile);
   assert.deepEqual((await readdir(dir)).filter(name=>name.endsWith('.tmp')),[],'refusing must not publish a new key');
  }finally{await started.close();await rm(dir,{recursive:true,force:true})}
 });
@@ -267,17 +277,17 @@ test('a symlinked key file is refused instead of supplying the tag key',async()=
   try{await assert.rejects(linked.rows[0]!.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_symlink')}finally{await linked.close()}
   await rm(keyFile);await writeFile(keyFile,key,{mode:0o600});
   const direct=await concurrentStarters(dir,sent,1);
-  try{await direct.rows[0]!.space.open();assert.equal((await stat(keyFile)).mode&0o777,0o600)}finally{await direct.close()}
+  try{await direct.rows[0]!.space.open();await assertPrivatePath(keyFile)}finally{await direct.close()}
  }finally{await rm(dir,{recursive:true,force:true})}
 });
 
 test('a key file readable by other accounts or of the wrong length is refused',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-mode-')),sent:Record<string,unknown>[]=[],keyFile=join(dir,'space.json.key'),key='b'.repeat(64);
  try{
-  await writeFile(keyFile,key,{mode:0o644});
+  await writeFile(keyFile,key,{mode:0o600});await setKeyReadableByOthers(keyFile,true);
   const wide=await concurrentStarters(dir,sent,1);
   try{await assert.rejects(wide.rows[0]!.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_permissions')}finally{await wide.close()}
-  await chmod(keyFile,0o600);const narrow=await concurrentStarters(dir,sent,1);
+  await setKeyReadableByOthers(keyFile,false);const narrow=await concurrentStarters(dir,sent,1);
   try{await narrow.rows[0]!.space.open()}finally{await narrow.close()}
   await writeFile(keyFile,key.slice(0,63),{mode:0o600});const short=await concurrentStarters(dir,sent,1);
   try{await assert.rejects(short.rows[0]!.space.open(),(error:NodeJS.ErrnoException)=>error.code==='space_secret_key_invalid')}finally{await short.close()}
