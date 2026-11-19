@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {build} from 'esbuild'
 import {cp, mkdir, readFile, readdir, writeFile} from 'node:fs/promises'
-import {resolve, relative, sep} from 'node:path'
+import {isAbsolute, resolve, relative, sep} from 'node:path'
 import {pathToFileURL} from 'node:url'
 import {DESKTOP_PRODUCT_NAME} from '../src/main/desktop-identity.mjs'
 
@@ -18,7 +18,7 @@ const css={index:['design-tokens.css','controls.css','index.css','task-banner.cs
 export async function buildRenderer({outputRoot=process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(desktopRoot,'build/renderer'), sourcemap=false}={}){
  assert.ok(outputRoot,'Renderer output directory must not be empty')
  const out=resolve(outputRoot),path=relative(sourceRoot,out)
- assert.ok(path.startsWith('..'+sep)||path==='..','Renderer output must be outside the source directory')
+ assert.ok(isAbsolute(path)||path.startsWith('..'+sep)||path==='..','Renderer output must be outside the source directory')
  await mkdir(out,{recursive:true})
  // Retain local static files at their original URLs, including worklets and idle media.
  for(const file of await readdir(sourceRoot,{withFileTypes:true})){
