@@ -23,9 +23,15 @@ export async function stageReleaseApplication({packageRoot, rendererOutputRoot =
     for (const name of Object.keys({...manifest.dependencies, ...optional, ...manifest.peerDependencies})) {
       if (manifest.name === '@livekit/av' && name.startsWith('@livekit/av-')) continue
       const search = createRequire(resolve(source, 'package.json')).resolve.paths('nova-package-resolution') ?? []
-      let dependency
+      let dependency, meta
       for (const directory of search) {
-        try { dependency = await realpath(resolve(directory, name)); break } catch (error) {
+        try {
+          const candidate = await realpath(resolve(directory, name))
+          // npm may leave an empty directory for an omitted platform-specific optional package.
+          meta = JSON.parse(await readFile(resolve(candidate, 'package.json'), 'utf8'))
+          dependency = candidate
+          break
+        } catch (error) {
           if (error.code !== 'ENOENT') throw error
         }
       }
@@ -33,7 +39,6 @@ export async function stageReleaseApplication({packageRoot, rendererOutputRoot =
         if (name in optional || manifest.peerDependenciesMeta?.[name]?.optional) continue
         throw new Error(`production dependency missing: ${name}`)
       }
-      const meta = JSON.parse(await readFile(resolve(dependency, 'package.json'), 'utf8'))
       if ((meta.os && !meta.os.includes(process.platform)) || (meta.cpu && !meta.cpu.includes(process.arch))) {
         assert.ok(name in optional, `production dependency wrong platform: ${name}`)
         continue
