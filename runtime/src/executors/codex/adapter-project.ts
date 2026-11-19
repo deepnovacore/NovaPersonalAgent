@@ -1111,7 +1111,6 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
       // prior display title during the process-construction window.
       if (backend.backend_id !== 'codex') slot.work = {...slot.work, backend_id: backend.backend_id}
       await this.#refreshProjectContextBarrier()
-      slot.processStopped = false
       inner = this.#transportFactory.create(Object.freeze({
         workspace: approvedWorkspace,
         codexHome,
@@ -1120,6 +1119,7 @@ export class ProjectCodexAdapter implements ProjectExecutorAdapter {
         resumeThreadId: resumed?.backend_session_id ?? null,
         work: slot.work,
       }))
+      slot.processStopped = false
     } catch (error) {
       if (startRollback !== null) {
         await this.#store.rollbackSessionStartForRun(
