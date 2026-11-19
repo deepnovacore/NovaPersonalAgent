@@ -3,7 +3,7 @@
 import argparse, hashlib, json, os, pathlib, shutil, subprocess, sys, tarfile, urllib.request
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'documents'))
-from bake_rootfs import bake, sha256
+from bake_rootfs import bake, sha256, verified_ios_archive
 
 ISH_COMMIT = 'e6521d9cfe9cd48f19917fc3b23aea622ba358b4'
 ISH_SHA256 = '48fea8b9d713c79581148b19f17d828b79e487adf7058d998aa08ef9d06fa07c'
@@ -25,10 +25,13 @@ def main():
     parser.add_argument('--output-root', type=pathlib.Path, required=True)
     parser.add_argument('--sdk', choices=['iphoneos','iphonesimulator','macosx'], default='iphoneos')
     parser.add_argument('--ci-runner-temp', action='store_true', help='Allow an isolated GitHub Actions RUNNER_TEMP output root')
+    parser.add_argument('--use-baked-documents', action='store_true', help='Use the verified document archive produced by the Linux bake job')
     parser.add_argument('--docker', default='docker')
     parser.add_argument('--verify-reproducible', action='store_true')
     parser.add_argument('--without-font', action='store_true', help='Size comparison only')
     args = parser.parse_args()
+    if args.use_baked_documents and (args.without_font or args.verify_reproducible):
+        parser.error('--without-font and --verify-reproducible require a fresh bake')
     out = args.output_root.resolve()
     if args.ci_runner_temp:
         runner_temp = os.environ.get('RUNNER_TEMP')
@@ -82,8 +85,11 @@ def main():
     run('ninja','-C',str(native),'tools/fakefsify',env=env)
     alpine = downloads/'alpine-minirootfs-3.21.0-aarch64.tar.gz'
     download('https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/'+alpine.name, alpine, ALPINE_SHA256)
-    baked = bake('ios', out/'documents-ios', docker=args.docker, without_font=args.without_font,
-                 verify_reproducible=args.verify_reproducible, ci_runner_temp=args.ci_runner_temp)
+    if args.use_baked_documents:
+        baked = verified_ios_archive(out / 'documents-ios')
+    else:
+        baked = bake('ios', out/'documents-ios', docker=args.docker, without_font=args.without_font,
+                     verify_reproducible=args.verify_reproducible, ci_runner_temp=args.ci_runner_temp)
     resources = out/'resources'; resources.mkdir(exist_ok=True)
     rootfs = resources/'NovaAlpine'
     baked_digest = sha256(baked)

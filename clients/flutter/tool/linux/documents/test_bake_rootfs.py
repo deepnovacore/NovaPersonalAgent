@@ -27,6 +27,24 @@ class BakeRootfsTest(unittest.TestCase):
                 with self.assertRaises(ValueError):
                     bake_rootfs.validate_output(Path(path), ci_runner_temp=True)
 
+    def test_ios_handoff_checks_archive_and_locked_inputs(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            archive = root / 'rootfs.tgz'
+            archive.write_bytes(b'fixture')
+            manifest = {'platform': 'ios', 'archive_sha256': bake_rootfs.sha256(archive),
+                        'lock_sha256': bake_rootfs.sha256(bake_rootfs.HERE / 'locks/ios.json'),
+                        'wheels_lock_sha256': bake_rootfs.sha256(bake_rootfs.HERE / 'locks/wheels.json'),
+                        'sitecustomize_sha256': bake_rootfs.sha256(bake_rootfs.HERE / 'nova_sitecustomize.py'),
+                        'font': {**bake_rootfs.load_lock('font'), 'bundled': True}, 'smoke': {'passed': True}}
+            for overrides in [{}, {'archive_sha256': 'stale'}, {'platform': 'android'}, {'smoke': {'passed': False}}]:
+                (root / 'manifest.json').write_text(json.dumps({**manifest, **overrides}))
+                if overrides:
+                    with self.assertRaises(ValueError):
+                        bake_rootfs.verified_ios_archive(root)
+                else:
+                    self.assertEqual(bake_rootfs.verified_ios_archive(root), archive)
+
     def test_missing_docker_fails_with_actionable_message(self):
         with patch('bake_rootfs.subprocess.run', side_effect=FileNotFoundError):
             with self.assertRaisesRegex(ValueError, 'Docker CLI not found'):

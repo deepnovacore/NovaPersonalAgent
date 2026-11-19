@@ -35,6 +35,21 @@ def validate_output(path, ci_runner_temp=False):
     return resolved
 
 
+def verified_ios_archive(directory):
+    archive = directory / 'rootfs.tgz'
+    manifest = json.loads((directory / 'manifest.json').read_text())
+    expected = {
+        'platform': 'ios', 'lock_sha256': sha256(HERE / 'locks/ios.json'),
+        'wheels_lock_sha256': sha256(HERE / 'locks/wheels.json'),
+        'font': {**load_lock('font'), 'bundled': True},
+        'sitecustomize_sha256': sha256(HERE / 'nova_sitecustomize.py'),
+        'archive_sha256': sha256(archive),
+    }
+    if any(manifest.get(key) != value for key, value in expected.items()) or manifest['smoke']['passed'] is not True:
+        raise ValueError('Baked iOS document archive or manifest does not match the verified inputs')
+    return archive
+
+
 def download(item, directory):
     target = directory / item['filename']
     if not target.exists():

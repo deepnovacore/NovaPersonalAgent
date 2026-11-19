@@ -74,15 +74,20 @@ test('only own projects become profile input, and the input version follows the 
 })
 test('a withdrawal while the digest call runs keeps the withdrawn project off disk',async()=>{
  let release!:()=>void;const gate=new Promise<void>(r=>{release=r})
- const t=await setup(async p=>{await gate;return answer(p)});let service=t.make()
+ const t=await setup(async p=>{await gate;return answer(p)},{idleMs:0});let service=t.make()
  try{
   await service.open();const files=[file('/r/a','README.md'),file('/r/b','README.md')];service.update(files)
-  await until(()=>t.calls.length===1)
-  const forgot=service.forgetUnavailable(new Set([files[1]!.id]));release();await forgot
-  await until(()=>t.outcomes.length===1);assert.deepEqual(service.digests().map(d=>d.name),['b'])
+  const first=service.refresh()
+  assert.deepEqual(t.calls[0]!.map(project=>project.name).sort(),['a','b'])
+  const forgot=service.forgetUnavailable(new Set([files[1]!.id]));release()
+  await Promise.all([first,forgot])
+  assert.equal(t.outcomes[0]!.outcome,'aborted')
+  await service.refresh()
+  assert.deepEqual(t.calls[1]!.map(project=>project.name),['b'])
+  assert.deepEqual(service.digests().map(d=>d.name),['b'])
   await service.close();service=new ProjectDigests(join(t.dir,'digests.json'),undefined,()=>{/* observer fixture */});await service.open();service.update(files)
   assert.deepEqual(service.digests().map(d=>d.name),['b'],'the withdrawn project never reached disk')
- }finally{await service.close();await rm(t.dir,{recursive:true,force:true})}
+ }finally{release();await service.close();await rm(t.dir,{recursive:true,force:true})}
 })
 test('withdrawing one document of a project retires every digest that read it, cited or not',async()=>{
  let release!:()=>void;const gate=new Promise<void>(r=>{release=r})
