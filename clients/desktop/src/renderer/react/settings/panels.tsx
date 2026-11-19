@@ -1,5 +1,5 @@
 import {PermissionCards} from '../windows/welcome';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { FilePlus2, FolderPlus, Monitor, RefreshCw, RotateCcw, Trash2 } from 'lucide-react';
 import { Action, Card, Field, useCommand } from './controls';
 import { t } from '../../locale.mjs';
@@ -74,7 +74,8 @@ export function KnowledgePanel({ api, view }: any) {
     const enabled = view.capabilities?.runtime?.modules?.knowledge?.enabled === true;
     const [state, setState] = useState<any>({}), [url, setUrl] = useState(''), [note, setNote] = useState(t('点击刷新查看知识库。')), [tone, setTone] = useState('info'), [busy, setBusy] = useState(false), [confirmRemove, setConfirmRemove] = useState<string | null>(null);
     const epoch = useRef(0), lock = useRef(false);
-    useEffect(() => {
+    // Capture the new configuration before the toolbar can dispatch its first request.
+    useLayoutEffect(() => {
         epoch.current++;
         setConfirmRemove(null);
         setState({});
