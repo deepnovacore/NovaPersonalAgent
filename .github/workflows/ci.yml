@@ -67,8 +67,8 @@ jobs:
         working-directory: clients/flutter
         run: |
           flutter pub get --enforce-lockfile
-          flutter analyze
-          flutter test test/space_*test.dart
+          flutter analyze --no-pub
+          flutter test --no-pub test/space_*test.dart
 
   electron:
     strategy:
@@ -96,7 +96,9 @@ jobs:
       # coverage plus the desktop/native/installer acceptance below.
       - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
-      - run: npm run test:live:contract --workspace @nova-personal-agent/runtime
+      # Both runtime test paths above compile runtime/dist.
+      - run: node --test scripts/live/*contract.test.mjs
+        working-directory: runtime
       - run: npm run test:server-cli
       - run: npm run test:cli
       # The self-hosted serving launcher's tests need no models or GPU; its process checks are Linux-only.

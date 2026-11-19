@@ -1,5 +1,4 @@
-// Real-device, real-model acceptance entrypoint; never ship this application.
-// Generate the ignored materials file with tool/device_e2e_materials.py first.
+// Real-device, real-model acceptance harness.
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
@@ -18,8 +17,6 @@ import 'package:nova_mobile/conversation/local_conversation_store.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 import 'package:nova_mobile/personal/life_reducer.dart';
 import 'package:nova_mobile/space/space_storage.dart';
-
-import 'device_e2e_materials.g.dart';
 
 const _aOnly = bool.fromEnvironment('NOVA_E2E_A_ONLY');
 const _spaceId = String.fromEnvironment(
@@ -107,7 +104,7 @@ class _MeasuredShell extends WorkspaceShell {
   }
 }
 
-Future<void> main() async {
+Future<void> runDeviceAcceptance(Map<String, String> materials) async {
   WidgetsFlutterBinding.ensureInitialized();
   const space = SpaceRecord(
     id: _spaceId,
@@ -119,11 +116,13 @@ Future<void> main() async {
     'setSpaceScope',
     {'spaceId': space.id, 'mode': space.mode.name},
   );
-  runApp(const MaterialApp(home: _Acceptance()));
+  runApp(MaterialApp(home: _Acceptance(materials)));
 }
 
 class _Acceptance extends StatefulWidget {
-  const _Acceptance();
+  const _Acceptance(this.materials);
+
+  final Map<String, String> materials;
   @override
   State<_Acceptance> createState() => _AcceptanceState();
 }
@@ -195,7 +194,7 @@ class _AcceptanceState extends State<_Acceptance> {
         shell.phase = entry.$1;
         final material = File('${workspace!.root.parent.path}/${entry.$2}');
         await material.writeAsBytes(
-          base64Decode(deviceE2eMaterials[entry.$2]!),
+          base64Decode(widget.materials[entry.$2]!),
         );
         // Identical import method and outgoing message format to LocalChatPanel.
         final imported = await workspace!.importDocument(material, entry.$2);

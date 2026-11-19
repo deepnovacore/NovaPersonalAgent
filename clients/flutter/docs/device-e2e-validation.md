@@ -57,11 +57,12 @@ xcrun devicectl device install app --device <设备 UDID> "$SESSION/ios-derived/
 
 ## 驱动、模型及运行时
 
-- 入口：[device_e2e_acceptance.dart](../test/support/device_e2e_acceptance.dart)。
+- 真机验收使用 [device_e2e_runner.dart](../test/support/device_e2e_runner.dart)。
   真实 AgentCoreHost + 四工具 ToolRegistry + 原生 Linux；iOS 使用与UI相同的
   IosModelClient，Android使用ModelClient。界面直接渲染产品 LocalChatPanel。
 - 用 [device_e2e_materials.py](../tool/device_e2e_materials.py) 将指定三文件嵌入
-  ignored/session文件，不提交论文或原始工作簿。调用UI同一个 `importDocument`，
+  `test/support/device_e2e_materials.g.dart`。脚本同时生成真机入口
+  `test/support/device_e2e_acceptance.dart`，Flutter 沿用这个 target 构建，两份生成文件都由 git 忽略。调用 UI 的 `importDocument`，
   导入 `/workspace/inbox/<id>/<name>`；发送UI同样的附件路径/不可信内容消息格式。
   用户指令始终为“帮我汇总表格数据（按城市统计总额），并写出一个 PDF”与
   “帮我解读一下这篇 paper”，未追加引用要求到用户消息。
