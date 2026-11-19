@@ -843,10 +843,10 @@ test('a fresh paused connector reopens before any capture scope has been configu
 test('cached Feishu status reads the snapshot without running the CLI', async () => {
   const directory=await mkdtemp(join(tmpdir(),'nova-feishu-cached-'));
   const calls:string[][]=[];
-  const connector=new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:async(args)=>{
+  const connector=new FeishuConnector({bootstrapOnly:true,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:(args)=>{
     calls.push(args);
-    if(args[0]==='--version')return '1.0.97';
-    return JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'authenticated',tokenStatus:'valid',scope:FEISHU_SCOPES.join(' ')}}});
+    if(args[0]==='--version')return Promise.resolve('1.0.97');
+    return Promise.resolve(JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{openId:'ou_fixture',status:'authenticated',tokenStatus:'valid',scope:FEISHU_SCOPES.join(' ')}}}));
   }});
   try {
     await connector.open();
@@ -865,7 +865,10 @@ test('verified Feishu status is bounded and a failed check without a login retur
   const connector=new FeishuConnector({bootstrapOnly:true,statusTimeoutMs:50,executable:'fixture',credentialRoot:directory,statePath:join(directory,'state.json'),run:(args,options)=>{
     if(args[0]==='--version')return Promise.resolve('1.0.97');
     if(mode==='offline')return Promise.reject(Error('Feishu CLI failed (1)'));
-    if(mode==='hang')return new Promise((_,reject)=>{options?.signal?.addEventListener('abort',()=>reject(Error('Feishu operation cancelled')),{once:true})});
+    if(mode==='hang')return new Promise((_,reject)=>{
+      const timer=setTimeout(()=>reject(Error('fixture CLI timed out')),3000);
+      options?.signal?.addEventListener('abort',()=>{clearTimeout(timer);reject(Error('Feishu operation cancelled'))},{once:true});
+    });
     return Promise.resolve(JSON.stringify({appId:'cli_fixture',verified:true,identities:{user:{status:'missing'}}}));
   }});
   try {

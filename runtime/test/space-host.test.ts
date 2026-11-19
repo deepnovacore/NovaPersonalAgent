@@ -50,8 +50,8 @@ test('real PersonalAgentHost model path streams preview, survives disconnect and
 test('model failure reason survives final delivery, snapshot and Host restart without provider details',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-failure-')),sent:Record<string,unknown>[]=[];
  const make=()=>new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
- let host=make();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.reject(Object.assign(Error('sk-secret https://private.example'),{reason:'provider_http_auth'})),close:()=>Promise.resolve()}),()=>{});
- const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>{}),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
+ let host=make();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.reject(Object.assign(Error('sk-secret https://private.example'),{reason:'provider_http_auth'})),close:()=>Promise.resolve()}),()=>undefined);
+ const transport:SpaceHostTransport={start:()=>Promise.resolve(()=>undefined),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve(),clients:()=>['phone']};
  const space=new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport});
  try{await host.open({deferBackground:true});await space.open();await space.receive('phone',{v:1,type:'intent',op_id:'chat',kind:'chat.send',created_at:Date.now(),expires_at:Date.now()+30000,input:{conversation_id:'chat:main',text:'hi'}});await space.waitForChats();
   assert.equal(sent.find(row=>row.type==='chat.final')?.error,'authentication');assert.equal(space.snapshot().chat.find(row=>row.role==='user')?.failure_reason,'authentication');assert.equal(JSON.stringify(sent).includes('sk-secret'),false);assert.equal((await readFile(join(dir,'personal.json'),'utf8')).includes('sk-secret'),false);
@@ -163,8 +163,8 @@ test('a caller flush returns without chasing rows queued after it started, and t
 test('Host rejects stale Client chat targeting a conversation now in plan mode',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-plan-read-only-'));let calls=0;const sent:Record<string,unknown>[]=[];
  const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
- host.setConversationRuntime(()=>Promise.resolve({runTurn:async()=>{calls++;return {assistant:'should not run'}},close:()=>Promise.resolve()}),()=>{});
- const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>{}),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve()};
+ host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>{calls++;return Promise.resolve({assistant:'should not run'})},close:()=>Promise.resolve()}),()=>undefined);
+ const transport:SpaceHostTransport={clients:()=>['phone'],start:()=>Promise.resolve(()=>undefined),send:(_to,body)=>{sent.push(body);return Promise.resolve()},stream:()=>Promise.resolve()};
  const space=new SpaceHost({path:join(dir,'space.json'),space:'test',host,transport});
  try{
   await host.open({deferBackground:true});await space.open();

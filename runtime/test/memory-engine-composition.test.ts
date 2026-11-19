@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,rm} from 'node:fs/promises'
+import {mkdtemp,realpath,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import type {RealtimeProvider} from '../src/realtime/protocol.js'
@@ -9,7 +9,7 @@ import {providerFixture,settle} from './memory-engine-provider-fixture.js'
 
 for(const backend of ['mem0','voicemem'] as const)test(`production composeRealtime selects and feeds ${backend}`,{timeout:30_000},async()=>{
   const {buildAssembly}=await import('../src/composition/assembly.js'),{composeRealtime,plannedMemoryTools}=await import('../src/composition/realtime-assembly.js'),{loadSettings,resolveMemoryComposition}=await import('../src/config/config.js'),{parseCapabilityRegistry}=await import('../src/config/capability-registry.js')
-  const root=await mkdtemp(join(tmpdir(),'nova-composed-engine-')),provider=await providerFixture()
+  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-composed-engine-')),provider=await providerFixture()
   let graph:ReturnType<typeof composeRealtime>|undefined
   try{
   const settings=loadSettings({DASHSCOPE_API_KEY:'fixture',FAST_MODEL:'fixture',CASCADE_LLM_PROVIDER:'qwen',EMBEDDING_API_KEY:'fixture',EMBEDDING_MODEL:'fixture',MEMORY_RECALL_ENGINE:backend,MEMORY_EXTRACTORS:'ledger,voicemem',MEMORY_PATH:join(root,'legacy.sqlite'),WORKSPACE_GRAPH_PATH:join(root,'ledger.sqlite'),MEMORY_LEDGER_PATH:join(root,'ledger.sqlite'),EXECUTORS:''})

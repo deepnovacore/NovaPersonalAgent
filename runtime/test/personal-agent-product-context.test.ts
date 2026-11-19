@@ -1,3 +1,4 @@
+import type {MemoryEntry} from '../src/memory/entry.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp,realpath,rm} from 'node:fs/promises'
@@ -471,7 +472,7 @@ for(const change of ['merge','changed_merge','forgotten','consent','correction']
  let allowed=true,frames=0
  let runtime:ConversationRuntime|undefined
  const notices:string[]=[],injected:HostContextItem[]=[]
- const entry:import('../src/memory/entry.js').MemoryEntry={id:'preference',version:1,kind:'preference',content:'Prefer declining politely',origin:'inferred',status:'active',source_refs:[{type:'conversation',ref:'conversation:1',observed_at:at}],evidence_refs:['conversation:1'],observed_at:at,recorded_at:at,topic:'reply',corrected_to:null,confidence_note:null}
+ const entry:MemoryEntry={id:'preference',version:1,kind:'preference',content:'Prefer declining politely',origin:'inferred',status:'active',source_refs:[{type:'conversation',ref:'conversation:1',observed_at:at}],evidence_refs:['conversation:1'],observed_at:at,recorded_at:at,topic:'reply',corrected_to:null,confidence_note:null}
  const memory:PersonalMemoryResource={productSurfaces:true,open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),get:()=>Promise.resolve(entry),list:()=>Promise.resolve({entries:[entry],cursor:null}),canProcessEvidence:()=>Promise.resolve(allowed),canReadConversationEvidence:()=>Promise.resolve(allowed)}
  const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),now:()=>new Date(at),evidenceRefs:()=>['conversation:1'],evidence:ref=>allowed?{subject_key:ref,source:{type:'conversation',ref}}:null})
  const create=captureProvider(async function*(){await Promise.resolve();yield {kind:'response_started',response_id:'reminder'};yield {kind:'text_delta',text:'Reply to invitation?'};yield {kind:'response_completed',response_id:'reminder'}},[],injected)

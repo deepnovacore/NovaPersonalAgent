@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {createHash} from 'node:crypto'
-import {mkdtemp,rm,readdir,readFile,rename} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,readdir,readFile,rename} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {dirname,join} from 'node:path'
 import {DatabaseSync} from 'node:sqlite'
@@ -20,7 +20,7 @@ async function files(root:string):Promise<string[]>{
 }
 
 test('production grounded styles: old protocol retirement, backfill, revoke, expiry and forget survive restart',{timeout:60_000},async()=>{
-  const root=await mkdtemp(join(tmpdir(),'grounded-upgrade-')),provider=await providerFixture(),path=join(root,'ledger.sqlite'),enginePath=join(root,'engines')
+  const root=await mkdtemp(join(await realpath(tmpdir()),'grounded-upgrade-')),provider=await providerFixture(),path=join(root,'ledger.sqlite'),enginePath=join(root,'engines')
   const config={path:enginePath,embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}
   const create=()=>new SubstrateMemoryResource({client:new MemoryLedgerClient(path),userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},engine:{recall:'voicemem',styles:true,consumer:'consumer',config}})
   let memory=create()

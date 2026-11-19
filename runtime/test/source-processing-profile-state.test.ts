@@ -21,7 +21,7 @@ test('identical reused draft advances cache revision without a new publication o
   assert.deepEqual(process({...request,expected_revision:1}),{applied:true,revision:2})
   assert.equal(db.prepare('SELECT count(*) n FROM processing_publications').get()!.n,1)
   assert.equal(db.prepare('SELECT payload_json FROM processing_publications').get()!.payload_json,before)
-  assert.equal(JSON.parse(String(db.prepare('SELECT payload_json FROM processing_profiles').get()!.payload_json)).generated_at,JSON.parse(String(before)).generated_at)
+  assert.equal((JSON.parse(String(db.prepare('SELECT payload_json FROM processing_profiles').get()!.payload_json)) as {generated_at:unknown}).generated_at,(JSON.parse(String(before)) as {generated_at:unknown}).generated_at)
   initializeMemory(db)
   assert.equal(db.prepare('SELECT count(*) n FROM processing_publications').get()!.n,1,'startup backfill must not archive the reused cache as a new publication')
   assert.deepEqual(process({...request,expected_revision:2,defer_profile:true}),{applied:true,revision:3})

@@ -454,7 +454,7 @@ test('a discovery tick offers newly admitted suggestions to Surrogate before any
   const suggestion=runtime.suggestions.add({origin:'surrogate',kind:'question',content:{summary:'Invitation needs a reply',personal_feed_id:'feed'},salience:40,expires_at:100})
   tick();assert.equal(calls.length,1);assert.equal(calls[0]?.slot,'surrogate.watch')
   assert.deepEqual(selected,[],'admission is not speech permission')
-  runtime.completeModelCall(calls[0]!.job_id,{speak:true,suggestion_id:suggestion.id,progress_class:null,reason:'Reply deadline is near'},1)
+  runtime.completeModelCall(calls[0].job_id,{speak:true,suggestion_id:suggestion.id,progress_class:null,reason:'Reply deadline is near'},1)
   runtime.apply(runtime.queue.popReady(1)!)
   assert.deepEqual(selected,[suggestion.id])
 })

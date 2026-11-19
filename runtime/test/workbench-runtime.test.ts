@@ -1983,7 +1983,7 @@ test('a denied compound shell command also denies a respelling of its destructiv
   await f.host.submitConversationText(id,'再试一次',undefined,undefined,{local_desktop:true})
   const asked=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
   assert.ok(asked.approval)
-  await f.command('build.approve',{id,approval_id:asked.approval!.id,approved:false});await f.host.waitConversation(id)
+  await f.command('build.approve',{id,approval_id:asked.approval.id,approved:false});await f.host.waitConversation(id)
  }finally{await f.close()}
 })
 

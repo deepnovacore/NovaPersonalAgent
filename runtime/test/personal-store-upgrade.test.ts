@@ -39,7 +39,7 @@ test('legacy opaque persona metadata survives reading, schedule backup and writi
   await store.ensureScheduleBackup();assert.equal(await readFile(path+'.before-schedules.json','utf8'),original)
   await store.write(loaded)
   assert.deepEqual(await store.read(),state)
-  assert.deepEqual(JSON.parse(await readFile(path,'utf8')).conversations,state.conversations)
+  assert.deepEqual((JSON.parse(await readFile(path,'utf8')) as {conversations:unknown}).conversations,state.conversations)
  }finally{await rm(root,{recursive:true,force:true})}
 })
 

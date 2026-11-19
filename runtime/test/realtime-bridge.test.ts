@@ -760,7 +760,7 @@ test('joint recall uses the cancellable read lane and never dispatches retrieved
   assert.ok([...accepted.host_item.content].length>4000)
   hostContextItemSchema.parse(accepted.host_item)
   hostResponseIntentSchema.parse(accepted.response_intent)
-  retrieval.recall=async()=>({state:'ok',scope:'any',entries:[],snippets:[{evidence_id:'large',source_kind:'file',locator:'large.md',observed_at:new Date().toISOString(),trust:'untrusted_external',text:'x'.repeat(32768)}],degraded:false})
+  retrieval.recall=()=>Promise.resolve({state:'ok',scope:'any',entries:[],snippets:[{evidence_id:'large',source_kind:'file',locator:'large.md',observed_at:new Date().toISOString(),trust:'untrusted_external',text:'x'.repeat(32768)}],degraded:false})
   const oversized=await bridge.acceptPersonalMemoryRecall({...call,call_id:'large'},{originRef:`${origin.channel}:${origin.seq}`})
   assert.equal(oversized.code,'result_too_large')
   hostContextItemSchema.parse(oversized.host_item)

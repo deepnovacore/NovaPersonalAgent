@@ -65,7 +65,7 @@ for(const owned of [false,true])test(`returning to workbench ${owned?'keeps owne
  try{
   await host.open();await command('conversations.create',{title:'Non-main voice'})
   const source=host.conversationSnapshot().selected_id
-  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))},onAudioFrame:()=>{audio++},onAudioClear:()=>{clears++}}),()=>{})
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))},onAudioFrame:()=>{audio++},onAudioClear:()=>{clears++}}),()=>undefined)
   assert.equal((await command('presentation.set',{mode:'orb',conversation_id:source,voice_mode:'chat'})).ok,true)
   if(owned)assert.equal((await command('conversations.voice',{id:source,enabled:true,voice_mode:'chat'})).ok,true)
   else{
@@ -165,7 +165,7 @@ for(const [source,voiceMode] of [['chat','chat'],['plan','plan'],['chat','build'
   const conversation=createConversation('chat','Orb',null,'chat:main');conversation.mode=source
   const descriptor={name:'sim',summary:'Simulation worker',ownedChannels:['slow_sim']},sim=new SlowSim()
   const factory=conversationRuntimeFactory({host,memory:()=>undefined,memoryTools:FULL_MEMORY_TOOLS,executors:[{manifest:{...sim.manifest,model_visibility:'hidden'},dispatch:sim.dispatch.bind(sim)}],agentDescriptors:[descriptor],additionalAgentControllers:()=>[{descriptor,dispatch:()=>Promise.resolve({code:'accepted',accepted:true,detail:{}}),cancel:()=>Promise.resolve({code:'accepted',accepted:true,detail:{}})}],settings:settingsSchema.parse({executors:['fast_sim','slow_sim'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})
-  const runtime=await factory(conversation,()=>{},'voice',undefined,undefined,undefined,{voice_mode:voiceMode,...(voiceMode==='delegate'?{chat:false}:{})})
+  const runtime=await factory(conversation,()=>undefined,'voice',undefined,undefined,undefined,{voice_mode:voiceMode,...(voiceMode==='delegate'?{chat:false}:{})})
   try{
    const names=schemas.map(schema=>(schema as {function:{name:string}}).function.name)
    const service=runtime.bridgeService as RealtimeService,signal=new AbortController().signal

@@ -4,7 +4,7 @@ import {localPath} from './local-tools.js'
 import {shellClasses} from './workbench-shell-class.js'
 
 type Language='zh-CN'|'en'
-type CallLike={name:string;arguments:Record<string,JsonValue>}
+interface CallLike {name:string;arguments:Record<string,JsonValue>}
 
 const points=(text:string,limit:number):string=>{const all=[...text];return all.length>limit?all.slice(0,limit).join('')+'…':text}
 const firstLine=(text:string):string=>points((text.split('\n').find(line=>line.trim())??'').trim(),40)

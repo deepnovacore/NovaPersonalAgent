@@ -972,7 +972,7 @@ test('discovery prompt distinguishes invitation conflicts from contradictions an
  assert.match(request.system,/local_date, local_time and timezone/);assert.match(request.system,/never invent hour countdowns/)
  assert.match(request.system,/memory_refs must contain objects \{entry_id,version\}, never bare strings/)
  assert.match(request.system,/include a preference memory reference/)
- assert.equal(JSON.parse(request.prompt).local_time,'13:42')
+ assert.equal((JSON.parse(request.prompt) as {local_time:unknown}).local_time,'13:42')
 })
 
 test('discovery resolves exact snapshot memory IDs and drops bad refs individually without weakening proposal schema',async()=>{

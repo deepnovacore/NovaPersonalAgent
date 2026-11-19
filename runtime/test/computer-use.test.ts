@@ -171,7 +171,7 @@ test('geometry change during approval refuses input',async()=>{
  try{await f.observe();await assert.rejects(f.action('computer_click',{x:10,y:10}),/screen_changed/);assert.equal(f.writes.length,0)}finally{await f.dispose()}
 })
 test('session wall clock cancels a pending consent without input',async t=>{
- const keepAlive=setTimeout(()=>{},5000);t.after(()=>clearTimeout(keepAlive))
+ const keepAlive=setTimeout(()=>undefined,5000);t.after(()=>clearTimeout(keepAlive))
  const f=await fixture(()=>new Promise(()=>{ /* Consent never arrives. */ }),{},100)
  try{await assert.rejects(f.observe(),/cancelled/);assert.equal(f.writes.length,0);assert.equal(f.connected(),0)}finally{await f.dispose()}
 })
