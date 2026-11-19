@@ -1520,7 +1520,7 @@ for(const mode of ['plan','build'] as const)test(`${mode} quotes only typed user
  }finally{await f.close()}
 })
 
-for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async()=>{
+for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async t=>{
  const events:{kind:string;payload:Readonly<Record<string,JsonValue>>}[]=[]
  const f=await fixture(()=>({text:'done'}),'ask',undefined,undefined,undefined,{record:(kind,payload)=>events.push({kind,payload}),close:()=>undefined})
  try{
@@ -1528,7 +1528,10 @@ for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as 
   const text=outcome==='irrelevant'?'unrelated tea':'TypeScript project constraints'
   const resource:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:(_query,options)=>{
    recalls++;recallSignal=options?.signal
-   if(outcome==='timeout')return new Promise(()=>{ /* ignores cancellation to exercise the outer budget */ })
+   if(outcome==='timeout')return new Promise((_resolve,reject)=>{
+    const pending=setTimeout(()=>reject(Error('test recall exceeded outer budget')),10000)
+    t.after(()=>clearTimeout(pending))
+   })
    if(outcome==='failure')return Promise.reject(Error('unavailable'))
    return Promise.resolve({source:'personal',state:'ok',scope:'any',degraded:false,hits:[{memoryId:'project',text,revision:1,evidenceIds:['source'],score:1}]})
   },get:()=>Promise.resolve({memory_scope:'user',id:'project',version:1,status:'active',kind:'fact',origin:'stated',content:text,source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_ref,consumer)=>{authorizationChecks++;assert.equal(consumer,'configured-text-model');return Promise.resolve(allowed)}}
