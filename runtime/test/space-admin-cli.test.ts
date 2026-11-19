@@ -11,9 +11,10 @@ import {parseSpaceAdmin,runSpacePair,renderInvitationQr,main} from '../src/space
 import {adminSocketPath,spaceAdminRequest} from '../src/space-host/admin-socket.js';
 
 test('admin CLI argument parsing',()=>{
- assert.deepEqual(parseSpaceAdmin(['status','--config','/a/c.json']),{command:'status',configPath:'/a/c.json',timeoutSeconds:300});
- assert.deepEqual(parseSpaceAdmin(['pair','--config','/a/c.json','--timeout-seconds','5','--yes-fingerprint','fp']),{command:'pair',configPath:'/a/c.json',timeoutSeconds:5,yesFingerprint:'fp'});
- assert.equal(parseSpaceAdmin(['revoke','--config','/a/c.json','--device','d']).device,'d');
+ const configPath=join(tmpdir(),'c.json');
+ assert.deepEqual(parseSpaceAdmin(['status','--config',configPath]),{command:'status',configPath,timeoutSeconds:300});
+ assert.deepEqual(parseSpaceAdmin(['pair','--config',configPath,'--timeout-seconds','5','--yes-fingerprint','fp']),{command:'pair',configPath,timeoutSeconds:5,yesFingerprint:'fp'});
+ assert.equal(parseSpaceAdmin(['revoke','--config',configPath,'--device','d']).device,'d');
  for(const bad of [['status'],['status','--config'],['revoke','--config','/a'],['status','--config','/a','--device','d'],['pair','--config','/a','--timeout-seconds','0'],['pair','--config','/a','--timeout-seconds','x'],['pair','--config','/a','--config','/b'],['devices','--config','/a','--bogus','1'],['pair','--config','--yes-fingerprint']])
   assert.throws(()=>parseSpaceAdmin(bad),/usage:/);
 });
