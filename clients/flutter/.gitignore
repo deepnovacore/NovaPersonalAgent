@@ -51,3 +51,4 @@ app.*.map.json
 
 # Generated real-device acceptance inputs (synthetic workbook/public paper).
 /test/support/device_e2e_materials.g.dart
+/test/support/device_e2e_acceptance.dart
