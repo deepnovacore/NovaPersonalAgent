@@ -1102,8 +1102,7 @@ test('direct Build instructions skip planning but retain approval and completion
  assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
 
-test('Workbench previews grow and Build records narration before tools', async () => {
- for(const mode of ['plan','build'] as const){
+for(const mode of ['plan','build'] as const)test(`Workbench previews grow and Build records narration before tools (${mode})`, {skip:mode==='build'&&!supported}, async () => {
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
    assert.equal(request.previewText,true)
@@ -1128,11 +1127,9 @@ test('Workbench previews grow and Build records narration before tools', async (
    const message=f.host.conversationSnapshot().messages.at(-1)!
    assert.equal(message.text,merged);assert.equal(message.turn_id,captions.at(-1)!.turn_id)
   }finally{await f.close()}
- }
 })
 
-test('Plan and Build keep authoritative narration before a tool call', async () => {
- for(const mode of ['plan','build'] as const){
+for(const mode of ['plan','build'] as const)test(`Plan and Build keep authoritative narration before a tool call (${mode})`, {skip:mode==='build'&&!supported}, async () => {
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
    for await(const event of base.stream(request)){yield event;if(event.kind==='response_started'&&round===0)yield {kind:'text_delta' as const,text:'narration before the tool'}}
@@ -1154,7 +1151,6 @@ test('Plan and Build keep authoritative narration before a tool call', async () 
    assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
    assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,merged)
   }finally{await f.close()}
- }
 })
 
 test('a model output limit continues the reply twice and keeps one turn identity', async () => {

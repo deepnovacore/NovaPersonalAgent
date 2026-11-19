@@ -86,6 +86,8 @@ test('ledger host discovery, evidence citations, delivered feed and expired-hist
   consumer='consumer-b'
   assert.deepEqual((await host.discoverySnapshot()).recent_delivery,before.recent_delivery)
   assert.deepEqual((await host.dailyBriefSnapshot()).recent_delivery,dailyBefore.recent_delivery)
+  assert.deepEqual((await host.discoverySnapshot()).memory,[],'a new conversation recipient has no grant')
+  consumer='consumer-a'
   assert.deepEqual((await host.discoverySnapshot()).memory,before.memory)
   await host.revalidate();assert.equal(host.snapshot().feed[0]!.lifecycle,'active')
  }finally{await host.close();await resource.close();await rm(root,{recursive:true,force:true})}

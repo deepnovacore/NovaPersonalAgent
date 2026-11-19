@@ -40,7 +40,7 @@ test('settings connections bridge only forwards sources, connectors and discover
 test('directory and connector authorization IPC accept both windows and reject others', async()=>{
  const source=await readFile(new URL('../src/main/main.mjs',import.meta.url),'utf8')
  const mainWindow={webContents:{}},settingsWindow={webContents:{}},opened=[],dialogs=[]
- const connector=source.slice(source.indexOf("  ipcMain.handle('nova:personal:connector-authorization'"),source.indexOf("  ipcMain.handle('nova:personal:article'"))
+ const connector=source.slice(source.indexOf("  ipcMain.handle('nova:personal:connector-authorization'"),source.indexOf("  ipcMain.handle('nova:personal:shared-ideas'"))
  let handler;new Function('ipcMain','mainWindow','settingsWindow','shell','connectorAuthorizationUrl',connector)({handle:(_,fn)=>{handler=fn}},mainWindow,settingsWindow,{openExternal:async url=>opened.push(url)},url=>url)
  await assert.rejects(handler({sender:{}},'https://x'),/rejected/)
  await handler({sender:mainWindow.webContents},'https://a');await handler({sender:settingsWindow.webContents},'https://b');assert.deepEqual(opened,['https://a','https://b'])
