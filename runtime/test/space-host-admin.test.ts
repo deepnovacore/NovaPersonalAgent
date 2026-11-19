@@ -10,6 +10,7 @@ import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
 import {SuggestionPool} from '../src/core/suggestions.js';
 import {canonicalJson} from '../src/text/canonical-json.js';
+import {BoundedJsonStore} from '../src/storage/bounded-json.js';
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js';
 import {HostSecretStore,SPACE_SECRET_NAMES,overlaySpaceSecrets,secretClearSchema,secretPutSchema} from '../src/space-host/host-admin.js';
 import {HostModelRoutesStore} from '../src/space-host/model-settings.js';
@@ -234,12 +235,22 @@ function recordingTransport(sent:Record<string,unknown>[]):SpaceHostTransport{
 async function concurrentStarters(dir:string,sent:Record<string,unknown>[],count:number){
  const transport=recordingTransport(sent),make=async()=>{const host=new PersonalAgentHost({path:join(dir,'personal-'+randomUUID()+'.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});await host.open({deferBackground:true});return {host,space:new SpaceHost({path:join(dir,'space.json'),space:'s',host,transport,owner:()=>'phone',secrets:new HostSecretStore(join(dir,'config-'+randomUUID()+'.secrets.json')),environment:{}})}};
  const rows=await Promise.all(Array.from({length:count},make));
- return {rows,close:async()=>{await Promise.all(rows.map(async row=>{await row.space.close();await row.host.close()}))}};
+ return {rows,close:async()=>{for(const row of rows){await row.space.close();await row.host.close()}}};
 }
 function secretRaceIntent(value:string){return {v:1,type:'intent',op_id:'raced-secret',kind:'secret.put',created_at:Date.now(),input:{name:'OPENAI_API_KEY',value}}}
 
-test('concurrent starters publish one complete key file and every starter reads the same key',async()=>{
+test('concurrent starters publish one complete key file and every starter reads the same key',async t=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'space-secret-race-')),sent:Record<string,unknown>[]=[],receipt=()=>sent.filter(row=>row.type==='receipt'&&row.op_id==='raced-secret').at(-1)!;
+ // Production gives the journal one writer. This fixture shares it between eight Hosts to race
+ // only key publication, so serialize their journal replacements without serializing their opens.
+ let journalWrites=Promise.resolve();
+ // eslint-disable-next-line @typescript-eslint/unbound-method -- call the original with each store instance.
+ const write=BoundedJsonStore.prototype.write;
+ t.mock.method(BoundedJsonStore.prototype,'write',function(this:BoundedJsonStore<unknown>,state:unknown){
+  if(this.path!==join(dir,'space.json'))return write.call(this,state);
+  const pending=journalWrites.then(()=>write.call(this,state));
+  journalWrites=pending.catch(()=>undefined);return pending;
+ });
  const started=await concurrentStarters(dir,sent,8);
  try{
   // No starter may observe a half-written key: the name only appears once its contents are complete.

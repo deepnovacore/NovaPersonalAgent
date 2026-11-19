@@ -1,6 +1,6 @@
 import {createHash, randomUUID} from 'node:crypto'
 import {EventEmitter} from 'node:events'
-import {closeSync, constants, fstatSync, openSync, readFileSync} from 'node:fs'
+import {closeSync, constants, fstatSync, lstatSync, openSync, readFileSync} from 'node:fs'
 import {link, mkdir, open, unlink} from 'node:fs/promises'
 import {dirname} from 'node:path'
 import {z} from 'zod'
@@ -39,12 +39,18 @@ export const hostModelRoutesPath = (configPath: string): string => configPath + 
 
 function readFile(configPath: string): ModelFile | null {
   let fd: number
-  try {fd = openSync(hostModelRoutesPath(configPath), constants.O_RDONLY | constants.O_NOFOLLOW)} catch (error) {
+  const path = hostModelRoutesPath(configPath)
+  try {
+    if (lstatSync(path).isSymbolicLink()) throw Error('space_models_invalid')
+    fd = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW)
+  } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
     throw Error('space_models_invalid')
   }
   try {
     const stat = fstatSync(fd)
+    const entry = lstatSync(path)
+    if (!entry.isFile() || entry.dev !== stat.dev || entry.ino !== stat.ino) throw Error('space_models_invalid')
     if (!stat.isFile() || stat.size > CAPACITY || process.platform !== 'win32' && ((stat.mode & 0o077) !== 0 || typeof process.getuid === 'function' && stat.uid !== process.getuid())) throw Error('space_models_invalid')
     const text = readFileSync(fd, 'utf8')
     // Existing empty files are damaged documents too; preserve them instead of silently resetting state.
