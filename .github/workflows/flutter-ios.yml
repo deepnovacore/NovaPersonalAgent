@@ -1,6 +1,7 @@
 name: Flutter iOS device build
 on:
   push:
+    branches: [main, 'v*dev', 'release/**']
     paths: ['clients/flutter/**', '.github/workflows/flutter-ios.yml']
   pull_request:
     paths: ['clients/flutter/**', '.github/workflows/flutter-ios.yml']
