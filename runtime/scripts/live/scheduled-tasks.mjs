@@ -22,12 +22,12 @@ export async function runScheduledLive(output){
  const pass=name=>{report.checks.push(name);console.log('PASS',name)}
  const wait=async(check,label,timeout=180000)=>{const until=Date.now()+timeout;let nextLog=0;while(Date.now()<until){const value=await check();if(value)return value;if(Date.now()>nextLog){console.log('WAIT',label);await observe();nextLog=Date.now()+20000}await new Promise(r=>setTimeout(r,1000))}throw Error('timeout_'+label)}
  try{
-  const {loadSettings,resolveModelApiKey}=await import('../../dist/src/config/config.js')
+  const {loadSettings,resolveModelRoute,resolveSelectedModelConnection}=await import('../../dist/src/config/config.js')
   const {requireSelectedCascadedLlmConfig}=await import('../../dist/src/config/cascaded-realtime-config.js')
   const environment={...process.env,PIPELINE_MODE:'cascaded',MEMORY_CONNECTION:'disabled',REALTIME_TELEMETRY:join(directory,'telemetry.jsonl'),BLACKBOARD_PATH:join(directory,'blackboard.sqlite'),CAPABILITIES_CONFIG:join(directory,'capabilities.json'),CODEX_WORKSPACE:directory,CODEX_MANAGED_ROOT:directory,CODEX_PROJECT_STATE_ROOT:directory,COMPOSIO_API_KEY:'',PHONE_ENABLED:'false'}
   await writeFile(environment.CAPABILITIES_CONFIG,JSON.stringify({version:1,modules:{search:{enabled:false},coding:{enabled:false},camera:{enabled:false},knowledge:{enabled:false}}}))
   let settings,selected
-  try{settings=loadSettings(environment,true);selected=requireSelectedCascadedLlmConfig(settings);if(!resolveModelApiKey(settings))throw Error('missing_support_model')}catch(error){report.status='blocked';report.blocker='configured_primary_and_support_models_required';report.configuration_error={name:error.name,message:Object.entries(environment).filter(([key,value])=>/KEY|TOKEN|SECRET/u.test(key)&&value).reduce((message,[,value])=>message.replaceAll(value,'[redacted]'),String(error.message)),fields:error.issues?.map(issue=>issue.path.join('.'))};return report}
+  try{settings=loadSettings(environment,true);selected=requireSelectedCascadedLlmConfig(settings);const support=resolveModelRoute(settings,'support')??resolveSelectedModelConnection(settings);if(!support||support.missing)throw Error('missing_support_model')}catch(error){report.status='blocked';report.blocker='configured_primary_and_support_models_required';report.configuration_error={name:error.name,message:Object.entries(environment).filter(([key,value])=>/KEY|TOKEN|SECRET/u.test(key)&&value).reduce((message,[,value])=>message.replaceAll(value,'[redacted]'),String(error.message)),fields:error.issues?.map(issue=>issue.path.join('.'))};return report}
   report.provider=selected.provider;report.model=selected.config.model
   const {buildProductionComposition}=await import('../../dist/src/composition/production-composition.js')
   let host

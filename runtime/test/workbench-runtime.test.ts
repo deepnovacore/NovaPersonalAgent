@@ -68,6 +68,15 @@ const buildView=(host:PersonalAgentHost,id:string)=>host.conversationSnapshot().
 const toolOutputs=(request:Request)=>request.inputs.flatMap(input=>input.kind==='tool_result'?[input.output as unknown as {status:string;message?:string}]:[])
 const supported=['darwin','win32'].includes(process.platform)
 
+test('local Build is unavailable on unsupported platforms', {skip:supported}, async () => {
+ const f=await fixture(()=>({}))
+ try{
+  await assert.rejects(f.build(),/local_build_unavailable/)
+  assert.equal(f.host.conversationSnapshot().selected_id,'chat:main')
+  assert.equal(f.script.requests.length,0)
+ }finally{await f.close()}
+})
+
 test('production Plan factory admits batched wire calls through the real conversation tool bridge',async context=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-plan-production-')),requests:Record<string,unknown>[]=[],frames:Record<string,unknown>[]=[]
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'production-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
