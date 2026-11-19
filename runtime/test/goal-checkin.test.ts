@@ -256,17 +256,19 @@ test('"stop reminding" mutes the goal at its current version, is idempotent, and
 
 // --- reply → progress ---
 function withConversation(f:Fixture){f.host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'好的，记下了'}),sendAudio:()=>Promise.resolve(),close:()=>Promise.resolve()}),()=>{/* no observer */})}
-const reply=async(f:Fixture,text:string,references?:ConversationTurnContext['references'])=>{const settled=f.progress.settled;await f.host.submitConversationText('chat:main',text,undefined,undefined,references?{references}:{});await f.host.waitConversation('chat:main');if(references?.length){await until(()=>f.progress.settled>settled);await new Promise(resolve=>setTimeout(resolve,50))}}
+const reply=async(f:Fixture,text:string,references?:ConversationTurnContext['references'])=>{const settled=f.progress.settled;await f.host.submitConversationText('chat:main',text,undefined,undefined,references?{references}:{});await f.host.waitConversation('chat:main');if(references?.length)await until(()=>f.progress.settled>settled)}
 test('a reply that references a goal updates its progress from that message alone; made_progress controls last_progress_at',async()=>{
  const f=await fixture();try{
   withConversation(f);const goal=await f.life({op:'create',kind:'goal',title:'学英语口语',success_criteria:'能聊十分钟',cadence:'daily'})
   await reply(f,'今天跟读了二十分钟',[{kind:'goal',id:goal.id,version:1}])
   const sent=f.host.conversationSnapshot().messages.find(m=>m.role==='user'&&m.text==='今天跟读了二十分钟')!
   assert.equal(f.progress.calls.length,1);assert.deepEqual(f.progress.calls[0]!.goal,{title:'学英语口语',success_criteria:'能聊十分钟',status:'active'});assert.equal(f.progress.calls[0]!.previous,null);assert.equal(f.progress.calls[0]!.message.text,'今天跟读了二十分钟')
+  await until(()=>f.host.goalProgress(goal.id)?.evidence_refs.includes('message:chat:main:'+sent.id)===true)
   let row=f.host.goalProgress(goal.id)!
   assert.deepEqual(row.evidence_refs,['message:chat:main:'+sent.id],'the only evidence is the reply');assert.equal(row.last_progress_at,sent.created_at);assert.equal(row.goal_version,1);assert.equal(row.summary,'练了跟读')
   f.clock.value+=DAY;f.progress.fn=()=>Promise.resolve({summary:'今天没练',next_step:'明早补上',made_progress:false})
   await reply(f,'今天太忙没练',[{kind:'goal',id:goal.id,version:1}])
+  await until(()=>f.host.goalProgress(goal.id)?.summary==='今天没练')
   row=f.host.goalProgress(goal.id)!;assert.equal(row.summary,'今天没练');assert.equal(row.last_progress_at,sent.created_at,'no progress keeps the previous time')
   assert.deepEqual(f.progress.calls[1]!.previous,{summary:'练了跟读',next_step:'明天再练',last_progress_at:sent.created_at})
   await reply(f,'随便聊聊');assert.equal(f.progress.calls.length,2,'a message without a goal reference triggers nothing')
@@ -282,6 +284,7 @@ test('progress updates skip a goal deleted meanwhile and fail silently',async()=
   const other=await f.life({op:'create',kind:'goal',title:'每天跑步',cadence:'daily'});f.progress.fn=()=>Promise.reject(Error('model_down'))
   const errors:unknown[]=[];f.host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.resolve({assistant:'好'}),sendAudio:()=>Promise.resolve(),close:()=>Promise.resolve()}),frame=>errors.push(frame))
   await reply(f,'跑了五公里',[{kind:'goal',id:other.id,version:1}])
+  await until(()=>f.diagnostics.includes('goal_progress_update_failed'))
   assert.equal(f.host.goalProgress(other.id),null);assert.deepEqual(errors.filter(frame=>(frame as {type?:string}).type==='conversation.error'),[],'no error reaches the user');assert.ok(f.diagnostics.includes('goal_progress_update_failed'))
   assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,'好','the reply itself is unaffected')
  }finally{await f.close()}
@@ -334,7 +337,7 @@ test('progress race: a goal edited after the user referenced it, before the repl
   await f.host.submitConversationText('chat:main','练了',undefined,undefined,{references:[{kind:'goal',id:goal.id,version:1}]})
   await f.life({op:'update',kind:'goal',id:goal.id,expected_version:1,title:'学法语口语'});gate.resolve();await f.host.waitConversation('chat:main');await settle()
   assert.equal(f.progress.calls.length,0,'the user referenced version 1, which is no longer current');assert.equal(f.host.goalProgress(goal.id),null)
-  withConversation(f);await reply(f,'又练了',[{kind:'goal',id:goal.id,version:2}]);assert.equal(f.host.goalProgress(goal.id)!.goal_version,2)
+  withConversation(f);await reply(f,'又练了',[{kind:'goal',id:goal.id,version:2}]);await until(()=>f.host.goalProgress(goal.id)?.goal_version===2);assert.equal(f.host.goalProgress(goal.id)!.goal_version,2)
  }finally{await f.close()}
 })
 test('progress race: updates for one goal run in reply order; the later reply sees the earlier result and wins',async()=>{

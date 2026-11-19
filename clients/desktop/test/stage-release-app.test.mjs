@@ -60,3 +60,20 @@ test('staged Host can load relay client and excludes relay sources and deploymen
   for(const file of ['src/client.ts','.env'])await assert.rejects(access(join(staged,'node_modules/@nova-personal-agent/relay',file)))
  } finally { await rm(root,{recursive:true,force:true}) }
 })
+
+
+test('staging skips an empty optional package directory and still rejects a missing required package', async () => {
+ const root=await mkdtemp(join(tmpdir(),'nova-stage-optional-'))
+ const rendererOutputRoot=join(root,'renderer')
+ const dependency='fixture-optional-platform-binding'
+ try{
+  for(const path of ['src','LICENSES','renderer',join('node_modules',dependency)])await mkdir(join(root,path),{recursive:true})
+  await writeFile(join(root,'THIRD_PARTY_NOTICES.md'),'fixture')
+  const manifest=join(root,'package.json')
+  await writeFile(manifest,JSON.stringify({name:'test-app',optionalDependencies:{[dependency]:'1'}}))
+  const staged=await stageReleaseApplication({packageRoot:root,rendererOutputRoot})
+  await assert.rejects(access(join(staged,'node_modules',dependency)),{code:'ENOENT'})
+  await writeFile(manifest,JSON.stringify({name:'test-app',dependencies:{[dependency]:'1'}}))
+  await assert.rejects(stageReleaseApplication({packageRoot:root,rendererOutputRoot}),/production dependency missing: fixture-optional-platform-binding/)
+ }finally{await rm(root,{recursive:true,force:true})}
+})
