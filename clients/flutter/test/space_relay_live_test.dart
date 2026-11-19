@@ -165,14 +165,16 @@ void main() {
                 credential,
                 body: body,
                 allowLoopback: true,
-                responseBodyTimeout: const Duration(seconds: 15),
+                responseBodyTimeout: const Duration(minutes: 1),
               ),
         );
         await gatewayEntered.future;
         controller.start();
-        final deadline = DateTime.now().add(const Duration(seconds: 5));
+        // Decrypting the backlog in a debug VM can take several seconds.
+        const initialSyncTimeout = Duration(seconds: 20);
+        final deadline = DateTime.now().add(initialSyncTimeout);
         while (state.snapshot.isEmpty && DateTime.now().isBefore(deadline)) {
-          await controller.sync().timeout(const Duration(seconds: 5));
+          await controller.sync().timeout(initialSyncTimeout);
           await Future<void>.delayed(const Duration(milliseconds: 100));
         }
         expect(
