@@ -80,7 +80,8 @@ jobs:
       matrix:
         os: [macos-latest, ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 30
+    # On slower hosted Macs, runtime and desktop tests alone can take 24 minutes.
+    timeout-minutes: ${{ matrix.os == 'macos-latest' && 50 || 30 }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
