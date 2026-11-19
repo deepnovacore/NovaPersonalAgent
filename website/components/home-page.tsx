@@ -34,27 +34,9 @@ export function HomePage({ en = false }: { en?: boolean }) {
       ];
 
   const downloads: [string, [string, string][]][] = [
-    [
-      en ? 'macOS (Apple Silicon)' : 'macOS（Apple 芯片）',
-      [
-        ['DMG', `${rel}-macos-arm64.dmg`],
-        ['ZIP', `${rel}-macos-arm64-app.zip`],
-      ],
-    ],
-    [
-      en ? 'Windows (x64)' : 'Windows（x64）',
-      [
-        [en ? 'Installer' : '安装包', `${rel}-windows-x64.exe`],
-        [en ? 'Portable' : '免安装版', `${rel}-windows-x64-portable.zip`],
-      ],
-    ],
-    [
-      en ? 'Linux (Ubuntu 22.04 or later)' : 'Linux（Ubuntu 22.04 及以上）',
-      [
-        ['AppImage', `${rel}-linux-x64.AppImage`],
-        ['DEB', `${rel}-linux-x64.deb`],
-      ],
-    ],
+    [en ? 'macOS (Apple Silicon)' : 'macOS（Apple 芯片）', [['DMG', `${rel}-macos-arm64.dmg`]]],
+    [en ? 'Windows (x64)' : 'Windows（x64）', [[en ? 'EXE (unsigned)' : 'EXE（未签名）', `${rel}-windows-x64-unsigned.exe`]]],
+    ['Android (arm64)', [['APK', `${rel}-android-arm64.apk`]]],
   ];
 
   return (
@@ -171,18 +153,13 @@ export function HomePage({ en = false }: { en?: boolean }) {
                 </tr>
               ))}
               <tr>
-                <th scope="row">iOS / Android</th>
-                <td className="soon">
-                  {/* TODO(v1.0.0): add the TestFlight invitation and Android APK links before release. */}
-                  {en
-                    ? 'Links go up with the release.'
-                    : '链接随正式发布补上。'}
-                </td>
+                <th scope="row">iOS</th>
+                <td>{en ? 'External testing via TestFlight' : '通过 TestFlight 外测'}</td>
               </tr>
             </tbody>
           </table>
           <p className="get-npm">
-            {en ? 'Or install with npm:' : '也可以用 npm 安装：'}
+            {en ? 'Older npm release (0.4.1)' : 'npm 旧版（0.4.1）'}
           </p>
           <InstallCommand en={en} />
           <p className="small">
