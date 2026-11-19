@@ -1,4 +1,5 @@
 import 'package:nova_mobile/context/profile_writer.dart';
+import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 
 // Existing profile/repair tests focus on their original behavior. Adapt their
 // simulated model responses to the new independent Timeline protocol; direct
@@ -10,10 +11,13 @@ ProfileWriter fixtureProfileWriter({
   loadValidatedBatch,
   Future<void> Function(List<Map<String, dynamic>>, List<Map<String, dynamic>>)?
   saveValidatedBatch,
+  Future<ProfileObservationReuse> Function(List<Map<String, dynamic>>)?
+  loadReusableObservations,
 }) => ProfileWriter(
   onProgress: onProgress,
   loadValidatedBatch: loadValidatedBatch,
   saveValidatedBatch: saveValidatedBatch,
+  loadReusableObservations: loadReusableObservations,
   complete: (stage, instructions, input) async {
     if (stage == 'timeline_select') {
       return {
@@ -60,6 +64,7 @@ ProfileWriter fixtureProfileWriter({
             'why_now': '这一进展回应了本人提出的项目计划。',
             'next_steps': <Object>[],
             'uncertainty': '',
+            'temporal': {'kind': 'unknown', 'dates': []},
           };
         }
       }

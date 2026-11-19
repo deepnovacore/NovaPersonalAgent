@@ -51,7 +51,7 @@ test('steps render provider thinking and tool calls interleaved in server order'
  m.log.update();await tick()
  assert.deepEqual(m.rows().map(node=>node.dataset.stepKind),['thinking','tool','thinking','tool'])
  const header=m.header()
- assert.equal(header.children[1].textContent,'工作步骤 · 4')
+ assert.equal(header.children[1].textContent,'2 次工具调用')
  assert.equal(header.attributes['aria-expanded'],'false')
  assert.equal(m.rows()[0].children[0].children[1].textContent,'思考')
  assert.match(m.rows()[0].children[0].children[4].textContent,/^\d+[smhd]$/)
@@ -78,7 +78,7 @@ test('compact hides thinking rows, standard truncates the preview, detailed open
  m.log.update();await tick()
  assert.equal(m.rows().length,1,'a thought-only row is omitted in compact mode')
  assert.equal(m.rows()[0].hidden,false)
- assert.equal(m.header().children[1].textContent,'工作步骤 · 1','the count matches visible rows')
+ assert.equal(m.header().children[1].textContent,'1 次工具调用','thinking is excluded from tool counts')
  m.display.set({steps:'standard'});await tick()
  assert.equal(m.rows().length,2)
  const thinking=m.rows()[0]
@@ -271,7 +271,7 @@ test('unlinked steps are grouped after the transcript instead of being dropped',
  assert.equal(m.log.forMessage('user').length,0)
  const orphans=m.log.remaining(new Set(['user']))
  assert.equal(orphans.length,2)
- assert.equal(orphans[0].children[0].children[1].textContent,'工作步骤 · 1')
+ assert.equal(orphans[0].children[0].children[1].textContent,'思考 · 1')
 })
 
 test('long builds retain every step so new calls cannot freeze the log',async()=>{
@@ -289,9 +289,10 @@ test('computer actions keep reading as human action summaries',()=>{
 
 test('workbench CSS keeps the avatar gutter and a bounded compact step flow',async()=>{
  const css=await readFile(new URL('../src/renderer/workbench.css',import.meta.url),'utf8')
- assert.match(css,/\.message-avatar\{[^}]*width:32px[^}]*border-radius:10px/u)
- assert.match(css,/\.message\.assistant\{[^}]*grid-template-columns:32px minmax\(0,1fr\)/u)
- assert.match(css,/\.message\.assistant\.message-continuation\{[^}]*padding-left:42px/u)
+ assert.match(css,/--assistant-avatar-gap:10px/u)
+ assert.match(css,/\.message\.assistant\{[^}]*gap:0 var\(--assistant-avatar-gap\)/u)
+ assert.match(css,/\.message\.assistant\.message-continuation\{[^}]*padding-inline-start:var\(--assistant-gutter\)/u)
+ assert.match(css,/\.message\.build-steps\{[^}]*width:calc\(min\(100%,var\(--chat-message-width\)\) - var\(--assistant-gutter\)\)[^}]*margin-inline-start:var\(--assistant-gutter\)/u)
  assert.match(css,/\.build-steps-rows\{[^}]*max-height:420px[^}]*overflow:auto/u)
  assert.match(css,/\.build-steps-header\{[^}]*min-height:33px[^}]*border-bottom/u)
  assert.match(css,/\.build-step-summary\{[^}]*min-height:26px/u)

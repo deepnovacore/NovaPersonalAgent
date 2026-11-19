@@ -1,3 +1,4 @@
+import {notificationDisplayBody} from './content.js';
 import { createHash } from 'node:crypto';
 import { notificationStore } from './store.js';
 import { bindingSchema, notificationSchema, partSchema, type ChannelBinding, type Delivery, type DeliveryStatus, type NotificationInput, type NotificationState, type NotificationChannelAdapter, type SendOutcome } from './contracts.js';
@@ -48,6 +49,7 @@ export class NotificationService {
             d.error = 'interrupted_send';
         } }); this.#opened = true; }
     async close() { this.#opened = false; this.#stop.abort(); await this.#run; await this.#tail; }
+    display(){return this.#state.deliveries.filter(delivery=>!['cancelled','superseded'].includes(delivery.status)).slice(-100).map(delivery=>({id:delivery.id,kind:delivery.notification.kind,title:delivery.notification.title,body:notificationDisplayBody(delivery.notification),version:delivery.notification.revision+':'+delivery.notification.occurrence,created_at:new Date(delivery.notification.created_at).toISOString()}))}
     snapshot() { const counts = Object.fromEntries(['pending', 'sending', 'accepted', 'retry_wait', 'blocked', 'unknown', 'cancelled', 'expired', 'superseded'].map(s => [s, 0])) as Record<DeliveryStatus, number>; for (const d of this.#state.deliveries)
         counts[d.status]++; return { primary_binding_id: this.#state.primary_binding_id, route_revision: this.#state.route_revision, local: this.local, configured: this.#state.configured, bindings: this.#state.bindings.map(b => ({id:b.id,provider:b.provider,user_scope:b.user_scope,generation:b.generation,status:b.status})), counts, deliveries: this.#state.deliveries.slice(-100).map(d => ({ id: d.id, title: d.notification.title, source: d.notification.source, status: d.status, error: d.error, binding_id: d.binding.id, updated_at: d.updated_at })) }; }
     /** Accepted is the only delivered terminal status; its `updated_at` is set when the final part's receipt is stored. */

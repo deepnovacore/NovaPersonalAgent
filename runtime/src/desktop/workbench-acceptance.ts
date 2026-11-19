@@ -13,7 +13,7 @@ import type {CapabilityRegistry} from '../config/capability-registry.js'
 import {Dispatcher,getGlobalDispatcher,setGlobalDispatcher} from 'undici'
 import {FEED_HEADERS,NEWS_SOURCES} from '../news/feeds.js'
 
-const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false),readExistingOnly:z.boolean().default(false)}).strict()
+const manifestSchema=z.object({version:z.literal(1),originalUserData:z.string(),originalBlackboardPath:z.string(),repository:z.string(),outputDirectory:z.string(),buildCommit:z.string().regex(/^[a-f0-9]{40}$/u),providers:z.array(z.object({identity:z.string().min(1),origin:z.string().url(),models:z.array(z.string()).min(1)}).strict()).min(1),allowedIdentities:z.array(z.string()).min(1),runCapSeconds:z.number().int().min(10).max(3600).default(300),profileGeneration:z.boolean().default(false),news:z.boolean().default(false),readExistingOnly:z.boolean().default(false),keepOpen:z.boolean().default(false),chatCallLimit:z.number().int().min(0).max(3).default(0),relayOrigins:z.array(z.string().url()).default([])}).strict()
 export type AcceptanceManifest=z.infer<typeof manifestSchema>
 let active:AcceptanceManifest|undefined
 let calls=0,blocked=0,probeVerified=false
@@ -38,13 +38,16 @@ export function loadAcceptanceManifest(environment:NodeJS.ProcessEnv=process.env
  if(!environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)return undefined
  if(!environment.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST)throw Error('acceptance_manifest_required')
  const value=manifestSchema.parse(JSON.parse(readFileSync(environment.NOVA_WORKBENCH_ACCEPTANCE_MANIFEST,'utf8')))
+ if(value.keepOpen&&!value.readExistingOnly)throw Error('acceptance_keep_open_requires_cached_results')
  const output=canonical(value.outputDirectory),report=resolve(environment.NOVA_WORKBENCH_ACCEPTANCE_REPORT)
  for(const root of [value.originalUserData,dirname(value.originalBlackboardPath),value.repository])if(inside(canonical(root),output))throw Error('acceptance_output_inside_profile_or_repository')
  if(canonical(dirname(report))!==output)throw Error('acceptance_report_outside_output')
  const identityOrigins=new Map<string,string>()
  for(const provider of value.providers){if(identityOrigins.has(provider.identity)&&identityOrigins.get(provider.identity)!==provider.origin)throw Error('acceptance_provider_identity_multiple_origins');identityOrigins.set(provider.identity,provider.origin);if(!value.allowedIdentities.includes(provider.identity))throw Error('acceptance_provider_not_authorized');const url=new URL(provider.origin);if(url.protocol!=='https:'||url.origin!==provider.origin||url.username||url.password)throw Error('acceptance_provider_origin_invalid')}
+ for(const origin of value.relayOrigins){const url=new URL(origin);if(url.protocol!=='https:'||url.origin!==origin||url.username||url.password||value.providers.some(provider=>provider.origin===origin))throw Error('acceptance_relay_origin_invalid')}
  return value
 }
+function relayUrl(url:URL):boolean{return !!active?.relayOrigins.includes(url.protocol==='wss:'?'https://'+url.host:url.origin)&&['https:','wss:'].includes(url.protocol)&&!url.username&&!url.password&&!url.hash&&url.pathname.startsWith('/v1/')&&!/%(?:2f|5c)/iu.test(url.pathname)}
 function rejectEgress(code:string):never{blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error(code)}
 export function acceptanceCounts():{model_calls:number;blocked_calls:number}{return {model_calls:calls,blocked_calls:blocked}}
 export function appendAcceptanceCounts(kind:string,counts:Record<string,number>):void{
@@ -57,6 +60,7 @@ export function assertAcceptanceUrl(input:string,allowProvider=false):void{
  const url=new URL(input)
  if(['file:','nova:','devtools:'].includes(url.protocol))return
  if(url.protocol==='ws:'&&loopback.has(url.host))return
+ if(relayUrl(url))return
  if(allowProvider&&url.protocol==='https:'&&active.providers.some(provider=>provider.origin===url.origin))return
  if(allowProvider&&url.protocol==='https:'&&newsOrigin(url.origin))return
  blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unknown_outbound')
@@ -68,12 +72,14 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
  active=manifest
  if(environment.DESKTOP_READY_ENDPOINT)allowAcceptanceLoopback(environment.DESKTOP_READY_ENDPOINT)
  assertOriginalProfilePaths({blackboardPath:environment.BLACKBOARD_PATH??''},{userData:manifest.originalUserData,blackboardPath:manifest.originalBlackboardPath})
+ if(!manifest.readExistingOnly){
  const source=JSON.parse(readFileSync(manifest.originalBlackboardPath+'.personal.json.sources.json','utf8')) as {sources?:{deleting?:boolean;view?:{state?:string};processing_consent?:{extraction_provider?:string|null;embedding_provider?:string|null}}[]}
  const grants=source.sources?.filter(record=>!record.deleting&&['connected','error'].includes(record.view?.state??''))??[]
  if(!grants.length)throw Error('acceptance_no_active_sources')
  const sourceIdentities=new Set(grants.flatMap(record=>[record.processing_consent?.extraction_provider,record.processing_consent?.embedding_provider]).filter((id):id is string=>typeof id==='string'))
  if(manifest.providers.some(provider=>!sourceIdentities.has(provider.identity))||manifest.allowedIdentities.some(identity=>!sourceIdentities.has(identity)))throw Error('acceptance_provider_outside_source_grant')
  for(const record of grants)for(const identity of [record.processing_consent?.extraction_provider,record.processing_consent?.embedding_provider])if(!identity||!manifest.allowedIdentities.includes(identity))throw Error('acceptance_processing_grant_mismatch')
+ }
  // Preserve the method for Reflect.apply with the calling socket below.
  // eslint-disable-next-line @typescript-eslint/unbound-method
  const originalConnect=Socket.prototype.connect
@@ -83,7 +89,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   const host=typeof options==='object'?options.host:typeof args[1]==='string'?args[1]:undefined
   const port=typeof options==='object'?options.port:options
   // Unix sockets and arbitrary local proxies could bypass provider enforcement.
-  const permitted=host!==undefined&&(loopback.has(host+':'+String(port))||manifest.providers.some(provider=>{const url=new URL(provider.origin);return fetchOrigin.getStore()===provider.origin&&url.hostname===host&&String(port)===String(url.port||443)})||[...newsOrigins].some(origin=>{const url=new URL(origin);return newsOrigin(origin)&&fetchOrigin.getStore()===origin&&url.hostname===host&&String(port)==='443'}))
+  const permitted=host!==undefined&&(loopback.has(host+':'+String(port))||manifest.providers.some(provider=>{const url=new URL(provider.origin);return fetchOrigin.getStore()===provider.origin&&url.hostname===host&&String(port)===String(url.port||443)})||manifest.relayOrigins.some(origin=>{const url=new URL(origin);return fetchOrigin.getStore()===origin&&url.hostname===host&&String(port)===String(url.port||443)})||[...newsOrigins].some(origin=>{const url=new URL(origin);return newsOrigin(origin)&&fetchOrigin.getStore()===origin&&url.hostname===host&&String(port)==='443'}))
   if(!permitted){blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unknown_socket')}
   return Reflect.apply(originalConnect,this,args)
  } as Socket['connect']
@@ -93,11 +99,13 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
    const input=args[0]
    const url=typeof input==='string'||input instanceof URL?new URL(input):undefined
    const rawOptions=url?args[1]:input
-   const options=rawOptions&&typeof rawOptions==='object'?rawOptions as {hostname?:string;host?:string;port?:string|number;protocol?:string;socketPath?:string}:undefined
+   const options=rawOptions&&typeof rawOptions==='object'?rawOptions as {hostname?:string;host?:string;port?:string|number;protocol?:string;socketPath?:string;path?:string;method?:string;headers?:Record<string,unknown>;rejectUnauthorized?:boolean}:undefined
    const host=options?.hostname??options?.host??url?.hostname
    const protocol=options?.protocol??url?.protocol??(transport===https?'https:':'http:')
    const urlPort=url?.port===''?undefined:url?.port
    const port=options?.port??urlPort??(protocol==='https:'?443:80)
+   const path=options?.path??(url?url.pathname+url.search:'/'),target=new URL(path,protocol+'//'+host+':'+String(port));
+   if(transport===https&&protocol==='https:'&&!options?.socketPath&&options?.rejectUnauthorized!==false&&relayUrl(target)&&target.pathname==='/v1/live'&&(options?.method??'GET').toUpperCase()==='GET'&&Object.entries(options?.headers??{}).some(([key,value])=>key.toLowerCase()==='upgrade'&&String(value).toLowerCase()==='websocket'))return fetchOrigin.run(target.origin,()=>Reflect.apply(originalRequest,transport,args)) as http.ClientRequest
    if(options?.socketPath||protocol!=='http:'||host!=='127.0.0.1'||!loopback.has(host+':'+String(port))){blocked++;appendAcceptanceCounts('egress_blocked',{blocked_calls:blocked});throw Error('acceptance_unapproved_http_transport')}
    return Reflect.apply(originalRequest,transport,args) as http.ClientRequest
   }
@@ -118,12 +126,22 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
   assertAcceptanceUrl(url,true)
   const provider=manifest.providers.find(item=>item.origin===new URL(url).origin)
   if(provider){
-   if(acceptanceReadExistingOnly())rejectEgress('acceptance_generation_paused')
    // Refuse opaque bodies, redirects, and an unknown model before transmitting.
    const body=init?.body
    if(typeof body!=='string')rejectEgress('acceptance_model_body_required')
    let model:unknown;try{model=(JSON.parse(body) as {model?:unknown}).model}catch{rejectEgress('acceptance_model_body_invalid')}
    if(typeof model!=='string'||!manifest.providers.some(item=>item.origin===new URL(url).origin&&item.models.includes(model)))rejectEgress('acceptance_unknown_model')
+   if(acceptanceReadExistingOnly()){
+    const payload=JSON.parse(body) as Record<string,unknown>;
+    if(!manifest.chatCallLimit||payload.stream!==true||(init?.method??'GET').toUpperCase()!=='POST'||!new URL(url).pathname.endsWith('/chat/completions'))rejectEgress('acceptance_generation_paused');
+    if(calls>=manifest.chatCallLimit)rejectEgress('acceptance_chat_call_limit');
+    if(Buffer.byteLength(body)>256*1024)rejectEgress('acceptance_chat_input_limit');
+    const limitField='max_completion_tokens' in payload?'max_completion_tokens':'max_tokens',limit=payload[limitField];
+    delete payload.max_tokens;delete payload.max_completion_tokens;
+    payload[limitField]=Math.min(typeof limit==='number'&&Number.isInteger(limit)&&limit>0?limit:2048,2048);
+    payload.n=1;
+    init={...init,body:JSON.stringify(payload)};
+   }
    calls++
    // One row per call, written when the response headers settle: purpose, endpoint, and time to first byte.
    const purpose=currentModelPurpose(),labels={model_calls:calls,['purpose_'+purpose]:1,[new URL(url).pathname.endsWith('/embeddings')?'endpoint_embeddings':'endpoint_chat']:1},started=performance.now()
@@ -132,6 +150,10 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
     if(response.ok&&!new URL(url).pathname.endsWith('/embeddings'))void response.clone().json().then((reply:unknown)=>{const usage=(reply as {usage?:{prompt_tokens?:unknown;completion_tokens?:unknown}}|null)?.usage;if(typeof usage?.completion_tokens==='number'&&typeof usage.prompt_tokens==='number')appendAcceptanceCounts('model_usage',{['purpose_'+purpose]:1,input_tokens:usage.prompt_tokens,output_tokens:usage.completion_tokens,body_ms:Math.round(performance.now()-started)})}).catch(()=>undefined)
     return response}
    catch(error){appendAcceptanceCounts('model_call',{...labels,latency_ms:Math.round(performance.now()-started),ok:0,[error instanceof Error&&error.name==='AbortError'||error instanceof Error&&error.name==='TimeoutError'?'aborted':'network_error']:1});throw error}
+  }
+  if(relayUrl(new URL(url))){
+   if(typeof input!=='string'&&!(input instanceof URL)||!['GET','POST'].includes((init?.method??'GET').toUpperCase()))rejectEgress('acceptance_relay_method_invalid')
+   return fetchOrigin.run(new URL(url).origin,()=>originalFetch(input,{...init,redirect:'error'}))
   }
   if(newsOrigin(new URL(url).origin)){
    // A feed read sends nothing: exactly a built-in feed URL, GET with no body, and fixed public headers in place of the caller's.
@@ -147,7 +169,7 @@ export function installAcceptanceGate(environment:NodeJS.ProcessEnv=process.env)
 }
 export function acceptanceProfileHash(path:string):string{return createHash('sha256').update(canonical(path)).digest('hex')}
 export function assertAcceptanceGrant(expected:{extraction_provider:string|null;embedding_provider:string|null}|undefined,grants:readonly {extraction_provider:string|null;embedding_provider:string|null}[]):void{
- if(!active)return
+ if(!active||active.readExistingOnly)return
  if(!expected?.extraction_provider||!expected.embedding_provider)throw Error('acceptance_embedding_provider_disabled')
  for(const id of [expected.extraction_provider,expected.embedding_provider])if(!active.allowedIdentities.includes(id))throw Error('acceptance_provider_not_authorized')
  if(!grants.length||grants.some(grant=>grant.extraction_provider!==expected.extraction_provider||grant.embedding_provider!==expected.embedding_provider))throw Error('acceptance_processing_grant_mismatch')
@@ -157,6 +179,7 @@ export function assertPersistedAcceptanceGrant(expected:{extraction_provider:str
  if(!active){if(acceptanceEnabled())throw Error('acceptance_gate_missing');return}
  if(!probeVerified)throw Error('acceptance_gate_probe_missing')
  if(hostPath!==undefined&&canonical(hostPath)!==canonical(active.originalBlackboardPath+'.personal.json'))throw Error('acceptance_wrong_host_path')
+ if(active.readExistingOnly)return
  const state=JSON.parse(readFileSync(active.originalBlackboardPath+'.personal.json.sources.json','utf8')) as {sources?:{deleting?:boolean;view?:{state?:string};processing_consent?:{extraction_provider:string|null;embedding_provider:string|null}}[]}
  assertAcceptanceGrant(expected,(state.sources??[]).filter(record=>!record.deleting&&['connected','error'].includes(record.view?.state??'')).map(record=>record.processing_consent??{extraction_provider:null,embedding_provider:null}))
 }

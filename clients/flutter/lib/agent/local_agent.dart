@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'package:flutter/services.dart';
+import '../agent_core/model_settings.dart';
 
 /// UI commands and projections only. The native host owns task state.
 abstract interface class LocalAgent {
@@ -14,6 +15,9 @@ class NativeLocalAgent implements LocalAgent {
     String method, [
     Map<String, dynamic> input = const {},
   ]) async {
+    if (method == 'modelSettings' || method == 'run') {
+      await ModelSettings(native: this).syncNative();
+    }
     final reply = await _channel.invokeMethod<String>(
       method,
       jsonEncode(input),

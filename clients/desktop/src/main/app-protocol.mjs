@@ -72,8 +72,9 @@ function staticDependencies(route, source) {
 export async function buildRendererAssetGraph(
   rendererRoot,
   readText = file => readFile(file, 'utf8'),
+  entryPaths = RENDERER_ENTRY_PATHS,
 ) {
-  const pending = [...RENDERER_ENTRY_PATHS]
+  const pending = [...entryPaths]
   const visited = new Set()
   while (pending.length > 0) {
     const route = pending.shift()

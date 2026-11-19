@@ -60,6 +60,56 @@ test('text chat continues after a task control tool and records its admission', 
   } finally { await host.close(); await rm(dir, {recursive: true, force: true}) }
 })
 
+test('a text turn keeps pre-tool narration and merges the tool continuation into one reply', async () => {
+  const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-tool-continuation-'))
+  const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'test', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
+  let requests = 0
+  try {
+    await host.open()
+    const conversation = createConversation('chat', 'Turn merge')
+    const task = await host.tasks.delegate('initial', {conversation_id: conversation.id, goal: 'Review project', acceptance: [], origin_ref: 'conversation:1'})
+    // This test owns the foreground control/continuation chain, not background task execution.
+    host.wakeTask = () => Promise.resolve()
+    const llm: CascadedLlmSession = {
+      async *stream(input) {
+        await Promise.resolve()
+        const id = 'llm-' + ++requests
+        yield {kind: 'response_started', response_id: id}
+        if (requests === 1) {
+          yield {kind: 'text_preview', text: '先说明一下'}
+          yield {kind: 'tool_call', item_id: 'item', call_id: 'continue-task', name: 'task', arguments: {operation: 'continue', task_id: task.id, source_refs: []}}
+        } else {
+          assert.ok(input.inputs.some(item => item.kind === 'tool_result'), 'the next request carries the captured tool result')
+          yield {kind: 'text_delta', text: '已收到，任务会继续。'}
+        }
+        yield {kind: 'response_completed', response_id: id}
+      },
+      restoreHistory: () => Promise.resolve(), abandonPendingResponse: () => Promise.resolve(), close: () => Promise.resolve(),
+    }
+    const frames: Record<string, unknown>[] = []
+    const factory = conversationRuntimeFactory({host, clock: new VirtualClock(), memory: () => undefined,
+      settings: settingsSchema.parse({executors: [], camera_module_enabled: false, cascade_llm_provider: 'qwen', dashscope_api_key: 'test'}),
+      searchTransport: {search: () => Promise.reject(Error('unexpected search'))},
+      gateway: {complete: () => Promise.reject(Error('unexpected model')), async *stream() { await Promise.resolve(); throw Error('unexpected stream') }},
+      onDiagnostic: () => undefined,
+      createTextProvider: options => buildCascadedTextProvider(options, {...cascadedProviderRegistries, llm: {...cascadedProviderRegistries.llm, qwen: () => ({open: () => llm})}}),
+    })
+    const runtime = await factory(conversation, frame => { frames.push(frame) })
+    try {
+      const result = await runtime.runTurn('确认继续', AbortSignal.timeout(3000))
+      assert.equal(requests, 2)
+      assert.equal(result.assistant, '先说明一下\n\n已收到，任务会继续。')
+      const captions = frames.filter(frame => frame.type === 'caption' && frame.role === 'assistant')
+      assert.ok(captions.length > 0)
+      // Tool rounds belong to the same user turn: one stable caption identity, no empty turn final.
+      assert.equal(new Set(captions.map(frame => frame.turn_id)).size, 1)
+      assert.equal(captions.some(frame => frame.final === true && frame.text === ''), false)
+      assert.ok(captions.some(frame => String(frame.full_text ?? frame.text).includes('先说明一下')))
+      assert.equal(result.turn_id, captions.at(-1)?.turn_id)
+    } finally { await runtime.close() }
+  } finally { await host.close(); await rm(dir, {recursive: true, force: true}) }
+})
+
 test('a cascaded HTTP 401 rejects the pending text turn before reconnect without waiting for the deadline', async () => {
   const dir = await mkdtemp(join(await realpath(tmpdir()), 'nova-tool-continuation-'))
   const host = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'test', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})

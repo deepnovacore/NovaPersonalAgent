@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 """Build pinned iSH ARM64 + Alpine; all generated files stay under --output-root."""
-import argparse, hashlib, json, os, pathlib, shutil, subprocess, tarfile, urllib.request
+import argparse, hashlib, json, os, pathlib, shutil, subprocess, sys, tarfile, urllib.request
+
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / 'documents'))
+from bake_rootfs import bake, sha256
 
 ISH_COMMIT = 'e6521d9cfe9cd48f19917fc3b23aea622ba358b4'
 ISH_SHA256 = '48fea8b9d713c79581148b19f17d828b79e487adf7058d998aa08ef9d06fa07c'
@@ -21,10 +24,18 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--output-root', type=pathlib.Path, required=True)
     parser.add_argument('--sdk', choices=['iphoneos','iphonesimulator','macosx'], default='iphoneos')
+    parser.add_argument('--ci-runner-temp', action='store_true', help='Allow an isolated GitHub Actions RUNNER_TEMP output root')
+    parser.add_argument('--docker', default='docker')
+    parser.add_argument('--verify-reproducible', action='store_true')
+    parser.add_argument('--without-font', action='store_true', help='Size comparison only')
     args = parser.parse_args()
     out = args.output_root.resolve()
-    if len(out.parts) < 4 or out.parts[1] != 'Volumes' or not os.path.ismount(pathlib.Path('/Volumes') / out.parts[2]):
-        raise SystemExit('--output-root must be on a mounted external volume; no internal fallback')
+    if args.ci_runner_temp:
+        runner_temp = os.environ.get('RUNNER_TEMP')
+        if os.environ.get('GITHUB_ACTIONS') != 'true' or not runner_temp or not out.is_relative_to(pathlib.Path(runner_temp).resolve()) or out == pathlib.Path(runner_temp).resolve():
+            raise SystemExit('--ci-runner-temp requires an isolated output under GitHub Actions RUNNER_TEMP')
+    elif not args.output_root.is_absolute() or out == pathlib.Path(out.anchor) or out.is_relative_to('/Volumes'):
+        raise SystemExit('--output-root must be an explicit isolated directory on internal storage')
     out.mkdir(parents=True, exist_ok=True)
     downloads = out / 'downloads'; downloads.mkdir(exist_ok=True)
     env = os.environ.copy(); env['TMPDIR'] = str(out / 'tmp'); pathlib.Path(env['TMPDIR']).mkdir(exist_ok=True)
@@ -71,17 +82,24 @@ def main():
     run('ninja','-C',str(native),'tools/fakefsify',env=env)
     alpine = downloads/'alpine-minirootfs-3.21.0-aarch64.tar.gz'
     download('https://dl-cdn.alpinelinux.org/alpine/v3.21/releases/aarch64/'+alpine.name, alpine, ALPINE_SHA256)
+    baked = bake('ios', out/'documents-ios', docker=args.docker, without_font=args.without_font,
+                 verify_reproducible=args.verify_reproducible, ci_runner_temp=args.ci_runner_temp)
     resources = out/'resources'; resources.mkdir(exist_ok=True)
     rootfs = resources/'NovaAlpine'
+    baked_digest = sha256(baked)
+    rootfs_marker = resources/'NovaAlpine.sha256'
+    if rootfs.exists() and (not rootfs_marker.is_file() or rootfs_marker.read_text().strip() != baked_digest):
+        raise SystemExit('Existing fakefs uses different inputs; use a new isolated output root, do not reuse stale resources')
     if not rootfs.exists():
         staging = resources/('NovaAlpine.install-'+str(os.getpid()))
-        run(str(native/'tools/fakefsify'),str(alpine),str(staging),env=env)
+        run(str(native/'tools/fakefsify'),str(baked),str(staging),env=env)
         staging.rename(rootfs)
+        rootfs_marker.write_text(baked_digest+'\n')
     if not (rootfs/'meta.db').is_file() or not (rootfs/'data').is_dir():
         raise SystemExit('Incomplete existing fakefs root; preserve it for recovery before rebuilding')
     includes = out/'include'; includes.mkdir(exist_ok=True)
     if not (includes/'ish').exists(): (includes/'ish').symlink_to(source, target_is_directory=True)
-    manifest = {'ish_commit':ISH_COMMIT,'ish_archive_sha256':ISH_SHA256,'alpine_archive_sha256':ALPINE_SHA256,'sdk':args.sdk,'patches':['darwin-spawn-chdir-np','nova-execution-ownership-v1']}
+    manifest = {'documents':json.loads((baked.parent/'manifest.json').read_text()),'fakefs_bytes':sum(p.stat().st_size for p in rootfs.rglob('*') if p.is_file()),'ish_commit':ISH_COMMIT,'ish_archive_sha256':ISH_SHA256,'alpine_archive_sha256':ALPINE_SHA256,'sdk':args.sdk,'patches':['darwin-spawn-chdir-np','nova-execution-ownership-v1']}
     (out/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
     print(f'Runtime ready: {out} ({args.sdk})')
 if __name__ == '__main__': main()

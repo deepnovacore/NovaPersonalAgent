@@ -4,6 +4,11 @@ This matrix follows the adapters and capability allowlists in the current code. 
 
 ## Voice pipelines
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/voice-pipeline.en.dark.svg">
+  <img src="../../assets/architecture/voice-pipeline.en.light.svg" alt="Voice Pipeline Architecture (Integrated vs. Cascaded)" width="100%">
+</picture>
+
 | Capability | Integrated | Cascaded |
 |---|---|---|
 | Processing | One realtime model handles speech directly | Speech recognition → language model → speech synthesis |

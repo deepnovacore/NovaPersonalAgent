@@ -4,6 +4,7 @@ import '../agent_core/model_client.dart';
 import '../agent_core/model_settings.dart';
 import 'components.dart';
 import 'local_dialog.dart';
+import 'provider_credentials_sheet.dart';
 import 'theme.dart';
 
 enum _AccountNotice {
@@ -15,8 +16,9 @@ enum _AccountNotice {
 /// Account metadata is displayed here; credentials never enter widget state.
 Future<void> showChatGptSettings(
   BuildContext context,
-  ModelSettings settings,
-) async {
+  ModelSettings settings, {
+  Future<void> Function()? onClearSelection,
+}) async {
   final accounts = settings.chatGpt;
   var data = await accounts.metadata();
   var catalog = <Map<String, String>>[];
@@ -41,6 +43,11 @@ Future<void> showChatGptSettings(
                 ? _AccountNotice.settingsUnavailable
                 : _AccountNotice.operationFailed;
           } finally {
+            try {
+              await settings.refreshApiKeyProjection();
+            } catch (_) {
+              message = _AccountNotice.settingsUnavailable;
+            }
             try {
               data = await accounts.metadata();
             } catch (_) {
@@ -67,7 +74,7 @@ Future<void> showChatGptSettings(
                   const Padding(
                     padding: EdgeInsets.only(bottom: 4),
                     child: Text(
-                      '使用这台手机独立登录的 ChatGPT 账号。账号与密钥只保存在本机，不从电脑或 Hub 同步。',
+                      '使用这台手机独立登录的 ChatGPT 账号。账号与密钥只保存在本机，不与其他 Space 共享。',
                       style: TextStyle(
                         color: Nova.secondary,
                         fontSize: 13,
@@ -164,6 +171,20 @@ Future<void> showChatGptSettings(
                           ),
                       ],
                     ),
+                  TextButton(
+                    key: const ValueKey('model.credentials'),
+                    onPressed: busy
+                        ? null
+                        : () => run(() async {
+                            await showProviderCredentials(
+                              context,
+                              settings.credentials,
+                              modelSettings: settings,
+                              onChanged: settings.refreshApiKeyProjection,
+                            );
+                          }),
+                    child: const Text('配置密钥'),
+                  ),
                   const SizedBox(height: 8),
                   FilledButton(
                     onPressed: busy
@@ -254,6 +275,16 @@ Future<void> showChatGptSettings(
             ),
           ),
           actions: [
+            if (onClearSelection != null)
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => run(() async {
+                        await onClearSelection();
+                        if (context.mounted) Navigator.pop(context);
+                      }),
+                child: const Text('移除自配模型'),
+              ),
             TextButton(
               onPressed: busy ? null : () => Navigator.pop(context),
               child: const Text('完成'),

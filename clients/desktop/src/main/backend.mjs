@@ -2,6 +2,7 @@ import {NATIVE_VOICE_PROVIDERS} from '../renderer/native-voice.mjs'
 import {isEndpointSecret, COMPATIBLE_STAGES} from '../renderer/compatible-providers.mjs'
 import { createServer } from 'node:net'
 import { timingSafeEqual } from 'node:crypto'
+import { existsSync } from 'node:fs'
 import { isAbsolute, resolve } from 'node:path'
 import {codingProfileRegistry} from './coding-settings.mjs'
 import { CONTROL_CHARACTERS, RUNTIME_DEFAULTS as SETTINGS_DEFAULTS, selectedTextLlmProvider } from './settings-defaults.mjs'
@@ -31,7 +32,6 @@ export const SECRET_ENV_MAP = Object.freeze({
   geminiApiKey: 'GEMINI_API_KEY',
   tavilyApiKey: 'TAVILY_API_KEY',
   openrouterApiKey: 'OPENROUTER_API_KEY',
-  modelApiKey: 'MODEL_API_KEY',
   codexApiKey: 'CODEX_API_KEY',
   arkApiKey: 'ARK_API_KEY',
   deepseekApiKey: 'DEEPSEEK_API_KEY',
@@ -62,9 +62,23 @@ const ALWAYS_ACTIVE_SECRET_KEYS = Object.freeze([
   'openrouterApiKey',
   'composioApiKey',
   'tavilyApiKey',
-  'modelApiKey',
   'codexApiKey',
 ])
+
+/** The secret a model-lane provider authenticates with; mirrors runtime provider routing. */
+const ROUTE_PROVIDER_SECRETS = Object.freeze({
+  qwen: 'dashscopeApiKey', dashscope: 'dashscopeApiKey', ark: 'arkApiKey', deepseek: 'deepseekApiKey',
+  openai: 'openaiApiKey', gemini: 'geminiApiKey', stepfun: 'stepfunApiKey',
+  'openai-compatible': 'openaiCompatibleApiKey', 'self-hosted': 'selfHostedLlmApiKey',
+})
+
+function routeSecretKeys(settings) {
+  const keys = []
+  for (const route of Object.values(settings?.modelRoutes ?? {})) {
+    if (route && ROUTE_PROVIDER_SECRETS[route.provider]) keys.push(ROUTE_PROVIDER_SECRETS[route.provider])
+  }
+  return keys
+}
 
 /**
  * How long one connection may hold a file descriptor without authenticating.
@@ -212,7 +226,6 @@ export function backendLaunchSpec({
     CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
     MEMORY_PRERECALL_ENABLED: String(settings?.memoryPrerecallEnabled ?? false),
-    CONVERSATION_VISION_ENABLED: String(settings?.conversationVisionEnabled ?? false),
     MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }
   for (const [name, value] of [
@@ -224,6 +237,11 @@ export function backendLaunchSpec({
     ['KNOWLEDGE_PATH', settings?.knowledgePath ?? SETTINGS_DEFAULTS.knowledgePath],
   ]) {
     if (typeof value === 'string' && value) env[name] = value
+  }
+  // A Space created from the settings page; an operator-set variable keeps precedence.
+  const spaceHostConfig = settings?.spaceHostConfigPath
+  if (!parentEnv.NOVA_SPACE_HOST_CONFIG && typeof spaceHostConfig === 'string' && isAbsolute(spaceHostConfig) && existsSync(spaceHostConfig)) {
+    env.NOVA_SPACE_HOST_CONFIG = spaceHostConfig
   }
   if (env.CAPABILITIES_CONFIG && !env.CAPABILITIES_CONFIG.startsWith('~/')) {
     env.CAPABILITIES_CONFIG = resolve(env.CAPABILITIES_CONFIG)
@@ -240,7 +258,6 @@ export function backendLaunchSpec({
     delete env.CODEX_PREFIX_ARGS
     delete env.CODEX_MANAGED_ROOT
     delete env.CODEX_PROJECT_STATE_ROOT
-    delete env.MODEL_BASE_URL
     if (typeof resolvedConfig.codexBinaryPath === 'string' && resolvedConfig.codexBinaryPath) {
       env.CODEX_BIN = resolvedConfig.codexBinaryPath
     }
@@ -256,20 +273,10 @@ export function backendLaunchSpec({
     if (typeof resolvedConfig.stateRoot === 'string' && resolvedConfig.stateRoot) {
       env.CODEX_PROJECT_STATE_ROOT = resolvedConfig.stateRoot
     }
-    if (typeof resolvedConfig.modelBaseUrl === 'string' && resolvedConfig.modelBaseUrl) {
-      env.MODEL_BASE_URL = resolvedConfig.modelBaseUrl
-    }
   }
-  const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
-  Object.assign(env, {
-    CASCADE_LLM_PROVIDER: llmProvider,
-    CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[llmProvider]
-      ?? SETTINGS_DEFAULTS.cascadedLlmModels[llmProvider]
-      ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
-    OPENAI_COMPATIBLE_BASE_URL: settings?.openaiCompatibleBaseUrl ?? SETTINGS_DEFAULTS.openaiCompatibleBaseUrl,
-    OPENAI_COMPATIBLE_PROTOCOL: settings?.openaiCompatibleProtocol ?? SETTINGS_DEFAULTS.openaiCompatibleProtocol,
-    SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
-  })
+  // The generic cross-provider model overrides are retired; never forward them to the runtime.
+  for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY']) delete env[name]
+  Object.assign(env, textModelEnvironment(settings))
   if (pipelineMode === 'cascaded') {
     Object.assign(env, {
       DOUBAO_ASR_VOICEPRINT_ENABLED: String(settings?.voiceprintEnabled === true && Boolean(settings?.voiceprintUploadUrl)),
@@ -321,6 +328,8 @@ export function backendLaunchSpec({
   // and the value actually injected is the trimmed one, so accidental
   // surrounding whitespace in a pasted key is cleaned up too.
   Object.assign(env, capabilityEnvironment(settings, decryptedSecrets, env, capabilitiesDocument))
+  const modelRoutes = Object.fromEntries(Object.entries(settings?.modelRoutes ?? {}).filter(([, route]) => route))
+  if (!env.NOVA_SPACE_HOST_CONFIG && Object.keys(modelRoutes).length > 0) env.MODEL_ROUTES = JSON.stringify(modelRoutes)
   return {
     kind: 'node',
     entry: nodeEntry,
@@ -640,13 +649,27 @@ export async function shutdownBackendBestEffort(child, options) {
   }
 }
 
+/** Shared by the ordinary runtime and isolated experience conversations. */
+export function textModelEnvironment(settings) {
+  const provider = selectedTextLlmProvider(settings)
+  return {
+    CASCADE_LLM_PROVIDER: provider,
+    CASCADE_LLM_MODEL: settings?.cascadedLlmModels?.[provider] ?? SETTINGS_DEFAULTS.cascadedLlmModels[provider] ?? SETTINGS_DEFAULTS.cascadedLlmModels.qwen,
+    OPENAI_COMPATIBLE_BASE_URL: settings?.openaiCompatibleBaseUrl ?? SETTINGS_DEFAULTS.openaiCompatibleBaseUrl,
+    OPENAI_COMPATIBLE_PROTOCOL: settings?.openaiCompatibleProtocol ?? SETTINGS_DEFAULTS.openaiCompatibleProtocol,
+    SELF_HOSTED_LLM_BASE_URL: settings?.selfHostedLlmBaseUrl ?? '',
+  }
+}
+
 /** Shared by registry validation and the actual child launch. */
 export function capabilityEnvironment(settings, decryptedSecrets, parentEnv = {}, document) {
   const env = {...parentEnv}
+  // Retired generic model overrides never reach the child, whichever launch path builds it.
+  for (const name of ['MODEL_BASE_URL', 'MODEL_API_KEY']) delete env[name]
   const pipelineMode = settings?.pipelineMode ?? SETTINGS_DEFAULTS.pipelineMode
   {
     decryptedSecrets = decryptedSecrets && typeof decryptedSecrets === 'object' ? decryptedSecrets : {}
-    const activeSecretKeys = new Set(ALWAYS_ACTIVE_SECRET_KEYS)
+    const activeSecretKeys = new Set([...ALWAYS_ACTIVE_SECRET_KEYS, ...routeSecretKeys(settings)])
     const llmProvider = selectedTextLlmProvider(settings, resolveSecretConfiguration(decryptedSecrets, parentEnv).secretsPresent)
     activeSecretKeys.add(llmProvider === 'openai-compatible' ? 'openaiCompatibleApiKey' : llmProvider === 'self-hosted' ? 'selfHostedLlmApiKey' : llmProvider === 'qwen' ? 'dashscopeApiKey' : `${llmProvider}ApiKey`)
     if (pipelineMode === 'cascaded') {

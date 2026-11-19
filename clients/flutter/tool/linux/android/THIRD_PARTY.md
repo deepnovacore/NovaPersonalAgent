@@ -6,4 +6,23 @@
 - Alpine Linux minirootfs 3.22.2 aarch64: official Alpine release archive. Individual package licenses and source are available from https://pkgs.alpinelinux.org/packages?branch=v3.22&arch=aarch64. The rootfs package database records installed versions. BusyBox is GPL-2.0-only; musl is MIT; apk-tools is GPL-2.0-only. Distribution requires providing corresponding source for included GPL components.
 - Build flags and the talloc standalone compatibility shim are adapted from OpenMinis `deps/build_proot.sh` at the revision above, GPL-3.0. Runtime Kotlin and the process-group launcher are Nova code under the repository's GPL-3.0 license.
 
-All download URLs and SHA-256 checksums are pinned in `build_runtime.py`. Build output includes a manifest and copies of available upstream license files. Keep source archives and build instructions alongside any distributed APK; retain the pinned loader source and package recipe with release evidence.
+All native download URLs and SHA-256 checksums are pinned in `build_runtime.py`; added document APK/wheel/font inputs are locked under `../documents/locks/`. Build output includes a manifest and copies of available upstream license files. Keep source archives and build instructions alongside any distributed APK; retain the pinned loader source and package recipe with release evidence.
+
+
+The document base set adds Alpine Python 3.12 and py3-pip plus their locked APK
+closure (versions/licence identifiers remain in `/lib/apk/db/installed`). Retain
+corresponding Alpine source/build recipes for included copyleft components when
+distributing; the lock is not a substitute for source-distribution obligations.
+The added wheel distributions retain their upstream `.dist-info` notices in
+`/usr/lib/python3.12/site-packages/` (openpyxl/et_xmlfile MIT; pypdf BSD-3-Clause;
+ReportLab BSD; Pillow HPND; charset-normalizer/python-docx MIT; lxml BSD with
+bundled libxml2/libxslt notices; typing_extensions PSF-2.0). Review the actual notices,
+including Pillow's bundled native dependencies, with the release artifact.
+
+Nova Document Sans SC Regular derives from Noto Sans SC 2.004-H2 under SIL OFL
+1.1; the exact owner-approved hash/source/character set is recorded in
+`docs/ASSET_PUBLICATION.md`. OFL and Adobe copyright are preserved alongside the
+font, under `/usr/share/licenses/nova-document-font/`, as
+`licenses/NovaDocumentSansSC-OFL.txt` in Android runtime assets, and in the
+Flutter application licence list. The renamed static subset does not use the
+reserved family name “Source”; never sell the font alone.

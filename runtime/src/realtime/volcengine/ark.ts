@@ -8,6 +8,7 @@ import { codePointLengthLikePython, stripLikePython } from '../../text/python-te
 import { MAX_REALTIME_TEXT, type JsonObject } from '../protocol.js'
 import {llmStreamLimits,llmToolCallLimit,type LlmStreamLimits,type LlmTransportOptions} from '../cascaded/llm-stream-limits.js'
 
+import {rotatedCredential} from '../../config/credential-rotation.js'
 export const MAX_ARK_REQUEST_BYTES = 4 * 1_024 * 1_024
 export const MAX_ARK_SSE_LINE_BYTES = 256 * 1_024
 export const MAX_ARK_SSE_EVENT_BYTES = 512 * 1_024
@@ -336,7 +337,7 @@ class FetchArkResponsesGateway implements ArkResponsesGateway {
           method: 'POST',
           ...(this.#compatible ? {redirect:'error' as const} : {}),
           headers: {
-            authorization: `Bearer ${this.#apiKey}`,
+            authorization: `Bearer ${rotatedCredential(this.#apiKey)}`,
             'content-type': 'application/json',
             accept: 'text/event-stream',
           },

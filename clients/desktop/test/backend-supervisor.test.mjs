@@ -9,6 +9,23 @@ function deferred() {
   return {promise, resolve}
 }
 
+test('only the exact child model-change notification crosses the control boundary', () => {
+  const child = new EventEmitter()
+  let notifications = 0
+  const control = createBackendControl(child, {onSpaceModelsChanged: (...args) => {
+    assert.deepEqual(args, [])
+    notifications++
+  }})
+  child.emit('message', {type: 'nova.space.models.changed', secret: 'must-not-cross'})
+  child.emit('message', {type: 'nova.space.models.changed.extra'})
+  assert.equal(notifications, 0)
+  child.emit('message', {type: 'nova.space.models.changed'})
+  assert.equal(notifications, 1)
+  control.close()
+  child.emit('message', {type: 'nova.space.models.changed'})
+  assert.equal(notifications, 1)
+})
+
 test('disconnect survives repeated readiness failures and retires each child before retry', async () => {
   const timers = []
   const stopped = []
@@ -276,7 +293,7 @@ test('private requests correlate, reject on close, and ignore late status', asyn
   assert.deepEqual(await request, {ok: true})
   const pending = control.request('knowledge.reindex', {})
   control.close()
-  await assert.rejects(pending, /unavailable/)
+  await assert.rejects(pending, /closed/)
   child.emit('message', {type: 'nova.capabilities', status: {toolCount: 8, toolBudget: 24}})
   assert.equal(statuses.length, 0)
   assert.equal(child.listenerCount('message'), 0)
@@ -352,7 +369,7 @@ test('backend classifier maps only stable public failure classes', () => {
   assert.deepEqual(classifyBackendFailure('private exception text'), {
     kind: 'recoverable', code: 'backend_disconnected',
   })
-  for (const code of ['personal_store_capacity', 'state_corrupt', 'state_version_unsupported']) {
+  for (const code of ['personal_store_capacity', 'state_corrupt', 'state_version_unsupported', 'state_schema_incompatible']) {
     assert.deepEqual(classifyBackendFailure(code), {kind: 'unavailable', code})
   }
 })
@@ -381,13 +398,16 @@ test('collector surfaces safe Codex detail but does not promote it to a startup 
   assert.equal(JSON.stringify(collector.failure()).includes('private'), false)
 })
 
-test('runtime startup errors are echoed for the terminal but never become a failure code', () => {
-  const chunk = 'noise\n[runtime-startup-error] Error: EBUSY: resource busy\n[runtime-diagnostic] assembly_failed\n'
-  assert.deepEqual(startupErrors(chunk), ['[runtime-startup-error] Error: EBUSY: resource busy'])
+test('only fixed runtime startup errors are echoed and never become a failure code', () => {
+  const detail = 'memory_configuration_invalid: MEMORY_RECALL_ENGINE, MEMORY_EXTRACTORS'
+  const chunk = `noise\n[runtime-startup-error] ${detail}\n[runtime-diagnostic] assembly_failed\n`
+  assert.deepEqual(startupErrors(chunk), [`[runtime-startup-error] ${detail}`])
+  assert.deepEqual(startupErrors('[runtime-startup-error] startup_failed\n'), ['[runtime-startup-error] startup_failed'])
   assert.deepEqual(startupErrors('[runtime-diagnostic] assembly_failed\n'), [])
-  assert.deepEqual(startupErrors(`[runtime-startup-error] ${'x'.repeat(400)}\n`).map(line => line.length), [320])
+  for (const raw of ['Error: Bearer short https://private.invalid consumer:private', 'x'.repeat(400),
+    `${detail}, PRIVATE`, `${detail}: secret`]) assert.deepEqual(startupErrors(`[runtime-startup-error] ${raw}\n`), [])
   const diagnostic = createBackendDiagnosticCollector()
-  assert.equal(diagnostic.push('[runtime-startup-error] Error: EBUSY\n'), null)
+  assert.equal(diagnostic.push(`[runtime-startup-error] ${detail}\n`), null)
   assert.equal(diagnostic.push(chunk), 'assembly_failed')
 })
 
@@ -397,4 +417,60 @@ test('runtime config warnings are echoed line by line and never become a failure
   assert.deepEqual(configWarnings('[runtime-diagnostic] assembly_failed\n'), [])
   const diagnostic = createBackendDiagnosticCollector()
   assert.equal(diagnostic.push(chunk), null)
+})
+
+test('private request failures keep a short diagnosable reason', async () => {
+  const child = new EventEmitter(), sent = []
+  child.postMessage = value => sent.push(value)
+  const control = createBackendControl(child)
+  const busy = control.request('feishu.status', {})
+  child.emit('message', {type: 'nova.control.reply', id: sent[0].id, error: 'busy'})
+  await assert.rejects(busy, /backend control busy/)
+  const early = control.request('feishu.status', {})
+  child.emit('message', {type: 'nova.control.reply', id: sent[1].id, error: 'not_ready'})
+  await assert.rejects(early, /backend control not ready/)
+  const failed = control.request('feishu.status', {})
+  child.emit('message', {type: 'nova.control.reply', id: sent[2].id, error: 'unavailable'})
+  await assert.rejects(failed, /backend control unavailable/)
+  await assert.rejects(control.request('feishu.status', {}, {timeoutMs: 5}), /backend control timeout/)
+  const pending = control.request('feishu.status', {})
+  child.emit('exit')
+  await assert.rejects(pending, /backend control closed/)
+  await assert.rejects(control.request('state', {}), /backend control closed/)
+})
+
+test('structured memory startup configuration survives child IPC and terminal supervisor failure', async () => {
+  const child = new EventEmitter(), diagnostic = createBackendDiagnosticCollector()
+  const configuration = {code: 'memory_provider_conflict', variables: ['MEMORY_PROVIDER', 'MEMORY_RECALL_ENGINE']}
+  const control = createBackendControl(child, {onStatus: status => diagnostic.pushCapabilityStatus(status)})
+  let scheduled = 0
+  const supervisor = createBackendSupervisor({start: async () => {
+    child.emit('message', {type: 'nova.capabilities', status: {state: 'startup_failed', toolCount: null, toolBudget: 24,
+      reason: 'configuration_required', startupConfiguration: {...configuration, hint: 'https://private.invalid?token=secret'}}})
+    throw diagnostic.failure()
+  }, stopBackend: async () => {}, onStatus: () => {}, schedule: () => {scheduled++; return 1}})
+  try {
+    await supervisor.start()
+    assert.equal(supervisor.status().state, 'configuration_required')
+    assert.deepEqual(supervisor.status().startupConfiguration, configuration)
+    assert.equal(scheduled, 0)
+    assert.doesNotMatch(JSON.stringify(supervisor.status()), /private|secret|hint/u)
+  } finally {control.close(); await supervisor.stop()}
+})
+
+test('memory configuration IPC rejects unknown codes and non-allowlisted variable names', async () => {
+  const {publicRuntimeCapabilityStatus} = await import('../src/main/backend-supervisor.mjs')
+  for (const startupConfiguration of [{code: 'private', variables: ['MEMORY_PROVIDER']},
+    {code: 'memory_configuration_invalid', variables: ['MEMORY_URL', 'https://private.invalid']},
+    {code: 'memory_configuration_invalid', variables: []}]) {
+    const result = publicRuntimeCapabilityStatus({state: 'startup_failed', toolCount: null, toolBudget: 24,
+      reason: 'configuration_required', startupConfiguration})
+    assert.equal(result.startupConfiguration, undefined)
+  }
+})
+
+test('schema incompatibility remains a stable unavailable diagnostic',()=>{
+ const collector=createBackendDiagnosticCollector()
+ collector.push('[runtime-diagnostic] state_schema_incompatible\nprivate schema detail')
+ assert.deepEqual(collector.failure(),{kind:'unavailable',code:'state_schema_incompatible'})
 })

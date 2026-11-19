@@ -113,6 +113,7 @@ test('Ark maps common inputs and tools, returns common events, and keeps chainin
   assert.deepEqual(requests[0]?.tools, [{
     type: 'function', name: 'weather__get', description: 'weather lookup', parameters: {type: 'object'},
   }])
+  assert.equal(requests[0]?.max_output_tokens, 8192, 'an explicit ceiling makes truncation detectable')
   assert.equal('previous_response_id' in requests[0], false)
 
   await collect(session.stream({
@@ -326,7 +327,8 @@ test('Ark never publishes speakable text before a tool decision is known', async
     )),
   }).open()
   const narrated = await collect(withTool.stream({inputs: [{kind: 'user_text', text: 'go'}], tools: [tool], previewText: true, signal}))
-  assert.equal(narrated.some(event => event.kind === 'text_delta'), false, 'narration must not reach TTS')
+  // Text-mode callers keep the narration as verified turn text; the tool decision still follows it.
+  assert.deepEqual(narrated.filter(event => event.kind === 'text_delta').map(event => event.text), ['我先查一下'])
   assert.deepEqual(narrated.filter(event => event.kind === 'text_preview').map(event => event.text), ['我先查一下'])
   assert.equal(narrated.some(event => event.kind === 'tool_call' && event.call_id === 'call-1'), true)
   await withTool.close()
@@ -372,6 +374,32 @@ test('Ark never publishes speakable text before a tool decision is known', async
   assert.deepEqual(preview.filter(event => event.kind === 'text_preview').map(event => event.text), ['最终回答'])
   assert.deepEqual(preview.filter(event => event.kind === 'text_delta').map(event => event.text), ['最终回答'])
   await previewed.close()
+})
+
+test('Ark maps an incomplete Responses turn to the output limit and keeps narration displayable', async () => {
+  const tool = {name: 'lookup', parameters: {type: 'object'}}
+  const session = createArkCascadedLlmFactory({
+    baseUrl: 'https://ark.example/api/v3', apiKey: 'ark-secret', model: 'ark-model',
+    instructions: 'instructions', fetchImpl: () => Promise.resolve(sse(
+      {type: 'response.created', response: {id: 'ark-incomplete'}},
+      {type: 'response.output_text.delta', delta: '前半段'},
+      {type: 'response.incomplete', response: {id: 'ark-incomplete'}},
+    )),
+  }).open()
+  try {
+    const events = await collect(session.stream({
+      inputs: [{kind: 'user_text', text: 'go'}], tools: [tool], previewText: true,
+      signal: new AbortController().signal,
+    }))
+    assert.deepEqual(events.filter(event => event.kind === 'text_preview').map(event => event.text), ['前半段'])
+    assert.deepEqual(events.filter(event => event.kind === 'text_delta').map(event => event.text), ['前半段'])
+    const failed = events.at(-1)
+    assert.equal(failed?.kind, 'response_failed')
+    if (failed?.kind === 'response_failed') {
+      assert.equal(failed.code, 'output_limit')
+      assert.equal(failed.detail, 'length')
+    }
+  } finally { await session.close() }
 })
 
 test('Ark original-image turn chains tools but the next turn uses text-only local history', async () => {

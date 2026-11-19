@@ -72,3 +72,19 @@ test('editing or resuming during a backward clock adjustment cannot rewind the c
  await s.update('edit',item.id,3,{...input,rule:{...input.rule,time:'11:30'}})
  assert.equal(s.get(item.id).cursor,cursor);assert.ok(s.get(item.id).next_slot!.scheduled_at>cursor)
 }))
+
+test('upgrade preserves ordinary schedules and retires shared schedules without local execution',()=>fixture(async(s,_t,set,path)=>{
+ const ordinary=await s.create('ordinary',input,authority),shared=await s.create('shared',input,authority);
+ await s.runNow('shared-pending',shared.id,shared.revision);
+ const {readFile,writeFile}=await import('node:fs/promises');const state=JSON.parse(await readFile(path,'utf8')) as {items:{id:string;shared?:{owner_revision:number}}[]};
+ state.items.find(item=>item.id===shared.id)!.shared={owner_revision:1};await writeFile(path,JSON.stringify(state));
+ set('2026-10-12T02:30:00Z');const restored=new ScheduleService(path,()=>{/* no observer */},()=>new Date('2026-10-12T02:30:00Z'));
+ try{
+  await restored.open();assert.deepEqual(restored.list().map(item=>item.id),[ordinary.id]);
+  assert.equal(restored.get(shared.id).archived,true);assert.equal(restored.get(shared.id).enabled,false);
+  assert.deepEqual(restored.activeRuns(),[]);assert.equal(restored.history(shared.id).items.length,1);
+  await assert.rejects(restored.runNow('no-local-run',shared.id,1),/schedule_not_found/);
+  assert.deepEqual((await restored.claimDue()).map(run=>run.schedule_id),[ordinary.id]);
+  const persisted=JSON.parse(await readFile(path,'utf8')) as typeof state;assert.deepEqual(persisted.items.find(item=>item.id===shared.id)?.shared,{owner_revision:1});
+ }finally{await restored.close()}
+}));

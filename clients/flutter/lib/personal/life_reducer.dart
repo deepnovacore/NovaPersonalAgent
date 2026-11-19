@@ -43,7 +43,7 @@ Map<String, dynamic>? lifeRow(Map<String, dynamic> state, String id) {
 }
 
 /// Local optimistic semantics for the explicit Life commands supported on mobile.
-/// Hub applies the existing TypeScript reducer as canonical domain authority.
+/// Independent Spaces apply these domain mutations to their local state.
 ({Map<String, dynamic> state, Map<String, dynamic> result}) reduceLife(
   Map<String, dynamic> state,
   Map<String, dynamic> input,

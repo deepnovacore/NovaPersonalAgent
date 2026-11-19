@@ -191,3 +191,42 @@ test('oversized legacy USER migration leaves no outbox and admits smaller body e
   assert.match(await readFile(join(directory,'USER.md'),'utf8'),/shortened preference/)
  }finally{await client.close();await rm(root,{recursive:true,force:true})}
 })
+
+
+test('read authority revision tracks committed reconciliation even when publication fails, not rejected edits',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-read-authority-')),path=join(root,'ledger.sqlite'),client=new MemoryLedgerClient(path)
+ try{
+  await client.open();await enable(client);await client.memory('append_evidence',evidence);await client.memory('merge',candidate)
+  const directory=join(path+'.memory','entries'),file=join(directory,(await readdir(directory))[0]!)
+  const text=await readFile(file,'utf8'),at=text.lastIndexOf('我不吃辣')
+  await writeFile(file,text.slice(0,at)+'最近可以吃一点'+text.slice(at+'我不吃辣'.length))
+  const before=client.recallAuthorityRevision()
+  const lock=join(path+'.memory','.git','HEAD.lock');await writeFile(lock,'synthetic lock')
+  await assert.rejects(client.memory('list',{}))
+  assert.ok(client.recallAuthorityRevision()>before,'SQL correction committed before Git publication failed')
+  await rm(lock)
+  const committed=client.recallAuthorityRevision()
+  await client.memory('list',{})
+  assert.equal(client.recallAuthorityRevision(),committed,'outbox publication alone does not change authority')
+  // A malformed edit is rejected before any correction can commit.
+  await writeFile(file,'unfinished document')
+  await assert.rejects(client.memory('list',{}))
+  assert.equal(client.recallAuthorityRevision(),committed)
+ }finally{await client.close();await rm(root,{recursive:true,force:true})}
+})
+
+test('a read rebuilding the Markdown revision index advances authority only when the index changes',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'nova-read-index-authority-')),path=join(root,'ledger.sqlite'),client=new MemoryLedgerClient(path)
+ try{
+  await client.open();await enable(client);await client.memory('append_evidence',evidence);await client.memory('merge',candidate)
+  await client.memory('list',{})
+  const before=client.recallAuthorityRevision()
+  const db=new DatabaseSync(path);try{db.exec('DELETE FROM memory_revisions')}finally{db.close()}
+  const rows=await client.memory('list',{}) as EntryRevision[]
+  assert.equal(rows[0]?.revision,1)
+  assert.ok(client.recallAuthorityRevision()>before,'readMemoryFiles committed a real index replacement')
+  const restored=client.recallAuthorityRevision()
+  await client.memory('list',{})
+  assert.equal(client.recallAuthorityRevision(),restored)
+ }finally{await client.close();await rm(root,{recursive:true,force:true})}
+})

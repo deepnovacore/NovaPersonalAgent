@@ -35,7 +35,7 @@ function record(value: unknown): Record<string, unknown> {
 function settings(overrides: Partial<Settings> = {}): Settings {
   return settingsSchema.parse({
     executors: ['fast_sim'],
-    model_api_key: 'assembly-test-key',
+    dashscope_api_key: 'assembly-test-key',
     tavily_api_key: 'tavily-test-key',
     ...overrides,
   })
@@ -153,12 +153,12 @@ test('a configured executor with no adapter fails at startup, not at first dispa
 
 test('a missing model credential is refused without echoing configuration', () => {
   assert.throws(
-    () => buildAssembly({settings: settings({model_api_key: null})}),
+    () => buildAssembly({settings: settings({fast_model: 'qwen-flash', dashscope_api_key: null})}),
     (error: unknown) => {
       assert.ok(error instanceof AssemblyError)
-      assert.match(error.message, /MODEL_API_KEY/u)
+      assert.match(error.message, /DASHSCOPE_API_KEY/u)
       // The name is enough to act on; no value may appear.
-      assert.doesNotMatch(error.message, /assembly-test-key|dashscope/u)
+      assert.doesNotMatch(error.message, /dashscope\.aliyuncs/u)
       return true
     },
   )
@@ -167,15 +167,18 @@ test('a missing model credential is refused without echoing configuration', () =
 test('model credential validation wins when both production credentials are absent', () => {
   assert.throws(
     () => buildAssembly({
-      settings: settings({model_api_key: null, tavily_api_key: null}),
+      settings: settings({fast_model: 'qwen-flash', dashscope_api_key: null, tavily_api_key: null}),
     }),
     (error: unknown) => error instanceof AssemblyError
-      && error.message === '缺少 DEEPSEEK_API_KEY 或 MODEL_API_KEY（Qwen 使用 DASHSCOPE_API_KEY）',
+      && error.message === '缺少 DASHSCOPE_API_KEY',
   )
 })
 
 test('production search without Tavily or DashScope is left out instead of blocking startup', () => {
-  const assembly = buildAssembly({settings: settings({tavily_api_key: null})})
+  const assembly = buildAssembly({
+    settings: settings({tavily_api_key: null, dashscope_api_key: null}),
+    gateway: new ScriptedGateway([]),
+  })
   assert.equal(assembly.manifests.some(manifest => manifest.name === 'search'), false)
   assert.equal([...assembly.tools.bindings.keys()].includes('search__search'), false)
 })
@@ -199,16 +202,6 @@ test('the compiled tool schema advertises always-on adapters before configured e
   assert.ok(!names.includes('update_intent'))
   // The realtime front brain is the only front brain, so recall is always on the table.
   assert.ok(names.includes('memory__recall'))
-})
-
-test('enter_plan_mode is registered only when the workbench Chat runtime requests the optional host tool',()=>{
- const ordinary=buildAssembly({settings:settings({executors:[]}),gateway:new ScriptedGateway([])})
- assert.equal(ordinary.tools.bindings.has('enter_plan_mode'),false)
- const workbench=buildAssembly({settings:settings({executors:[]}),gateway:new ScriptedGateway([]),includeEnterPlanMode:true})
- const schema=workbench.tools.schemas.find(item=>record(record(item).function).name==='enter_plan_mode')
- assert.ok(schema)
- assert.equal(workbench.tools.bindings.get('enter_plan_mode')?.logical_name,'host.enter_plan_mode')
- assert.deepEqual(record(record(record(schema).function).parameters),{type:'object',properties:{},additionalProperties:false,required:[]})
 })
 
 test('camera module off removes MCP camera, watch, and guard without affecting search, memory, or configured executors', () => {

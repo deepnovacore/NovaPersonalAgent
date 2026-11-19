@@ -65,7 +65,10 @@ class WorkspaceShell {
           initialized = await native('initialize', {
             'root_path': workspace.root.path,
           });
-        } on PlatformException {
+        } on PlatformException catch (error) {
+          if (error.code == 'space_runtime_restart_required') {
+            throw AgentFailure(error.message ?? '切换空间后请完全退出并重新打开 App 以使用本地终端');
+          }
           throw const AgentFailure('linux_runtime_unavailable');
         } on MissingPluginException {
           throw const AgentFailure('linux_runtime_unavailable');

@@ -25,6 +25,69 @@ Map<String, dynamic> result() => {
 };
 void main() {
   test(
+    'bounded observation budget starts with globally newest messages in chronological context',
+    () async {
+      final input = <Map<String, dynamic>>[
+        {
+          ...records().first,
+          'evidence_id': 'old',
+          'chat': 'aaa',
+          'created_at': '2026-09-01T00:00:00Z',
+          'text': '旧背景${'甲' * 12500}',
+        },
+        {
+          ...records().first,
+          'evidence_id': 'newest',
+          'chat': 'zzz',
+          'created_at': '2026-10-19T00:00:00Z',
+          'text': '最新进展${'甲' * 7000}',
+        },
+        {
+          ...records().first,
+          'evidence_id': 'recent',
+          'chat': 'zzz',
+          'created_at': '2026-10-18T00:00:00Z',
+          'text': '近期背景${'甲' * 7000}',
+        },
+      ];
+      final observed = <String>[];
+      final writer = fixtureProfileWriter(
+        complete: (stage, _, material) async {
+          if (stage == 'observations') {
+            observed.addAll(
+              (material['messages'] as List).map(
+                (m) => m['evidence_id'] as String,
+              ),
+            );
+            return {
+              'facts': [
+                {
+                  'text': '【风】持续核对依据',
+                  'relevance': 'ongoing_work',
+                  'refs': ['newest'],
+                },
+              ],
+            };
+          }
+          if (stage == 'review') return {'review_notes': []};
+          return {
+            'profile': {
+              'about': {
+                'text': '持续核对依据',
+                'evidence_ids': ['newest'],
+              },
+            },
+          };
+        },
+      );
+      await writer.generate(input, maxNewBatches: 1);
+      expect(observed, ['recent', 'newest']);
+      expect(writer.validatedObservationRecordCount, 2);
+      expect(writer.observedRecordCount, 2);
+      expect(writer.coverage['unobserved_records'], 1);
+    },
+  );
+  test(
     'bounded rounds process only two misses and still include later cached batches',
     () async {
       final input = List.generate(
@@ -46,6 +109,7 @@ void main() {
               ? [
                   {
                     'text': '【事】已有项目计划',
+                    'relevance': 'ongoing_work',
                     'refs': ['e6'],
                   },
                 ]
@@ -60,6 +124,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】补充计划',
+                  'relevance': 'ongoing_work',
                   'refs': [id],
                 },
               ],
@@ -106,6 +171,7 @@ void main() {
             return [
               {
                 'text': '【事】提出项目计划',
+                'relevance': 'ongoing_work',
                 'refs': ['e2'],
               },
             ];
@@ -163,6 +229,7 @@ void main() {
           ? [
               {
                 'text': '【事】提出项目计划',
+                'relevance': 'ongoing_work',
                 'refs': ['e2'],
               },
             ]

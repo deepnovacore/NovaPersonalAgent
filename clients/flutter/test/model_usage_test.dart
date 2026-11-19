@@ -28,6 +28,91 @@ void main() {
     'completion_tokens': 20,
     'total_tokens': 120,
   };
+  Map<String, dynamic> deepSeekTerminal({
+    String id = 'request-1',
+    String model = 'deepseek-flash',
+    String reason = 'stop',
+    Map<String, dynamic> delta = const {'content': '', 'role': null},
+    Map<String, dynamic>? usage,
+  }) => {
+    'id': id,
+    'model': model,
+    'choices': [
+      {'index': 0, 'delta': delta, 'finish_reason': reason},
+    ],
+    'usage': usage ?? valid,
+  };
+  test('official DeepSeek usage shares its empty terminal stop choice', () {
+    final parser = ChatCompletionUsage(
+      'deepseek-flash',
+      allowTerminalChoiceUsage: true,
+    );
+    parser.add(chunk(model: 'deepseek-flash'));
+    parser.add(deepSeekTerminal());
+    final usage = parser.finish()!;
+    expect(usage.responseId, 'request-1');
+    expect(usage.promptTokens, 100);
+    expect(usage.completionTokens, 20);
+  });
+  test('terminal-choice usage stays strict outside official DeepSeek', () {
+    for (final model in ['deepseek-flash', 'qwen3-vl-plus']) {
+      final parser = ChatCompletionUsage(model);
+      parser.add(deepSeekTerminal(model: model));
+      expect(parser.finish(), isNull);
+    }
+    final parser = ChatCompletionUsage(
+      'qwen3-vl-plus',
+      allowTerminalChoiceUsage: true,
+    );
+    parser.add(deepSeekTerminal(model: 'qwen3-vl-plus'));
+    expect(parser.finish(), isNull);
+  });
+  test(
+    'DeepSeek terminal usage rejects content, bad stops and identity drift',
+    () {
+      for (final events in <List<Map<String, dynamic>>>[
+        [
+          deepSeekTerminal(delta: {'content': 'new content'}),
+        ],
+        [
+          deepSeekTerminal(delta: {'content': '', 'role': 'assistant'}),
+        ],
+        [
+          deepSeekTerminal(delta: {'content': '', 'role': 0}),
+        ],
+        [
+          deepSeekTerminal(delta: {'content': '', 'role': ''}),
+        ],
+        [
+          deepSeekTerminal(delta: {'reasoning_content': 'new thinking'}),
+        ],
+        [
+          deepSeekTerminal(delta: {'tool_calls': []}),
+        ],
+        [deepSeekTerminal(reason: 'length')],
+        [deepSeekTerminal(reason: 'tool_calls')],
+        [
+          deepSeekTerminal(usage: {...valid, 'total_tokens': 121}),
+        ],
+        [
+          deepSeekTerminal(usage: {...valid, 'prompt_tokens': 100.0}),
+        ],
+        [chunk(model: 'deepseek-flash'), deepSeekTerminal(id: 'other')],
+        [chunk(model: 'deepseek-flash'), deepSeekTerminal(model: 'other')],
+        [deepSeekTerminal(), deepSeekTerminal()],
+        [chunk(model: 'deepseek-flash', reason: 'stop'), deepSeekTerminal()],
+      ]) {
+        final parser = ChatCompletionUsage(
+          'deepseek-flash',
+          allowTerminalChoiceUsage: true,
+        );
+        for (final event in events) {
+          parser.add(event);
+        }
+        expect(parser.finish(), isNull);
+      }
+    },
+  );
   test(
     'receipt requires stable identity, stop, final integral usage and completion',
     () {

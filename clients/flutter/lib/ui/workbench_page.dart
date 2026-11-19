@@ -1,5 +1,7 @@
 import 'dart:async';
+import 'shared_idea_suggestions.dart';
 import 'scheduled_tasks_page.dart';
+import 'news_interests.dart';
 import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -7,6 +9,7 @@ import '../personal/personal_store.dart';
 import '../personal/commands.dart';
 import 'components.dart';
 import 'strings.dart';
+import 'reason_copy.dart';
 import 'task_details.dart';
 import 'theme.dart';
 import 'todo_editor.dart';
@@ -57,6 +60,7 @@ class WorkbenchPage extends StatefulWidget {
     required this.onSettings,
     this.onOpenConversation,
     this.onDelegate,
+    this.onSharedIdea,
     this.showHeading = true,
     this.language = 'en',
     this.localProfile,
@@ -72,7 +76,7 @@ class WorkbenchPage extends StatefulWidget {
   final VoidCallback? onOpenConversation;
 
   /// Hands a prepared request to the Nova conversation.
-  final ValueChanged<String>? onDelegate;
+  final ValueChanged<String>? onDelegate, onSharedIdea;
   @override
   State<WorkbenchPage> createState() => _WorkbenchPageState();
 }
@@ -812,7 +816,8 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     ),
     subtitle: MetaLine([
       _label('phase', task['phase']),
-      task['waiting_reason'] as String?,
+      if (task['waiting_reason'] != null)
+        reasonCopy(task['waiting_reason'], language: widget.language),
     ]),
     trailing: const CupertinoListTileChevron(),
     onTap: () => showTaskSheet(
@@ -956,6 +961,9 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
     final suggested = version > 0 ? '' : draft['about'] as String? ?? '';
     final work = version > 0 ? const [] : _rows(draft['work']);
     final about = confirmed.isNotEmpty ? confirmed : suggested;
+    final interests = (draft['interests'] as List? ?? [])
+        .whereType<String>()
+        .toList();
     final memory = snapshot?.object('memory') ?? {};
     final overview = memory['overview'] as Map?;
     final entries = _rows(
@@ -991,7 +999,7 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 confirmed.isEmpty &&
                 suggested.isEmpty
             ? t(
-                'Add your introduction here. Information from Feishu appears below.',
+                'Add your introduction here. Information from connected sources appears below.',
               )
             : t(
                 confirmed.isNotEmpty
@@ -1044,6 +1052,19 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                 titleLines: 1,
                 subtitle: Text('${item['text'] ?? ''}'),
               ),
+          ],
+        ),
+      if (interests.isNotEmpty)
+        NovaSection(
+          header: widget.language == 'zh' ? '关注' : 'Interests',
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Align(
+                alignment: Alignment.centerLeft,
+                child: Text(interests.join(' · ')),
+              ),
+            ),
           ],
         ),
       if (overview != null && '${overview['summary'] ?? ''}'.isNotEmpty)
@@ -1309,6 +1330,21 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                   ...feeds.map(_feed),
                 ],
                 if (widget.page == 1) ...[
+                  NewsInterests(
+                    news: news,
+                    language: widget.language,
+                    available: store.available,
+                    configure: (interests) async {
+                      await store.command('news.configure', {
+                        'enabled': news['enabled'] ?? true,
+                        'explore': news['explore'] ?? true,
+                        'interests': interests,
+                        'keep_mined': true,
+                        if (news['profile_version'] != null)
+                          'expected_version': news['profile_version'],
+                      });
+                    },
+                  ),
                   Padding(
                     padding: const EdgeInsets.fromLTRB(20, 4, 16, 12),
                     child: Row(
@@ -1446,6 +1482,11 @@ class _WorkbenchPageState extends State<WorkbenchPage> {
                   if (rows.isNotEmpty)
                     NovaSection(children: rows.map(_item).toList()),
                   ..._suggestions('ideas', rows.isNotEmpty),
+                  if (widget.onSharedIdea case final onSend?)
+                    SharedIdeaSuggestions(
+                      language: widget.language,
+                      onSend: onSend,
+                    ),
                 ],
                 if (widget.page == 4) ...[
                   if (rows.isNotEmpty)

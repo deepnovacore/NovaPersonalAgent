@@ -174,8 +174,8 @@ test('backend launch comparison is stable, structural, and credential-free', () 
     config: {
       workspace: '/managed/alpha', stateRoot: '/state', managedRoot: '/managed',
       codexBinaryMode: 'auto', codexBinaryPath: '/bin/codex',
-      codexConfigurationError: null, modelBaseUrl: 'https://models.example/v1',
-      modelConfigurationError: null, startListeningOnLaunch: false,
+      codexConfigurationError: null,
+      startListeningOnLaunch: false,
     },
     codexStatus: {
       status: 'ready', path: '/bin/codex', prefixArgs: [], source: 'path', version: '1.2.3',

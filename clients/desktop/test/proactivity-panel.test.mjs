@@ -22,7 +22,7 @@ test('the general panel holds discovery and the daily cap; diary and briefing li
  for(const label of ['主动发现间隔','每日主动消息上限'])assert.ok(labels.includes(label),label)
  for(const label of ['早间简报','晚间简报','免打扰开始','时区','写每日日记'])assert.equal(labels.includes(label),false,label)
  assert.equal(h.button('保存简报设置'),undefined);assert.equal(h.cap().value,'5');assert.equal(h.cap().min,'1');assert.equal(h.cap().max,'10')
- assert.ok(all(h.root).some(n=>n.textContent==='agent 主动找你的消息每天最多几条；你自己发起的任务结果不计入。'))
+ assert.ok(all(h.root).some(n=>n.textContent==='agent 主动找你的消息每天最多几条（资讯推送另计）；你自己发起的任务结果不计入。'))
 })
 test('changing the cap sends discovery.configure with proactive_daily_cap and only that field',async()=>{
  const h=harness({proactive_daily_cap:5});await h.panel.load();assert.equal(h.cap().value,'5')

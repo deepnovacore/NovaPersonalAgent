@@ -1,0 +1,21 @@
+# Only public manifests and relay production sources enter this build context.
+**
+!package.json
+!package-lock.json
+!tsconfig.base.json
+!runtime/
+!runtime/package.json
+!cli/
+!cli/package.json
+!clients/
+!clients/desktop/
+!clients/desktop/package.json
+!relay/
+!relay/package.json
+!relay/tsconfig.json
+!relay/src/
+!relay/src/**
+!relay/Dockerfile
+!relay/Dockerfile.dockerignore
+!push-gateway/
+!push-gateway/package.json

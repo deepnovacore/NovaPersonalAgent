@@ -52,4 +52,4 @@ Screenshots are private, owner-only artifacts. Model history keeps only the newe
 
 ## Acceptance boundary
 
-Tests with fake devices or local scripted planners do not prove real model reasoning, microphone/voice interaction, packaged desktop UI, or Windows device behavior. Record those separately. See the [acceptance checklist](../../verification/build-computer-use.md); a source change or passing test is not a release record.
+Tests with fake devices or local scripted planners do not prove real model reasoning, microphone/voice interaction, packaged desktop UI, or Windows device behavior. Record those separately; a source change or passing test is not a release record.

@@ -7,6 +7,7 @@ abstract interface class AudioPort {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   });
   Future<void> enqueue(Uint8List frame);
   Future<void> terminal(String utteranceId, int epoch);

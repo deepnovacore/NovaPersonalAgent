@@ -6,7 +6,7 @@ import {join} from 'node:path'
 import {TaskService} from '../src/personal-agent/tasks.js'
 import {canonicalJson} from '../src/text/canonical-json.js'
 import type {JsonValue} from '../src/core/events.js'
-import {ItemDeliveryUncertainError} from '../src/realtime/protocol.js'
+import {ItemDeliveryUncertainError,type RealtimeProviderEvent} from '../src/realtime/protocol.js'
 import {
   PREEMPT_MIN_PRIORITY
 } from '../src/realtime/service-state.js'
@@ -143,9 +143,11 @@ test('a recovery item that comes back uncertain stops the service rather than re
   // be trusted to report anything, and guessing whether the model has seen a fact is worse than
   // stopping.
   const diagnostics: string[] = []
+  const notifications: RealtimeProviderEvent[] = []
   const service = new RealtimeService({
     ...queueOnlyOptions(),
     onDiagnostic: line => diagnostics.push(line),
+    onProviderEvent: event => notifications.push(event),
   })
   const uncertain = new ItemDeliveryUncertainError({
     session_epoch: 1,
@@ -156,6 +158,10 @@ test('a recovery item that comes back uncertain stops the service rather than re
   await service.reportUncertainDeliveryForTest(uncertain)
   assert.equal(service.stopped, true)
   assert.deepEqual(diagnostics, ['[realtime-diagnostic] uncertain_delivery_exhausted'])
+  const terminal = notifications.at(-1)
+  assert.equal(terminal?.kind, 'provider_error')
+  assert.equal(terminal?.code, 'uncertain_delivery_failed')
+  assert.equal(terminal?.recoverable, false)
 })
 
 test('an ordinary item is retried once, and a second uncertainty stops the service', async () => {

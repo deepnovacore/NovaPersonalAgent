@@ -31,9 +31,10 @@ struct NovaWorkspaceRequest {
   static func validID(_ id: String) -> Bool {
     !id.isEmpty && id.utf8.count <= 128 && id.utf8.allSatisfy { (48...57).contains($0) || (65...90).contains($0) || (97...122).contains($0) || $0 == 45 || $0 == 95 }
   }
-  static func validRoot(_ path: String, support: URL) -> Bool {
+  static func validRoot(_ path: String, support: URL, spaceID: String? = nil) -> Bool {
     guard path.hasPrefix("/") else { return false }
-    let expected = support.appendingPathComponent("nova-workspace").standardizedFileURL.resolvingSymlinksInPath()
+    let scoped = spaceID.map { support.appendingPathComponent("spaces").appendingPathComponent($0) } ?? support
+    let expected = scoped.appendingPathComponent("nova-workspace").standardizedFileURL.resolvingSymlinksInPath()
     return URL(fileURLWithPath:path).standardizedFileURL.resolvingSymlinksInPath() == expected
   }
   static func quote(_ value: String) -> String { "'" + value.replacingOccurrences(of:"'", with:"'\\''") + "'" }

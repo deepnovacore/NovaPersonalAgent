@@ -4,8 +4,6 @@ Nova 是运行在电脑上的语音助手。你可以直接交办编码任务、
 
 ## 对话与任务
 
-[![与 Nova 语音悬浮球对话](../../assets/features/conversation-polished.png)](../../assets/features/conversation-polished.png)
-
 | 能力 | 使用方式 |
 |---|---|
 | 实时语音 | 直接说出需求，也可以在 Nova 说话时打断 |
@@ -17,8 +15,6 @@ Nova 是运行在电脑上的语音助手。你可以直接交办编码任务、
 切换项目或创建项目需要确认。识别失败不会被当作同意、拒绝或取消任务；断开手机连接也不会自动取消电脑上的编码任务。
 
 ## Workbench
-
-[![Nova 工作台中的建议与项目近况](../../assets/features/workbench-original.png)](../../assets/features/workbench-original.png)
 
 - **Workbench** 是桌面主窗口：顶部页签包含 Timeline、Ideas、Goals、Feeds、Tasks 和 Profile，旁边是 Nova 对话。详见[Workbench](workbench.md)。
 - **Tasks** 用于委派工作，你可以设定验收标准；随时查看进度，也可以接管任务直接指挥执行器，完成后交还给 Nova。详见[Tasks](tasks.md)。

@@ -23,8 +23,16 @@ test('actionable host refusal codes become readable sentences in both languages'
 })
 
 test('the review-listed codes are all curated',()=>{
- for(const code of ['workspaces_unavailable','unknown_workspace','workspace_name_conflict','plan_delegation_unknown','plan_version_conflict','voice_active','generation_conflict','conversation_limit','invalid_project_directory','build_finished','conversation_busy','conversation_mode_transition','source_todo_conflict','stale_reference','reference_not_authorized','outcome_unknown','invalid_params','workspace_project_conflict'])
+ for(const code of ['workspaces_unavailable','unknown_workspace','workspace_name_conflict','plan_delegation_unknown','plan_version_conflict','voice_active','generation_conflict','conversation_limit','invalid_project_directory','build_finished','conversation_busy','source_todo_conflict','stale_reference','reference_not_authorized','outcome_unknown','invalid_params','workspace_project_conflict'])
   assert.ok(Object.hasOwn(HOST_REFUSALS,code),`missing ${code}`)
+})
+
+test('realtime voice connect failures explain what to check',()=>{
+ for(const code of ['realtime_auth_rejected','realtime_forbidden','realtime_endpoint_not_found','realtime_rate_limited','realtime_handshake_rejected','realtime_unreachable','realtime_timeout','realtime_tls_failed','realtime_session_rejected','realtime_connect_failed','realtime_protocol_error'])
+  assert.ok(Object.hasOwn(HOST_REFUSALS,code),`missing ${code}`)
+ assert.match(refusalText('realtime_auth_rejected'),/密钥/)
+ assert.match(refusalText('realtime_auth_rejected'),/地域/)
+ assert.match(refusalText('realtime_unreachable'),/网络/)
 })
 
 test('unknown snake_case codes degrade to a generic sentence instead of the raw identifier',()=>{

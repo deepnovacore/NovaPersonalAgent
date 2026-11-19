@@ -1,0 +1,61 @@
+name: Flutter iOS device build
+on:
+  push:
+    paths: ['clients/flutter/**', '.github/workflows/flutter-ios.yml']
+  pull_request:
+    paths: ['clients/flutter/**', '.github/workflows/flutter-ios.yml']
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  runner-and-notification-service:
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      FLUTTER_SUPPRESS_ANALYTICS: 'true'
+      HOMEBREW_NO_AUTO_UPDATE: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Verify ARM64 and Xcode
+        run: |
+          test "$(uname -m)" = arm64
+          xcodebuild -version
+          xcrun --sdk iphoneos --show-sdk-version
+          build_root="$RUNNER_TEMP/nova-flutter-ios-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$build_root/tmp"
+          {
+            echo "NOVA_CI_ROOT=$build_root"
+            echo "NOVA_LINUX_ROOT=$build_root/linux"
+            echo "XDG_CONFIG_HOME=$build_root/flutter-config"
+            echo "PUB_CACHE=$build_root/pub-cache"
+            echo "CP_HOME_DIR=$build_root/cocoapods"
+            echo "CLANG_MODULE_CACHE_PATH=$build_root/clang-cache"
+            echo "HOMEBREW_CACHE=$build_root/brew-cache"
+            echo "TMPDIR=$build_root/tmp/"
+          } >> "$GITHUB_ENV"
+      - name: Install native runtime toolchain
+        run: |
+          brew install llvm lld libarchive pkgconf
+          echo "$(brew --prefix llvm)/bin" >> "$GITHUB_PATH"
+          echo "$(brew --prefix lld)/bin" >> "$GITHUB_PATH"
+          echo "PKG_CONFIG_PATH=$(brew --prefix libarchive)/lib/pkgconfig" >> "$GITHUB_ENV"
+          pod --version
+          python3 --version
+      - name: Install Flutter 3.47.7 in the isolated build directory
+        run: |
+          git clone --depth 1 --branch 3.47.7 https://github.com/flutter/flutter.git "$NOVA_CI_ROOT/flutter-sdk"
+          echo "$NOVA_CI_ROOT/flutter-sdk/bin" >> "$GITHUB_PATH"
+          "$NOVA_CI_ROOT/flutter-sdk/bin/flutter" --version
+      - name: Build complete unsigned Flutter Runner and NSE for iPhone
+        run: bash clients/flutter/tool/ci/build_ios.sh
+      - name: Upload build evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-ios-build-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ env.NOVA_CI_ROOT }}/xcodebuild.log
+            ${{ env.NOVA_CI_ROOT }}/FlutterRunner.xcresult
+            ${{ env.NOVA_LINUX_ROOT }}/manifest.json
+          if-no-files-found: warn
+          retention-days: 14

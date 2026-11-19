@@ -1,3 +1,4 @@
+import type {MemoryToolCapabilities} from './memory/tool-capabilities.js'
 import {SOURCE_PROCESSING_INSTRUCTIONS} from './core/source-processing-instructions.js'
 import {cascadedProviderRegistries,type CascadedProviderRegistries} from './composition/cascaded-realtime-assembly.js'
 import {requireSelectedCascadedLlmConfig} from './config/cascaded-realtime-config.js'
@@ -19,6 +20,7 @@ export function configuredTextLlm(options:{settings:Settings;clock:Clock;idFacto
 
 /** One independent text conversation. Construct no endpointing, recognition, or synthesis nodes. */
 export function buildCascadedTextProvider(options:{
+  readonly memoryTools?:MemoryToolCapabilities
   readonly settings:Settings
   readonly clock:Clock
   readonly idFactory:()=>string
@@ -28,15 +30,15 @@ export function buildCascadedTextProvider(options:{
   readonly schedules?:boolean
   readonly sourceProcessingTask?:boolean
   readonly scheduledTask?:boolean
-  readonly enterPlanMode?:boolean
-}&Pick<CascadedRealtimeAdapterOptions,'prerecall'|'captureFrame'|'telemetry'>,registry:CascadedProviderRegistries=cascadedProviderRegistries):RealtimeProvider {
+  readonly chatToolPolicy?:boolean
+}&Pick<CascadedRealtimeAdapterOptions,'prerecall'|'prerecallPolicy'|'prerecallMeta'|'captureFrame'|'telemetry'>,registry:CascadedProviderRegistries=cascadedProviderRegistries):RealtimeProvider {
   const selected=requireSelectedCascadedLlmConfig(options.settings)
   const capabilities=capabilitiesFromSettings(options.settings)
   const input={config:selected.config,clock:options.clock,ids:{next:options.idFactory},instructions:options.sourceProcessingTask?SOURCE_PROCESSING_INSTRUCTIONS:options.scheduledTask?scheduledTaskInstructions(options.settings.language):frontendInstructions({
-    schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled,enterPlanMode:options.enterPlanMode===true,
+    ...(options.memoryTools ? {memoryTools:options.memoryTools} : {}),schedules:options.schedules===true,search:capabilities.modules.search.enabled,camera:options.captureFrame!==undefined,coding:capabilities.modules.coding.enabled,gui:options.settings.executors.some(name=>['browser','computer','mobile'].includes(name)),knowledge:capabilities.modules.knowledge.enabled,chatToolPolicy:options.chatToolPolicy===true,
   },options.executorApproval===true),...(options.onUsage===undefined?{}:{onUsage:usageReporterForEndpoint(options.onUsage,selected.config.baseUrl)!})}
   const factory=configuredTextLlm({...options,instructions:input.instructions},registry)
-  return new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,scheduledTask:options.scheduledTask===true,llm:factory.open(),llmFactory:factory,idFactory:options.idFactory,...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),...(options.history===undefined?{}:{history:options.history})})
+  return new CascadedRealtimeAdapter({language:options.settings.language,textOnly:true,scheduledTask:options.scheduledTask===true,llm:factory.open(),llmFactory:factory,idFactory:options.idFactory,...(options.prerecall===undefined?{}:{prerecall:options.prerecall}),...(options.prerecallPolicy===undefined?{}:{prerecallPolicy:options.prerecallPolicy}),...(options.prerecallMeta===undefined?{}:{prerecallMeta:options.prerecallMeta}),...(options.captureFrame===undefined?{}:{captureFrame:options.captureFrame}),...(options.telemetry===undefined?{}:{telemetry:options.telemetry}),...(options.history===undefined?{}:{history:options.history})})
 }
 
 function scheduledTaskInstructions(language:'zh-CN'|'en'):string {

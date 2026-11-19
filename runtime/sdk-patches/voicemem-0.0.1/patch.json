@@ -1,0 +1,60 @@
+{
+  "dist/src/memory.js": [
+    {
+      "before": "import { lexicalTimeBonus, dedupeNear, comparableFacts } from './ranking.js';",
+      "after": "import { lexicalTimeBonus, dedupeNear, comparableFacts } from './ranking.js';\nimport { groundedReplyPreferences, replyPreferenceTrait, groundedStyleCandidates } from './grounded-reply-preferences.js';"
+    },
+    {
+      "before": "        const sensed = source.audioEvidence ? sensedAudioEvidence(source) : { facts: [], emotions: [] };",
+      "after": "        // SDK-owned source validation replaces every untrusted model/reaction trait.\n        extraction.traits = groundedReplyPreferences(source).map(claim => replyPreferenceTrait(claim, identity));\n        const sensed = source.audioEvidence ? sensedAudioEvidence(source) : { facts: [], emotions: [] };"
+    },
+    {
+      "before": "                attribute: f.attribute, slots: f.slots, entities: f.entities, emotion: f.emotion,",
+      "after": "                attribute: f.attribute, slots: f.slots, entities: f.entities, emotion: f.emotion,\n                ...(f.replyPreference ? { replyPreference: f.replyPreference } : {}),"
+    },
+    {
+      "before": "exact === undefined && this.options.traitSimilarityThreshold !== undefined ?",
+      "after": "exact === undefined && !incoming.record.replyPreference && this.options.traitSimilarityThreshold !== undefined ?"
+    },
+    {
+      "before": "            const candidates = candidateLimit === undefined ? items : items.toSorted(byDurableAppend).slice(-candidateLimit).map(item => ({ ...this.store.memory(this.userId, scope, item.record.id), record: item.record }));",
+      "after": "            const grounded = groundedStyleCandidates(items, this.store);\n            const candidates = candidateLimit === undefined ? grounded : grounded.toSorted(byDurableAppend).slice(-candidateLimit).map(item => ({ ...this.store.memory(this.userId, scope, item.record.id), record: item.record }));"
+    }
+  ],
+  "dist/src/extraction.js": [
+    {
+      "before": "/** VoiceMem-TS addition: keeps explicit reply-style preferences addressable as a global trait. */\nconst REPLY_PREFERENCE_ADDENDUM = `\n\nVoiceMem addition — reply preferences: when the speaker explicitly states a standing\npreference about how the assistant should reply to them (length, tone, format or\nlanguage, e.g. \"请简短回复\", \"keep your answers short\"), include it in \"traits\" with\nslot \"表达风格\" and add \"reply_preference\": true to that trait item. Never infer such\na preference from a one-off request, a passing mood, or the assistant's own words.`;\n",
+      "after": ""
+    },
+    {
+      "before": " + REPLY_PREFERENCE_ADDENDUM",
+      "after": ""
+    },
+    {
+      "before": "    const traits = [];\n    if (Array.isArray(data.traits))\n        for (const value of data.traits) {\n            const item = object(value);\n            const slot = text(item?.slot), label = text(item?.label);\n            if (!item || !label || !RB_SLOTS.has(slot))\n                continue;\n            traits.push({ text: label, subject: speaker, ...narrator, attribute: item.reply_preference === true ? 'reply_preference' : slot, slots: [slot], entities: [], emotion: '' });\n        }\n",
+      "after": "    // Structured style extraction is source-grounded by VoiceMem.learn, not model labels.\n    const traits = [];\n"
+    },
+    {
+      "before": "const RB_SLOTS = new Set(['情绪', '应对方式', '表达风格', '思维模式', '喜好与厌恶']);\n",
+      "after": ""
+    }
+  ],
+  "dist/src/routing.js": [
+    {
+      "before": "record.attribute === 'reply_preference'",
+      "after": "record.replyPreference?.protocol === 'voicemem-0.0.1/grounded-reply-preferences-v1'"
+    }
+  ],
+  "dist/src/types.d.ts": [
+    {
+      "before": "export interface MemoryRecord {",
+      "after": "export interface GroundedReplyPreference {\n    readonly protocol: 'voicemem-0.0.1/grounded-reply-preferences-v1';\n    readonly dimension: 'length' | 'directness';\n    readonly polarity: 'affirmed' | 'denied';\n    readonly value: 'brief' | 'detailed' | 'direct' | 'indirect';\n    readonly support: { readonly text: string; readonly start: number; readonly end: number };\n}\nexport interface MemoryRecord {\n    readonly replyPreference?: GroundedReplyPreference;"
+    }
+  ],
+  "dist/src/index.js": [
+    {
+      "before": "export * from './types.js';",
+      "after": "export * from './types.js';\nexport { REPLY_PREFERENCE_PROTOCOL } from './grounded-reply-preferences.js';"
+    }
+  ]
+}

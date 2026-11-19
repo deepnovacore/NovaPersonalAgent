@@ -10,9 +10,11 @@ class ChatActivity extends StatefulWidget {
     required this.label,
     required this.startedAt,
     required this.language,
+    this.summary,
     this.details,
   });
   final String label, language;
+  final String? summary;
   final Widget? details;
   final DateTime startedAt;
   @override
@@ -61,6 +63,7 @@ class _ChatActivityState extends State<ChatActivity>
     final elapsed = seconds < 60
         ? '${seconds}s'
         : '${seconds ~/ 60}m ${seconds % 60}s';
+    final summary = widget.summary?.trim();
     final label = Text(
       widget.label,
       style: const TextStyle(
@@ -126,6 +129,20 @@ class _ChatActivityState extends State<ChatActivity>
                               )
                             : label,
                       ),
+                      if (summary != null && summary.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            summary,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Nova.tertiary,
+                              fontSize: 12,
+                            ),
+                          ),
+                        ),
+                      ],
                       if (widget.details != null)
                         const Padding(
                           padding: EdgeInsets.only(left: 8),

@@ -411,7 +411,7 @@ class PetAvatarTitle extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final label = language == 'zh' ? 'Nova · 宠物头像' : 'Nova · Pet avatar';
+    final label = language == 'zh' ? '$title · 宠物头像' : '$title · Pet avatar';
     return Semantics(
       button: true,
       label: label,
@@ -428,12 +428,16 @@ class PetAvatarTitle extends StatelessWidget {
               children: [
                 PetAvatar(store: store, size: 30),
                 const SizedBox(width: 8),
-                Text(
-                  title,
-                  style: const TextStyle(
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: -.5,
+                Flexible(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      letterSpacing: -.5,
+                    ),
                   ),
                 ),
               ],

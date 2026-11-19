@@ -42,7 +42,7 @@ export function acceptanceWakeSettings(settings,enabled){
 }
 
 export function acceptanceBackendSettings(settings,manifest){
- if(!manifest)return settings
+ if(!manifest||manifest.readExistingOnly)return settings
  const allowed=manifest.providers?.some(provider=>provider.origin==='https://dashscope.aliyuncs.com'&&provider.models.includes('qwen3-vl-plus'))
  if(!allowed)throw Error('acceptance_text_model_missing')
  return {...settings,pipelineMode:'cascaded',cascadedLlmProvider:'qwen',cascadedLlmModels:{...settings.cascadedLlmModels,qwen:'qwen3-vl-plus'}}

@@ -1,3 +1,4 @@
+import {contextDependenciesSchema,type ContextDependencies} from './context-dependencies.js'
 import {createHash,randomUUID} from 'node:crypto'
 import {mkdir,open,rename,unlink} from 'node:fs/promises'
 import {dirname,join,resolve} from 'node:path'
@@ -8,19 +9,21 @@ import {validateToolImage,type CascadedLlmInput} from '../realtime/cascaded/llm.
 import {computerApplicationSchema,type ToolImage} from './computer-use/contract.js'
 import type {LocalShellProcess} from './local-shell.js'
 
-export const planSchema=z.object({id:z.string(),version:z.number().int().positive(),title:z.string().min(1).max(120),content:z.string().min(1).max(131072),conversation_id:z.string(),generation:z.number().int().nonnegative(),created_at:z.string(),publication_key:z.string().optional()}).strict()
+export const planSchema=z.object({context_dependencies:contextDependenciesSchema.optional(),id:z.string(),version:z.number().int().positive(),title:z.string().min(1).max(120),content:z.string().min(1).max(131072),conversation_id:z.string(),generation:z.number().int().nonnegative(),created_at:z.string(),publication_key:z.string().optional()}).strict()
 export type WorkbenchPlan=z.infer<typeof planSchema>
 export const buildStatusSchema=z.enum(['idle','running','awaiting_approval','paused','completed','failed','outcome_unknown','finished'])
 export type BuildStatus=z.infer<typeof buildStatusSchema>
-export interface WorkbenchCall {id:string;name:string;arguments:Record<string,JsonValue>;state:'prepared'|'awaiting_approval'|'running'|'completed';result?:JsonValue;message_id?:string;created_at?:string;approval_id?:string;started_at?:string;finished_at?:string;process?:LocalShellProcess}
+export interface WorkbenchCall {id:string;name:string;arguments:Record<string,JsonValue>;state:'prepared'|'awaiting_approval'|'running'|'completed';result?:JsonValue;message_id?:string;narration?:string;created_at?:string;approval_id?:string;started_at?:string;finished_at?:string;process?:LocalShellProcess}
 /** Display-only provider thinking; never a model input, never merged into the assistant reply. */
 export interface WorkbenchThought {id:string;text:string;created_at:string;message_id?:string}
 export const MAX_WORKBENCH_THOUGHTS=64
 export const MAX_WORKBENCH_THOUGHT_CODEPOINTS=8000
 export const MAX_WORKBENCH_THOUGHT_BYTES=256*1024
 export interface WorkbenchCheckpoint {
+ context_dependencies?:ContextDependencies
+ confirmed_plan_omitted?:boolean
  version:1;conversation_id:string;generation:number;run_version:number;status:BuildStatus;reason:string|null;model:JsonValue|null;
- inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;assistant:string;updated_at:string
+ inputs:CascadedLlmInput[];pending_calls:WorkbenchCall[];calls:WorkbenchCall[];last_user:string;denied_classes?:string[];assistant:string;updated_at:string
  voice_message_ids?:string[]
  /** Bounded display-only history; empty for checkpoints written before capture existed. */
  thoughts?:WorkbenchThought[]
@@ -40,7 +43,7 @@ export function boundWorkbenchThoughts(thoughts:readonly WorkbenchThought[]):Wor
  }
  return kept
 }
-const callSchema=z.object({id:z.string().min(1),name:z.string().min(1),arguments:z.record(z.string(),jsonValueSchema),state:z.enum(['prepared','awaiting_approval','running','completed']),result:jsonValueSchema.optional(),message_id:z.string().optional(),created_at:z.string().optional(),approval_id:z.string().optional(),started_at:z.string().optional(),finished_at:z.string().optional(),process:z.object({platform:z.enum(['darwin','win32']),pid:z.number().int().positive()}).strict().optional()}).strict()
+const callSchema=z.object({id:z.string().min(1),name:z.string().min(1),arguments:z.record(z.string(),jsonValueSchema),state:z.enum(['prepared','awaiting_approval','running','completed']),result:jsonValueSchema.optional(),message_id:z.string().optional(),narration:z.string().max(32001).optional(),created_at:z.string().optional(),approval_id:z.string().optional(),started_at:z.string().optional(),finished_at:z.string().optional(),process:z.object({platform:z.enum(['darwin','win32']),pid:z.number().int().positive()}).strict().optional()}).strict()
 const inputSchema=z.union([
  z.object({kind:z.literal('user_text'),text:z.string()}).strict(),
  z.object({kind:z.enum(['host_context','host_task','host_activation','packed_history']),content:z.string()}).strict(),
@@ -143,7 +146,7 @@ export class WorkbenchStore {
  async checkpoint(id:string,generation:number):Promise<WorkbenchCheckpoint>{
   const value=await this.#images(await this.#readCheckpoint(id,generation),id,generation,true)
   if(value===null)return emptyWorkbenchCheckpoint(id,generation)
-  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
+  const checked=z.object({version:z.literal(1),conversation_id:z.literal(id),generation:z.literal(generation),context_dependencies:contextDependenciesSchema.optional(),confirmed_plan_omitted:z.boolean().optional(),run_version:z.number().int().nonnegative(),status:buildStatusSchema,reason:z.string().nullable(),model:jsonValueSchema.nullable(),inputs:z.array(inputSchema),pending_calls:z.array(callSchema),calls:z.array(callSchema),thoughts:z.array(thoughtSchema).optional(),last_user:z.string(),denied_classes:z.array(z.string().max(1100)).max(256).optional(),assistant:z.string(),updated_at:z.string(),voice_message_ids:z.array(z.string()).max(512).optional(),model_failure:z.object({code:z.string().regex(/^[a-z_]{1,64}$/u),detail:z.string().regex(/^[a-z_]{1,64}$/u).optional(),tool_call_count:z.number().int().nonnegative().max(128).optional()}).strict().optional()}).strict().parse(value)
   const calls=new Map(checked.calls.map(call=>[call.id,call]));if(calls.size!==checked.calls.length)throw Error('duplicate_tool_call')
   checked.pending_calls=checked.pending_calls.map(call=>{const prior=calls.get(call.id);if(prior?.name!==call.name||JSON.stringify(prior.arguments)!==JSON.stringify(call.arguments))throw Error('tool_call_id_conflict');return prior})
   checked.thoughts=boundWorkbenchThoughts((checked.thoughts??[]).map(thought=>({id:thought.id,text:thought.text,created_at:thought.created_at,...(thought.message_id===undefined?{}:{message_id:thought.message_id})})))
@@ -212,6 +215,9 @@ export function workbenchCallPreview(call:WorkbenchCall,sequence:number){
  const target=call.arguments.path??call.arguments.command
  const input=JSON.stringify(call.arguments,null,2),output=call.result===undefined?'':JSON.stringify(call.result,null,2)
  return {image_ref:firstImageRef(call.result),sequence,id:call.id.slice(0,512),name:call.name.slice(0,128),message_id:call.message_id??null,state:call.state,status,
+  ...(call.narration?{narration:call.narration}:{}),
+  ...(['file_read','file_write','file_edit'].includes(call.name)&&status==='completed'
+   ?{file_key:typeof result.path==='string'&&result.type!=='directory'?createHash('sha256').update(result.path).digest('hex'):null}:{}),
   target:typeof target==='string'?target.slice(0,180):'',input:input.slice(0,500),output:output.slice(0,700),
   input_truncated:input.length>500,output_truncated:output.length>700||result.truncated===true,
   exit_code:typeof result.exit_code==='number'?result.exit_code:null,

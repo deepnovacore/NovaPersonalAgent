@@ -5,6 +5,7 @@ import {readBoundedResponse} from '../../http/bounded-response.js'
 import {reportUsage, type UsageReporter} from '../usage.js'
 import type {AsrFactory, TtsFactory} from './ports.js'
 
+import {rotatedCredential} from '../../config/credential-rotation.js'
 interface SpeechOptions {
   readonly endpoint:string
   readonly apiKey:string
@@ -31,7 +32,7 @@ async function request(options:SpeechOptions,path:string,body:FormData|string,si
   try {
     checkAbort(owned)
     const pending=(options.fetchImpl??fetch)(`${options.endpoint.replace(/\/+$/u,'')}/audio/${path}`,{
-      method:'POST',headers:{authorization:`Bearer ${options.apiKey}`,...(typeof body==='string'?{'content-type':'application/json'}:{})},
+      method:'POST',headers:{authorization:`Bearer ${rotatedCredential(options.apiKey)}`,...(typeof body==='string'?{'content-type':'application/json'}:{})},
       body,signal:owned,redirect:'error',
     }).then(response=>{received=response;if(owned.aborted){discard(response);throw failure('aborted')}return response})
     const response=await abortable(pending,owned)

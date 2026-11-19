@@ -1,3 +1,6 @@
+import {contextDependenciesSchema,type ContextDependencies} from './context-dependencies.js'
+import type {retrievalPrerecall} from '../memory/prerecall-port.js'
+import {chatFailureSchema} from './chat-failure.js'
 import type {RealtimeCapabilities} from '../realtime/capabilities.js'
 import {scheduleReferenceSchema} from './schedule-reference.js'
 import type {Suggestion} from '../core/suggestions.js'
@@ -13,25 +16,30 @@ import type {TaskDispatchContext} from '../core/task-tools.js'
 import {computerUseStateSchema} from './computer-use/contract.js'
 import {buildStatusSchema} from './workbench-store.js'
 export const planReferenceSchema=z.object({id:z.string(),version:z.number().int().positive(),title:z.string().max(120)}).strict()
-export const localBuildSchema=z.object({computer_use:computerUseStateSchema.optional(),project:z.string(),plan_id:z.string().optional(),plan_version:z.number().int().positive().optional(),source_conversation_id:z.string(),status:buildStatusSchema,reason:z.string().nullable().default(null),log_revision:z.number().int().nonnegative().default(0),approval:z.object({id:z.string(),call_id:z.string(),name:z.string(),preview:z.string().max(1800)}).strict().nullable().default(null)}).strict()
+export const localBuildSchema=z.object({computer_use:computerUseStateSchema.optional(),project:z.string(),plan_id:z.string().optional(),plan_version:z.number().int().positive().optional(),source_conversation_id:z.string(),status:buildStatusSchema,reason:z.string().nullable().default(null),reason_detail:z.string().max(300).nullable().optional(),log_revision:z.number().int().nonnegative().default(0),approval:z.object({id:z.string(),call_id:z.string(),name:z.string(),preview:z.string().max(1800)}).strict().nullable().default(null)}).strict()
 export const sourceTodoSchema=z.object({id:z.string().min(1).max(512),version:z.number().int().nonnegative()}).strict()
 export interface ConversationTurnContext {user_message_id?:string;local_desktop?:boolean;resume?:boolean;source_todo?:z.infer<typeof sourceTodoSchema>; prepared?:PreparedContent; references?:DiscussionReference[]; refresh?:()=>Promise<ConversationTurnContext>}
-export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),origin:z.literal('proactive').optional(),input_mode:z.literal('voice').optional(),schedule_ref:scheduleReferenceSchema.optional(),references:z.array(discussionReferenceSchema).max(2).optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),read:z.boolean().optional(),text:z.string().max(16000),full_text_ref:z.boolean().optional(),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
+const toolTraceSchema=z.array(z.object({name:z.string().min(1).max(128),state:z.enum(['running','ok','error']),summary:z.string().max(160)}).strict()).max(16)
+export const conversationMessageSchema=z.object({id:z.string().min(1).max(128),conversation_id:z.string().min(1).max(128),role:z.enum(['user','assistant']),context_dependencies:contextDependenciesSchema.optional(),task_ids:z.array(z.string().min(1).max(128)).max(16).optional(),memory_origin:z.literal('non_product').optional(),origin:z.literal('proactive').optional(),input_mode:z.literal('voice').optional(),schedule_ref:scheduleReferenceSchema.optional(),references:z.array(discussionReferenceSchema).max(2).optional(),source_todo:sourceTodoSchema.optional(),delivery:z.enum(['completed','interrupted','generated']).optional(),generation_status:z.enum(['pending','completed','failed','interrupted']).optional(),failure_reason:chatFailureSchema.optional(),read:z.boolean().optional(),text:z.string().max(16000),full_text_ref:z.boolean().optional(),tool_trace:toolTraceSchema.optional(),created_at:z.string().datetime(),reply_to:z.string().max(128).optional(),request_id:z.string().max(128).optional(),turn_id:z.string().max(512).optional()}).strict()
 export const codingTargetSchema=z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable(),project:z.string().min(1).max(120),title:z.string().max(120),executor:z.literal('codex')}).strict()
-export const conversationSchema=z.object({mode:z.enum(['chat','plan']).optional(),plan:planReferenceSchema.optional(),build:localBuildSchema.optional(),scheduled_result_focus:z.string().min(1).max(128).optional(),coding_target:codingTargetSchema.nullable().default(null),id:z.string().min(1).max(128),kind:z.enum(['chat','topic','schedule','build']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
+// Preserve opaque persona metadata from older profiles without exposing a character catalogue.
+export const conversationSchema=z.object({persona:z.string().min(1).max(128).optional(),mode:z.enum(['chat','plan']).optional(),plan:planReferenceSchema.optional(),build:localBuildSchema.optional(),scheduled_result_focus:z.string().min(1).max(128).optional(),coding_target:codingTargetSchema.nullable().default(null),id:z.string().min(1).max(128),kind:z.enum(['chat','topic','schedule','build']),title:z.string().min(1).max(120),subject_key:z.string().max(512).nullable(),created_at:z.string().datetime(),updated_at:z.string().datetime(),generation:z.number().int().nonnegative(),messages:z.array(conversationMessageSchema).max(512),feed_ids:z.array(z.string().max(128)).max(256),read_through_id:z.string().nullable().default(null),prepared:z.object({trust:z.literal('untrusted_external'),text:z.string().max(12000),evidence_refs:z.array(z.string().max(512)).max(32)}).strict().nullable()}).strict()
 export type Conversation=z.infer<typeof conversationSchema>
+export const voiceModeSchema=z.enum(['chat','plan','build','delegate'])
+export type VoiceMode=z.infer<typeof voiceModeSchema>
 export const conversationsStateSchema=z.object({selected_id:z.string(),voice_id:z.string().nullable(),items:z.array(conversationSchema).min(1).max(192),work_owners:z.record(z.string(),z.string()),approval_owners:z.record(z.string(),z.string())}).strict().refine(state=>state.items.filter(item=>item.kind!=='schedule').length<=128&&state.items.filter(item=>item.kind==='schedule').length<=64&&!state.items.some(item=>item.kind==='schedule'&&(item.id===state.selected_id||item.id===state.voice_id)),'invalid_conversation_ownership')
 export type ConversationsState=z.infer<typeof conversationsStateSchema>
 export function createConversation(kind:Conversation['kind'],title:string,subject_key:string|null=null,id:string=randomUUID()):Conversation {const at=new Date().toISOString();return {id,kind,title,subject_key,coding_target:null,created_at:at,updated_at:at,generation:0,messages:[],feed_ids:[],read_through_id:null,prepared:null}}
 export function nextConversationTitle(items:readonly Pick<Conversation,'title'>[]):string{const titles=new Set(items.map(item=>item.title));let number=1;while(titles.has(`新对话 ${number}`))number++;return `新对话 ${number}`}
 export function initialConversations():ConversationsState{return {selected_id:'chat:main',voice_id:null,items:[createConversation('chat',nextConversationTitle([]),null,'chat:main')],work_owners:{},approval_owners:{}}}
+export interface ConversationTurnResult {assistant:string;context_dependencies?:ContextDependencies;full_text_ref?:boolean;turn_id?:string;task_ids?:string[];memory_origin?:'non_product';tool_trace?:readonly {name:string;state:'running'|'ok'|'error';summary:string}[]}
 export interface ConversationRuntime {
  readonly capabilities?:RealtimeCapabilities|undefined
- toolBridge?:{readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
+ toolBridge?:{readonly prerecall?:ReturnType<typeof retrievalPrerecall>;readonly tools:readonly CascadedLlmTool[];readonly readonlyNames:readonly string[];readonly chatTools?:readonly CascadedLlmTool[];origin:(text:string)=>Promise<string>;invoke:(text:string,call:{id:string;name:string;arguments:Record<string,JsonValue>},signal:AbortSignal,task?:TaskDispatchContext)=>Promise<JsonValue>}
  stopBuild?():Promise<void>
  localApproval?(id:string,approved:boolean,always?:boolean):Promise<void>
  retainTasks?():boolean
- runTurn(text:string,signal:AbortSignal,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string}>
+ runTurn(text:string,signal:AbortSignal,context?:ConversationTurnContext):Promise<ConversationTurnResult>
  parkVoice?():Promise<void>
  canSwitch?():boolean
  deliverSuggestion?(suggestion:Suggestion,reason:WakeReason):void
@@ -42,12 +50,14 @@ export interface ConversationRuntime {
  approvalDecision?(approvalId:string,approved:boolean):Promise<void>
  confirmationDecision?(proposalId:string,confirmed:boolean):Promise<void>
 }
-export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit:(frame:Record<string,unknown>)=>void,mode?:'text'|'voice',lifetime?:AbortSignal,recovery?:boolean,execution?:ScheduledRunGrant)=>Promise<ConversationRuntime>
+export type ConversationRuntimeFactory=(conversation:Readonly<Conversation>,emit:(frame:Record<string,unknown>)=>void,mode?:'text'|'voice',lifetime?:AbortSignal,recovery?:boolean,execution?:ScheduledRunGrant,overrides?:{chat?:boolean;voice_mode?:VoiceMode},startup?:AbortSignal)=>Promise<ConversationRuntime>
 /** The global host owns resources; this pool owns only each conversation's scoped turn graph. */
 export class ConversationRuntimePool {
  readonly #modes=new Map<string,'text'|'voice'|'parked'>()
  readonly #lifetimes=new Map<string,AbortController>()
  readonly #retired=new Map<string,Set<ConversationRuntime>>()
+ readonly #isolated=new Set<Promise<ConversationRuntime>>()
+ readonly #isolatedLifetimes=new Set<AbortController>()
  readonly #ready=new Map<string,ConversationRuntime>()
  readonly #runtimes=new Map<string,Promise<ConversationRuntime>>()
  readonly #tails=new Map<string,Promise<unknown>>()
@@ -56,9 +66,27 @@ export class ConversationRuntimePool {
  #closed=false
  readonly #executions=new Map<string,string>()
  constructor(readonly create:ConversationRuntimeFactory,readonly emit:(frame:Record<string,unknown>)=>void){}
- async prepare(conversation:Conversation,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{return this.#prepare(conversation,false,execution)}
- async restore(conversation:Conversation,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{return this.#prepare(conversation,true,execution)}
- async #prepare(conversation:Conversation,recovery:boolean,execution?:ScheduledRunGrant):Promise<ConversationRuntime>{
+ /** Host action graphs share task ownership, never the foreground Chat slot. */
+ async isolated<T>(conversation:Conversation,operation:(runtime:ConversationRuntime)=>Promise<T>,recovery=false):Promise<T>{
+  if(this.#closed)throw Error('conversation_runtime_closed')
+  const lifetime=new AbortController(),id=conversation.id
+  this.#isolatedLifetimes.add(lifetime)
+  const starting=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,undefined,{chat:false})
+  this.#isolated.add(starting)
+  let runtime:ConversationRuntime|undefined
+  try{
+   runtime=await starting
+   if(this.#closed)throw Error('conversation_runtime_closed')
+   const retained=this.#retired.get(id)??new Set<ConversationRuntime>();retained.add(runtime);this.#retired.set(id,retained)
+   return await operation(runtime)
+  }finally{
+   lifetime.abort();this.#isolatedLifetimes.delete(lifetime);this.#isolated.delete(starting)
+   if(runtime){if(!this.#closed&&runtime.retainTasks?.())await runtime.parkVoice?.();else{this.#retired.get(id)?.delete(runtime);await runtime.close()}}
+  }
+ }
+ async prepare(conversation:Conversation,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{return this.#prepare(conversation,false,execution,overrides)}
+ async restore(conversation:Conversation,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{return this.#prepare(conversation,true,execution,overrides)}
+ async #prepare(conversation:Conversation,recovery:boolean,execution?:ScheduledRunGrant,overrides?:{chat?:boolean}):Promise<ConversationRuntime>{
   if(this.#closed)throw Error('conversation_runtime_closed')
   if(conversation.kind==='schedule'&&!execution)throw Error('scheduled_execution_required')
   if(execution&&conversation.kind!=='schedule')throw Error('invalid_scheduled_conversation')
@@ -66,10 +94,10 @@ export class ConversationRuntimePool {
   if(execution)this.#executions.set(conversation.id,execution.namespace)
   const id=conversation.id,existing=this.#runtimes.get(id);if(existing)return existing
   const lifetime=new AbortController();this.#lifetimes.set(id,lifetime);this.#modes.set(id,'text')
-  const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,execution);this.#runtimes.set(id,promise)
+  const promise=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(id)===lifetime)this.emit({...frame,conversation_id:id})},'text',lifetime.signal,recovery,execution,overrides);this.#runtimes.set(id,promise)
   try{const runtime=await promise;if(this.#closed||this.#lifetimes.get(id)!==lifetime){await runtime.close();throw Error('conversation_runtime_closed')}this.#ready.set(id,runtime);return runtime}catch(error){lifetime.abort();this.#runtimes.delete(id);this.#lifetimes.delete(id);this.#modes.delete(id);throw error}
  }
- run(conversation:Conversation,text:string,context?:ConversationTurnContext):Promise<{assistant:string;turn_id?:string}>{
+ run(conversation:Conversation,text:string,context?:ConversationTurnContext):Promise<ConversationTurnResult>{
   if(conversation.kind==='schedule')return Promise.reject(Error('hidden_conversation'))
   if(this.#closed)return Promise.reject(Error('conversation_runtime_closed'))
   if(!this.acceptsText(conversation.id))return Promise.reject(Error('conversation_busy'))
@@ -90,17 +118,17 @@ export class ConversationRuntimePool {
  hasVoice(id:string):boolean{return this.#modes.get(id)==='voice'}
  acceptsText(id:string):boolean{return this.#modes.get(id)!=='voice'&&(this.#modes.get(id)!=='parked'||this.#ready.get(id)?.canSwitch?.()!==false)}
  async stopVoice(id:string):Promise<void>{const runtime=this.#ready.get(id);await runtime?.parkVoice?.();this.#modes.set(id,'parked')}
- async stopBuild(id:string):Promise<void>{const controller=this.#controllers.get(id);controller?.abort();const runtime=await this.#runtimes.get(id);await runtime?.stopBuild?.();await this.#tails.get(id);if(this.#controllers.get(id)===controller)this.#controllers.delete(id)}
+ async stopBuild(id:string):Promise<void>{const controller=this.#controllers.get(id);controller?.abort('user_stop');const runtime=await this.#runtimes.get(id);await runtime?.stopBuild?.();await this.#tails.get(id);if(this.#controllers.get(id)===controller)this.#controllers.delete(id)}
  async localApproval(id:string,approvalId:string,approved:boolean,always?:boolean):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.localApproval)throw Error('local_approval_unavailable');await runtime.localApproval(approvalId,approved,always)}
- async clear(id:string):Promise<void>{this.#modes.delete(id);this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);this.#controllers.get(id)?.abort();await this.#tails.get(id);const runtime=this.#runtimes.get(id);this.#runtimes.delete(id);this.#ready.delete(id);this.#controllers.delete(id);this.#tails.delete(id);if(runtime){const ready=await runtime;if(!this.#closed&&ready.retainTasks?.()){await ready.parkVoice?.();const retained=this.#retired.get(id)??new Set<ConversationRuntime>();retained.add(ready);this.#retired.set(id,retained)}else await ready.close()}}
- async startVoice(conversation:Conversation):Promise<void>{if(conversation.kind==='schedule')throw Error('hidden_conversation');if(this.#closed)throw Error('conversation_runtime_closed');if(this.#busy.has(conversation.id)||this.#ready.get(conversation.id)?.canSwitch?.()===false)throw Error('conversation_busy');await this.clear(conversation.id);if(this.#closed)throw Error('conversation_runtime_closed');this.#modes.set(conversation.id,'voice');const lifetime=new AbortController();this.#lifetimes.set(conversation.id,lifetime);const runtime=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(conversation.id)===lifetime)this.emit({...frame,conversation_id:conversation.id})},'voice',lifetime.signal);this.#runtimes.set(conversation.id,runtime);let ready:ConversationRuntime;try{ready=await runtime}catch(error){lifetime.abort();if(this.#runtimes.get(conversation.id)===runtime){this.#runtimes.delete(conversation.id);this.#lifetimes.delete(conversation.id);this.#modes.delete(conversation.id)}throw error}if(this.#closed||this.#lifetimes.get(conversation.id)!==lifetime)throw Error('conversation_runtime_closed');this.#ready.set(conversation.id,ready)}
+ async clear(id:string):Promise<void>{this.#modes.delete(id);this.#lifetimes.get(id)?.abort();this.#lifetimes.delete(id);this.#controllers.get(id)?.abort();await this.#tails.get(id);const runtime=this.#runtimes.get(id);this.#runtimes.delete(id);this.#ready.delete(id);this.#controllers.delete(id);this.#tails.delete(id);if(runtime){const ready=await runtime.catch(()=>undefined);if(!ready)return;if(!this.#closed&&ready.retainTasks?.()){await ready.parkVoice?.();const retained=this.#retired.get(id)??new Set<ConversationRuntime>();retained.add(ready);this.#retired.set(id,retained)}else await ready.close()}}
+ async startVoice(conversation:Conversation,voiceMode?:VoiceMode):Promise<void>{if(conversation.kind==='schedule')throw Error('hidden_conversation');if(this.#closed)throw Error('conversation_runtime_closed');if(this.#busy.has(conversation.id)||this.#ready.get(conversation.id)?.canSwitch?.()===false)throw Error('conversation_busy');await this.clear(conversation.id);if(this.#closed)throw Error('conversation_runtime_closed');this.#modes.set(conversation.id,'voice');const lifetime=new AbortController();this.#lifetimes.set(conversation.id,lifetime);const runtime=this.create(structuredClone(conversation),frame=>{if(!lifetime.signal.aborted&&this.#lifetimes.get(conversation.id)===lifetime)this.emit({...frame,conversation_id:conversation.id})},'voice',lifetime.signal,undefined,undefined,voiceMode?{voice_mode:voiceMode,...(voiceMode==='delegate'?{chat:false}:{})}:undefined);this.#runtimes.set(conversation.id,runtime);let ready:ConversationRuntime;try{ready=await runtime}catch(error){lifetime.abort();if(this.#runtimes.get(conversation.id)===runtime){this.#runtimes.delete(conversation.id);this.#lifetimes.delete(conversation.id);this.#modes.delete(conversation.id)}throw error}if(this.#closed||this.#lifetimes.get(conversation.id)!==lifetime)throw Error('conversation_runtime_closed');this.#ready.set(conversation.id,ready)}
  deliverSuggestion(id:string,suggestion:Suggestion,reason:WakeReason):void{this.#ready.get(id)?.deliverSuggestion?.(suggestion,reason)}
  workConversation(id:string):string|undefined{for(const [conversation,runtime] of this.#ready)if(runtime.ownsWork?.(id))return conversation;for(const [conversation,runtimes] of this.#retired)for(const runtime of runtimes)if(runtime.ownsWork?.(id))return conversation;return undefined}
  service(id:string):BridgeService|undefined{return this.#ready.get(id)?.bridgeService}
  async sendAudio(id:string,pcm:Uint8Array):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.sendAudio)throw Error('voice_unavailable');await runtime.sendAudio(pcm)}
  async confirm(id:string,proposalId:string,confirmed:boolean):Promise<void>{const runtime=await this.#runtimes.get(id);if(!runtime?.confirmationDecision)throw Error('confirmation_unavailable');await runtime.confirmationDecision(proposalId,confirmed)}
  async approve(id:string,approvalId:string,approved:boolean):Promise<void>{const candidates=[await this.#runtimes.get(id),...(this.#retired.get(id)??[])];for(const runtime of candidates){if(!runtime?.approvalDecision)continue;try{await runtime.approvalDecision(approvalId,approved);return}catch{}}throw Error('approval_unavailable')}
- async close():Promise<void>{this.#closed=true;await Promise.all([...new Set([...this.#controllers.keys(),...this.#runtimes.keys()])].map(id=>this.clear(id)));await Promise.all([...this.#retired.values()].flatMap(items=>[...items].map(runtime=>runtime.close())));this.#retired.clear()}
+ async close():Promise<void>{this.#closed=true;for(const lifetime of this.#isolatedLifetimes)lifetime.abort();await Promise.allSettled(this.#isolated);await Promise.all([...new Set([...this.#controllers.keys(),...this.#runtimes.keys()])].map(id=>this.clear(id)));await Promise.all([...this.#retired.values()].flatMap(items=>[...items].map(runtime=>runtime.close())));this.#retired.clear()}
 }
 
 /** Acknowledgements cover only messages actually visible, never later arrivals. */

@@ -43,13 +43,6 @@ export function resolveDesktopConfig({
   const workspace = nonempty(settings.codexWorkspace)
     || nonempty(environment.CODEX_WORKSPACE)
     || defaults.defaultWorkspace
-  const rawModelBaseUrl = nonempty(settings.modelBaseUrl)
-    || nonempty(environment.MODEL_BASE_URL)
-    || ''
-  const modelBaseUrl = validModelBaseUrl(rawModelBaseUrl)
-  const modelConfigurationError = modelBaseUrl === null
-    ? 'model_base_url_invalid'
-    : null
 
   void platform
   return Object.freeze({
@@ -60,8 +53,6 @@ export function resolveDesktopConfig({
     codexBinaryMode,
     codexBinaryPath: binaryPath === '' ? '' : canonicalize(binaryPath),
     codexConfigurationError,
-    modelBaseUrl: modelBaseUrl ?? '',
-    modelConfigurationError,
     startListeningOnLaunch: settings.startListeningOnLaunch === true,
   })
 }
@@ -82,4 +73,3 @@ export async function ensureProductDirectories(config, { mkdir, pathApi }) {
   }
   return config
 }
-import { validModelBaseUrl } from './settings-store.mjs'

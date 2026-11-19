@@ -25,8 +25,87 @@ class Lease extends BackgroundExecution {
   Future<void> end({required bool success}) async {}
 }
 
+class OnePageLease extends Lease {
+  @override
+  Future<void> progress(int units, String phase) async => expire();
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'repeated short leases resume the durable queue without rereading completed chats',
+    () async {
+      final now = DateTime.utc(2026, 10, 18);
+      final authDisk = MemoryLifePersistence()
+        ..value = jsonEncode({
+          'version': 1,
+          'generation': 1,
+          'app': {
+            'brand': 'feishu',
+            'app_id': 'cli_fixture',
+            'secret': 'synthetic',
+          },
+          'identity': {'open_id': 'person'},
+          'credential': {
+            'access_token': 'synthetic',
+            'expires_at': now
+                .add(const Duration(days: 1))
+                .millisecondsSinceEpoch,
+          },
+        });
+      final readChats = <String>[];
+      final auth = FeishuAuth(
+        authDisk,
+        FeishuApi(
+          transport: (m, u, h, b) async {
+            readChats.add(u.queryParameters['container_id']!);
+            return FeishuResponse(200, {
+              'code': 0,
+              'data': {'items': [], 'has_more': false},
+            });
+          },
+        ),
+        now: () => now,
+      );
+      await auth.open();
+      final sourceDisk = MemoryLifePersistence(),
+          intent = MemoryLifePersistence();
+      var sources = SourceStore(sourceDisk, now: () => now);
+      await sources.bind(auth.identityKey, auth.generation);
+      await sources.setAllAccessible(false);
+      for (final id in ['first', 'second', 'last']) {
+        await sources.select(id, DateTime.utc(1970));
+      }
+      var collection = FeishuCollection(
+        FeishuIngest(auth, sources, now: () => now),
+        execution: OnePageLease(),
+        intent: intent,
+      );
+      await collection.start();
+      expect(collection.completed, 1);
+      collection.dispose();
+      sources.dispose();
+      sources = SourceStore(sourceDisk, now: () => now);
+      await sources.open();
+      collection = FeishuCollection(
+        FeishuIngest(auth, sources, now: () => now),
+        execution: OnePageLease(),
+        intent: intent,
+      );
+      await collection.restore();
+      await collection.start();
+      expect(collection.completed, 2);
+      await collection.start();
+      expect(collection.completed, 3);
+      expect(collection.total, 3);
+      expect(collection.pages, 3);
+      expect(readChats, ['first', 'second', 'last']);
+      expect(intent.value, 'null');
+      collection.dispose();
+      sources.dispose();
+      auth.dispose();
+    },
+  );
   for (final pause in ['none', 'system', 'user', 'restart', 'restart_stale']) {
     test('collection survives view detachment; pause=$pause', () async {
       final first = Completer<void>(), release = Completer<void>();

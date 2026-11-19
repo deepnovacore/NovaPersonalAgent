@@ -1,5 +1,13 @@
 # Personal memory
 
+Proactive discovery, feeds, timeline, brief and profile are available only with the default Nova ledger; mem0 provides recall, evidence and Memory-page management.
+
+Task-result feeds created while a non-product memory resource (mem0, remote or VoiceMem) is present carry a persisted `memory_origin: 'non_product'` marker. They remain visible locally, but cannot enter model-bound discovery, briefs, timeline, suggestion selection or voice delivery, even after restarting or switching to the ledger. With no memory resource, new task results remain unmarked and eligible, as do legacy unmarked task results regardless of the current backend. Memory-dependent feeds require that substrate; evidence-only dependencies must resolve independently through a non-memory source when no product substrate is active. App-record references (such as todos, goals and tasks) do not require a memory backend; all model-bound uses revalidate their current versions and destination authorization. Disabling memory never makes unresolved memory evidence eligible.
+
+Scheduled summaries persist the optional, bounded `memory_origin: 'non_product'` field before feed delivery and copy it to the feed and chat bubble. Publication retries preserve that production-time provenance across backend changes. This is an additive schema change: old summaries need no rewrite and remain unmarked.
+
+App-informed assistant answers, versioned plans and Plan/Build checkpoints retain optional, bounded `context_dependencies`, including inherited dependencies from prior answers. Reusing history or voice context requires current source authorization; overflow is unavailable rather than partially tracked. Legacy rows remain readable locally. Unverifiable app-informed legacy checkpoints refuse model reuse without deleting plans or tool receipts. Confirmed plan handoffs retain the published version’s dependencies and check the receiving model again before use. Queued personal voice items reauthorize immediately before provider injection, including after floor waits or reconnects. Unrelated standalone chat remains usable.
+
 The default local ledger supports explicit saves such as “Remember to call me kant.” Nova uses `memory__remember` and confirms only after a durable receipt. A new conversation can read the saved preference immediately, without waiting for extraction or vector indexing; it survives restart. A preferred form of address is not a legal name. Explicit changes and forgetting use the same versioned ledger.
 
 Preferred names and reply style receive priority in conversation context. Use `memory__lookup` to enumerate or read exact saved facts, `memory__recall` to ask about other history naturally, and `memory__evidence` to inspect sources. Ordinary conversations still use background extraction. A turn with explicit saves uses the submitted entries and skips duplicate extraction of the full turn. Conflicts and failures must not be reported as successful saves. Explicit writes are currently unsupported by mem0 and remote backends. Forgetting hides the entry and its operation evidence. Distinct explicit saves remain independent even if they quote the same sentence. Surviving broad quotations may still mention a forgotten fact; forgetting does not delete chat history or guarantee semantic erasure of paraphrases.
@@ -12,9 +20,15 @@ Tell Nova a fact, such as “My example project is Cedar, code C-731.” Later, 
 
 Learning takes time. A new fact may not be searchable immediately; check its learning state in the desktop memory panel.
 
-## View memories
+## Memory in Plan / Build
 
-[![Nova Profile in the main window](../../assets/features/profile-original.en.png)](../../assets/features/profile-original.en.png)
+Plan and Build text conversations can use the memory retrieval tools supported by the current backend. Backends supporting explicit saves also expose `memory__remember` and `memory__lookup`. Both modes **write only through `memory__remember` on an explicit user request**, with no automatic learning. A save requires a verbatim quote from the current typed user message and a committed receipt. Files, tool results and voice transcripts cannot authorize saves. These rules are part of the system instructions on every Workbench turn, including restored conversations. Resume retains the original user text; host context is not a new request.
+
+Use `scope=general` for project, code and repository constraints, and `scope=user` only for stable facts about the user themself. General project memories remain readable through `memory__recall`, `memory__lookup` and the Memory page, but do not enter `USER.md`, the voice “Memory facts” list or reply preferences. This general-scope exclusion from voice facts and reply preferences applies only to the Nova ledger: remote and VoiceMem-adapter preferences carry no scope. This exclusion does not cover derived summaries.
+
+At the start of a new text turn, shared authorized retrieval may inject a few relevant memories as untrusted reference context. Retrieval failures or a roughly 400 ms timeout are silently skipped. Pending retrieved context is discarded on retries and Resume, including after restart; Resume does not re-retrieve it. This does not require `MEMORY_PRERECALL_ENABLED` and never triggers automatic writes. Plan / Build voice remains a conversation and steering channel with no tools and no automatic memory capture; return to text to explicitly request a memory write. Chat voice capture is unchanged.
+
+## View memories
 
 Use the main window’s memory view to inspect, correct or forget ledger entries. With mem0 selected, right-click the orb, open the memory panel, and select personal memory. You can search your original wording, view learned facts and their sources, and browse earlier records.
 
@@ -36,11 +50,31 @@ For source use, edit `.env` and restart Nova. No changes are needed for the defa
 
 | Choice | Configuration |
 |---|---|
-| Unified local ledger (default) | `MEMORY_CONNECTION=local`; omit provider or select `voicemem` |
-| Local mem0 | `MEMORY_CONNECTION=local` and `MEMORY_PROVIDER=mem0` |
+| Unified local ledger (default, with legacy migration) | `MEMORY_CONNECTION=local`; leave all engine/provider variables unset |
+| Explicit ledger composition (no legacy migration) | `MEMORY_CONNECTION=local`, `MEMORY_RECALL_ENGINE=ledger`, `MEMORY_EXTRACTORS=ledger` |
+| Standalone mem0 (deprecated selection) | `MEMORY_CONNECTION=local` and `MEMORY_PROVIDER=mem0` |
 | Disable memory | `MEMORY_CONNECTION=disabled`; remove provider |
-| Remote service | `MEMORY_CONNECTION=remote`; configure the service URL and token below; remove provider |
+| Remote service | `MEMORY_CONNECTION=remote`; configure the service URL and token below; unset provider and both new composition variables |
+
+`MEMORY_PROVIDER` is deprecated; legacy `voicemem` preserves the default ledger migration and legacy `mem0` preserves standalone mode. Do not combine it with the new variables.
 
 Remote connections require `MEMORY_URL` and `MEMORY_TOKEN`. The service must implement Nova's memory interface; an arbitrary mem0 endpoint is not compatible. Connection failure reports unavailable rather than switching to local storage.
 
 The unified ledger can import legacy VoiceMem records without changing the old database. Selecting mem0 does not migrate ledger records or enable ledger-backed source connectors. Disabling memory does not delete stored data. See [configuration](configuration.md) for common settings.
+
+### Standalone mem0
+
+mem0 supports recall with original user-turn evidence and local Memory-page listing, correction and forgetting. Explicit `remember`/`lookup` tools remain ledger-only. Model reads require both the destination grant saved when the source was admitted and the currently configured destination; missing grants fail closed. Sources admitted before this change remain visible in the Memory page, but are not offered to the model until the identical user turn is re-admitted with the same source ID. Only an empty grant snapshot is refreshed; existing nonempty grants and forgotten sources are never widened.
+
+Corrections use durable local overrides under the SDK item ID; revision tokens hash the SDK update timestamp and canonical content, falling back to a content hash when no timestamp exists. The canonical text is bounded to 500 characters. Correcting or forgetting an item freezes re-extraction of its source to prevent new SDK IDs from resurrecting old facts. Raw evidence remains the original user turn, not the corrected or extracted text. Source forgetting tombstones that turn immediately and retries derived-item deletion after restart. Corrections change returned text, not the SDK embedding, so ranking still uses the original embedding.
+
+mem0 listing scans the SDK store once per page (O(n) reads and O(n log n) sorting), batches local overrides, and hydrates only the requested page. No scan is cached across requests. `include_expired: true` is unsupported and returns an invalid-input error; forgotten entries are never listed.
+
+### Expert backend composition
+
+`MEMORY_RECALL_ENGINE=ledger` and `MEMORY_EXTRACTORS=ledger` select the Nova ledger
+explicitly. Only the ledger extractor is implemented. `MEMORY_PROVIDER` is deprecated:
+legacy `voicemem` keeps ledger migration and legacy `mem0` keeps standalone mode.
+Do not combine legacy and new variables or use new variables with a remote connection.
+Explicit recall-engine selections are not silently substituted or enabled by default.
+There is no engine picker. See [configuration](configuration.md) for supported selections and [memory architecture](archs/02-memory.md) for design details.

@@ -5,3 +5,5 @@ Nova Personal Agent is distributed under GPL-3.0-or-later from this change onwar
 Earlier Nova material was made available under Apache-2.0. Its original copyright, attribution and notice obligations remain; the earlier license text is preserved in Apache-2.0.txt. This change does not retract rights previously granted under that license. Third-party components retain their own licenses and attribution. Media and character publication approvals remain separately required.
 
 OpenMinis/iSH components reused by the mobile runtime must retain their upstream notices, fixed source revisions and applicable license texts in the third-party manifest. No publication is performed by this licensing change.
+
+Parts of the Android phone-control stack and provider setup are derived from Mika (Apache-2.0); see `third-party/Mika-NOTICE.md`.

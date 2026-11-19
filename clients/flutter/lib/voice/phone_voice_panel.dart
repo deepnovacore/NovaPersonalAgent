@@ -3,15 +3,18 @@ import 'package:flutter/cupertino.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
+import '../agent/phone_run.dart';
 import '../ui/theme.dart';
+import '../ui/pet_avatar.dart';
+import '../ui/virtual_screen_pip.dart';
 import 'phone_voice_session.dart';
-import 'voice_call_visual.dart';
 import 'voice_companion.dart';
 
 class PhoneVoicePanel extends StatefulWidget {
   const PhoneVoicePanel({
     super.key,
     required this.session,
+    required this.petAvatar,
     required this.onSettings,
     required this.onStart,
     this.language = 'zh',
@@ -20,8 +23,14 @@ class PhoneVoicePanel extends StatefulWidget {
     this.onMinimize,
     this.onExpand,
     this.onEnd,
+    this.phoneRun,
   });
+
+  /// While a phone task runs on the virtual screen, its live picture is shown
+  /// next to the character.
+  final PhoneRunTracker? phoneRun;
   final PhoneVoiceSession session;
+  final PetAvatarStore petAvatar;
   final VoidCallback onSettings, onStart;
   final VoidCallback? onMinimize, onExpand, onEnd;
   final String language;
@@ -121,7 +130,7 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
             if (_nativePip)
               _pipSource(72, 48)
             else
-              const Icon(CupertinoIcons.phone, color: Nova.mint, size: 20),
+              PetAvatar(store: widget.petAvatar, size: 36),
             const SizedBox(width: 10),
             Expanded(
               child: Padding(
@@ -246,44 +255,100 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
             child: LayoutBuilder(
               builder: (context, constraints) {
                 final short = constraints.maxHeight < 360;
-                return SingleChildScrollView(
+                final wide = constraints.maxWidth >= 560;
+                Widget stage(PhoneRun? screen) => Column(
+                  children: [
+                    SizedBox(
+                      height: short
+                          ? 112
+                          : screen != null && !wide
+                          ? 88
+                          : (constraints.maxHeight * .43).clamp(190.0, 270.0),
+                      width: double.infinity,
+                      child: ValueListenableBuilder<double>(
+                        valueListenable: session.audioLevel,
+                        builder: (context, level, _) => VoicePetVisual(
+                          petAvatar: widget.petAvatar,
+                          status:
+                              widget.startupError != null ||
+                                  session.error != null
+                              ? 'error'
+                              : session.muted
+                              ? 'muted'
+                              : session.status,
+                          inputLevel: session.muted ? 0 : level,
+                          isUserSpeaking: session.isUserSpeaking,
+                          isPlaying: session.isPlaying,
+                        ),
+                      ),
+                    ),
+                    Semantics(
+                      liveRegion: true,
+                      child: Text(
+                        _status,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Nova.secondary,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w400,
+                          letterSpacing: .6,
+                        ),
+                      ),
+                    ),
+                  ],
+                );
+                Widget visual(PhoneRun? run) {
+                  final tracker = widget.phoneRun;
+                  if (tracker == null || run == null) return stage(null);
+                  final screen = VirtualScreenView(
+                    key: const ValueKey('voice-virtual-screen'),
+                    tracker: tracker,
+                    run: run,
+                    language: widget.language,
+                    maxWidth: wide ? 180 : 110,
+                    maxHeight: wide ? 300 : 120,
+                  );
+                  return wide
+                      ? Row(
+                          key: const ValueKey('voice-pet-and-screen-row'),
+                          crossAxisAlignment: CrossAxisAlignment.center,
+                          children: [
+                            Expanded(child: stage(run)),
+                            const SizedBox(width: 24),
+                            screen,
+                          ],
+                        )
+                      : Column(
+                          key: const ValueKey('voice-pet-and-screen-column'),
+                          children: [
+                            stage(run),
+                            const SizedBox(height: 8),
+                            screen,
+                          ],
+                        );
+                }
+
+                Widget content(PhoneRun? run) => SingleChildScrollView(
                   key: const ValueKey('voice-call-content'),
                   padding: const EdgeInsets.symmetric(horizontal: 32),
                   child: Column(
                     children: [
-                      SizedBox(height: short ? 0 : constraints.maxHeight * .10),
                       SizedBox(
-                        height: short
-                            ? 112
-                            : (constraints.maxHeight * .43).clamp(190.0, 270.0),
-                        width: double.infinity,
-                        child: ValueListenableBuilder<double>(
-                          valueListenable: session.audioLevel,
-                          builder: (context, level, _) => VoiceCallVisual(
-                            status: session.status,
-                            inputLevel: session.muted ? 0 : level,
-                            isUserSpeaking: session.isUserSpeaking,
-                            isPlaying: session.isPlaying,
-                          ),
-                        ),
+                        height: short || (run != null && !wide)
+                            ? 0
+                            : constraints.maxHeight * .10,
                       ),
-                      Semantics(
-                        liveRegion: true,
-                        child: Text(
-                          _status,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Nova.secondary,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w400,
-                            letterSpacing: .6,
-                          ),
-                        ),
-                      ),
+                      visual(run),
                       const SizedBox(height: 28),
                       SizedBox(
                         key: const ValueKey('voice-captions'),
-                        height: short ? 116 : 164,
+                        // Beside a narrow phone's virtual screen the captions
+                        // give up height so the end of the content stays near.
+                        height: short
+                            ? 116
+                            : (run != null && !wide)
+                            ? 96
+                            : 164,
                         width: double.infinity,
                         child: SingleChildScrollView(
                           child: Column(
@@ -342,15 +407,65 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                                   '手机音频已中断，请重新开始通话。',
                                   'Device audio was interrupted. Please restart the call.',
                                 ),
+                                'microphone_denied' => t(
+                                  '麦克风权限未授予，请在系统设置中允许 NovaCore 使用麦克风。',
+                                  'Microphone permission was denied. Allow NovaCore to use the microphone in system settings.',
+                                ),
+                                'connection_http_401' => t(
+                                  '语音服务鉴权失败（HTTP 401），请检查所选服务的 API 密钥。',
+                                  'Voice authentication failed (HTTP 401). Check the selected service’s API key.',
+                                ),
+                                'connection_http_403' => t(
+                                  '语音服务拒绝访问（HTTP 403），请检查密钥的权限、服务地区和模型访问权限。',
+                                  'Voice access denied (HTTP 403). Check key permissions, service region and model access.',
+                                ),
+                                'connection_http_404' => t(
+                                  '语音服务地址或模型不存在（HTTP 404），请检查语音配置。',
+                                  'Voice endpoint or model not found (HTTP 404). Check voice settings.',
+                                ),
+                                'connection_http_429' => t(
+                                  '语音服务限流或额度不足（HTTP 429），请检查额度或稍后重试。',
+                                  'Voice rate limit or quota exceeded (HTTP 429). Check quota or retry later.',
+                                ),
+                                'connection_network_failed' => t(
+                                  '无法连接语音服务，请检查手机网络、DNS 或代理设置（connection_network_failed）。',
+                                  'Cannot reach the voice service. Check network, DNS or proxy settings (connection_network_failed).',
+                                ),
+                                'connection_tls_failed' => t(
+                                  '语音服务的安全连接失败，请检查设备时间、证书或代理设置（connection_tls_failed）。',
+                                  'Voice TLS handshake failed. Check device time, certificates or proxy settings (connection_tls_failed).',
+                                ),
+                                'connection_timeout' || 'setup_timeout' => t(
+                                  '连接语音服务超时，请检查网络后重试（${session.error}）。',
+                                  'Voice connection timed out. Check your connection and retry (${session.error}).',
+                                ),
+                                'voice_configuration_invalid' => t(
+                                  '语音配置无效，请检查服务地址、模型和密钥（voice_configuration_invalid）。',
+                                  'Invalid voice configuration. Check endpoint, model and key (voice_configuration_invalid).',
+                                ),
+                                'idle_timeout' ||
+                                'provider_response_idle_timeout' => t(
+                                  '通话因长时间静音已自动结束，可随时重新开始。',
+                                  'The call ended after a long silence. Start it again any time.',
+                                ),
                                 'provider_invalid_value' => t(
                                   '语音服务拒绝了本次请求，请重试或检查模型配置。',
                                   'The voice service rejected this request. Retry or check the model configuration.',
                                 ),
                                 _ => t(
-                                  '请检查语音设置或网络，再重新通话。',
-                                  'Check voice settings or your connection, then try again.',
+                                  '通话失败（${session.error}）。请根据错误检查语音配置或服务状态后重试。',
+                                  'Call failed (${session.error}). Check voice settings or service status for this error and retry.',
                                 ),
                               },
+                        ),
+                      if (session.active &&
+                          !session.muted &&
+                          session.microphoneSilent)
+                        _notice(
+                          t(
+                            '未采集到麦克风声音。请检查屏幕共享、镜像或其他设备占用，关闭后重试。',
+                            'No microphone sound detected. Check screen sharing, mirroring, or other device use, then retry.',
+                          ),
                         ),
                       if (session.active && !session.supportsVoiceDelegation)
                         _notice(
@@ -368,6 +483,14 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                     ],
                   ),
                 );
+
+                final tracker = widget.phoneRun;
+                return tracker == null
+                    ? content(null)
+                    : ListenableBuilder(
+                        listenable: tracker,
+                        builder: (context, _) => content(tracker.activeVirtual),
+                      );
               },
             ),
           ),
@@ -444,12 +567,14 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                   : null,
             ),
             _control(
-              label: t('扬声器', 'Speaker'),
+              label: session.recordingCompatible
+                  ? t('录屏外放', 'Recording speaker')
+                  : t('扬声器', 'Speaker'),
               icon: session.speaker
                   ? CupertinoIcons.speaker_2
                   : CupertinoIcons.ear,
               selected: session.speaker,
-              onPressed: session.active
+              onPressed: session.active && !session.recordingCompatible
                   ? () => unawaited(_action(session.toggleSpeaker))
                   : null,
             ),
@@ -516,4 +641,122 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
       ),
     );
   }
+}
+
+/// Matches the desktop pet voice stage: selected portrait, semantic state aura.
+/// Voice ownership and audio levels remain entirely with the session.
+class VoicePetVisual extends StatefulWidget {
+  const VoicePetVisual({
+    super.key,
+    required this.petAvatar,
+    required this.status,
+    required this.inputLevel,
+    required this.isUserSpeaking,
+    required this.isPlaying,
+  });
+  final PetAvatarStore petAvatar;
+  final String status;
+  final double inputLevel;
+  final bool isUserSpeaking, isPlaying;
+  @override
+  State<VoicePetVisual> createState() => _VoicePetVisualState();
+}
+
+class _VoicePetVisualState extends State<VoicePetVisual>
+    with SingleTickerProviderStateMixin {
+  late final _pulse = AnimationController(vsync: this);
+  bool _reduced = false;
+  bool get _moving =>
+      !_reduced &&
+      const [
+        'connecting',
+        'thinking',
+        'listening',
+        'speaking',
+      ].contains(widget.status);
+  Duration get _period => Duration(
+    milliseconds: switch (widget.status) {
+      'connecting' || 'thinking' => 2400,
+      'speaking' => 980,
+      'listening' => 1700,
+      _ => 5200,
+    },
+  );
+  Color get _color => switch (widget.status) {
+    'error' => const Color(0xffff7b83),
+    'muted' => const Color(0xffcdd0da),
+    'connecting' || 'thinking' => const Color(0xffb8a7ff),
+    'speaking' => const Color(0xffffb46b),
+    'listening' => const Color(0xff86e5ff),
+    _ => const Color(0xffffe4c2),
+  };
+  void _sync() {
+    if (_moving) {
+      if (!_pulse.isAnimating || _pulse.duration != _period) {
+        _pulse.duration = _period;
+        _pulse.repeat(reverse: true);
+      }
+    } else {
+      _pulse.stop();
+      _pulse.value = 0;
+    }
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _reduced = MediaQuery.disableAnimationsOf(context);
+    _sync();
+  }
+
+  @override
+  void didUpdateWidget(covariant VoicePetVisual oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    _sync();
+  }
+
+  @override
+  void dispose() {
+    _pulse.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => Center(
+    child: FittedBox(
+      child: AnimatedBuilder(
+        animation: _pulse,
+        child: PetAvatar(
+          store: widget.petAvatar,
+          size: 148,
+          borderRadius: BorderRadius.circular(74),
+        ),
+        builder: (context, avatar) {
+          final level = widget.isUserSpeaking && widget.inputLevel.isFinite
+              ? widget.inputLevel.clamp(0.0, 1.0)
+              : 0.0;
+          final scale = _reduced ? 1.0 : 1 + _pulse.value * .012 + level * .025;
+          return Transform.scale(
+            scale: scale,
+            child: DecoratedBox(
+              key: ValueKey('voice-pet-${widget.status}'),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                border: Border.all(color: _color, width: 2),
+                boxShadow: [
+                  BoxShadow(
+                    color: _color.withValues(
+                      alpha: widget.status == 'muted' ? 0 : .20,
+                    ),
+                    blurRadius: 22 + (_reduced ? 0 : _pulse.value * 6),
+                  ),
+                ],
+              ),
+              child: Padding(padding: const EdgeInsets.all(3), child: avatar),
+            ),
+          );
+        },
+      ),
+    ),
+  );
 }

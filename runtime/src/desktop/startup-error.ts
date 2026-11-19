@@ -1,18 +1,25 @@
-import {homedir} from 'node:os'
+const MEMORY_CONFIGURATION_VARIABLES = new Set([
+  'MEMORY_PROVIDER', 'MEMORY_RECALL_ENGINE', 'MEMORY_EXTRACTORS', 'MEMORY_BACKEND',
+  'MEMORY_CONNECTION', 'MEMORY_URL', 'MEMORY_TOKEN', 'MEMORY_PATH', 'MEMORY_USER_ID',
+])
 
-const MAX_LENGTH = 296
+export interface StartupConfiguration {
+  readonly code: 'memory_provider_conflict' | 'memory_configuration_invalid'
+  readonly variables: readonly string[]
+}
 
-/** One terminal-safe line describing a startup exception, with the home directory and token-like strings removed. */
-export function describeStartupError(error: unknown, home: string = homedir()): string {
-  const code = error instanceof Error ? (error as {code?: unknown}).code : undefined
-  const detail = error instanceof Error
-    ? `${error.name}${typeof code === 'string' ? ` [${code}]` : ''}: ${error.message}`
-    : typeof error
-  let line = detail.replace(/[\r\n]+/gu, ' ')
-  if (home.length > 1) line = line.split(home).join('~')
-  line = line
-    .replace(/\b(Bearer|Basic)\s+\S+/giu, '$1 <redacted>')
-    .replace(/([?&](?:key|token|secret|password|api_key|access_token)=)[^\s&'"]+/giu, '$1<redacted>')
-    .replace(/[A-Za-z0-9_+=-]{32,}/gu, '<redacted>')
-  return line.slice(0, MAX_LENGTH)
+/** Project only the fixed configuration contract, never exception messages or setting values. */
+export function startupConfiguration(error: unknown): StartupConfiguration | undefined {
+  const value = (error as {readonly startupConfiguration?: unknown} | null)?.startupConfiguration as
+    {readonly code?: unknown; readonly variables?: unknown} | undefined
+  if (value?.code !== 'memory_provider_conflict' && value?.code !== 'memory_configuration_invalid') return undefined
+  if (!Array.isArray(value.variables) || value.variables.length === 0 || value.variables.length > MEMORY_CONFIGURATION_VARIABLES.size
+    || !value.variables.every(name => typeof name === 'string' && MEMORY_CONFIGURATION_VARIABLES.has(name))) return undefined
+  return {code: value.code, variables: [...new Set(value.variables as string[])]}
+}
+
+/** Terminal diagnostics share the same allowlisted contract as the desktop; raw errors stay private. */
+export function describeStartupError(error: unknown): string {
+  const configuration = startupConfiguration(error)
+  return configuration === undefined ? 'startup_failed' : `${configuration.code}: ${configuration.variables.join(', ')}`
 }

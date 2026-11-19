@@ -1076,7 +1076,7 @@ function text(frame: ReceivedFrame): string {
 test('production composition serves compact boards on debug sockets without disturbing voice', async t => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1152,7 +1152,7 @@ test('authenticated fake-provider loopback uses one service for duplex audio and
   const provider = new ScriptedProvider(trace)
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1292,7 +1292,6 @@ test('selected integrated Qwen assembly uses the authenticated provider-neutral 
         settings: loadSettings({MEMORY_CONNECTION: 'disabled',
           PIPELINE_MODE: 'integrated',
           DASHSCOPE_API_KEY: 'dash-key',
-          MODEL_API_KEY: 'model-key',
           TAVILY_API_KEY: 'search-key',
         }),
         connector: () => Promise.resolve(providerSocket),
@@ -1538,7 +1537,7 @@ test('composition posts only audible delivery events into the exact runtime and 
   const clock = new VirtualClock(12.5)
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     clock,
     gateway: new NeverGateway(),
@@ -1617,7 +1616,7 @@ test('captured composition callbacks preserve clear alert Codex project clock an
   }
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     clock,
     gateway: new NeverGateway(),
@@ -1689,7 +1688,7 @@ test('captured composition callbacks preserve clear alert Codex project clock an
 test('composition rejects output callbacks fired before the desktop bridge exists', () => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1730,7 +1729,7 @@ test('composition rejects synchronous delivery before the realtime holder exists
 test('composition camera transport rejects construction-time use with a fixed non-TDZ error', async () => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1762,7 +1761,7 @@ test('composition camera transport rejects construction-time use with a fixed no
 test('composition camera transport is one stable proxy to the final desktop server owner', async () => {
   const core = buildAssembly({
     settings: settingsSchema.parse({
-      executors: ['fast_sim'], model_api_key: 'model-key', tavily_api_key: 'search-key',
+      executors: ['fast_sim'], deepseek_api_key: 'model-key', tavily_api_key: 'search-key',
     }),
     gateway: new NeverGateway(),
     searchTransport: {search: () => Promise.reject(new Error('search was not expected'))},
@@ -1813,7 +1812,7 @@ test('composition camera transport is one stable proxy to the final desktop serv
 
 
 test('shared phone endpoint publishes one host revision and cannot interrupt desktop audio on reconnect', async () => {
-  const core=buildAssembly({settings:settingsSchema.parse({executors:['fast_sim'],model_api_key:'key',tavily_api_key:'key'}),gateway:new NeverGateway(),searchTransport:{search:()=>Promise.reject(Error('unexpected'))}})
+  const core=buildAssembly({settings:settingsSchema.parse({executors:['fast_sim'],deepseek_api_key:'key',tavily_api_key:'key'}),gateway:new NeverGateway(),searchTransport:{search:()=>Promise.reject(Error('unexpected'))}})
   const stop=new AbortController()
   let revision=0, voice:string|null=null, disconnects=0, discarded=0, onsets=0
   let voiceStart:Promise<void>|undefined
@@ -1828,7 +1827,7 @@ test('shared phone endpoint publishes one host revision and cannot interrupt des
     Object.defineProperties(realtime.personalAgent,{
       subscribe:{value:(listener:()=>void)=>{listeners.add(listener);return()=>listeners.delete(listener)}},
       snapshot:{value:()=>({type:'personal.state',revision})},
-      conversationSnapshot:{value:()=>({voice_id:voice,selected_id:'chat',items:[{id:'chat'}]})},
+      conversationSnapshot:{value:()=>({voice_id:voice,selected_id:'chat',items:[{id:'chat'}]})},voiceConversationId:{value:()=>voice},
       command:{value:async(command:{method:string;request_id:string;params?:{enabled?:boolean;mode?:string}},context?:{presentation_mode?:string})=>{if(command.method==='presentation.set')presentations.push({mode:command.params?.mode,aggregate:context?.presentation_mode});if(command.method==='conversations.voice'){if(voiceFailure)throw Error('voice_start_failed');if(command.params?.enabled)await voiceStart;voice=command.params?.enabled?'chat':null;}revision++;for(const listener of listeners)listener();return {type:'personal.result',request_id:command.request_id,ok:true}}},
       voiceService:{value:()=>realtime.service},
       sendConversationAudio:{value:(id:string)=>{assert.equal(id,'chat');conversationAudio++;return Promise.resolve()}},

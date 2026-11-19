@@ -7,6 +7,12 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import type {ScheduleRun} from '../src/personal-agent/scheduled-tasks.js'
+import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
+import {settingsSchema} from '../src/config/config.js'
+import {buildCascadedTextProvider} from '../src/cascaded-text-provider.js'
+import {cascadedProviderRegistries} from '../src/composition/cascaded-realtime-assembly.js'
+import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
+import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 const context={todos:true,goals:false,tasks:false,memory:false,knowledge:false,search:false}
 const input={title:'Review',goal:'Prioritize',acceptance:['One action'],rule:{kind:'daily' as const,timezone:'UTC',time:'10:00'},context}
 const authority={user_scope:'test',source:'ui' as const,origin_ref:'ui:create',source_refs:[],allowed_context:context}
@@ -85,4 +91,46 @@ test('retired report focus and message references do not break ordinary conversa
   assert.equal(state.conversations.items.find(c=>c.id==='chat:main')?.scheduled_result_focus,undefined)
   bind(host);await host.submitConversationText('chat:main','Hello');await host.waitConversation('chat:main');assert.ok(host.conversationSnapshot().messages.some(m=>m.text==='Hello'&&m.role==='assistant'))
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+for(const [production,destination] of [
+ ['non_product','none'],['non_product','ledger'],['ledger','non_product'],
+ ['legacy','none'],['legacy','ledger'],['legacy','non_product'],
+] as const)test(`interrupted scheduled publication preserves production provenance (${production} -> ${destination})`,async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-result-origin-')),path=join(dir,'personal.json')
+ const ledger=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(dir,'ledger.sqlite')),userId:'test',model:'test',gateway:{complete:()=>Promise.reject(Error('unexpected model request')),async *stream(){await Promise.resolve();throw Error('unexpected model stream')}},inputConsent:true,consolidation:{enabled:false}})
+ const nonProduct={open:()=>Promise.resolve(),close:()=>Promise.resolve()} as unknown as PersonalMemoryResource
+ const resource=(backend:string)=>backend==='ledger'?ledger:backend==='non_product'?nonProduct:undefined
+ const make=(backend:string)=>new PersonalAgentHost({path,userScope:'test',memory:()=>resource(backend),pool:new SuggestionPool(),evidence:()=>null})
+ let host=make(production)
+ try{
+  await ledger.open();await host.open();await host.scheduledTaskTick()
+  const {run,page}=await complete(host),eligible=production!=='non_product'
+  if(production==='legacy'){
+   await host.schedules.markFinished(run.run_id,{outcome:'completed',text:'Original source report',evidence_refs:page.evidence_refs,consumer:null,published:false})
+  }else{
+   const finish=host.schedules.markFinished.bind(host.schedules)
+   host.schedules.markFinished=async(id,summary)=>{await finish(id,summary);throw Error('crash_after_summary_commit')}
+   await assert.rejects(host.publishScheduledResult(run.run_id),/crash_after_summary_commit/)
+   host.schedules.markFinished=finish
+  }
+  assert.equal(host.schedules.getRun(run.run_id).terminal_summary?.memory_origin,eligible?undefined:'non_product')
+  assert.equal(host.snapshot().feed.some(item=>item.schedule_ref?.run_id===run.run_id),false)
+  await host.close();host=make(destination);await host.open()
+  assert.equal(host.schedules.getRun(run.run_id).terminal_summary?.memory_origin,eligible?undefined:'non_product','strict schedule store preserves provenance without migrating legacy rows')
+  await host.publishScheduledResult(run.run_id)
+  const feed=host.snapshot().feed.find(item=>item.schedule_ref?.run_id===run.run_id)!
+  assert.ok(feed);assert.equal(feed.memory_origin,eligible?undefined:'non_product')
+  const bubble=host.conversationSnapshot().messages.find(message=>message.schedule_ref?.run_id===run.run_id)!
+  assert.ok(bubble.text.includes('Original source report'),'report remains listed locally')
+  assert.equal(bubble.memory_origin,eligible?undefined:'non_product')
+  assert.equal(await host.scheduledResultAuthorized(run.run_id),eligible)
+  const requests:string[]=[],histories:string[]=[]
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>resource(destination),settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',cascade_llm_model:'destination-b',dashscope_api_key:'test'}),createTextProvider:options=>buildCascadedTextProvider(options,{...cascadedProviderRegistries,llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:()=>({async *stream(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'reply'};yield {kind:'text_delta',text:'Current answer'};yield {kind:'response_completed',response_id:'reply'}},restoreHistory:history=>{histories.push(JSON.stringify(history));return Promise.resolve()},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()})})}})}),()=>{/* local renderer */})
+  await host.submitConversationText('chat:main','Explain the previous report','destination-b');await host.waitConversation('chat:main')
+  assert.equal(requests.length,1,'capture actual destination-B cascaded LLM request')
+  assert.equal(requests.some(request=>request.includes('Original source report')),eligible)
+  assert.ok(histories.every(history=>!history.includes('Original source report')))
+  assert.ok(host.conversationSnapshot().messages.some(message=>message.text.includes('Original source report')))
+ }finally{await host.close();await ledger.close();await rm(dir,{recursive:true,force:true})}
 })

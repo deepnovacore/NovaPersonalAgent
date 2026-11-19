@@ -1,0 +1,149 @@
+/* Homepage. Video carries each capability; text is one short label, with the
+   recorded conversation folded underneath for anyone who wants it. Palette
+   comes from the launch film and the architecture diagram. */
+:root {
+  --paper: #f5f6fa;
+  --ink: #1d2636;
+  --muted: #5c687b;
+  --rule: #d9dee8;
+  --nova: #3972e9;
+  --tile: #0b0f16;
+  --speech: 'Songti SC', 'STSong', 'Noto Serif CJK SC', 'Noto Serif SC', 'Source Han Serif SC', 'SimSun', serif;
+}
+[data-theme='dark'] {
+  --paper: #0f1216;
+  --ink: #e6e9ee;
+  --muted: #a3adbb;
+  --rule: #2a313b;
+  --nova: #8fb4ff;
+}
+body:has(#overview) { background: var(--paper); color: var(--ink); }
+main .wrap { width: min(1200px, 100% - 64px); margin-inline: auto; }
+main h1, main h2 { margin: 0; color: var(--ink); }
+main p { text-wrap: pretty; }
+main section { scroll-margin-top: 88px; }
+
+.btn { display: inline-flex; align-items: center; min-height: 46px; padding: 0 22px; border: 1px solid var(--ink); border-radius: 8px; color: var(--ink); font-size: 15px; font-weight: 500; }
+.btn:hover { background: color-mix(in srgb, var(--ink) 6%, transparent); }
+.btn-primary { background: var(--ink); color: var(--paper); }
+.btn-primary:hover { background: color-mix(in srgb, var(--ink) 86%, var(--paper)); }
+.link { color: var(--nova); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 4px; }
+.link:hover { text-decoration-thickness: 2px; }
+main a:focus-visible, main button:focus-visible, main summary:focus-visible { outline: 2px solid var(--nova); outline-offset: 3px; border-radius: 4px; }
+
+/* Hero: name, one line, two buttons, then the film as the main visual. */
+.hero { padding-block: 128px 112px; }
+.hero-head { display: flex; align-items: center; gap: 24px; }
+.hero-head .nova-mark-svg { flex: none; }
+.hero h1 { font-size: clamp(36px, 5vw, 64px); font-weight: 650; line-height: 1.05; letter-spacing: -0.035em; }
+.hero-head p { margin: 12px 0 0; font-size: clamp(17px, 1.6vw, 21px); line-height: 1.6; color: var(--muted); }
+.actions { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 32px; }
+.hero-film { margin: 56px 0 0; }
+.hero-film video { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 14px; background: var(--tile); }
+.hero-film figcaption { margin-top: 12px; font-size: 14px; color: var(--muted); }
+
+/* Device bodies */
+.device { position: relative; }
+.device-screen { position: relative; aspect-ratio: var(--ar); overflow: hidden; background: #000; }
+.device-screen video { display: block; width: 100%; height: 100%; object-fit: cover; }
+.device-mac { padding: 9px 9px 10px; border-radius: 18px 18px 4px 4px; background: var(--tile); }
+.device-mac .device-screen { border-radius: 9px; }
+.device-mac::after { content: ''; position: absolute; left: -4%; right: -4%; bottom: -9px; height: 9px; border-radius: 0 0 12px 12px; background: #b9bfc8; }
+.device-phone { padding: 8px; border-radius: 40px; background: var(--tile); }
+.device-phone .device-screen { border-radius: 32px; }
+.device-phone::before { content: ''; position: absolute; z-index: 2; top: 16px; left: 50%; width: 26%; height: 3.2%; border-radius: 99px; background: #000; transform: translateX(-50%); pointer-events: none; }
+
+/* Capability groups. The group title is the claim; each demo is a recording
+   with a one-line label underneath. */
+.group { padding-block: 104px; border-top: 1px solid var(--rule); }
+.group > h2 { margin-bottom: 56px; font-family: var(--speech); font-size: 48px; font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
+html[lang='en'] .group > h2 { font-size: 44px; }
+.demos { display: flex; flex-wrap: wrap; gap: 56px 40px; align-items: flex-start; }
+.demo { margin: 0; min-width: 0; }
+.demo-wide { flex: 1 1 520px; max-width: calc(50% - 20px); }
+.demo-narrow { flex: 0 0 240px; }
+.demo-media { display: flex; gap: 20px; align-items: flex-end; }
+.demo-media .clip-mac { flex: 1 1 auto; min-width: 0; }
+.demo-media .clip-phone { flex: 0 0 auto; width: 100%; max-width: 240px; }
+.demo-wide .demo-media .clip-phone { width: 30%; min-width: 150px; }
+.demo figcaption { margin-top: 22px; }
+.demo-label { display: block; font-size: 18px; font-weight: 600; line-height: 1.4; }
+
+/* The recorded conversation, folded by default. */
+.demo details { margin-top: 8px; }
+.demo summary { display: inline-flex; align-items: center; gap: 6px; padding: 2px 0; list-style: none; font-size: 14px; color: var(--nova); cursor: pointer; }
+.demo summary::-webkit-details-marker { display: none; }
+.demo summary::before { content: '▸'; font-size: 11px; transition: transform 0.15s; }
+.demo details[open] summary::before { transform: rotate(90deg); }
+.exchange { list-style: none; margin: 14px 0 0; padding: 14px 0 0; display: grid; gap: 14px; border-top: 1px solid var(--rule); max-width: 34em; }
+.turn { display: grid; gap: 2px; }
+.who { font-size: 12px; font-weight: 600; letter-spacing: 0.02em; color: var(--nova); }
+.said { font-family: var(--speech); quotes: '“' '”'; }
+.turn-you .said { font-size: 18px; font-weight: 600; line-height: 1.55; color: var(--ink); }
+.turn-nova .said { quotes: none; font-size: 15px; line-height: 1.75; color: var(--muted); }
+
+.thumbs { display: flex; gap: 12px; margin: 56px 0 0; padding: 0; list-style: none; overflow-x: auto; }
+.thumbs li { flex: none; }
+.thumbs button { display: block; padding: 0; border: 1px solid var(--rule); border-radius: 6px; background: var(--paper); cursor: zoom-in; overflow: hidden; }
+.thumbs img { display: block; height: 88px; width: auto; }
+.scenes-source { margin: 0 auto; padding: 28px 0 0; border-top: 1px solid var(--rule); font-size: 14px; color: var(--muted); }
+
+.lightbox { padding: 0; border: 0; background: transparent; max-width: min(1100px, 94vw); max-height: 94vh; overflow: visible; margin: auto; color: #e6e9ee; }
+.lightbox::backdrop { background: rgba(11, 15, 22, 0.94); }
+.lightbox img { display: block; max-width: 100%; max-height: 78vh; width: auto; height: auto; margin-inline: auto; }
+.lightbox p { margin: 16px auto 0; max-width: 40em; text-align: center; font-size: 15px; line-height: 1.7; }
+.lightbox-controls { display: flex; justify-content: center; gap: 10px; margin-top: 16px; }
+.lightbox-controls button { min-height: 40px; padding: 0 16px; border: 1px solid rgba(255, 255, 255, 0.35); border-radius: 8px; background: transparent; color: #fff; font: inherit; font-size: 14px; cursor: pointer; }
+.lightbox-controls button:hover { background: rgba(255, 255, 255, 0.1); }
+.lightbox-controls button:focus-visible { outline: 2px solid #8fb4ff; outline-offset: 2px; }
+
+/* What's new and architecture */
+.release { padding-block: 104px 96px; }
+.release h2, .get h2 { margin-bottom: 28px; font-size: 30px; font-weight: 600; line-height: 1.3; }
+.release ul { margin: 0; padding: 0; list-style: none; display: grid; gap: 12px; font-size: 19px; line-height: 1.5; }
+.release li::before { content: '—'; margin-right: 12px; color: var(--muted); }
+.arch { margin: 64px 0 20px; }
+.arch img { width: 100%; height: auto; }
+.release-links { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 0; }
+.only-dark { display: none; }
+[data-theme='dark'] .only-light { display: none; }
+[data-theme='dark'] .only-dark { display: block; }
+
+/* Download */
+.get { padding-block: 96px 128px; border-top: 1px solid var(--rule); }
+.get table { width: 100%; max-width: 720px; border-collapse: collapse; }
+.get th, .get td { padding: 15px 0; border-bottom: 1px solid var(--rule); text-align: left; font-size: 16px; font-weight: 400; vertical-align: baseline; }
+.get th { width: 46%; padding-right: 16px; }
+.get td a { margin-right: 20px; color: var(--nova); text-decoration: underline; text-underline-offset: 4px; }
+.get .soon { color: var(--muted); }
+.get-npm { margin: 36px 0 12px; color: var(--muted); }
+.get .install-command { max-width: 720px; }
+.get .small { margin: 14px 0 0; font-size: 14px; line-height: 1.7; color: var(--muted); }
+.get-links { display: flex; flex-wrap: wrap; gap: 8px 28px; margin: 32px 0 0; }
+
+@media (max-width: 640px) {
+  main .wrap { width: calc(100% - 40px); }
+  .hero { padding-block: 96px 64px; }
+  .hero-head { gap: 16px; }
+  .hero-head .nova-mark-svg { width: 48px; height: 48px; }
+  .hero-film { margin-top: 36px; }
+  .hero-film video { border-radius: 10px; }
+  .actions .btn { flex: 1 1 auto; justify-content: center; }
+  .group { padding-block: 64px; }
+  .group > h2, html[lang='en'] .group > h2 { margin-bottom: 36px; font-size: 30px; }
+  .demos { gap: 48px; }
+  .demo-wide, .demo-narrow { flex: 1 1 100%; max-width: none; }
+  .demo-narrow .demo-media { justify-content: center; }
+  .demo-narrow .clip-phone { width: min(68vw, 260px); }
+  .demo-wide .demo-media .clip-phone { width: 34%; min-width: 0; }
+  .thumbs { margin-top: 40px; }
+  .thumbs img { height: 76px; }
+  .release { padding-block: 64px; }
+  .release ul { font-size: 17px; }
+  .get { padding-block: 64px 96px; }
+  .get th { width: auto; display: block; padding-bottom: 4px; border-bottom: 0; }
+  .get td { display: block; padding-top: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .demo summary::before { transition: none; }
+}

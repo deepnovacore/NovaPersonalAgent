@@ -1,3 +1,4 @@
 <resources>
-    <string name="local_gui_description">Nova 可在你明确委托任务后读取屏幕、点击、滑动和输入。执行时可随时点“停止 Nova”。同步待办不会自动启动操作。</string>
+    <string name="local_gui_description">Nova 可在你明确委托任务后读取屏幕、点击、滑动和输入。设备支持时，所选 App 会在 Nova 的私有后台屏幕上运行，你可以继续使用手机，也可随时接管。执行时可随时点悬浮的“停止任务”按钮。同步待办不会自动启动操作。</string>
+    <string name="local_task_stop">停止任务</string>
 </resources>

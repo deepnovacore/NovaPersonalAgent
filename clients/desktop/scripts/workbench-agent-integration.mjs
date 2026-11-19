@@ -80,9 +80,9 @@ const click=async label=>{
 }
 const choose=async value=>{
  for(let i=0;i<4;i++){
+  await until(()=>evaluate(`(()=>{const button=document.querySelector('.composer-mode-active');return !button.disabled&&button.getAttribute('aria-busy')!=='true'})()`),Boolean,'mode ready')
   const current=await evaluate(`document.querySelector('.composer-mode').dataset.mode`)
   if(current===value)return
-  await until(()=>evaluate(`!document.querySelector('.composer-mode-active').disabled`),Boolean,'mode ready')
   await evaluate(`document.querySelector('.composer-mode-active').click()`)
   await until(()=>evaluate(`document.querySelector('.composer-mode').dataset.mode`),mode=>mode!==current,'mode changed')
  }

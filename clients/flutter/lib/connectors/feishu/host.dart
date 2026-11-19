@@ -1,3 +1,4 @@
+import '../../space/space_storage.dart';
 import 'dart:async';
 import 'package:flutter/foundation.dart';
 import '../../context/source_store.dart';
@@ -18,23 +19,42 @@ class FeishuHost extends ChangeNotifier {
       sources =
           sources ??
           SourceStore(
-            const SecureContextPersistence('nova.feishu.sources.v1'),
-            onInvalidated: invalidateDerivedProfile,
+            SecureContextPersistence('nova.feishu.sources.v1'),
+            onInvalidated: _scopedInvalidator(),
+            onContentChanged: _scopedInvalidator(preserveObservations: true),
           );
+  static Future<void> Function() _scopedInvalidator({
+    bool preserveObservations = false,
+  }) {
+    final scope = SpaceStorage.scope;
+    return () => SpaceStorage.runScoped(
+      scope,
+      () =>
+          invalidateDerivedProfile(preserveObservations: preserveObservations),
+    );
+  }
+
+  final _spaceScope = SpaceStorage.scope;
   static Future<void> invalidateDerivedProfile({
     bool clearPublished = false,
+    bool preserveObservations = false,
   }) async {
-    // Input changes invalidate paid working checkpoints, not successful history.
+    // Content changes retain context batches for current-record revalidation.
     if (clearPublished) {
-      await const SecureContextPersistence(
-        'nova.profile.local.v1',
-      ).write('null');
+      await SecureContextPersistence('nova.profile.local.v1').write('null');
     }
-    await ProfileObservationCheckpoint.invalidate(
-      const SecureContextPersistence(ProfileObservationCheckpoint.storageKey),
-    );
+    if (!preserveObservations) {
+      for (final key in [
+        ProfileObservationCheckpoint.storageKey,
+        ProfileObservationCheckpoint.incrementalStorageKey,
+      ]) {
+        await ProfileObservationCheckpoint.invalidate(
+          SecureContextPersistence(key),
+        );
+      }
+    }
     await ProfilePipelineCheckpoint.invalidate(
-      const SecureContextPersistence(ProfilePipelineCheckpoint.storageKey),
+      SecureContextPersistence(ProfilePipelineCheckpoint.storageKey),
     );
   }
 
@@ -43,25 +63,51 @@ class FeishuHost extends ChangeNotifier {
   late final ingest = FeishuIngest(auth, sources);
   late final collection = FeishuCollection(
     ingest,
-    intent: const SecureContextPersistence('nova.feishu.collection.v1'),
+    intent: SecureContextPersistence('nova.feishu.collection.v1'),
   )..addListener(_notify);
   Future<void>? _opening;
   Future<void> _identityTail = Future.value();
   bool _disposed = false;
-  Future<void> open() => _opening ??= _open();
+  bool _restored = false, _listening = false;
+  Future<void> open() => SpaceStorage.runScoped(_spaceScope, _openOnce);
+
+  /// A failed setup is retryable: drop the cached future but keep its error for
+  /// every caller that was already waiting on it.
+  Future<void> _openOnce() async {
+    final opening = _opening;
+    if (opening != null) return opening;
+    final result = _open();
+    _opening = result;
+    try {
+      await result;
+    } catch (_) {
+      if (identical(_opening, result)) _opening = null;
+      rethrow;
+    }
+  }
+
   Future<void> _open() async {
     // Working model copies from an interrupted process are never resumed.
-    await const SecureContextPersistence(
+    await SecureContextPersistence(
       'nova.profile.task.context.v1',
     ).write('{"schema_version":1,"conversations":[]}');
-    await const SecureContextPersistence(
+    await SecureContextPersistence(
       'nova.profile.task.tools.v1',
     ).write('{"schema_version":1,"records":{}}');
     await auth.open();
     await sources.open();
     await synchronizeIdentity();
-    auth.addListener(_authChanged);
-    sources.addListener(_notify);
+    // Local data is usable even without Feishu authorization; only the
+    // connector-dependent states need [ready].
+    if (!_restored) {
+      _restored = true;
+      _notify();
+    }
+    if (!_listening) {
+      _listening = true;
+      auth.addListener(_authChanged);
+      sources.addListener(_notify);
+    }
     await collection.restore();
   }
 
@@ -74,7 +120,9 @@ class FeishuHost extends ChangeNotifier {
     unawaited(synchronizeIdentity().catchError((Object _) {}));
   }
 
-  Future<void> synchronizeIdentity() {
+  Future<void> synchronizeIdentity() =>
+      SpaceStorage.runScoped(_spaceScope, _synchronizeIdentity);
+  Future<void> _synchronizeIdentity() {
     final result = _identityTail.then((_) async {
       if (_disposed) return;
       final identity = auth.identityKey, generation = auth.generation;
@@ -90,13 +138,19 @@ class FeishuHost extends ChangeNotifier {
     return result;
   }
 
+  /// Whether local persisted state (auth, sources, identity) has been opened.
+  /// Deliberately independent of [ready]: saved results stay readable while the
+  /// Feishu connector is unconfigured or unauthorized.
+  bool get restored => _restored;
   bool get ready =>
       auth.authorized &&
       sources.identity == auth.identityKey &&
       sources.generation == auth.generation;
   String remoteSource(String hub, String chat) =>
       lifeFingerprint({'hub': hub, 'identity': auth.identityKey, 'chat': chat});
-  Future<void> applyTombstones(String hub, Set<String> ids) async {
+  Future<void> applyTombstones(String hub, Set<String> ids) =>
+      SpaceStorage.runScoped(_spaceScope, () => _applyTombstones(hub, ids));
+  Future<void> _applyTombstones(String hub, Set<String> ids) async {
     await open();
     for (final chat in sources.sources) {
       if (ids.contains(remoteSource(hub, chat))) await sources.remove(chat);
@@ -117,8 +171,11 @@ class FeishuHost extends ChangeNotifier {
   void dispose() {
     _disposed = true;
     collection.dispose();
-    auth.removeListener(_authChanged);
-    sources.removeListener(_notify);
+    if (_listening) {
+      _listening = false;
+      auth.removeListener(_authChanged);
+      sources.removeListener(_notify);
+    }
     auth.dispose();
     sources.dispose();
     super.dispose();

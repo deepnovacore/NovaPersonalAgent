@@ -1,3 +1,8 @@
+import 'dart:io';
+import 'package:flutter/services.dart';
+import 'package:nova_mobile/agent_core/tool_registry.dart';
+import 'package:nova_mobile/memory/local_memory_store.dart';
+import 'package:nova_mobile/space/space_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
@@ -6,6 +11,51 @@ import 'package:nova_mobile/voice/voice_delegate.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 
 void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+  test(
+    'production delegate worker disables memory without replacing the shared runner',
+    () async {
+      final root = await Directory.systemTemp.createTemp('delegate-memory-');
+      addTearDown(() => root.delete(recursive: true));
+      const pathProvider = MethodChannel('plugins.flutter.io/path_provider');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(pathProvider, (_) async => root.path);
+      addTearDown(
+        () => TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+            .setMockMethodCallHandler(pathProvider, null),
+      );
+      final memory = LocalMemoryStore(MemoryPersistence());
+      await memory.open();
+      final store = ConversationStore(MemoryPersistence());
+      await store.open();
+      final journal = ToolJournal(MemoryPersistence());
+      await journal.open();
+      final primary = AgentCoreHost(
+        store: store,
+        settings: ModelSettings(),
+        tools: ToolRunner(
+          journal: journal,
+          registry: ToolRegistry(
+            snapshot: () => {},
+            mutate: (_, {required operationId}) async => {},
+            hasConflict: () => false,
+            fetch: (_) async => {},
+            localMemory: memory,
+            spaceMode: SpaceMode.standalone,
+          ),
+        ),
+      );
+      addTearDown(primary.dispose);
+      final bridge = await SpaceStorage.runScoped(
+        const SpaceRecord(id: 'one', name: 'one', mode: SpaceMode.standalone),
+        () => VoiceDelegateBridge.open(primary),
+      );
+      addTearDown(bridge.dispose);
+      expect(bridge.worker.allowLocalMemory, false);
+      expect(identical(bridge.worker.store, primary.store), true);
+      expect(identical(bridge.worker.tools, primary.tools), true);
+    },
+  );
   for (final completed in [true, false]) {
     test(
       'startup reconciles ${completed ? "saved result" : "unknown interruption"} to origin exactly once without execution',
@@ -16,8 +66,7 @@ void main() {
             worker = ConversationStore(workerPersistence);
         await main.open();
         await worker.open();
-        final origin = await main.create(),
-            context = await worker.create();
+        final origin = await main.create(), context = await worker.create();
         await main.append(origin, {
           'role': 'assistant',
           'content': '',

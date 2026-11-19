@@ -1,11 +1,15 @@
 import {randomUUID} from 'node:crypto'
+import {subscribeHostModelRoutesChanges} from '../space-host/model-settings.js'
 import {personalCommandSchema} from '../personal-agent/contracts.js'
+import type {PersonalCommandContext} from '../personal-agent/host.js'
 import {BlockingConfigurationError, type memoryStatus} from '../config/config.js'
 import {DEFAULT_FRONTBRAIN_TOOL_BUDGET} from '../config/capability-registry.js'
 import type {CapabilityStatus} from '../config/capability-registry.js'
 import type {DesktopStopParentSource} from './desktop-session.js'
 import {reportUsage, type UsageReport} from '../realtime/usage.js'
 import {CODING_BACKEND_IDS, type CodingBackendId} from '../config/coding-backends.js'
+import {rotateCredential} from '../config/credential-rotation.js'
+import {startupConfiguration, type StartupConfiguration} from './startup-error.js'
 
 type ParentPort = DesktopStopParentSource & {postMessage(message: unknown): void}
 export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
@@ -16,6 +20,7 @@ export interface DesktopCapabilityState extends Partial<CapabilityStatus> {
   readonly reason?: 'configuration_required'
   readonly pipeline?: 'integrated' | 'cascaded'
   readonly missing?: readonly string[]
+  readonly startupConfiguration?: StartupConfiguration
 }
 /** Utility IPC only: the renderer WebSocket never admits these host operations. */
 export function installDesktopControl(options: {
@@ -43,7 +48,9 @@ export function installDesktopControl(options: {
     const wrapper = event as {readonly data?: unknown}
     const value = (wrapper?.data ?? event) as {readonly type?: unknown; readonly id?: unknown; readonly method?: unknown; readonly params?: unknown}
     if (disposed || value?.type !== 'nova.control.request' || typeof value.id !== 'string' || value.id.length > 80
-      || typeof value.method !== 'string' || value.method.length > 80 || pending >= 8) return
+      || typeof value.method !== 'string' || value.method.length > 80) return
+    // A full port still answers, so the main process does not wait out its own timeout.
+    if (pending >= 8) { port?.postMessage({type: 'nova.control.reply', id: value.id, error: 'busy'}); return }
     const id = value.id
     const method = value.method
     pending += 1
@@ -59,19 +66,33 @@ export function installDesktopControl(options: {
           }
           options.updateCodingBackend(params.backend as CodingBackendId)
           result = {backend: params.backend}
+        } else if (method === 'credentials.rotate') {
+          // Replaces keys that are already in use; the reply only counts them and never carries a value.
+          const params = value.params as {rotations?: unknown} | null
+          const list = params !== null && typeof params === 'object' && !Array.isArray(params) && Object.keys(params).length === 1 ? params.rotations : undefined
+          if (!Array.isArray(list) || list.length < 1 || list.length > 8) throw new Error('invalid_credentials')
+          let applied = 0
+          for (const entry of list) {
+            const pair = entry as {from?: unknown; to?: unknown} | null
+            if (pair === null || typeof pair !== 'object' || Object.keys(pair).length !== 2 || !rotateCredential(pair.from, pair.to)) throw new Error('invalid_credentials')
+            applied += 1
+          }
+          result = {applied}
         } else result = method === 'capabilities.status' ? options.status() : await options.handle?.(method, value.params)
-        if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'unavailable'} : {result})})
+        if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'not_ready'} : {result})})
       } catch {
         if (!disposed) port?.postMessage({type: 'nova.control.reply', id, error: 'unavailable'})
       } finally { pending -= 1 }
     })()
   }
+  const unsubscribeModels = subscribeHostModelRoutesChanges(() => {if (!disposed) port?.postMessage({type: 'nova.space.models.changed'})})
   const timer = port === undefined ? undefined : setInterval(publish, 1000)
   timer?.unref()
   function dispose(): void {
     if (disposed) return
     disposed = true
     clearInterval(timer)
+    unsubscribeModels()
     port?.off?.('message', receive)
     options.signal.removeEventListener('abort', dispose)
   }
@@ -83,8 +104,11 @@ export function installDesktopControl(options: {
     reportUsage(port === undefined ? undefined : value => port.postMessage({type: 'nova.usage', report: value}), report)
   }}
 }
-/** Names the missing pipeline keys so the host can ask for exactly those instead of a bare configuration error. */
+/** Names only safe configuration keys so the host can offer an actionable startup failure. */
 export function desktopConfigurationFailure(error: unknown): DesktopCapabilityState | undefined {
+  const configuration = startupConfiguration(error)
+  if (configuration !== undefined) return {state: 'startup_failed', toolCount: null,
+    toolBudget: DEFAULT_FRONTBRAIN_TOOL_BUDGET, reason: 'configuration_required', startupConfiguration: configuration}
   if (!(error instanceof BlockingConfigurationError)) return undefined
   const missing = error.missing.filter(name => /^[A-Z][A-Z0-9_]{0,63}$/u.test(name)).slice(0, 4)
   return {state: 'startup_failed', toolCount: null, toolBudget: DEFAULT_FRONTBRAIN_TOOL_BUDGET,
@@ -100,8 +124,9 @@ export function desktopBudgetFailure(error: unknown): DesktopCapabilityState | u
 }
 
 
-/** The settings window may manage sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
+/** The settings window may manage Space pairing, sources, connectors and discovery scheduling; nothing that reads memory, feeds or conversations. */
 export const PERSONAL_SETTINGS_METHODS: readonly string[] = Object.freeze([
+  'space.status', 'space.models.status', 'space.models.configure', 'space.invitation', 'space.pairings', 'space.confirm_pairing', 'space.revoke',
   'state', 'identity.configure', 'sources.add', 'sources.authorize_computer', 'sources.consent', 'sources.pause', 'sources.resume', 'sources.sync', 'sources.disconnect', 'sources.delete',
   'connector.status', 'connector.link', 'connector.complete', 'connector.scopes', 'connector.configure', 'connector.consent',
   'connector.sync', 'connector.pause', 'connector.resume', 'connector.disconnect', 'connector.delete',
@@ -120,11 +145,11 @@ export function connectionsProjection(snapshot: unknown): Record<string, unknown
     capabilities: {sources: capabilities.sources === true, discovery: capabilities.discovery === true},
   }
 }
-export async function handlePersonalSettings(command: (input: unknown) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
+export async function handlePersonalSettings(command: (input: unknown, context?: PersonalCommandContext) => Promise<unknown>, method: string, params: unknown): Promise<unknown> {
   if (!PERSONAL_SETTINGS_METHODS.includes(method)) return {error: 'unsupported'}
   const parsed = personalCommandSchema.safeParse({type: 'personal.command', request_id: randomUUID(), method, params})
   if (!parsed.success) return {error: 'invalid_request'}
-  const result = await command(parsed.data) as {ok?: boolean; data?: unknown; error?: string}
+  const result = await command(parsed.data, {client_id: 'desktop:local'}) as {ok?: boolean; data?: unknown; error?: string}
   if (result.ok !== true) return {error: result.error ?? 'unavailable'}
   if (method === 'state') return connectionsProjection(result.data)
   // Commands that persist without a payload (discovery.configure) must still read as success across the port.

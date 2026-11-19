@@ -295,7 +295,7 @@ export class MarkdownRepository {
    if(!this.isOperationCommit(head,journal))throw failure('CONFLICT')
   }else {
    // Build exactly the owned understanding tree. Untracked files and the batch journal never enter Git.
-   const tree=this.documentTree(new Map(journal.files.map(file=>[file.path,file.after])))
+   const tree=this.documentTree(new Map(journal.files.map(file=>[file.path,file.after])),head)
    const previousTree=head?this.git(['rev-parse',`${head}^{tree}`]).trim():null
    if(tree!==previousTree){
     const commit=this.git(['commit-tree',tree,...(head?['-p',head]:[])],`Nova understanding ${operationId}\n`).trim()
@@ -406,10 +406,18 @@ export class MarkdownRepository {
   const committed=this.committedFiles(head,paths)
   return journal.files.every(file=>committed.has(file.path)&&digest(committed.get(file.path)!)===digest(file.after))
  }
- private documentTree(files:ReadonlyMap<string,string>):string {
+ private documentTree(files:ReadonlyMap<string,string>,head:string|null=this.head()):string {
+  const algorithm=head?.length===40?'sha1':head?.length===64?'sha256':null
+  const committed=new Map<string,string>()
+  // Only reuse blobs reachable from this operation's live HEAD, never a cache that purge could prune.
+  if(head&&algorithm)for(const row of this.git(['ls-tree','-r','-z',head]).split('\0')){
+   const match=/^[0-7]{6} blob ([a-f0-9]{40}|[a-f0-9]{64})\t([\s\S]+)$/.exec(row)
+   if(match)committed.set(match[2]!,match[1]!)
+  }
   const directories=new Map<string,string[]>(),top:string[]=[]
   for(const [path,text] of files){
-   const blob=this.git(['hash-object','-w','--stdin'],text).trim(),slash=path.indexOf('/')
+   const candidate=algorithm?createHash(algorithm).update(`blob ${Buffer.byteLength(text)}\0`).update(text).digest('hex'):null
+   const blob=candidate&&committed.get(path)===candidate?candidate:this.git(['hash-object','-w','--stdin'],text).trim(),slash=path.indexOf('/')
    if(slash<0)top.push(`100644 blob ${blob}\t${path}\n`)
    else{const folder=path.slice(0,slash),rows=directories.get(folder)??[];rows.push(`100644 blob ${blob}\t${path.slice(slash+1)}\n`);directories.set(folder,rows)}
   }

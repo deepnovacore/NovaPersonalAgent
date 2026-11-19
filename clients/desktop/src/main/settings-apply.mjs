@@ -6,8 +6,6 @@ const CONFIG_KEYS = Object.freeze([
   'codexBinaryMode',
   'codexBinaryPath',
   'codexConfigurationError',
-  'modelBaseUrl',
-  'modelConfigurationError',
   'startListeningOnLaunch',
 ])
 

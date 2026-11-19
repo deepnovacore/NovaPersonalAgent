@@ -1,12 +1,15 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
-import 'package:path_provider/path_provider.dart';
+import '../space/space_storage.dart';
 import '../agent_core/agent_core_host.dart';
+import '../agent_core/background_execution.dart';
 import '../agent_core/tool_registry.dart';
-import '../conversation/local_conversation_store.dart';
+import '../agent_core/tool_owner.dart';
 import '../personal/local_life.dart';
 import '../protocol/request_id.dart';
+import '../ui/reason_copy.dart';
 
 class VoiceDelegateUpdate {
   const VoiceDelegateUpdate(
@@ -14,13 +17,18 @@ class VoiceDelegateUpdate {
     this.conversationId,
     this.text, {
     required this.terminal,
+    this.taskId,
   });
   final String id, conversationId, text;
   final bool terminal;
+
+  /// The task (worker conversation) this run belongs to; a later
+  /// delegate_task can continue it by this id.
+  final String? taskId;
 }
 
-/// One backbrain lane, isolated durable tool context, shared execution journal.
-/// The call owns listening; this application-owned lane owns delegated work.
+/// One independent execution lane; its durable conversations live in Tasks.
+/// The call owns listening. Ending it never cancels delegated work.
 class VoiceDelegateBridge extends ChangeNotifier {
   VoiceDelegateBridge({required this.primary, required this.worker}) {
     worker.addListener(_progress);
@@ -29,61 +37,183 @@ class VoiceDelegateBridge extends ChangeNotifier {
   final _updates = StreamController<VoiceDelegateUpdate>.broadcast();
   Stream<VoiceDelegateUpdate> get updates => _updates.stream;
   String? id, conversationId;
+  String? _taskConversationId, _updateConversationId;
+  String? get taskConversationId => _taskConversationId;
   String _lastProgress = '';
   String _language = 'zh';
   DateTime _lastSent = DateTime.fromMillisecondsSinceEpoch(0);
-  bool _disposed = false;
+  bool _disposed = false, _cancelRequested = false;
   bool get busy => id != null;
   String get draft => worker.draft;
   String? get activeTool => worker.activeTool;
 
+  bool ownsConversation(String conversation) => worker.store.conversations.any(
+    (row) => row['id'] == conversation && row['delegate_origin'] is String,
+  );
+
+  AgentCoreHost hostForConversation(String conversation) =>
+      ownsConversation(conversation) ? worker : primary;
+
   static Future<VoiceDelegateBridge> open(AgentCoreHost primary) async {
-    final directory = await getApplicationSupportDirectory();
-    final store = ConversationStore(
-      FileLifePersistence(
-        File('${directory.path}/voice-delegate-contexts-v1.json'),
-      ),
-    );
-    await store.open();
     final bridge = VoiceDelegateBridge(
       primary: primary,
       worker: AgentCoreHost(
-        store: store,
+        store: primary.store,
         settings: primary.settings,
         tools: primary.tools,
-        // A separate Dart HTTP client avoids the iOS singleton stream handler.
+        experienceModel: primary.experienceModel,
+        profileAccessChanged: primary.profileAccessChanged,
+        experiencePersona: primary.experiencePersona,
+        additionalContext: primary.additionalContext,
+        backgroundExecution: primary.backgroundExecution == null
+            ? null
+            : BackgroundExecution(),
+        clientFactory: primary.clientFactory,
+        allowLocalMemory: false,
+        // Recall only: a delegated request can never authorize a save.
+        memoryReadOnly: true,
+        owner: '${ToolOwner.voice}:delegate',
       ),
     );
-    await bridge.reconcile();
-    return bridge;
+    try {
+      await bridge._importLegacy();
+      await bridge.reconcile();
+      return bridge;
+    } catch (_) {
+      bridge.dispose();
+      rethrow;
+    }
   }
 
-  /// Repair the public projection from durable worker context without execution.
+  Future<void> _importLegacy() async {
+    final Map data;
+    try {
+      final directory = await SpaceStorage.directory();
+      final raw = await FileLifePersistence(
+        File('${directory.path}/voice-delegate-contexts-v1.json'),
+      ).read();
+      if (raw == null) {
+        return;
+      }
+      data = jsonDecode(raw) as Map;
+      if (data['schema_version'] != 1 || data['conversations'] is! List) {
+        throw const FormatException('unsupported_delegate_schema');
+      }
+    } catch (_) {
+      debugPrint('[VoiceDelegate] Skipped unreadable legacy contexts.');
+      return;
+    }
+    final linked = <String, ({String origin, Map intent})>{};
+    for (final conversation in primary.store.conversations) {
+      for (final message in conversation['messages'] as List) {
+        final context = message['delegate_context'];
+        if (context is String && message['delegate_id'] is String) {
+          linked[context] = (
+            origin: conversation['id'] as String,
+            intent: message as Map,
+          );
+        }
+      }
+    }
+    for (final source in data['conversations'] as List) {
+      try {
+        if (source is! Map) {
+          throw const FormatException('invalid_delegate_context');
+        }
+        final link = linked[source['id']];
+        if (link == null) {
+          continue;
+        }
+        await primary.store.importDelegateTask(
+          Map<String, dynamic>.from(source),
+          origin: link.origin,
+          task: link.intent['delegate_id'] as String,
+          status: link.intent['delegate_status'] is String
+              ? link.intent['delegate_status'] as String
+              : 'returned',
+          language: link.intent['delegate_language'] is String
+              ? link.intent['delegate_language'] as String
+              : 'zh',
+        );
+      } catch (_) {
+        debugPrint('[VoiceDelegate] Skipped invalid legacy context.');
+      }
+    }
+    // The old file remains intact, including unlinked recovery contexts.
+  }
+
+  /// Repair saved projections without ever replaying interrupted execution.
   Future<void> reconcile() async {
+    if (busy || worker.busy) {
+      throw StateError('delegate_busy');
+    }
+    for (final row in worker.store.conversations) {
+      if (row['delegate_origin'] is! String ||
+          row['delegate_status'] != 'dispatched') {
+        continue;
+      }
+      final linked = primary.store.conversations.any(
+        (origin) =>
+            origin['id'] == row['delegate_origin'] &&
+            (origin['messages'] as List).any(
+              (message) =>
+                  message['delegate_id'] == row['delegate_id'] &&
+                  message['delegate_context'] == row['id'],
+            ),
+      );
+      if (!linked) {
+        await worker.store.delegateStatus(
+          row['id'] as String,
+          row['delegate_id'] as String,
+          'process_interrupted_unknown',
+        );
+      }
+    }
     for (final conversation in primary.store.conversations) {
       final messages = conversation['messages'] as List;
       for (final intent in messages.where(
         (m) => m['delegate_status'] == 'dispatched',
       )) {
         final task = intent['delegate_id'];
+        if (task is! String) {
+          continue;
+        }
+        final language = intent['delegate_language'] is String
+            ? intent['delegate_language'] as String
+            : 'zh';
         if (messages.any(
           (m) =>
               m['delegate_id'] == task && m['delegate_status'] != 'dispatched',
         )) {
           continue;
         }
-        final contexts = worker.store.conversations.where(
-          (c) => c['id'] == intent['delegate_context'],
-        );
-        final workerMessages = contexts.isEmpty
-            ? <dynamic>[]
-            : contexts.first['messages'] as List;
+        final context = worker.store.conversations
+            .where((c) => c['id'] == intent['delegate_context'])
+            .firstOrNull;
+        final workerMessages = context?['messages'] as List? ?? <dynamic>[];
         final saved = workerMessages
             .where((m) => m['delegate_result'] == task)
             .toList();
-        final last = workerMessages.isEmpty ? null : workerMessages.last;
-        // Earlier assistant prose may precede a tool whose outcome is unknown.
-        // Only an explicit result or a final trailing assistant can be recovered.
+        // A continuation must not recover an earlier run's final answer.
+        final current = context?['delegate_id'] == task;
+        final candidates = context?['delegate_id'] != null && !current
+            ? <dynamic>[]
+            : current &&
+                  context?['delegate_start_index'] is int &&
+                  (context!['delegate_start_index'] as int) >= 0
+            ? workerMessages
+                  .skip(context['delegate_start_index'] as int)
+                  .toList()
+            : workerMessages
+                  .where(
+                    (m) =>
+                        (m['time'] as String).compareTo(
+                          intent['time'] as String,
+                        ) >=
+                        0,
+                  )
+                  .toList();
+        final last = candidates.lastOrNull;
         final result = saved.isNotEmpty
             ? saved.last
             : last != null &&
@@ -93,23 +223,77 @@ class VoiceDelegateBridge extends ChangeNotifier {
                   (last['content'] as String).isNotEmpty
             ? last
             : null;
+        final savedStatus = result?['delegate_status'];
+        final status = result == null
+            ? 'process_interrupted_unknown'
+            : savedStatus is String
+            ? savedStatus
+            : 'returned';
+        final text =
+            result?['content'] as String? ??
+            (language == 'en'
+                ? 'Task execution was interrupted. Its outcome is unknown; it will not be retried automatically.'
+                : '任务执行已中断，操作结果未知；不会自动重试。');
+        if (context != null && context['delegate_origin'] != null) {
+          await worker.store.delegateStatus(
+            context['id'] as String,
+            task,
+            status,
+          );
+        }
         await primary.store.append(conversation['id'] as String, {
           'role': 'assistant',
-          'content':
-              result?['content'] ??
-              (intent['delegate_language'] == 'en'
-                  ? 'The app exited before the task finished. Its outcome is unknown; it will not be retried automatically.'
-                  : '任务因应用退出而中断，操作结果未知；不会自动重试。'),
+          'content': _summary(text, language),
           'delegate_id': task,
           'delegate_context': intent['delegate_context'],
           if (intent['delegate_language'] != null)
-            'delegate_language': intent['delegate_language'],
-          'delegate_status': result == null
-              ? 'process_interrupted_unknown'
-              : result['delegate_status'] ?? 'returned',
-        });
+            'delegate_language': language,
+          'delegate_status': status,
+        }, external: true);
       }
     }
+  }
+
+  Future<void> clearConversationContext(String conversation) async {
+    if (busy || worker.busy) {
+      throw StateError('delegate_busy');
+    }
+    if (identical(primary.store, worker.store)) {
+      return;
+    }
+    final contexts =
+        (primary.store.conversation(conversation)['messages'] as List)
+            .map((message) => message['delegate_context'])
+            .whereType<String>()
+            .toSet();
+    for (final context in contexts) {
+      if (worker.store.conversations.any((c) => c['id'] == context)) {
+        await worker.store.clearConversation(context);
+      }
+    }
+  }
+
+  /// The latest tasks started from [origin], newest first, for the front
+  /// brain to pick one to continue. Titles are the user's own words.
+  List<Map<String, String>> recentTasks(String origin, {int limit = 5}) {
+    final rows = worker.store.conversations
+        .where((c) => c['delegate_origin'] == origin)
+        .toList();
+    return [
+      for (final row in rows.reversed.take(limit))
+        {
+          'task_id': row['id'] as String,
+          'title': _clip(row['title'] as String? ?? '', 40),
+          'status': row['delegate_status'] as String? ?? 'unknown',
+        },
+    ];
+  }
+
+  static String _clip(String text, int max) {
+    final runes = text.runes.toList();
+    return runes.length <= max
+        ? text
+        : '${String.fromCharCodes(runes.take(max))}…';
   }
 
   Future<String> start({
@@ -117,55 +301,150 @@ class VoiceDelegateBridge extends ChangeNotifier {
     required String callId,
     required String request,
     String language = 'zh',
+    String? taskId,
   }) async {
-    if (_disposed || busy || primary.busy) throw StateError('delegate_busy');
+    if (taskId != null &&
+        (!ownsConversation(taskId) ||
+            worker.store.conversation(taskId)['delegate_origin'] !=
+                (ownsConversation(conversation)
+                    ? worker.store.conversation(conversation)['delegate_origin']
+                    : conversation))) {
+      // Only a task started from this conversation can be continued here.
+      throw StateError('delegate_task_missing');
+    }
+    final context =
+        taskId ?? (ownsConversation(conversation) ? conversation : null);
+    final origin = context == null
+        ? conversation
+        : worker.store.conversation(context)['delegate_origin'] as String;
+    return _dispatch(
+      origin: origin,
+      callId: callId,
+      request: request,
+      language: language,
+      context: context,
+      updateConversation: conversation,
+    );
+  }
+
+  Future<void> continueTask(
+    String conversation,
+    String text, {
+    ToolApproval? approve,
+    String? language,
+    bool userAuthored = true,
+  }) async {
+    if (!ownsConversation(conversation)) {
+      throw StateError('delegate_task_missing');
+    }
+    final row = worker.store.conversation(conversation);
+    await _dispatch(
+      origin: row['delegate_origin'] as String,
+      callId: requestId(),
+      request: text,
+      language: language ?? row['delegate_language'] as String? ?? 'zh',
+      context: conversation,
+      approve: approve,
+      userAuthored: userAuthored,
+      wait: true,
+      updateConversation: conversation,
+    );
+  }
+
+  Future<String> _dispatch({
+    required String origin,
+    required String callId,
+    required String request,
+    required String language,
+    String? context,
+    ToolApproval? approve,
+    bool userAuthored = false,
+    bool wait = false,
+    required String updateConversation,
+  }) async {
+    if (_disposed || busy || worker.busy || primary.busy) {
+      throw StateError('delegate_busy');
+    }
     if (request.trim().isEmpty || request.length > 8000) {
       throw ArgumentError('invalid_delegate');
     }
-    final existing =
-        (primary.store.conversation(conversation)['messages'] as List)
-            .where((m) => m['voice_delegate_call'] == callId)
-            .firstOrNull;
-    if (existing != null) throw StateError('delegate_already_dispatched');
-    // Capture the call language for this task, including background completion.
+    final history = primary.store.conversation(origin)['messages'] as List;
+    if (history.any((m) => m['voice_delegate_call'] == callId)) {
+      throw StateError('delegate_already_dispatched');
+    }
     final taskLanguage = language == 'zh' ? 'zh' : 'en';
-    _language = taskLanguage;
     final task = id = requestId();
-    conversationId = conversation;
+    _cancelRequested = false;
+    conversationId = origin;
+    _updateConversationId = updateConversation;
+    _language = taskLanguage;
     _lastProgress = '';
+    _lastSent = DateTime.fromMillisecondsSinceEpoch(0);
     notifyListeners();
     try {
-      final history =
-          primary.store.conversation(conversation)['messages'] as List;
-      final previous = history.reversed
-          .map((message) => message['delegate_context'])
-          .whereType<String>()
-          .firstOrNull;
-      // Follow-ups need the same tool receipts; other chats keep separate contexts.
-      final context =
-          previous != null &&
-              worker.store.conversations.any((c) => c['id'] == previous)
-          ? previous
-          : await worker.store.create();
-      // Durable association before execution. Recovered intents are never replayed.
-      await primary.store.append(conversation, {
+      final child = await worker.store.delegateTask(
+        origin: origin,
+        task: task,
+        request: request,
+        language: taskLanguage,
+        context: context,
+      );
+      _taskConversationId = child;
+      await primary.store.append(origin, {
         'role': 'assistant',
-        'content': '',
+        'content': taskLanguage == 'zh'
+            ? (context == null ? '已创建任务，正在处理。' : '任务已继续处理。')
+            : (context == null
+                  ? 'Created a task and started working.'
+                  : 'Continued the task.'),
         'voice_delegate_call': callId,
         'delegate_id': task,
         'delegate_status': 'dispatched',
-        'delegate_context': context,
+        'delegate_context': child,
         'request': request,
         'delegate_language': taskLanguage,
-      });
-      unawaited(_run(task, conversation, context, request, taskLanguage));
+      }, external: true);
+      notifyListeners();
+      final execution = _run(
+        task,
+        origin,
+        child,
+        request,
+        taskLanguage,
+        approve: approve,
+        userAuthored: userAuthored,
+        updateConversation: updateConversation,
+      );
+      if (wait) {
+        await execution;
+      } else {
+        unawaited(execution);
+      }
       return task;
     } catch (_) {
+      final child = _taskConversationId;
+      if (child != null) {
+        try {
+          await worker.store.delegateStatus(child, task, 'failed');
+        } catch (_) {
+          // Startup reconciliation accounts for a failed dispatch receipt.
+        }
+      }
       id = null;
       conversationId = null;
-      notifyListeners();
+      _taskConversationId = null;
+      _updateConversationId = null;
+      if (!_disposed) notifyListeners();
       rethrow;
     }
+  }
+
+  String _summary(String text, String language) {
+    final characters = text.runes;
+    if (characters.length <= 600) {
+      return text;
+    }
+    return '${String.fromCharCodes(characters.take(600)).trimRight()}\n… ${language == 'zh' ? '完整结果见任务。' : 'See the task for the full result.'}';
   }
 
   Future<void> _run(
@@ -173,21 +452,32 @@ class VoiceDelegateBridge extends ChangeNotifier {
     String conversation,
     String context,
     String request,
-    String language,
-  ) async {
+    String language, {
+    ToolApproval? approve,
+    required bool userAuthored,
+    required String updateConversation,
+  }) async {
     String t(String zh, String en) => language == 'zh' ? zh : en;
-    String result;
+    var result = t(
+      '任务结果保存失败，请核对现有操作；不会自动重试。',
+      'The task result could not be saved. Check the existing action; it will not be retried automatically.',
+    );
     try {
       final before =
           (worker.store.conversation(context)['messages'] as List).length;
-      // The same registered tool policy controls writes; no blanket bypass.
-      await worker.send(
-        context,
-        request,
-        language: language,
-        approve: (ApprovalOffer _) async =>
-            worker.tools?.registry.automaticExecution == true,
-      );
+      final cancelledBeforeStart = _cancelRequested;
+      if (!cancelledBeforeStart) {
+        await worker.send(
+          context,
+          request,
+          userAuthored: userAuthored,
+          language: language,
+          approve:
+              approve ??
+              (ApprovalOffer _) async =>
+                  worker.tools?.registry.automaticExecution == true,
+        );
+      }
       final messages = worker.store.conversation(context)['messages'] as List;
       final finals = messages
           .skip(before)
@@ -195,11 +485,42 @@ class VoiceDelegateBridge extends ChangeNotifier {
             (m) =>
                 m['role'] == 'assistant' &&
                 m['tool_calls'] == null &&
+                // A draft cut off by a stop or failure is not a result: it
+                // often still reads "I'm working on it".
+                m['interrupted'] != true &&
                 (m['content'] as String).isNotEmpty,
           );
       result = finals.isNotEmpty ? finals.last['content'] as String : '';
-      if (worker.error != null) {
-        result = '$result\n${t('任务状态', 'Task status')}: ${worker.error}';
+      if (cancelledBeforeStart) {
+        result = t('任务已停止，未开始执行。', 'Task stopped before execution started.');
+      } else if (worker.error == 'cancelled') {
+        // A step that was already dispatched may have taken effect.
+        final uncertain = messages.skip(before).any((m) {
+          if (m['role'] != 'tool') return false;
+          try {
+            return (jsonDecode(m['content'] as String) as Map)['status'] ==
+                'outcome_unknown';
+          } catch (_) {
+            return false;
+          }
+        });
+        result = uncertain
+            ? t(
+                '任务已停止，没有完成。停止时最后一步可能已经生效，请到对应 App 里核对；不会自动重试。',
+                'The task was stopped and did not finish. The last step may already have taken effect; check the app. It will not be retried.',
+              )
+            : t(
+                '任务已停止，没有完成。已经做过的修改会保留，未做完的部分没有继续。',
+                'The task was stopped and did not finish. Changes already made are kept; the rest was not done.',
+              );
+      } else if (worker.error != null) {
+        final detail = worker.errorDetail;
+        final reason = reasonCopy(
+          detail != null && hasReasonCopy(detail) ? detail : worker.error,
+          language: language,
+        );
+        result =
+            '$result\n${t('任务状态', 'Task status')}: ${t('未完成', 'not completed')} — $reason';
       }
       if (result.trim().isEmpty) {
         result = t(
@@ -207,40 +528,56 @@ class VoiceDelegateBridge extends ChangeNotifier {
           'The task stopped without a confirmed completion result.',
         );
       }
-      await worker.store.append(context, {
-        'role': 'assistant',
-        'content': result,
-        'delegate_result': task,
-        'delegate_language': language,
-        'delegate_status': worker.error ?? 'returned',
-        'delegate_origin': conversation,
-      });
+      final status = cancelledBeforeStart
+          ? 'cancelled'
+          : worker.error ?? 'returned';
+      await worker.store.finishDelegateTask(
+        context,
+        task,
+        result: result,
+        status: status,
+        language: language,
+        origin: conversation,
+        finalTime: finals.isEmpty ? null : finals.last['time'] as String,
+      );
+      result = _summary(result, language);
       await primary.store.append(conversation, {
         'role': 'assistant',
         'content': result,
         'delegate_context': context,
         'delegate_id': task,
         'delegate_language': language,
-        'delegate_status': worker.error ?? 'returned',
-      });
+        'delegate_status': status,
+      }, external: true);
     } catch (_) {
       result = t(
         '任务结果保存失败，请核对现有操作；不会自动重试。',
         'The task result could not be saved. Check the existing action; it will not be retried automatically.',
       );
+    } finally {
+      id = null;
+      conversationId = null;
+      _taskConversationId = null;
+      _updateConversationId = null;
+      if (!_disposed) {
+        _updates.add(
+          VoiceDelegateUpdate(
+            task,
+            updateConversation,
+            result,
+            terminal: true,
+            taskId: context,
+          ),
+        );
+        notifyListeners();
+      }
     }
-    if (!_disposed) {
-      _updates.add(
-        VoiceDelegateUpdate(task, conversation, result, terminal: true),
-      );
-    }
-    id = null;
-    conversationId = null;
-    if (!_disposed) notifyListeners();
   }
 
   void _progress() {
-    if (_disposed || id == null || conversationId == null) return;
+    if (_disposed || id == null || conversationId == null) {
+      return;
+    }
     notifyListeners();
     final text = worker.activeTool != null
         ? (_language == 'zh'
@@ -255,12 +592,20 @@ class VoiceDelegateBridge extends ChangeNotifier {
     _lastProgress = text;
     _lastSent = DateTime.now();
     _updates.add(
-      VoiceDelegateUpdate(id!, conversationId!, text, terminal: false),
+      VoiceDelegateUpdate(
+        id!,
+        _updateConversationId ?? conversationId!,
+        text,
+        terminal: false,
+      ),
     );
   }
 
   void cancel(String taskId) {
-    if (id == taskId) worker.cancel();
+    if (id == taskId) {
+      _cancelRequested = true;
+      worker.cancel();
+    }
   }
 
   @override

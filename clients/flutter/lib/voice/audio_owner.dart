@@ -70,6 +70,7 @@ class OwnedAudioPort implements AudioPort, AoqPort {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   }) => owner.acquire(this, () async {
     _clientGeneration = generation;
     _nativeGeneration = owner.nextGeneration();
@@ -77,6 +78,7 @@ class OwnedAudioPort implements AudioPort, AoqPort {
       generation: _nativeGeneration!,
       capture: capture,
       threshold: threshold,
+      recordingCompatible: recordingCompatible,
     );
   });
   @override

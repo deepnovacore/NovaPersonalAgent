@@ -5,6 +5,7 @@ import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
+import 'package:nova_mobile/space/space_storage.dart';
 import 'package:nova_mobile/voice/voice_settings.dart';
 import 'package:nova_mobile/voice/voice_settings_sheet.dart';
 
@@ -17,10 +18,55 @@ void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   setUp(() => FlutterSecureStorage.setMockInitialValues({}));
 
+  test(
+    'recording compatibility is opt-in and survives secure settings saves',
+    () async {
+      final legacy = configured().toJson()..remove('recordingCompatible');
+      expect(
+        VoiceConfiguration.fromJson(legacy).toJson()['recordingCompatible'],
+        false,
+      );
+      final enabled = VoiceConfiguration.fromJson({
+        ...legacy,
+        'recordingCompatible': true,
+      });
+      final settings = VoiceSettings();
+      await settings.save(enabled);
+      expect((await settings.read())!.toJson()['recordingCompatible'], true);
+    },
+  );
+
+  testWidgets(
+    'Android voice settings expose a saved recording switch',
+    (tester) async {
+      final settings = VoiceSettings();
+      final initial = await settings.save(configured());
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: VoiceSettingsSheet(settings: settings, initial: initial),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final toggle = find.byKey(const ValueKey('voice.recordingCompatible'));
+      expect(toggle, findsOneWidget);
+      await tester.ensureVisible(toggle);
+      await tester.tap(toggle);
+      await tester.tap(find.text('保存'));
+      await tester.pumpAndSettle();
+      expect(
+        (await VoiceSettings().read())!.toJson()['recordingCompatible'],
+        true,
+      );
+    },
+    variant: TargetPlatformVariant.only(TargetPlatform.android),
+  );
+
   test('secure round trip is independent of text settings', () async {
     const storage = FlutterSecureStorage();
     await storage.write(key: ModelSettings.storageKey, value: 'text-config');
-    const settings = VoiceSettings();
+    final settings = VoiceSettings();
     expect(await settings.read(), isNull);
     final saved = await settings.save(configured());
     final loaded = (await settings.read())!;
@@ -36,7 +82,7 @@ void main() {
   test(
     'ASR-only configuration works without integrated, LLM or TTS credentials',
     () async {
-      const settings = VoiceSettings();
+      final settings = VoiceSettings();
       final saved = await settings.saveAsr(
         provider: SpeechProvider.volcengine,
         asr: const VoiceServiceConfiguration(
@@ -54,7 +100,8 @@ void main() {
           integrated: configured().integrated,
         ),
       );
-      expect(full.asr.key, 'asr-key');
+      expect(full.asr.key, isEmpty);
+      expect((await settings.readForDictation())!.asr.key, 'asr-key');
       expect((await settings.read())!.integrated.key, 'test-key');
     },
   );
@@ -62,7 +109,7 @@ void main() {
   test(
     'ASR save preserves conversation settings and scopes retained secrets',
     () async {
-      const settings = VoiceSettings();
+      final settings = VoiceSettings();
       await settings.save(configured());
       const service = VoiceServiceConfiguration(
         endpoint: 'wss://example.com/asr',
@@ -78,7 +125,8 @@ void main() {
         asr: service.copyWith(key: '', resourceId: ''),
       );
       expect(retained.asr.toJson(), saved.asr.toJson());
-      expect(retained.integrated.toJson(), configured().integrated.toJson());
+      expect(retained.integrated.credentialId, saved.integrated.credentialId);
+      expect((await settings.read())!.integrated.key, 'test-key');
       await expectLater(
         settings.saveAsr(
           provider: SpeechProvider.volcengine,
@@ -103,7 +151,7 @@ void main() {
   );
 
   test('blank key preserved only for same endpoint and provider', () async {
-    const settings = VoiceSettings();
+    final settings = VoiceSettings();
     final original = await settings.save(configured());
     final blank = original.copyWith(
       integrated: original.integrated.copyWith(model: 'another-model', key: ''),
@@ -133,7 +181,7 @@ void main() {
   });
 
   test('cascaded secrets are independent and have separate scopes', () async {
-    const settings = VoiceSettings();
+    final settings = VoiceSettings();
     final original = const VoiceConfiguration().copyWith(
       pipeline: VoicePipeline.cascaded,
       asr: const VoiceConfiguration().asr.copyWith(key: 'asr-secret'),
@@ -169,6 +217,124 @@ void main() {
     );
     expect(selfHosted.tts.key, isEmpty); // Same address, different provider.
   });
+
+  test('forebrain reuses the matching model key without copying it', () async {
+    const storage = FlutterSecureStorage();
+    Future<void> modelKey(String key) => storage.write(
+      key: ModelSettings.storageKey,
+      value: jsonEncode({
+        'endpoint': 'https://api.openai.com/v1/responses',
+        'model': 'text-model',
+        'key': key,
+      }),
+    );
+    await modelKey('model-secret');
+    final settings = VoiceSettings();
+    final draft = const VoiceConfiguration().copyWith(
+      pipeline: VoicePipeline.cascaded,
+      asr: const VoiceConfiguration().asr.copyWith(key: 'asr-key'),
+      tts: const VoiceConfiguration().tts.copyWith(key: 'tts-key'),
+      fastLlm: const VoiceServiceConfiguration(
+        endpoint: 'https://api.openai.com/v1',
+        model: 'voice-model',
+      ),
+    );
+    expect((await settings.save(draft)).fastLlm.key, 'model-secret');
+    expect((await settings.readDraft())!.fastLlm.key, isEmpty);
+    expect((await settings.read())!.fastLlmConfiguration.key, 'model-secret');
+    final shared = (await settings.credentials.resolve(
+      draft.fastLlm.endpoint,
+    ))!;
+    await settings.credentials.save(
+      id: shared.id,
+      endpoint: shared.endpoint,
+      key: 'rotated-secret',
+    );
+    expect((await settings.read())!.fastLlm.key, 'rotated-secret');
+    for (final endpoint in [
+      'https://different.example/v1',
+      'https://api.openai.com/another/v1',
+    ]) {
+      await expectLater(
+        settings.save(
+          draft.copyWith(fastLlm: draft.fastLlm.copyWith(endpoint: endpoint)),
+        ),
+        throwsA(isA<AgentFailure>()),
+      );
+    }
+    await storage.delete(key: ModelSettings.storageKey);
+    expect((await settings.read())!.fastLlm.key, 'rotated-secret');
+    await settings.credentials.delete(shared.id);
+    await expectLater(settings.read(), throwsA(isA<AgentFailure>()));
+    final explicit = await settings.save(
+      draft.copyWith(fastLlm: draft.fastLlm.copyWith(key: 'voice-secret')),
+    );
+    expect(explicit.fastLlm.key, 'voice-secret');
+    expect((await settings.read())!.fastLlm.key, 'voice-secret');
+  });
+
+  test(
+    'retained voice settings never resolve another Space model key',
+    () async {
+      final previousSpace = SpaceStorage.active;
+      addTearDown(() => SpaceStorage.active = previousSpace);
+      const storage = FlutterSecureStorage();
+      const spaceA = SpaceRecord(
+        id: 'voice-a',
+        name: 'A',
+        mode: SpaceMode.standalone,
+      );
+      const spaceB = SpaceRecord(
+        id: 'voice-b',
+        name: 'B',
+        mode: SpaceMode.standalone,
+      );
+      final draft = const VoiceConfiguration().copyWith(
+        pipeline: VoicePipeline.cascaded,
+        asr: const VoiceConfiguration().asr.copyWith(key: 'asr-key'),
+        tts: const VoiceConfiguration().tts.copyWith(key: 'tts-key'),
+        fastLlm: const VoiceServiceConfiguration(
+          endpoint: 'https://api.openai.com/v1',
+          model: 'voice-model',
+        ),
+      );
+      Future<void> modelKey(String key) => storage.write(
+        key: SpaceStorage.secureKey(ModelSettings.storageKey),
+        value: jsonEncode({
+          'endpoint': draft.fastLlm.endpoint,
+          'model': 'text-model',
+          'key': key,
+        }),
+      );
+      SpaceStorage.active = spaceA;
+      final settingsA = VoiceSettings(storage: storage);
+      final modelKeyA = SpaceStorage.secureKey(ModelSettings.storageKey);
+      final voiceKeyA = SpaceStorage.secureKey(VoiceSettings.storageKey);
+      await modelKey('a-secret');
+      await settingsA.save(draft);
+
+      SpaceStorage.active = spaceB;
+      await modelKey('b-secret');
+      expect((await settingsA.read())!.fastLlm.key, 'a-secret');
+      expect((await settingsA.save(draft)).fastLlm.key, 'a-secret');
+      expect(await storage.read(key: voiceKeyA), isNotNull);
+      expect(
+        await storage.read(
+          key: SpaceStorage.secureKey(VoiceSettings.storageKey),
+        ),
+        isNull,
+      );
+
+      await storage.delete(key: modelKeyA);
+      expect((await settingsA.read())!.fastLlm.key, 'a-secret');
+      final credentialA = (await settingsA.credentials.resolve(
+        draft.fastLlm.endpoint,
+      ))!;
+      await settingsA.credentials.delete(credentialA.id);
+      await expectLater(settingsA.read(), throwsA(isA<AgentFailure>()));
+      await expectLater(settingsA.save(draft), throwsA(isA<AgentFailure>()));
+    },
+  );
 
   test(
     'public URLs require TLS, reject embedded credentials and parameters',
@@ -247,7 +413,7 @@ void main() {
       ]) {
         await storage.write(key: VoiceSettings.storageKey, value: raw);
         await expectLater(
-          const VoiceSettings().read(),
+          VoiceSettings().read(),
           throwsA(
             isA<AgentFailure>().having(
               (e) => e.toString(),
@@ -265,31 +431,23 @@ void main() {
     expect(() => VoiceConfiguration.fromJson(value), throwsArgumentError);
   });
 
-  testWidgets(
-    'saved secrets stay out of controllers and edited address clears entered key',
-    (tester) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          home: Scaffold(
-            body: VoiceSettingsSheet(
-              settings: const VoiceSettings(),
-              initial: configured(),
-            ),
+  testWidgets('voice page never creates secret controllers', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: VoiceSettingsSheet(
+            settings: VoiceSettings(),
+            initial: configured(),
           ),
         ),
-      );
-      final keyFinder = find.byKey(const ValueKey('实时模型.key'));
-      final field = tester.widget<TextField>(keyFinder);
-      expect(field.obscureText, isTrue);
-      expect(field.controller!.text, isEmpty);
-      expect(find.text('test-key'), findsNothing);
-      await tester.enterText(keyFinder, 'new-secret');
-      await tester.enterText(
-        find.byKey(const ValueKey('实时模型.endpoint')),
-        'wss://another.example/realtime',
-      );
-      expect(field.controller!.text, isEmpty);
-      await tester.pumpWidget(const SizedBox.shrink());
-    },
-  );
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.byType(TextField), findsNothing);
+    expect(find.text('test-key'), findsNothing);
+    expect(
+      find.byKey(const ValueKey('integrated.credentials')),
+      findsOneWidget,
+    );
+  });
 }

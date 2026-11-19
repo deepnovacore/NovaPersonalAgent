@@ -19,24 +19,38 @@ internal class LinuxWorkspaceHost(context: Context, messenger: BinaryMessenger) 
     private val channel = MethodChannel(messenger, "nova/workspace/v1")
     private val worker = Executors.newCachedThreadPool()
     private val main = Handler(Looper.getMainLooper())
-    private val runtime = LinuxRuntime.get(this.context)
+    @Volatile private var runtime: LinuxRuntime? = null
     private val owned = ConcurrentHashMap.newKeySet<String>()
     @Volatile private var disposed = false
 
     init {
+        NovaSpaceScope.listen(this) {
+            val old = runtime
+            owned.forEach { old?.cancel(it) }
+            runtime = null
+        }
         channel.setMethodCallHandler { call, result ->
             try {
                 check(!disposed) { "workspace_host_disposed" }
                 val args = call.arguments as? Map<*, *> ?: emptyMap<Any, Any>()
                 when (call.method) {
-                    "cancel" -> result.success(mapOf("accepted" to runtime.cancel(args["id"] as? String ?: "")))
-                    "initialize" -> worker.execute {
+                    "cancel" -> result.success(mapOf("accepted" to (runtime?.cancel(args["id"] as? String ?: "") ?: false)))
+                    "initialize" -> {
+                        val scope = NovaSpaceScope.standalone()
+                        worker.execute {
                         try {
-                            runtime.initialize(args["root_path"] as? String ?: error("missing_root_path"))
+                            val selectedRuntime = LinuxRuntime.get(context, scope.id)
+                            selectedRuntime.initialize(args["root_path"] as? String ?: error("missing_root_path"))
+                            check(NovaSpaceScope.isCurrent(scope)) { "workspace_scope_changed" }
+                            runtime = selectedRuntime
                             main.post { result.success(mapOf("ready" to true, "platform" to "android")) }
                         } catch (error: Exception) { main.post { result.error("workspace_error", error.message, null) } }
                     }
+                    }
                     "execute" -> {
+                        val scope = NovaSpaceScope.standalone()
+                        val selectedRuntime = runtime ?: error("workspace_not_initialized")
+                        check(selectedRuntime.spaceId == scope.id) { "workspace_scope_changed" }
                         val request = ShellRequest(
                             id = args["id"] as? String ?: error("missing_id"),
                             command = args["command"] as? String ?: error("missing_command"),
@@ -47,7 +61,7 @@ internal class LinuxWorkspaceHost(context: Context, messenger: BinaryMessenger) 
                             } ?: emptyMap(),
                         )
                         // Register synchronously: the next channel cancel cannot overtake this run.
-                        val execution = runtime.execution ?: error("workspace_not_initialized")
+                        val execution = selectedRuntime.execution ?: error("workspace_not_initialized")
                         execution.reserve(request.id)
                         owned.add(request.id)
                         worker.execute {
@@ -66,19 +80,20 @@ internal class LinuxWorkspaceHost(context: Context, messenger: BinaryMessenger) 
 
     fun dispose() {
         disposed = true
+        NovaSpaceScope.removeListener(this)
         channel.setMethodCallHandler(null)
-        owned.forEach { runtime.cancel(it) }
+        owned.forEach { runtime?.cancel(it) }
         worker.shutdown()
     }
 }
 
 /** One filesystem installer and supervisor for all foreground/headless engines. */
-private class LinuxRuntime(private val context: Context) {
+private class LinuxRuntime(private val context: Context, val spaceId: String) {
     companion object {
-        private var instance: LinuxRuntime? = null
-        @Synchronized fun get(context: Context): LinuxRuntime = instance ?: LinuxRuntime(context.applicationContext).also { instance = it }
+        private val instances = mutableMapOf<String, LinuxRuntime>()
+        @Synchronized fun get(context: Context, spaceId: String): LinuxRuntime = instances.getOrPut(spaceId) { LinuxRuntime(context.applicationContext, spaceId) }
     }
-    private val runtime = File(context.noBackupFilesDir, "nova-linux")
+    private val runtime = File(NovaSpaceScope.privateDirectory(context, spaceId), "nova-linux")
     private val rootfs = File(runtime, "rootfs")
     private val native = File(context.applicationInfo.nativeLibraryDir)
     private val processGroups = ConcurrentHashMap<Process, Int>()
@@ -88,10 +103,10 @@ private class LinuxRuntime(private val context: Context) {
 
     @Synchronized internal fun initialize(path: String) {
         val supplied = File(path)
-        val expected = File(context.filesDir, "nova-workspace").absoluteFile
+        val expected = NovaSpaceScope.workspace(context, spaceId).absoluteFile
         require(supplied.isAbsolute && supplied.absoluteFile == expected) { "invalid_workspace_root" }
         val root = supplied.canonicalFile
-        require(root == File(context.filesDir.canonicalFile, "nova-workspace")) { "workspace_outside_app_data" }
+        require(root == File(context.filesDir.canonicalFile, "spaces/$spaceId/nova-workspace")) { "workspace_outside_app_data" }
         execution?.let { require(it.workspace == root) { "workspace_root_changed" }; return }
         check(root.isDirectory || root.mkdirs()) { "workspace_create_failed" }
         listOf("libproot.so", "libproot-loader.so", "libnova-exec.so").forEach {

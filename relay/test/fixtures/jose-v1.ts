@@ -1,0 +1,106 @@
+// Test-only fixed JOSE interoperability vector. Never use fixture keys in deployment.
+export const joseFixture = {
+  "description": "TEST ONLY public fixture keys; never use in deployment",
+  "host": {
+    "device": "ae2311c8-db92-4469-b36a-16e460a30694",
+    "signingPublicKey": {
+      "crv": "Ed25519",
+      "x": "mSC4nXzzqcJ238BxqGL5D-YAppb9bq-yn4-wKDyu-94",
+      "kty": "OKP"
+    },
+    "signingPrivateKey": {
+      "crv": "Ed25519",
+      "d": "K_08Ui3RZE8Wsy5cg5WHDjklgE80E_eifaNnRKjUiD0",
+      "x": "mSC4nXzzqcJ238BxqGL5D-YAppb9bq-yn4-wKDyu-94",
+      "kty": "OKP"
+    },
+    "encryptionPublicKey": {
+      "kty": "EC",
+      "x": "9vbcCrKUt235oyWYZckbxKgIN9XCtEZt6yBwo222z4c",
+      "y": "1xFYI8PEihku1ZQ4iWlf2hhSnVXIoTrcDcYPHg-2m-M",
+      "crv": "P-256"
+    },
+    "encryptionPrivateKey": {
+      "kty": "EC",
+      "x": "9vbcCrKUt235oyWYZckbxKgIN9XCtEZt6yBwo222z4c",
+      "y": "1xFYI8PEihku1ZQ4iWlf2hhSnVXIoTrcDcYPHg-2m-M",
+      "crv": "P-256",
+      "d": "rb37dGatNFNKGP43cLxvc-Pqhjg2zRLYi4sNTnFbtko"
+    }
+  },
+  "client": {
+    "device": "5c75dc0f-786e-459d-b080-1481938ae07a",
+    "signingPublicKey": {
+      "crv": "Ed25519",
+      "x": "fZfb0yj6Vv4aABP-4P-JuZZvCTltrXhl4ZrFrUpnMz8",
+      "kty": "OKP"
+    },
+    "signingPrivateKey": {
+      "crv": "Ed25519",
+      "d": "3boY2ZJuWmhwKxTTKPCCVPEvtAlRhQQ45ZA5z2ygBf8",
+      "x": "fZfb0yj6Vv4aABP-4P-JuZZvCTltrXhl4ZrFrUpnMz8",
+      "kty": "OKP"
+    },
+    "encryptionPublicKey": {
+      "kty": "EC",
+      "x": "4AZ_oUMB34u4qHzzPGSkZhbqes7uGaUoRuKNihl1DI4",
+      "y": "ohGXqOiMhjJsio14RDtYCgg9VAKla8DZnJ1Q5sac6yY",
+      "crv": "P-256"
+    },
+    "encryptionPrivateKey": {
+      "kty": "EC",
+      "x": "4AZ_oUMB34u4qHzzPGSkZhbqes7uGaUoRuKNihl1DI4",
+      "y": "ohGXqOiMhjJsio14RDtYCgg9VAKla8DZnJ1Q5sac6yY",
+      "crv": "P-256",
+      "d": "w3pprHwxR6AFC4BJk3hFq2BFOwlaxy34ZbwEIKLWnVU"
+    }
+  },
+  "space": "lu77GN_fwI52SdCncr-TcVeQ2GOvcfzOyhLYJyP8Gwk",
+  "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8",
+  "plaintext": {
+    "v": 1,
+    "type": "snapshot",
+    "text": "标准 JOSE 🔐",
+    "version": 7
+  },
+  "envelope": {
+    "v": 1,
+    "space": "lu77GN_fwI52SdCncr-TcVeQ2GOvcfzOyhLYJyP8Gwk",
+    "id": "fixture-v1",
+    "from": "ae2311c8-db92-4469-b36a-16e460a30694",
+    "to": "5c75dc0f-786e-459d-b080-1481938ae07a",
+    "chan": "mailbox",
+    "epoch": 1,
+    "expiresAt": null,
+    "body": "ZXlKaGJHY2lPaUprYVhJaUxDSmxibU1pT2lKQk1qVTJSME5OSW4wLi5scWlUbmdXTEQyN1pxQy1NLlRLbHBWT2tIaWtoTkNLS1M5X2FMT3A1QnNNMm1YaFV1eHYwY2R3WFZZdXdaazNJVGZmSkR1Nk1wTmhIVXJmekJUYlVLT0J4ZTlTME1DdkFaRWNfeC42TWlhTEdyekJJRE56NE5IYzM5UFF3",
+    "sig": "ZXlKaGJHY2lPaUpGWkVSVFFTSXNJblI1Y0NJNkltNXZkbUV0Wlc1MlpXeHZjR1VyYW5kekluMC5leUoySWpveExDSnpjR0ZqWlNJNklteDFOemRIVGw5bWQwazFNbE5rUTI1amNpMVVZMVpsVVRKSFQzWmpabnBQZVdoTVdVcDVVRGhIZDJzaUxDSnBaQ0k2SW1acGVIUjFjbVV0ZGpFaUxDSm1jbTl0SWpvaVlXVXlNekV4WXpndFpHSTVNaTAwTkRZNUxXSXpObUV0TVRabE5EWXdZVE13TmprMElpd2lkRzhpT2lJMVl6YzFaR013WmkwM09EWmxMVFExT1dRdFlqQTRNQzB4TkRneE9UTTRZV1V3TjJFaUxDSmphR0Z1SWpvaWJXRnBiR0p2ZUNJc0ltVndiMk5vSWpveExDSmxlSEJwY21WelFYUWlPbTUxYkd3c0ltSnZaSGtpT2lKYVdHeExZVWRLU0ZreWJGQmhWWEJ5V1Zab1NtRlZlRVJUYlhocFlsVXhjRlF5YkV0UmF6RnhWbFJLVTAxRk5VOVRWelIzVEdrMWMyTlhiRlZpYldSWVZFVlJlVTR4Y0hoUmVURk9UR3hTVEdKSVFsZFVNblJKWVZkMGIxUnJUa3hUTVUwMVdESkdUVlF6UVRGUmJrNU9UVzB4V1dGR1ZqRmxTRmwzV1RKU00xZEdXbHBrV0dSaFlYcE9TbFpIV20xVGExSXhUbXN4ZDFSdGFFbFdXRXB0Wld0S1ZWbHNWa3hVTUVvMFdsUnNWRTFGTVVSa2EwWmhVbGRPWm1WRE5ESlVWMnhvVkVWa2VXVnJTa3BTUlRVMlRrVTFTVmw2VFRWVlJrWXpJbjAuaHZsYUZsVDVIYkFRUFgxUVZsN1NYblBIM1FkWUV2THFOWUlkQmNFeVRwU0UzX2k2dF82MjVCb2tSVUpOVW5RUTdjOHdqd3gycXFMcFJKNTdTTk11REE="
+  },
+  "keyDelivery": {
+    "v": 1,
+    "space": "lu77GN_fwI52SdCncr-TcVeQ2GOvcfzOyhLYJyP8Gwk",
+    "epoch": 1,
+    "recipient": "5c75dc0f-786e-459d-b080-1481938ae07a",
+    "key": "AAECAwQFBgcICQoLDA0ODxAREhMUFRYXGBkaGxwdHh8"
+  },
+  "wrapped": "eyJhbGciOiJFQ0RILUVTK0EyNTZLVyIsImVuYyI6IkEyNTZHQ00iLCJlcGsiOnsieCI6IlJsc0JjOUx0cHY0a0luSFk4Z2VTN3RrU0U0UFJuXzctZUhZWjJ6U2cwYmMiLCJjcnYiOiJQLTI1NiIsImt0eSI6IkVDIiwieSI6Ilk4bG1Kc0NrMVNVQllVQnNlYnVISG9iUlI5Zk5nd3M2Z291c3MwdEFOTmMifX0.CeY8eXK-YQQRW8lAbmGkLpCqdzgupmlW3U4wXiggogopbu8uzc905Q.5MM5P41NH57estW0.m2ZNWtBVA02DhAuuo2xcTFDIOffHg6UDYv7NpBm7TdZ2_y5Vkt89I6VKn-Gte5pyswT7td5utphWXI67C_9E9bY_NcAmn9OEou3Ijq26CEXkpoV5oUltX0QHhtb5ZqyBjv8ckM0-MHrgkFwZHPeOx45J1MQeCgJRs9tN2_kt2qSw09LxUzUfj0SLHaB6WMVsEAyiux_hYDmiKwnZjQ5IdHmzKJaPegyA0XMC2LV8.V0iBCvS-GiE3vjv7_VEmDQ",
+  "keyEnvelope": {
+    "v": 1,
+    "space": "lu77GN_fwI52SdCncr-TcVeQ2GOvcfzOyhLYJyP8Gwk",
+    "id": "fixture-key-v1",
+    "from": "ae2311c8-db92-4469-b36a-16e460a30694",
+    "to": "5c75dc0f-786e-459d-b080-1481938ae07a",
+    "chan": "mailbox",
+    "epoch": 1,
+    "expiresAt": null,
+    "body": "ZXlKaGJHY2lPaUpGUTBSSUxVVlRLMEV5TlRaTFZ5SXNJbVZ1WXlJNklrRXlOVFpIUTAwaUxDSmxjR3NpT25zaWVDSTZJbEpzYzBKak9VeDBjSFkwYTBsdVNGazRaMlZUTjNSclUwVTBVRkp1WHpjdFpVaFpXako2VTJjd1ltTWlMQ0pqY25ZaU9pSlFMVEkxTmlJc0ltdDBlU0k2SWtWRElpd2llU0k2SWxrNGJHMUtjME5yTVZOVlFsbFZRbk5sWW5WSVNHOWlVbEk1Wms1bmQzTTJaMjkxYzNNd2RFRk9UbU1pZlgwLkNlWThlWEstWVFRUlc4bEFibUdrTHBDcWR6Z3VwbWxXM1U0d1hpZ2dvZ29wYnU4dXpjOTA1US41TU01UDQxTkg1N2VzdFcwLm0yWk5XdEJWQTAyRGhBdXVvMnhjVEZESU9mZkhnNlVEWXY3TnBCbTdUZFoyX3k1Vmt0ODlJNlZLbi1HdGU1cHlzd1Q3dGQ1dXRwaFdYSTY3Q185RTliWV9OY0FtbjlPRW91M0lqcTI2Q0VYa3BvVjVvVWx0WDBRSGh0YjVacXlCanY4Y2tNMC1NSHJna0Z3WkhQZU94NDVKMU1RZUNnSlJzOXROMl9rdDJxU3cwOUx4VXpVZmowU0xIYUI2V01Wc0VBeWl1eF9oWURtaUt3blpqUTVJZEhtektKYVBlZ3lBMFhNQzJMVjguVjBpQkN2Uy1HaUUzdmp2N19WRW1EUQ==",
+    "sig": "ZXlKaGJHY2lPaUpGWkVSVFFTSXNJblI1Y0NJNkltNXZkbUV0Wlc1MlpXeHZjR1VyYW5kekluMC5leUoySWpveExDSnpjR0ZqWlNJNklteDFOemRIVGw5bWQwazFNbE5rUTI1amNpMVVZMVpsVVRKSFQzWmpabnBQZVdoTVdVcDVVRGhIZDJzaUxDSnBaQ0k2SW1acGVIUjFjbVV0YTJWNUxYWXhJaXdpWm5KdmJTSTZJbUZsTWpNeE1XTTRMV1JpT1RJdE5EUTJPUzFpTXpaaExURTJaVFEyTUdFek1EWTVOQ0lzSW5Sdklqb2lOV00zTldSak1HWXROemcyWlMwME5UbGtMV0l3T0RBdE1UUTRNVGt6T0dGbE1EZGhJaXdpWTJoaGJpSTZJbTFoYVd4aWIzZ2lMQ0psY0c5amFDSTZNU3dpWlhod2FYSmxjMEYwSWpwdWRXeHNMQ0ppYjJSNUlqb2lXbGhzUzJGSFNraFpNbXhRWVZWd1IxVlVRbE5UVlhoV1ZteFNURTFGVmpWVWJGSmhWRVphTlZOWVRrcGlWbG94VjFoc1NrNXJiSEpTV0d4UFZrWndTVlZVUVhkaFZYaEVVMjE0YWxJelRuQlVNalY2WVZkV1JGTlVXa3BpUlhCNldYcENTMkZyT1ZabFJFSnFVMFpyZDFsVVFuTmtWazVIWVhwU1lVMXNXbFZVYWs1VFkyeFZkMVpVUWxaU2EzQXhWMGh3YW1SR2NGWmhSbkJZWVd0dk1sWlVTbXBrTVd4MFZGZHNUVkV3Y0hGWk1qVmFZVlU1Y0ZOc1JrMVdSV3Q0Vkcxc1NtTXdiSFJrUkVKc1ZUQnJNbE5YZEZkU1JXeHdaREpzYkZVd2F6SlRWM2h5VGtkS1NFMVZkR3BOUlRWNVZGWmFUMVpzUm5OaVJscFNZbXMxYzFkWE5WZFRWazVJVDFkc1ZtSkZhekZYYlhNeFltMVJlbFJVU21GTmFtdDRXWHBPVG1ReVVrWlNhemxWWWxVeGNGcHNaM2RNYTA1c1YxUm9iRmRGYzNSWFZrWlNWV3hqTkdKRlJtbGlWV1J5VkVoQ1JHTlhValphTTFaM1lsZDRXRTB4VlRCa01XaHdXakprZGxveU9YZFpibFUwWkZod2FrOVVRVEZWVXpReFZGVXdNVlZFVVhoVWEyY3hUakpXZW1SR1kzZE1iVEI1VjJzMVdHUkZTbGRSVkVGNVVrZG9RbVJZVm5aTmJtaHFWa1ZhUlZOVk9XMWFhMmh1VG14V1JWZFlXVE5VYmtKRFlsUmtWVnBHYjNsWU0yc3hWbTEwTUU5RWJFcE9iRnBNWW1reFNHUkhWVEZqU0d4NlpERlJNMlJIVVRGa1dGSjNZVVprV1ZOVVdUTlJNVGcxVWxSc2FWZFdPVTlaTUVaMFltcHNVRkpYT1RGTk1HeHhZMVJKTWxFd1ZsbGhNMEoyVm1wV2RsWlhlREJYUkVKU1UwZG9NRmxxVm1GaldHeERZVzVaTkZreWRFNU5RekZPVTBoS2JtRXdXak5YYTJoUldsVTVORTVFVmt0TlZURlNXbFZPYmxOc1NucFBXRkpQVFd3NWNtUkVTbmhWTTJOM1QxVjRORlpZY0ZaYWJXOTNWVEI0U1ZsVlNUSldNREZYWXpCV1FtVlhiREZsUmpsdlYxVlNkR0ZWZEROaWJIQnhWVlJXU2xwRmFIUmxhM1JMV1ZaQ2JGb3piRUpOUm1oT1VYcEtUVlpxWjNWV2FrSndVV3RPTWxWNU1VaGhWVlY2Wkcxd01rNHhPVmRTVnpGRlZWRTlQU0o5LjFPb0pxWHRUcXg2R0U3djV2cEF5ZGFuZzlzekZ0NmxzdnB3cElmZElZRldGUXV4dWZSUEdISHRkQlVOTkFjSEdTZnM3VmhON0RzdVFhRnNWTE5HdURR"
+  },
+  "control": {
+    "v": 1,
+    "purpose": "fixture",
+    "space": "lu77GN_fwI52SdCncr-TcVeQ2GOvcfzOyhLYJyP8Gwk"
+  },
+  "proof": "eyJhbGciOiJFZERTQSIsInR5cCI6Im5vdmEtY29udHJvbCtqd3MifQ.eyJ2IjoxLCJwdXJwb3NlIjoiZml4dHVyZSIsInNwYWNlIjoibHU3N0dOX2Z3STUyU2RDbmNyLVRjVmVRMkdPdmNmek95aExZSnlQOEd3ayJ9.JLr7QUZfa_TmPWRHnGmUploMSTiFrplqtrdRTFFsVnPo2Uu6eWCk7syLEiFjK5LJPrHOrD7jJXtgqHsmvL6PAA",
+  "clientFingerprint": "vVidfbfnJdhoFwm5FxfsI2gUo1QJYrVX7WGHvkSklqo",
+  "hostFingerprint": "Rd0G-XQHvtEuDb8Zs7n6QptgzeI3bOD1KUz_ZnbuLxk"
+} as const;

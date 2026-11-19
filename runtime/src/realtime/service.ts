@@ -1,3 +1,4 @@
+import {abortable} from '../core/camera-session.js'
 import {parseMemoryRef} from '../core/memory.js'
 import type {ProactiveNotice} from './service-ports.js'
 import {TaskExecutionRejected} from '../personal-agent/task-loop.js'
@@ -176,7 +177,7 @@ export class RealtimeService {
     const notice:ProactiveNotice={event_id:event,kind:((event.startsWith('progress:')||intent.item.kind==='progress')?'task_progress':event.startsWith('observation:')?'alert':event.startsWith('suggestion:')?'suggestion':'task_result'),body,...(work?{work_id:work}:{}),priority:options.preemptiveAlert?100:options.priority??40,expires_in_ms:options.expiresAt==null?null:Math.max(0,(options.expiresAt-this.#clock.now())*1000)};
     const signal=this.#stop.signal;notice.evidence_refs=evidenceRefs;notice.valid=()=>{if(signal.aborted)return false;for(const ref of evidenceRefs){try{const [channel,seq]=parseMemoryRef(ref);if(!this.#runtime.memory?.channels.get(channel)?.items.some(item=>item.seq===seq))return false}catch{/* Durable evidence is validated by the host. */}}if(options.stillWanted&&!options.stillWanted())return false;if(work&&notice.kind==='alert'&&!this.#runtime.inFlightDelegate(work))return false;if(options.owner){const state=this.session.delegateState(options.owner.delegate_id);if(state!=='running')return false;}return options.expiresAt==null||options.expiresAt>this.#clock.now()};
     if(!admittedFeed)void route.publish(notice).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_admission_failed'));
-    if(!route.local()){void this.session.injectHostContext(intent.item).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_context_unavailable'));return}
+    if(!route.local()){void this.session.injectHostContext(intent.item,options.authorizeBeforeInject?{authorizeBeforeInject:async()=>{const guard=AbortSignal.any([this.#stop.signal,AbortSignal.timeout(5000)]);try{return await abortable(options.authorizeBeforeInject!(guard),guard)&&!guard.aborted}catch{return false}}}:{}).catch(()=>this.#onDiagnostic('[realtime-diagnostic] notification_context_unavailable'));return}
     const prior=options.stillWanted;this.queueHostItem(intent,{...options,stillWanted:()=>route.local()&&(!prior||prior())})
   }
 
@@ -188,9 +189,9 @@ export class RealtimeService {
     this.#projection.projectRuntimeEvent(event, currentConversation)
   }
 
-  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason): void {
+  onSuggestionSelected(suggestion: Suggestion, reason: WakeReason,authorization:Pick<HostItemOptions,'authorizeBeforeInject'>={}): void {
     if (this.#provider.capabilities?.protocol.conversationItems === false || this.#provider.capabilities?.protocol.clientResponses === false) return
-    this.#projection.onSuggestionSelected(suggestion, reason)
+    this.#projection.onSuggestionSelected(suggestion, reason,authorization)
   }
 
   readonly session: RealtimeSession
@@ -357,6 +358,7 @@ export class RealtimeService {
       controlledPreemptiveAlertReconnect: this.#controlledPreemptiveAlertReconnect,
       clearingConversation: () => this.#clearingConversation,
       stopped: () => this.#stop.signal.aborted,
+      stopSignal:()=>this.#stop.signal,
       providerFailed: () => this.#providerFailed,
       wake: () => this.#deliveryReady.set(),
       intakeFactEligible: (id, epoch) => this.#intake?.factEligible(id, epoch),
@@ -421,9 +423,11 @@ export class RealtimeService {
       throw new TypeError('agent controller registry does not match compiled tool descriptors')
     }
     this.#continuations = new ToolContinuations({
+      ...(options.spaceMobile?{spaceMobile:options.spaceMobile}:{}),
       ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
-      ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
       ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
+      ...(options.toolGate?{toolGate:options.toolGate}:{}),
+      ...(options.onTool?{onTool:options.onTool}:{}),
       ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
       ...(options.taskHost ? {taskHost:options.taskHost} : {}),
       session: this.session, host: this.#host, runtime: this.#runtime,
@@ -833,7 +837,18 @@ export class RealtimeService {
 
   #failUncertainDelivery(): void {
     this.#onDiagnostic('[realtime-diagnostic] uncertain_delivery_exhausted')
+    const alreadyFailed = this.#providerFailed
     this.#providerFailed = true
+    // The UI may still believe the voice session is live; tell lifecycle owners the
+    // service is stopping, exactly like #taskFailed does for loop failures.
+    if (!alreadyFailed) {
+      this.#notifyProviderEvent({
+        kind: 'provider_error',
+        session_epoch: this.session.sessionEpoch,
+        code: 'uncertain_delivery_failed',
+        recoverable: false,
+      })
+    }
     this.#host.releaseFailedDelivery()
     this.#stop.abort()
     this.#deliveryReady.set()
@@ -906,6 +921,7 @@ export class RealtimeService {
   ): Promise<boolean> {
     const requestedEpoch = options.expectedEpoch ?? this.session.sessionEpoch
     this.#telemetry?.record('provider.reconnect', {reason: options.reason, outcome: 'started'})
+    let replacementAnnounced = false
     try {
       return await this.#reconnectLock.run(async () => {
         if (this.session.sessionEpoch !== requestedEpoch) {
@@ -948,6 +964,14 @@ export class RealtimeService {
         this.#continuations.reconcileToolStateAfterReconnect(oldEpoch)
         this.#host.reopenFailedSemanticAcknowledgements()
         this.#host.reconcileSemanticAcknowledgementsAfterReconnect()
+        // Tell lifecycle owners before any queued delivery resumes, so a user
+        // whose transport just came back learns they can speak again without
+        // having to test the new session first.
+        this.#notifyProviderEvent({
+          kind: 'provider_reconnected',
+          session_epoch: this.session.sessionEpoch,
+        })
+        replacementAnnounced = true
         await this.driveContinuations()
         await this.#deliveryPass()
         this.#telemetry?.record('provider.reconnect', {
@@ -958,6 +982,17 @@ export class RealtimeService {
       })
     } catch (failure) {
       this.#telemetry?.record('provider.reconnect', {reason: options.reason, outcome: 'failed'})
+      // A failed replacement leaves no provider behind, so the transport will
+      // emit nothing else. Lifecycle owners must learn the outcome here. A failure after the
+      // replacement was announced is a delivery problem on a live session, not a dead transport.
+      if (!replacementAnnounced) {
+        this.#notifyProviderEvent({
+          kind: 'provider_error',
+          session_epoch: this.session.sessionEpoch,
+          code: 'reconnect_failed',
+          recoverable: false,
+        })
+      }
       throw failure
     }
   }
@@ -988,8 +1023,13 @@ export class RealtimeService {
         if (event.session_epoch !== this.session.sessionEpoch) continue
         received = true
         try {
+          // A provider error is transport news, not conversation state: handleEvent
+          // may spend seconds replacing the session inside its recoverable arm, so
+          // lifecycle owners are told first. Otherwise the "reconnecting" notice
+          // would arrive only after the reconnect had already finished.
+          if (event.kind === 'provider_error') this.#notifyProviderEvent(event)
           await this.handleEvent(event)
-          this.#notifyProviderEvent(event)
+          if (event.kind !== 'provider_error') this.#notifyProviderEvent(event)
         } catch (cause) {
           if (event.kind === 'response_terminal') this.#notifyProviderEvent(event)
           if (cause instanceof ItemDeliveryUncertainError) {
@@ -1113,11 +1153,23 @@ export class RealtimeService {
         `[realtime-diagnostic] provider_error code=${event.code} recoverable=${event.recoverable}`,
       )
       if (event.recoverable) {
-        await this.#reconnectProviderSession({
+        // Cleared before the reconnect so the empty final caption cannot land after
+        // "provider_reconnected" and make the desktop treat it as a fresh utterance.
+        this.#clearCaptions()
+        const replaced = await this.#reconnectProviderSession({
           reason: 'recoverable_provider_error',
           expectedEpoch: this.session.sessionEpoch,
         })
-        this.#clearCaptions()
+        // A false result means another reconnect replaced the session first, so
+        // its own completion notification may have landed before this error was
+        // reported. Re-state that the live epoch is usable, or a listener that
+        // announced the gap would wait for a recovery that already happened.
+        if (replaced === false) {
+          this.#notifyProviderEvent({
+            kind: 'provider_reconnected',
+            session_epoch: this.session.sessionEpoch,
+          })
+        }
       } else {
         this.#providerFailed = true
         this.#approvalHost.invalidateExecutorApproval('provider_failed')
@@ -1479,7 +1531,18 @@ export class RealtimeService {
       this.#onDiagnostic('[realtime-diagnostic] task_failure_from_previous_run')
       return
     }
+    const alreadyFailed = this.#providerFailed
     this.#providerFailed = true
+    // Owners were told "recovered" or "connected" earlier; without a terminal notice they would keep
+    // showing a live voice session after the service has stopped.
+    if (!alreadyFailed) {
+      this.#notifyProviderEvent({
+        kind: 'provider_error',
+        session_epoch: this.session.sessionEpoch,
+        code: 'service_task_failed',
+        recoverable: false,
+      })
+    }
     this.#approvalHost.invalidateExecutorApproval('task_failed')
     this.#host.releaseFailedDelivery()
     this.#stop.abort()

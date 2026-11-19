@@ -1,3 +1,4 @@
+import {DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
 /**
  * Transparency is fixed at window creation. Windows also disables the native
  * thick frame (and DWM shadow) on transparent windows, regardless of hasShadow.
@@ -8,7 +9,7 @@ export function createWindowsPresentationWindows({BaseWindow, WebContentsView, o
   if (platform !== 'win32') return null
 
   const {webPreferences, ...shellOptions} = options
-  shellOptions.title ??= 'Nova Personal Agent Desktop'
+  shellOptions.title ??= DESKTOP_PRODUCT_NAME
   const view = new WebContentsView({webPreferences})
   view.setBackgroundColor('#00000000')
 

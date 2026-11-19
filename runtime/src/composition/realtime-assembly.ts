@@ -1,24 +1,25 @@
+import {factoryForMemoryComposition, legacyMemoryComposition} from '../memory/factory.js'
+import {type MemoryComposition} from '../config/config.js'
+import {configuredDiscoveryConsumer, configuredMemoryConsumer, configuredMemoryRecipient, configuredMemoryConsumers} from '../memory/consumer.js'
+export {configuredMemoryConsumer, configuredMemoryRecipient, configuredTaskVerifierConsumer} from '../memory/consumer.js'
+import {deriveMemoryToolCapabilities, planMemoryToolCapabilities, useLocalLedger} from '../memory/tool-capabilities.js'
+import {readHostSpaceConfig,loadSpaceHostController} from '../space-host/config.js'
 import type {UsageContext} from '../usage/context.js'
 import {soulRoleContext} from './soul-context.js'
 import {acceptanceReadExistingOnly} from '../desktop/workbench-acceptance.js'
-import {resolveModelApiKey, resolveEmbeddingConnection} from '../config/config.js'
+import {resolveMemoryExtractionConnection, resolveEmbeddingConnection} from '../config/config.js'
 import type {ToolAcceptance,ToolCallReady} from '../realtime/bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import {admitIntakeTask} from '../personal-agent/intake-task.js'
 import type {RuntimeDispatchResult} from '../core/runtime.js'
 import type {TaskDispatchContext} from '../core/task-tools.js'
 import type {CodingTargetController} from '../personal-agent/coding-targets.js'
-import {requireSelectedCascadedLlmConfig} from '../config/cascaded-realtime-config.js'
-import {requireIntegratedRealtime} from '../config/config.js'
 import type {RealtimeProviderEvent} from '../realtime/protocol.js'
 import type {KnowledgeEvidenceLedger} from '../knowledge/service.js'
 import {UnifiedRetrieval} from '../memory/retrieval.js'
 import {DashScopeEmbeddingProvider} from '../knowledge/embeddings.js'
 import {createHash as embeddingHash} from 'node:crypto'
 import {SubstrateMemoryResource} from '../memory-substrate/resource.js'
-import {HubContextBridge} from '../hub/context-bridge.js'
-import {HubScheduleCoordinator} from '../hub/schedule-coordinator.js'
-import {loadHubCredentials,LifeSyncTransport} from '../hub/life-sync-transport.js'
 import {MemoryLedgerClient} from '../memory-ledger/store-client.js'
 import {homedir as memoryHome} from 'node:os'
 import {resolve as memoryPath} from 'node:path'
@@ -169,20 +170,6 @@ function turnKey(sessionEpoch: number, userInputRevision: number): string {
   return `${sessionEpoch}:${userInputRevision}`
 }
 
-export function configuredMemoryConsumer(settings: AssemblyOptions['settings'], mode: 'text'|'voice'): string|undefined {
-  return configuredMemoryRecipient(settings,mode)?.consumer
-}
-export function configuredMemoryRecipient(settings: AssemblyOptions['settings'], mode:'text'|'voice'):{consumer:string;provider:string}|undefined {
-  try {
-    const selected = mode === 'text' || settings.pipeline_mode === 'cascaded' ? requireSelectedCascadedLlmConfig(settings) : undefined
-    const voice = selected === undefined ? requireIntegratedRealtime(settings) : undefined
-    const endpoint=selected?.config.baseUrl ?? voice!.url,model=selected?.config.model ?? voice!.model
-    return {consumer:embeddingHash('sha256').update(JSON.stringify({provider:selected?.provider ?? settings.integrated_provider,endpoint,model})).digest('hex'),provider:endpoint+'|'+model}
-  } catch { return undefined }
-}
-export function configuredTaskVerifierConsumer(settings:AssemblyOptions['settings']):string {
-  return embeddingHash('sha256').update(JSON.stringify({provider:'openai-compatible',endpoint:settings.model_base_url,model:settings.support_model})).digest('hex')
-}
 
 async function responseAdaptationFor(
   resource: PersonalMemoryResource | undefined,
@@ -215,9 +202,13 @@ async function responseAdaptationFor(
 }
 
 export interface RealtimeAssemblyOptions {
+  readonly spaceHostConfigPath?:string
+  /** Environment the Space owner credential projection must read; defaults to the Host process environment. */
+  readonly spaceHostEnvironment?:NodeJS.ProcessEnv
   readonly usageContext?: UsageContext
   readonly conversationContext?:()=>Promise<string|null>
   readonly suppressMemoryAdaptation?:boolean
+  readonly suppressConversationMemoryCapture?:boolean
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
   readonly validateScopedContext?:()=>Promise<boolean>
@@ -230,7 +221,8 @@ export interface RealtimeAssemblyOptions {
   readonly taskConversationGeneration?: number
   readonly taskConversationId?: string
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
-  readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
+  readonly toolGate?: (name:string)=>boolean
+  readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
 
   readonly onUsage?: UsageReporter
 
@@ -269,6 +261,7 @@ export interface RealtimeAssemblyOptions {
   /** Required only when the resolved runtime has a coding role. */
   readonly codingAgentControllerFactory?: CodingAgentControllerFactory
   /** Personal-memory allocation occurs only after the final tool and executor validation. */
+  readonly memoryComposition?: MemoryComposition
   readonly createPersonalMemory?: () => PersonalMemoryResource
 }
 
@@ -288,6 +281,7 @@ type CleanupResult =
  * lower-level classes expose individually idempotent methods.
  */
 export class RealtimeAssembly {
+  readonly memoryConsumerFingerprint: string | undefined
   readonly personalAgent: PersonalAgentHost
   readonly retrieval:UnifiedRetrieval
   get personalMemory(): PersonalMemoryResource|undefined { return this.#personalMemory }
@@ -304,7 +298,11 @@ export class RealtimeAssembly {
   readonly tools: CompiledTools
 
   readonly #sharedPersonal: boolean
+  #spaceHostPrepared=false
+  readonly #spaceHostConfigPath:string|undefined
+  readonly #spaceHostEnvironment:NodeJS.ProcessEnv|undefined
   readonly #unsubscribePersonalEvents: () => void
+  readonly #unbindPersonalModelContext: () => void
   readonly #onDiagnostic: (line: string) => void
   readonly #projectAdapter: ProjectExecutorAdapter | undefined
   readonly #codexResource: CodingExecutorResource | undefined
@@ -314,6 +312,7 @@ export class RealtimeAssembly {
   readonly #personalMemoryTurnTracker: PersonalMemoryTurnTracker
   readonly #idFactory: () => string
   readonly #unbindSuggestionSelected: (() => void) | undefined
+  readonly #onPersonalMemoryOpened: (resource: PersonalMemoryResource | undefined) => void
   readonly #createPersonalMemory: (() => PersonalMemoryResource) | undefined
   #knowledgeBinding:Promise<void>|undefined
   #bindKnowledge:(()=>Promise<void>)|undefined
@@ -362,12 +361,18 @@ export class RealtimeAssembly {
   readonly taskConversationGeneration?: number
   readonly taskConversationId?: string
   readonly sharedPersonal?: {host:PersonalAgentHost;memory:PersonalMemoryResource|undefined}
+  readonly toolGate?: (name:string)=>boolean
+  readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
+    readonly onPersonalMemoryOpened: (resource: PersonalMemoryResource | undefined) => void
     readonly personalMemory?: PersonalMemoryResource
+    readonly spaceHostConfigPath?:string
+    readonly spaceHostEnvironment?:NodeJS.ProcessEnv
     readonly createPersonalMemory?: () => PersonalMemoryResource
     readonly memoryConsumerFingerprint?:string
     readonly personalMemoryTurnTracker: PersonalMemoryTurnTracker
   }) {
     const lifecycleProjectAdapter = input.sharedPersonal ? undefined : input.projectAdapter
+    this.memoryConsumerFingerprint = input.memoryConsumerFingerprint
     this.core = input.core
     this.capabilityStatus = capabilityStatus(input.core.capabilities, input.toolCount ?? input.core.tools.schemas.length)
     this.provider = input.provider
@@ -385,31 +390,28 @@ export class RealtimeAssembly {
     this.#idFactory = input.idFactory
     this.#unbindSuggestionSelected = input.unbindSuggestionSelected
     this.#sharedPersonal = input.sharedPersonal !== undefined
+    this.#spaceHostConfigPath=input.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
+    this.#spaceHostEnvironment=input.spaceHostEnvironment
+    const spaceConfig=this.#spaceHostConfigPath?readHostSpaceConfig(memoryPath(this.#spaceHostConfigPath)):undefined
+    if(spaceConfig?.data_mode==='existing'&&!input.sharedPersonal&&spaceConfig.personal_path!==input.core.personalAgentConfig?.path)throw Error('space_existing_data_mismatch')
     this.personalAgent = input.sharedPersonal?.host ?? new PersonalAgentHost({
-      ...(input.core.personalAgentConfig?.path?{readingCopiesDirectory:dirname(memoryPath(input.core.personalAgentConfig.path))}:{}),
+      ...((spaceConfig?.personal_path??input.core.personalAgentConfig?.path)?{readingCopiesDirectory:dirname(memoryPath(spaceConfig?.personal_path??input.core.personalAgentConfig!.path))}:{}),
       onDiagnostic:code=>this.#diagnose(code),
       newsLanguage: input.core.personalAgentConfig?.newsLanguage ?? 'en',
       profileParticipantMessages: input.core.personalAgentConfig?.profileParticipantMessages === true,
-      path: input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
-      userScope: input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
+      path: spaceConfig?.personal_path ?? input.core.personalAgentConfig?.path ?? join(mkdtempSync(join(realpathSync(tmpdir()), 'nova-personal-')), 'personal.json'),
+      userScope: (spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space) ?? input.core.personalAgentConfig?.userScope ?? 'local', memory:()=>this.#personalMemory,
       explicitMemoryConsumer:()=>input.memoryConsumerFingerprint,
       pool: input.core.runtime.core.suggestions,
       evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
-      onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
+      onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}},input.core.runtime.clock.now()+3)},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
       ...input.core.personalAgentConfig?.models,
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),
     })
+    this.#unbindPersonalModelContext=input.core.runtime.bindModelContextAuthorizer((view,slot,signal)=>this.personalAgent.authorizeModelContext(view,slot==='fast'?input.memoryConsumerFingerprint??null:configuredDiscoveryConsumer(input.core.settings)??null,signal))
     if (!this.#sharedPersonal) this.personalAgent.setRetrieval(input.retrieval)
-    if(!this.#sharedPersonal&&process.env.NOVA_CONTEXT_HUB_CREDENTIALS){
-      const path=memoryPath(process.env.NOVA_CONTEXT_HUB_CREDENTIALS)
-      this.personalAgent.schedules.coordinator=new HubScheduleCoordinator(this.personalAgent.schedules,async(route,body)=>{
-        const credentials=await loadHubCredentials(path)
-        if(!credentials)throw Error('hub_credentials_required')
-        return new LifeSyncTransport(credentials).contextRequest(route,body)
-      })
-    }
     this.#unsubscribePersonalEvents=input.core.runtime.observe((event,current)=>{
       if(current===false)return
       if(event.kind==='handoff'&&input.core.runtime.claimedHandoff(event.seq)){
@@ -427,6 +429,7 @@ export class RealtimeAssembly {
     })
     this.#personalMemory = input.personalMemory
     if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) {this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) });this.#personalMemory.setOnSourceChange(change=>this.personalAgent.sourceChanged(change))}
+    this.#onPersonalMemoryOpened = input.onPersonalMemoryOpened
     this.#createPersonalMemory = input.createPersonalMemory
     this.#personalMemoryTurnTracker = input.personalMemoryTurnTracker
     this.#unsubscribeProjectView = lifecycleProjectAdapter === undefined
@@ -558,6 +561,7 @@ export class RealtimeAssembly {
         this.#acceptProjectContext(context)
       }
       await this.core.start()
+      if(!this.#sharedPersonal&&!this.#spaceHostPrepared&&this.#spaceHostConfigPath){this.personalAgent.setSpaceHost(await loadSpaceHostController(this.personalAgent,memoryPath(this.#spaceHostConfigPath),this.#spaceHostEnvironment));this.#spaceHostPrepared=true}
       if (!this.#sharedPersonal) await this.personalAgent.open({deferBackground:true})
     } catch (error) {
       if (this.#state === 'starting') {
@@ -619,6 +623,7 @@ export class RealtimeAssembly {
     }
 
     this.#unsubscribePersonalEvents()
+    this.#unbindPersonalModelContext()
     if (!this.#sharedPersonal) await this.personalAgent.close()
     this.#unbindSuggestionSelected?.()
 
@@ -788,13 +793,13 @@ export class RealtimeAssembly {
   }
 
   async #openPersonalMemory(): Promise<void> {
-    if (this.#sharedPersonal) return
+    if (this.#sharedPersonal) {this.#onPersonalMemoryOpened(this.#personalMemory);return}
     try {
       if (this.#personalMemory === undefined && this.#createPersonalMemory !== undefined) {
         this.#personalMemory = this.#createPersonalMemory()
         if (!this.#sharedPersonal && this.#personalMemory instanceof SubstrateMemoryResource) {this.#personalMemory.setOnChange(() => { void this.personalAgent.sourceChanged().catch(() => { /* projection failure is retried on refresh */ }) });this.#personalMemory.setOnSourceChange(change=>this.personalAgent.sourceChanged(change))}
       }
-      if (this.#personalMemory === undefined) return
+      if (this.#personalMemory === undefined) {this.#onPersonalMemoryOpened(undefined);return}
       // Cold SDK/Worker initialization needs the full memory RPC deadline, not shutdown grace.
       const opened = await this.#settleWithinGrace(
         this.#personalMemory.open({deferBackground:true}),
@@ -803,6 +808,7 @@ export class RealtimeAssembly {
       )
       if (opened.kind === 'rejected') throw opened.error
       if (opened.kind === 'abandoned') throw new AssemblyError('personal memory open was abandoned')
+      this.#onPersonalMemoryOpened(this.#personalMemory)
       if(this.core.knowledge){
         const memory=this.#personalMemory
         if(memory?.recordEvidence&&memory.readEvidence&&memory.forgetSource){
@@ -984,7 +990,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     throw new AssemblyError('coding agent controller factory requires a coding executor')
   }
   const personalMemorySessionId = randomUUID()
-  const retrieval=new UnifiedRetrieval({...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
+  const retrieval=new UnifiedRetrieval({...(options.telemetry?{telemetry:options.telemetry}:{}),...(options.usageContext?{usageContext:options.usageContext}:{}),memory:()=>personalMemoryHolder.current,...(core.knowledge?{rawRecallKind:'knowledge' as const,rawPurgeEvidence:(ids:readonly string[])=>core.knowledge!.service.purgeEvidence(ids),rawRecall:async(query:string,limit:number,signal:AbortSignal)=>{
     if(!personalMemoryHolder.current?.readEvidence)return []
     const result=await core.knowledge!.service.recall(query,Math.min(5,limit),signal)
     return result.flatMap(hit=>'evidence_id' in hit&&typeof hit.evidence_id==='string'?[{evidence_id:hit.evidence_id,score:hit.score}]:[])
@@ -1056,7 +1062,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const notificationInstance=randomUUID()
   const service = new RealtimeService({
     proactiveRouting:{local:()=>assemblyHolder.current?.personalAgent.localNotifications??true,publish:async notice=>{const host=assemblyHolder.current?.personalAgent;if(!host)return;const now=Date.now();const task=notice.work_id?host.tasks.list().find(t=>t.work_ids.includes(notice.work_id!)):undefined;await host.publishNotification({guard:{requires_runtime:true,evidence_refs:(notice.evidence_refs??[]).filter(ref=>{try{parseMemoryRef(ref);return false}catch{return true}}),...(task?{task_id:task.id,goal_revision:task.goal_revision,work_id:notice.work_id}:{})},event_key:notificationInstance+':'+notice.event_id,revision:'1',occurrence:'initial',kind:notice.kind,title:notice.kind==='task_progress'?'任务进展':notice.kind==='task_result'?'任务结果':notice.kind==='alert'?'监控提醒':'Nova 提醒',body:notice.body,source:options.taskConversationId?{type:'conversation_runtime',id:options.taskConversationId,version:String(options.taskConversationGeneration??0)}:{type:'runtime',id:notificationInstance+':'+notice.event_id},created_at:now,expires_at:now+(notice.expires_in_ms??(notice.kind==='task_progress'?3600000:86400000)),not_before:0,priority:notice.priority,coalesce_key:notice.work_id?notificationInstance+':'+notice.work_id:null,feedback:[]},notice.valid)}},
-    ...((options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined) ? {} : {onUserTranscriptAccepted: (turn: {
+    ...((options.suppressConversationMemoryCapture || (options.createPersonalMemory === undefined && options.sharedPersonal?.memory === undefined)) ? {} : {onUserTranscriptAccepted: (turn: {
       readonly confirmed?: boolean; readonly text: string; readonly originRef: string; readonly sessionEpoch: number
       readonly userInputRevision: number
     }) => {
@@ -1066,6 +1072,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       )
       const resource = personalMemoryHolder.current
       if (resource?.remember === undefined) return
+      if(resource instanceof SubstrateMemoryResource&&(resource.options.personalMemoryEnabled===false||resource.options.inputConsent===false))return
       const [, sequence] = parseMemoryRef(turn.originRef)
       return resource.remember({
         sourceId: `${personalMemorySessionId}:${turn.originRef}`,
@@ -1079,7 +1086,8 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
     }}),
     onIntakePrepared:(intake,proposal)=>{taskIntakes.clear();taskIntakes.set(proposal.proposal_id,structuredClone(intake))},
     ...(options.sharedPersonal && options.taskConversationId ? {taskHost:{...(options.taskSourceTodo?{sourceTodo:options.taskSourceTodo}:{}),wake:taskId=>options.sharedPersonal!.host.wakeTask(taskId),cancel:(requestId,fence)=>options.sharedPersonal!.host.cancelTask(requestId,fence,{kind:'nova'}),...(options.taskFrontendCurrent?{isCurrent:options.taskFrontendCurrent}:{}),tasks:options.sharedPersonal.host.tasks,conversation_id:options.taskConversationId,...(options.taskConversationGeneration===undefined?{}:{conversation_generation:options.taskConversationGeneration})}} : {}),
-    ...(options.requestPlanMode?{requestPlanMode:options.requestPlanMode}:{}),
+    ...(options.toolGate?{toolGate:options.toolGate}:{}),
+    ...(options.onTool?{onTool:options.onTool}:{}),
     provider: providerSession,
     runtime: core.runtime,
     tools: core.tools,
@@ -1150,6 +1158,7 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
       },
     }}),
     idFactory,
+    spaceMobile:{invoke:(args,context)=>{const host=options.sharedPersonal?.host??assemblyHolder.current?.personalAgent;if(!host)throw Error('personal_store_not_ready');return host.invokeSpaceMobile(args,context)}},
     ...(options.scheduleHost?{scheduleHost:options.scheduleHost}:{}),
     ...(options.scopedTool?{scopedTool:options.scopedTool}:{}),
     ...(options.validateScopedContext?{validateScopedContext:options.validateScopedContext}:{}),
@@ -1200,14 +1209,40 @@ export function buildRealtimeAssembly(options: RealtimeAssemblyOptions): Realtim
   const unbindSuggestionSelected = core.runtime.bindSuggestionSelected(
     (suggestion: Suggestion, reason: WakeReason) => {
       try { options.onExecutorSuggestion?.(suggestion) } catch { /* observability cannot own speech */ }
-      if (typeof suggestion.content.personal_feed_id === 'string') {
-        void assemblyHolder.current?.personalAgent.canDeliver(suggestion.content.personal_feed_id).then(valid=>{if(valid&&!assemblyHolder.current?.personalAgent.routePersonalSuggestion(suggestion,reason))service.onSuggestionSelected(suggestion,reason)}).catch(()=>{ /* optional host projection failure */ })
+      const personalFeedId=suggestion.content.personal_feed_id
+      if (typeof personalFeedId === 'string') {
+        const host=assemblyHolder.current?.personalAgent
+        if(!host)return
+        const dependencies=host.feedContextDependencies(personalFeedId)
+        void host.canDeliver(personalFeedId).then(async valid=>{
+          if(!valid||assemblyHolder.current?.personalAgent!==host||host.routePersonalSuggestion(suggestion,reason))return
+          const receiver=assemblyHolder.current.memoryConsumerFingerprint??null
+          if(!await host.productFeedAuthorized(personalFeedId,receiver)||!await host.contextDependenciesAuthorized(dependencies,receiver))return
+          service.onSuggestionSelected(suggestion,reason,{authorizeBeforeInject:async signal=>{
+            signal.throwIfAborted()
+            if(assemblyHolder.current?.personalAgent!==host)return false
+            const currentReceiver=assemblyHolder.current.memoryConsumerFingerprint??null
+            const allowed=await host.productFeedAuthorized(personalFeedId,currentReceiver)&&await host.contextDependenciesAuthorized(dependencies,currentReceiver)
+            signal.throwIfAborted();return allowed&&assemblyHolder.current?.personalAgent===host&&currentReceiver===(assemblyHolder.current.memoryConsumerFingerprint??null)
+          }})
+        }).catch(()=>{ /* source/destination changed or delivery was cancelled */ })
       } else service.onSuggestionSelected(suggestion, reason)
     },
   )
-  const personalMemory = options.sharedPersonal?.memory ?? options.createPersonalMemory?.()
+  const personalMemory = options.sharedPersonal ? options.sharedPersonal.memory : options.createPersonalMemory?.()
   personalMemoryHolder.current = personalMemory
+  const reportedMemoryMismatches = new Set<string>()
   return assignAssembly(new RealtimeAssembly({
+    onPersonalMemoryOpened: resource => {
+      const caps = deriveMemoryToolCapabilities(resource, core.memoryTools.engine)
+      for (const tool of ['recall', 'evidence', 'lookup', 'remember'] as const) {
+        const name = `memory__${tool}`
+        if (caps[tool] || reportedMemoryMismatches.has(name) || !providerSchemas.some(schema => (schema.function as {name?: string} | undefined)?.name === name)) continue
+        reportedMemoryMismatches.add(name)
+        try { options.telemetry?.record('memory.capability.mismatch', {tool: name, engine: caps.engine}) } catch { /* telemetry cannot own resource readiness */ }
+      }
+    },
+    ...(options.spaceHostConfigPath?{spaceHostConfigPath:options.spaceHostConfigPath}:{}),
     toolCount: count,
     core,
     provider,
@@ -1442,6 +1477,14 @@ export function filterDisabledCoding<T extends AssemblyOptions & Pick<RealtimeAs
 /** Local extraction and Profile share one explicitly configured model transport. */
 export const createLocalMemoryGateway=(options:OpenAIGatewayOptions)=>new OpenAIModelGateway({...options,...(options.baseUrl==='https://dashscope.aliyuncs.com/compatible-mode/v1'?{thinkingControl:'qwen' as const}:{})})
 
+/** Resolve the same Space override before tool compilation and resource composition. */
+export function plannedMemoryTools(options: Pick<AssemblyOptions, 'settings' | 'knowledge'> & Pick<RealtimeAssemblyOptions, 'createPersonalMemory' | 'spaceHostConfigPath' | 'memoryComposition'>) {
+  const spaceConfigPath = options.spaceHostConfigPath ?? process.env.NOVA_SPACE_HOST_CONFIG
+  const spaceConfig = spaceConfigPath ? readHostSpaceConfig(memoryPath(spaceConfigPath)) : undefined
+  return planMemoryToolCapabilities({settings: options.settings, knowledge: options.knowledge !== undefined,
+    createPersonalMemory: options.createPersonalMemory, ...(options.memoryComposition ? {memoryComposition: options.memoryComposition} : {}), ...(spaceConfig ? {spaceConfig} : {})})
+}
+
 /** Shared production wiring; provider policy remains at each pipeline boundary. */
 export function composeRealtime(
   core: Assembly,
@@ -1449,56 +1492,56 @@ export function composeRealtime(
   options: Omit<RealtimeAssemblyOptions, 'core' | 'provider' | 'idFactory'> & {readonly settings: AssemblyOptions['settings']; readonly idFactory: () => string},
   providerTuning: Required<Pick<RealtimeAssemblyOptions, 'controlledPreemptiveAlertReconnect' | 'preemptiveAlertHistoryRecovery' | 'preemptiveAlertHistoryPairs'>>,
 ): RealtimeAssembly {
-  const local = (options.createPersonalMemory as {localMemoryConfig?:{path:string;userId:string;extractionModel:string;extraction?:{baseUrl:string;apiKey:string};embedding:{baseUrl:string;apiKey:string;model:string}}} | undefined)?.localMemoryConfig
+  const spaceConfigPath=options.spaceHostConfigPath??process.env.NOVA_SPACE_HOST_CONFIG
+  const spaceConfig=spaceConfigPath?readHostSpaceConfig(memoryPath(spaceConfigPath)):undefined
+  const composition = options.memoryComposition ?? legacyMemoryComposition(options.createPersonalMemory)
+  const local = composition?.kind === 'ledger' ? composition.local : undefined
   let sharedClient: MemoryLedgerClient | undefined
-  const getClient = () => sharedClient ??= new MemoryLedgerClient(memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
+  const getClient = () => sharedClient ??= new MemoryLedgerClient(spaceConfig&&spaceConfig.data_mode!=='existing'?spaceConfig.personal_path+'.memory.sqlite':memoryPath(options.settings.workspace_graph_path.replace(/^~(?=\/)/u, memoryHome())))
   const sharedEmbedding=core.knowledge?.embedding??(local?new DashScopeEmbeddingProvider({...(options.onUsage?{onUsage:options.onUsage}:{}),baseUrl:local.embedding.baseUrl,apiKey:local.embedding.apiKey,model:local.embedding.model}):undefined)
-  const extraction=local?.extraction??{baseUrl:options.settings.model_base_url,apiKey:resolveModelApiKey(options.settings)??''}
+  const extraction=local?.extraction??(()=>{const connection=resolveMemoryExtractionConnection(options.settings);return {baseUrl:connection.baseUrl,apiKey:connection.apiKey}})()
   const memoryGateway=local?(extraction.apiKey.trim()?createLocalMemoryGateway({...(options.onUsage?{onUsage:options.onUsage}:{}),...extraction,clock:new RealClock()}):unconfiguredModelGateway):core.gateway
-  const useLocalLedger=local!==undefined||(core.knowledge!==undefined&&options.createPersonalMemory===undefined)
-  const createPersonalMemory = useLocalLedger ? () => {
-    const memory = new SubstrateMemoryResource({client:getClient(),userId:local?.userId??options.settings.memory_user_id,
+  const isolatedSpace=spaceConfig!==undefined&&spaceConfig.data_mode!=='existing'
+  const localLedger = useLocalLedger({knowledge: core.knowledge !== undefined, createPersonalMemory: options.createPersonalMemory, ...(options.memoryComposition ? {memoryComposition: options.memoryComposition} : {}), ...(spaceConfig ? {spaceConfig} : {})})
+  const createPersonalMemory = localLedger ? () => {
+    const memory = new SubstrateMemoryResource({
+      ...(composition?.kind==='ledger'?{engine:{recall:composition.engine,styles:composition.extractors.includes('voicemem'),consumer:options.memoryConsumerFingerprint??configuredMemoryConsumer(options.settings,options.memoryReadMode??'voice')??'',config:{path:composition.local.path+'.engines',embedding:composition.local.embedding,extraction:composition.local.extraction,extractionModel:composition.local.extractionModel}}}:{}),
+      client:getClient(),userId:(spaceConfig?.data_mode==='existing'?undefined:spaceConfig?.space)??local?.userId??options.settings.memory_user_id,
       ...(sharedEmbedding?{embedding:sharedEmbedding,embeddingFingerprint:embeddingHash('sha256').update((core.knowledge?resolveEmbeddingConnection(options.settings).baseUrl:local!.embedding.baseUrl)+'|'+sharedEmbedding.id).digest('hex')} : {}),
       sourceProcessingLlm:extraction,
       extractionFingerprint:embeddingHash('sha256').update(extraction.baseUrl+'|'+(local?.extractionModel??options.settings.fast_model)).digest('hex'),
       personalMemoryEnabled:local!==undefined,inputConsent:local!==undefined,includeWorkspaceGraph:false,profileParticipantMessages:options.settings.profile_participant_messages,
-      conversationProviders: [...new Set([...(['text','voice'] as const).map(mode=>configuredMemoryConsumer(options.settings,mode)).filter((value): value is string=>value!==undefined),configuredTaskVerifierConsumer(options.settings)])],
+      conversationProviders: configuredMemoryConsumers(options.settings),
       conversationRecipients:Object.fromEntries((['text','voice'] as const).flatMap(mode=>{const recipient=configuredMemoryRecipient(options.settings,mode);return recipient?[[recipient.consumer,recipient.provider]]:[]})),
       consolidation:{enabled:options.settings.memory_consolidation_enabled,timezone:options.settings.memory_consolidation_timezone,hour:options.settings.memory_consolidation_hour},
       gateway:memoryGateway,model:local?.extractionModel??options.settings.fast_model,closeClient:true,onClose:()=>{sharedClient=undefined},
-      ...(local?{migrate:async()=>{await getClient().memory('migrate_legacy',{path:local.path,user_id:local.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
+      ...(composition?.kind === 'ledger' && composition.migrateLegacy && !isolatedSpace ? {migrate:async()=>{await getClient().memory('migrate_legacy',{path:composition.migrateLegacy!.path,user_id:composition.migrateLegacy!.userId,entry_prefix:memory.prefix,source_prefix:memory.prefix})}}:{}),
     })
-    if(local){
-      const credentialsPath=process.env.NOVA_CONTEXT_HUB_CREDENTIALS
-      if(credentialsPath){
-        // Explicit local opt-in; neither Feishu secrets nor model keys enter sync.
-        const transport=async(path:string,body?:unknown)=>{
-          const credentials=await loadHubCredentials(memoryPath(credentialsPath))
-          if(!credentials)throw Error('hub_credentials_required')
-          return new LifeSyncTransport(credentials).contextRequest(path,body)
-        }
-        memory.setSharedContext(new HubContextBridge(memory,memoryPath(local.path)+'.shared-context.json',transport))
-      }
+    if(local||isolatedSpace){
       return memory
     }
     // Knowledge-only mode owns A originals, without enabling personal capture or B projections.
     let opened=false
     return {open:async()=>{await memory.open();opened=true},close:async()=>{opened=false;await memory.close()},
       recall:(_query,queryOptions)=>opened?Promise.resolve({source:'personal',state:'empty',scope:queryOptions?.scope??'any',hits:[],degraded:false}):Promise.reject(Error('memory_unavailable')),
+      requiresConversationConsumer:true,canReadConversationEvidence:(id,consumer)=>memory.canReadConversationEvidence(id,consumer),recallAuthorityRevision:()=>memory.recallAuthorityRevision(),
       processingStamp:ids=>memory.processingStamp(ids),canProcessEvidence:(...args)=>memory.canProcessEvidence(...args),processingGrant:(...args)=>memory.processingGrant(...args),setProcessingConsent:(...args)=>memory.setProcessingConsent(...args),feishuProcessingConsent:(...args)=>memory.feishuProcessingConsent(...args),recordEvidence:input=>memory.recordEvidence(input),recordEvidenceBatch:inputs=>memory.recordEvidenceBatch(inputs),readEvidence:id=>memory.readEvidence(id),forgetSource:id=>memory.forgetSource(id),...(memory.forgetSources?{forgetSources:(refs:readonly string[])=>memory.forgetSources(refs)}:{}),
     } satisfies PersonalMemoryResource
-  } : options.createPersonalMemory
+  } : options.createPersonalMemory ?? (composition ? factoryForMemoryComposition(composition, options.settings) : undefined)
   const memoryConsumerFingerprint = options.memoryConsumerFingerprint ?? configuredMemoryConsumer(options.settings,options.memoryReadMode ?? 'voice')
   return buildRealtimeAssembly({
     ...(memoryConsumerFingerprint ? {memoryConsumerFingerprint} : {}),
     core,
     provider,
     ...(options.memoryReadMode === undefined ? {} : {memoryReadMode: options.memoryReadMode}),
+    ...(options.sharedPersonal===undefined?{}:{sharedPersonal:options.sharedPersonal}),
     ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
     ...(options.intake === undefined ? {} : {intake: options.intake}),
     ...(options.onExecutorSuggestion === undefined ? {} : {onExecutorSuggestion: options.onExecutorSuggestion}),
     idFactory: options.idFactory,
     ...providerTuning,
+    ...(spaceConfigPath?{spaceHostConfigPath:spaceConfigPath}:{}),
+    ...(options.spaceHostEnvironment===undefined?{}:{spaceHostEnvironment:options.spaceHostEnvironment}),
     ...(createPersonalMemory === undefined ? {} : {createPersonalMemory}),
     ...(options.providerToolView === undefined
       ? {}

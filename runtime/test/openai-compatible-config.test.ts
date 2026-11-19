@@ -11,7 +11,7 @@ test('generic LLM routes its endpoint and dedicated credential without vendor fa
   assert.equal(selected.config.baseUrl,'https://relay.example/api/v1')
   assert.equal(selected.config.apiKey,'llm-only')
   assert.equal(selected.config.model,'synthetic-model')
-  assert.throws(()=>requireSelectedCascadedLlmConfig(loadSettings({...environment,OPENAI_COMPATIBLE_API_KEY:'',OPENAI_API_KEY:'wrong',MODEL_API_KEY:'wrong'})),/OPENAI_COMPATIBLE_API_KEY/)
+  assert.throws(()=>requireSelectedCascadedLlmConfig(loadSettings({...environment,OPENAI_COMPATIBLE_API_KEY:'',OPENAI_API_KEY:'wrong'})),/OPENAI_COMPATIBLE_API_KEY/)
   assert.throws(()=>requireSelectedCascadedLlmConfig(loadSettings({...environment,CASCADE_LLM_MODEL:''})),/CASCADE_LLM_MODEL/)
 })
 

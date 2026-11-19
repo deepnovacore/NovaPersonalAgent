@@ -87,6 +87,78 @@ const delegatedTools = <Map<String, dynamic>>[
   },
 ];
 void main() {
+  for (final hold in [false, true]) {
+    test(
+      'a quiet connection ${hold ? 'stays open while held' : 'closes as idle'}',
+      () async {
+        final wire = Wire();
+        await wire.open();
+        final provider = QwenRealtimeVoiceProvider(
+          endpoint: wire.endpoint,
+          model: 'test-model',
+          apiKey: 'test-key',
+          voice: 'test',
+          idleTimeout: const Duration(milliseconds: 200),
+        )..holdOpen = () => hold;
+        final errors = <String?>[];
+        final subscription = provider.events.listen((event) {
+          if (event.kind == VoiceEventKind.error) errors.add(event.code);
+        });
+        addTearDown(() async {
+          await provider.close();
+          await subscription.cancel();
+          await wire.close();
+        });
+        await provider.connect(epoch: 1, instructions: 'Local idle check');
+        // Muted: nothing is sent and the server says nothing.
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+        if (hold) {
+          expect(errors, isEmpty);
+          expect(provider.closed, isFalse);
+          // Released: the next quiet period closes it as idle.
+          provider.holdOpen = () => false;
+          await Future<void>.delayed(const Duration(milliseconds: 500));
+        }
+        expect(errors, contains('idle_timeout'));
+        expect(provider.closed, isTrue);
+      },
+    );
+  }
+
+  test(
+    'outgoing microphone frames keep a quiet realtime connection alive',
+    () async {
+      final wire = Wire();
+      await wire.open();
+      final provider = QwenRealtimeVoiceProvider(
+        endpoint: wire.endpoint,
+        model: 'test-model',
+        apiKey: 'test-key',
+        voice: 'test',
+        idleTimeout: const Duration(milliseconds: 300),
+      );
+      final errors = <String?>[];
+      final subscription = provider.events.listen((event) {
+        if (event.kind == VoiceEventKind.error) errors.add(event.code);
+      });
+      addTearDown(() async {
+        await provider.close();
+        await subscription.cancel();
+        await wire.close();
+      });
+      await provider.connect(epoch: 1, instructions: 'Local liveness check');
+      for (var i = 0; i < 8; i++) {
+        await provider.sendAudio(Uint8List(640));
+        await Future<void>.delayed(const Duration(milliseconds: 75));
+      }
+      expect(errors, isEmpty);
+      expect(provider.closed, isFalse);
+      await wire.socket!.close();
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(errors, contains('disconnected'));
+    },
+  );
+
   test('Qwen preserves invalid speech turn reason and item identity', () async {
     final provider = QwenRealtimeVoiceProvider(
       endpoint: 'ws://127.0.0.1/live',

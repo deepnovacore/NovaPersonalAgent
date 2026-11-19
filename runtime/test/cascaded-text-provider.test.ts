@@ -6,13 +6,15 @@ import {cascadedProviderRegistries} from '../src/composition/cascaded-realtime-a
 import {buildCascadedTextProvider} from '../src/cascaded-text-provider.js'
 import type {CascadedLlmInput} from '../src/realtime/cascaded/llm.js'
 
-test('production text factory only validates and constructs selected LLM with no speech credentials',async()=>{
+test('production text factory only validates and constructs selected LLM with no speech credentials',async t=>{
  const settings={...loadSettings({DASHSCOPE_API_KEY:'test',CASCADE_LLM_PROVIDER:'qwen',PROMPT_LANGUAGE:'en'},true),doubao_tts_endpoint:'invalid',doubao_asr_endpoint:'invalid',volcengine_vad_threshold:-1}
+ const timeouts=t.mock.method(AbortSignal,'timeout')
+ const telemetry:{kind:string;payload:Readonly<Record<string,unknown>>}[]=[]
  let sequence=0,opened=0,recalled=0,consumed=0,metered=0
  let adaptation:string|null|undefined
  const received:CascadedLlmInput[][]=[]
  const forbidden=()=>{throw new Error('audio initialized')}
- const provider=buildCascadedTextProvider({settings,clock:new VirtualClock(),idFactory:()=>`text-${++sequence}`,onUsage:()=>{metered++},prerecall:query=>{assert.equal(query,'question');recalled++;return Promise.resolve(()=>{consumed++;return Promise.resolve('verified memory context')})}},{
+ const provider=buildCascadedTextProvider({settings,prerecallPolicy:{finalWaitMs:123},prerecallMeta:{embedding:'remote'},telemetry:{record:(kind,payload)=>telemetry.push({kind,payload}),close(){ /* fixture owns no resources */ }},clock:new VirtualClock(),idFactory:()=>`text-${++sequence}`,onUsage:()=>{metered++},prerecall:query=>{assert.equal(query,'question');recalled++;return Promise.resolve(()=>{consumed++;return Promise.resolve('verified memory context')})}},{
   ...cascadedProviderRegistries,
   endpointing:{auto:forbidden},asr:{'self-hosted':()=>{throw Error('unexpected self-hosted ASR')},gemini:()=>{throw new Error('unexpected Gemini speech factory')},volcengine:forbidden},tts:{'self-hosted':()=>{throw Error('unexpected self-hosted TTS')},gemini:()=>{throw new Error('unexpected Gemini speech factory')},volcengine:forbidden},
   llm:{...cascadedProviderRegistries.llm,qwen:factoryInput=>({open:()=>{opened++;return {
@@ -26,23 +28,34 @@ test('production text factory only validates and constructs selected LLM with no
   const done=(async()=>{for await(const raw of provider.events(signal)){const event=raw as {kind:string;item_id?:string};if(event.kind==='user_transcript_final')await provider.ensureResponse?.(signal,event.item_id);if(event.kind==='response_terminal')return}})()
   assert(typeof provider.submitText==='function');await provider.submitText('question',signal);await done
   assert.equal(opened,1);assert.equal(recalled,1);assert.equal(consumed,1);assert.equal(metered,1);assert.match(adaptation??'',/^verified memory context\n/u);assert.deepEqual(received,[[{kind:'user_text',text:'question'}]])
+  assert.ok(timeouts.mock.calls.some(call=>call.arguments[0]===123))
+  assert.equal(telemetry.find(event=>event.kind==='memory.prerecall.injected')?.payload.embedding,'remote')
  }finally{await provider.close()}
 })
 
-test('voice provider factory constructs only lazy provider resources and restores its conversation seed',async()=>{
+test('voice provider factory constructs only lazy provider resources and restores its conversation seed',async t=>{
  const {buildCascadedVoiceProvider}=await import('../src/conversation-voice-provider.js')
+ const timeouts=t.mock.method(AbortSignal,'timeout')
+ const telemetry:{kind:string;payload:Readonly<Record<string,unknown>>}[]=[]
  let audioOpens=0
  const history=[{user:'question',assistant:'answer'}]
  const settings=loadSettings({PIPELINE_MODE:'cascaded',DASHSCOPE_API_KEY:'test',DOUBAO_BIGMODEL_API_KEY:'speech-test',CASCADE_LLM_PROVIDER:'qwen'})
  let seeded:unknown
- const provider=buildCascadedVoiceProvider({settings,clock:new VirtualClock(),idFactory:()=>crypto.randomUUID(),history},{
+ const provider=buildCascadedVoiceProvider({settings,clock:new VirtualClock(),idFactory:()=>crypto.randomUUID(),history,prerecallPolicy:{finalWaitMs:137},prerecallMeta:{embedding:'none'},prerecall:()=>Promise.resolve(()=>Promise.resolve('memory')),telemetry:{record:(kind,payload)=>telemetry.push({kind,payload}),close(){ /* fixture owns no resources */ }}},{
   ...cascadedProviderRegistries,
   endpointing:{auto:()=>()=>{audioOpens++;return Promise.resolve({reset:()=>undefined,feed:()=>Promise.resolve([]),close:()=>Promise.resolve()})}},
   asr:{'self-hosted':()=>{throw Error('unexpected self-hosted ASR')},gemini:()=>{throw new Error('unexpected Gemini speech factory')},volcengine:()=>({openClient:()=>{audioOpens++;return {open:()=>Promise.reject(new Error('unused'))}}})},
   tts:{'self-hosted':()=>{throw Error('unexpected self-hosted TTS')},gemini:()=>{throw new Error('unexpected Gemini speech factory')},volcengine:()=>({openClient:()=>{audioOpens++;return {open:()=>Promise.reject(new Error('unused'))}}})},
-  llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:input=>{seeded=input?.history;return {async *stream(){await Promise.resolve()},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()}}})},
+  llm:{...cascadedProviderRegistries.llm,qwen:()=>({open:input=>{seeded=input?.history;return {async *stream(){await Promise.resolve();yield {kind:'response_started',response_id:'voice'};yield {kind:'response_completed',response_id:'voice'}},abandonPendingResponse:()=>Promise.resolve(),close:()=>Promise.resolve()}}})},
  })
- try {assert.equal(audioOpens,0);await provider.connect({tools:[],signal:new AbortController().signal});assert.equal(audioOpens,3);assert.deepEqual(seeded,history)}finally{await provider.close()}
+ const signal=new AbortController().signal
+ try {
+  assert.equal(audioOpens,0);await provider.connect({tools:[],signal});assert.equal(audioOpens,3);assert.deepEqual(seeded,history)
+  const done=(async()=>{for await(const raw of provider.events(signal)){const event=raw as {kind:string;item_id?:string};if(event.kind==='user_transcript_final')await provider.ensureResponse?.(signal,event.item_id);if(event.kind==='response_terminal')return}})()
+  await provider.submitText!('question',signal);await done
+  assert.ok(timeouts.mock.calls.some(call=>call.arguments[0]===137))
+  assert.equal(telemetry.find(event=>event.kind==='memory.prerecall.injected')?.payload.embedding,'none')
+ }finally{await provider.close()}
 })
 
 test('integrated voice keeps the explicitly selected text LLM and ledger path', async () => {

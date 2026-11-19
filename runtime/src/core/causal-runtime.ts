@@ -1,3 +1,4 @@
+import {personalFeedIdForAffordance,type ContextView} from './context-view.js'
 import {taskGrantService} from '../personal-agent/tasks.js'
 import type {WorkbenchPlan} from '../personal-agent/workbench-store.js'
 import type {TaskDispatchContext} from './task-tools.js'
@@ -422,6 +423,13 @@ export class CausalRuntime {
   }
 
 
+  #modelContextAuthorizer:((view:ContextView,slot:Slot,signal:AbortSignal)=>Promise<ContextView>)|undefined
+  /** Optional host authorization runs after queued snapshots/retention are refreshed, before dispatch. */
+  bindModelContextAuthorizer(authorize:(view:ContextView,slot:Slot,signal:AbortSignal)=>Promise<ContextView>):()=>void {
+    this.#modelContextAuthorizer=authorize
+    return ()=>{if(this.#modelContextAuthorizer===authorize)this.#modelContextAuthorizer=undefined}
+  }
+
   bindSuggestionSelected(
     observer: (suggestion: Suggestion, reason: WakeReason) => void,
   ): () => void {
@@ -547,9 +555,27 @@ export class CausalRuntime {
     const port = this.#models[call.slot]
     if (port === undefined) throw new Error(`model slot is not connected: ${call.slot}`)
     this.#ownTask(
-      signal => {
-        const prepared = this.#blackboard === undefined ? call : this.core.refreshModelCall(call)
-        if (prepared.compression_items?.length === 0) return Promise.resolve({channel: prepared.channel, summary: ''})
+      async signal => {
+        let prepared = this.#blackboard === undefined&&!this.#modelContextAuthorizer ? call : this.core.refreshModelCall(call)
+        if (prepared.compression_items?.length === 0) return {channel: prepared.channel, summary: ''}
+        const authorize=this.#modelContextAuthorizer,view=prepared.context_view
+        if(authorize&&view){
+          const deadline=AbortSignal.any([signal,AbortSignal.timeout(5000)])
+          let context:ContextView
+          const onAbort=()=>rejectAbort?.(Error('model_context_authorization_aborted'))
+          let rejectAbort:((error:Error)=>void)|undefined
+          try{
+            context=await Promise.race([authorize(view,call.slot,deadline),new Promise<never>((_,reject)=>{
+              rejectAbort=reject;deadline.addEventListener('abort',onAbort,{once:true})
+              if(deadline.aborted)reject(Error('model_context_authorization_aborted'))
+            })])
+          }catch{context={...view,affordances:view.affordances.filter(item=>personalFeedIdForAffordance(item)===undefined)}}finally{deadline.removeEventListener('abort',onAbort)}
+          // A withdrawal while authorization awaited must not resurrect the earlier offered snapshot.
+          const current=this.core.refreshModelCall(call).context_view
+          context={...context,affordances:context.affordances.filter(item=>item.source!=='suggestion'||current?.affordances.some(live=>live.source==='suggestion'&&live.ref===item.ref))}
+          prepared={...prepared,context_view:context,reason:{...prepared.reason,selected_suggestion:context.affordances.some(item=>item.ref===prepared.reason.selected_suggestion)?prepared.reason.selected_suggestion:null}}
+        }
+        signal.throwIfAborted()
         return port.complete(structuredClone(prepared), signal)
       },
       output => { if (epoch === this.core.conversationEpoch) this.core.completeModelCall(call.job_id, output, this.#clock.now()) },

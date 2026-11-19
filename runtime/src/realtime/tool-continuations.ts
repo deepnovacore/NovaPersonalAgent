@@ -1,3 +1,5 @@
+import {memoryRememberSummary} from '../personal-agent/conversation-tool-bridge.js'
+import type {SpaceMobilePort} from '../space-host/mobile-tools.js'
 import {scheduledToolResult} from '../personal-agent/scheduled-tool-runtime.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
 import type {TaskToolHost} from '../core/task-tools.js'
@@ -50,11 +52,32 @@ import {RealtimeDeliveryError, type RealtimeSession} from './session.js'
 import type {RealtimeTelemetry} from './telemetry.js'
 import type {UserOriginBindingLedger} from './user-origin-binding.js'
 const UNKNOWN_CONFIRMATION_TOOL_RESULT = JSON.stringify({code: 'unknown_confirmation', state: 'refused'})
+function acceptanceSummary(acceptance: ToolAcceptance,event:ToolCallReady): string {
+  const content = acceptance.host_item?.content
+  if(event.name==='memory__remember'){
+    let result:unknown=null
+    try{result=JSON.parse(content)}catch{ /* Missing receipts are not committed writes. */ }
+    return memoryRememberSummary(event.arguments,result,acceptance.accepted)
+  }
+  if (typeof content !== 'string') return ''
+  try {
+    const value = JSON.parse(content) as {items?:unknown;results?:unknown;entries?:unknown;snippets?:unknown;hit_count?:unknown;result?:{items?:unknown;results?:unknown;entries?:unknown;snippets?:unknown;hit_count?:unknown}}
+    const inner = value.result && typeof value.result === 'object' ? value.result : value
+    if (Array.isArray(inner.items)) return `${inner.items.length} 条`
+    if (Array.isArray(inner.results)) return `${inner.results.length} 条`
+    if (Array.isArray(inner.entries)) return `${inner.entries.length} 条`
+    if (Array.isArray(inner.snippets)) return `${inner.snippets.length} 条`
+    if (typeof inner.hit_count === 'number' && Number.isSafeInteger(inner.hit_count)) return `${inner.hit_count} 条`
+  } catch { /* non-JSON host results carry no safe summary */ }
+  return ''
+}
 interface ToolContinuationPorts {
   readonly taskHost?: TaskToolHost
+  readonly spaceMobile?:SpaceMobilePort
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
-  readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly toolGate?: (name:string)=>boolean
+  readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
   readonly validateScopedContext?:()=>Promise<boolean>
   readonly session: RealtimeSession
   readonly host: Pick<HostDelivery, 'bindContinuationAcknowledgement' | 'hasEligiblePreempt' | 'hasOriginDeliveryProof' | 'markOriginDelivered' | 'originCanReferenceProof' | 'originHasNonterminalReference' | 'releaseAcknowledgementReservation' | 'rendererPaused' | 'reserveSemanticAcknowledgement' | 'semanticAcknowledgement' | 'settleBackgroundAcknowledgement'>
@@ -96,6 +119,7 @@ export class ToolContinuations {
   /** Text loops share admission/execution with voice without manufacturing provider events. */
   async invokeStandalone(event:ToolCallReady,turn:StandaloneToolTurn):Promise<ToolAcceptance>{
     if(!this.#ports.tools.bindings.has(event.name)||this.#ports.tools.hidden.has(event.name))return this.#refusalAcceptance(event,'unknown_tool','{"code":"unknown_tool"}')
+    if(this.#ports.toolGate&&!this.#ports.toolGate(event.name))return this.#refusalAcceptance(event,'chat_tool_forbidden','{"code":"chat_tool_forbidden","state":"refused"}')
     turn.signal.throwIfAborted()
     const intercepted=await this.#interceptHost(event,turn.user.origin_ref,turn)
     if(intercepted)return intercepted
@@ -218,6 +242,8 @@ export class ToolContinuations {
    * preemption means something urgent is about to interrupt, so starting a turn now would produce one
    * that is immediately cut off.
    */
+  #lastBlockedResponse: string | null = null
+
   #continuationRequestIsBlocked(): boolean {
     return this.#ports.host.rendererPaused
       || this.session.floor.state === 'user_speaking'
@@ -287,6 +313,7 @@ export class ToolContinuations {
         const state = this.#toolCallState(key)
         if (state === undefined) continue
         if (state.output === 'pending') {
+          this.#ports.telemetry?.record('tool.continuation', {response_id:batch.provider_response_id,call_id:state.acceptance.host_item.call_id,stage:'injecting'})
           await this.session.injectToolOutput(state.acceptance.host_item)
           state.output = 'confirmed'
         }
@@ -307,7 +334,12 @@ export class ToolContinuations {
         this.#continuationFifo.shift()
         continue
       }
-      if (this.#continuationRequestIsBlocked()) return
+      if (this.#continuationRequestIsBlocked()) {
+        if (this.#lastBlockedResponse !== batch.provider_response_id) this.#ports.telemetry?.record('tool.continuation', {response_id:batch.provider_response_id,stage:'blocked',renderer_paused:this.#ports.host.rendererPaused,floor:this.session.floor.state,preempt:this.#ports.host.hasEligiblePreempt()})
+        this.#lastBlockedResponse = batch.provider_response_id
+        return
+      }
+      this.#lastBlockedResponse = null
 
       if(this.#ports.validateScopedContext&&!await this.#ports.validateScopedContext()){
         this.#discardScopedBatch(batch);this.#continuationFifo.shift();continue
@@ -315,6 +347,7 @@ export class ToolContinuations {
       const requestResult = await this.session.requestToolContinuation(intents, {
         originSpoken: this.#batchOriginWasDelivered(batch),
       })
+      this.#ports.telemetry?.record('tool.continuation', {response_id:batch.provider_response_id,stage:requestResult})
       // Retryable means the provider could not take it *now*: the batch keeps its place and the next
       // pass tries again. Rejected means it never will.
       if (requestResult === 'retryable') return
@@ -820,6 +853,7 @@ export class ToolContinuations {
       return
     }
 
+    this.#ports.onTool?.({name:call.name,state:'running',summary:''})
     const observedProviderResponseId = options.observedProviderResponseId ?? null
     const originRef = options.originRef ?? null
     const activeResponseId = this.session.activeProviderResponseId
@@ -912,6 +946,8 @@ export class ToolContinuations {
       acceptance = this.#overCapacityAcceptance(event)
     } else if (hidden) {
       acceptance = this.#refusalAcceptance(event, 'unknown_tool', '{"code":"unknown_tool","state":"refused"}')
+    } else if (this.#ports.toolGate && !this.#ports.toolGate(event.name)) {
+      acceptance = this.#refusalAcceptance(event, 'chat_tool_forbidden', '{"code":"chat_tool_forbidden","state":"refused"}')
     } else if (this.#ports.scopedTool) {
       acceptance = await this.#ports.scopedTool(event)
     } else if (personalRecall) {
@@ -980,6 +1016,7 @@ export class ToolContinuations {
       }
     }
 
+    this.#ports.onTool?.({name:event.name,state:acceptance.accepted?'ok':'error',summary:acceptanceSummary(acceptance,event)})
     this.#recordToolAdmission({
       callId: event.call_id,
       logicalName: binding?.logical_name ?? null,
@@ -1115,6 +1152,7 @@ export class ToolContinuations {
         ? 'fulfilled'
         : 'rejected'
     input.state.sync = 'none'
+    this.#ports.onTool?.({name:input.event.name,state:input.state.acceptance.accepted?'ok':'error',summary:acceptanceSummary(input.state.acceptance,input.event)})
     this.#recordToolAdmission({
       callId: input.event.call_id,
       logicalName: input.state.logical_name,
@@ -1125,6 +1163,7 @@ export class ToolContinuations {
       this.#ports.telemetry?.record('memory.recall', input.state.acceptance.telemetry)
     }
     const batch = this.#continuationBatches.get(callKey(input.event.session_epoch, input.providerResponseId))
+    this.#ports.telemetry?.record('tool.continuation', {response_id:input.providerResponseId,stage:'recall_resolved',phase:batch?.phase??'missing',renderer_paused:this.#ports.host.rendererPaused,floor:this.session.floor.state})
     if (superseded && batch !== undefined) {
       batch.origin_status = 'cancelled'
       batch.phase = 'ready'
@@ -1212,22 +1251,17 @@ export class ToolContinuations {
    * RealtimeService alone maps those facts to provider-facing result language.
    */
   async #interceptHost(event: ToolCallReady, originRef: string | null,standalone?:StandaloneToolTurn): Promise<ToolAcceptance | null> {
-    if(event.name==='enter_plan_mode'){
-      const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef)
-      if(Object.keys(event.arguments).length)return this.#refusalAcceptance(event,'invalid_params','{"code":"invalid_params"}')
-      if(!this.#ports.requestPlanMode)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
-      if(!user||!authority||!originRef||user.epoch!==event.session_epoch||user.origin_ref!==originRef||event.session_epoch<=this.#ports.discardedInputEpoch()||!authority.stillWanted())return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
-      try{
-        await this.#ports.requestPlanMode(event.call_id,originRef,authority.stillWanted)
-        if(!authority.stillWanted())return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
-        const acceptance=this.#refusalAcceptance(event,'accepted','{"accepted":true,"mode":"plan","scheduled":true}')
-        return {...acceptance,accepted:true,inline_fulfilled:true}
-      }catch(error){const code=error instanceof Error?error.message:'mode_change_failed';return this.#refusalAcceptance(event,code,canonicalJson({code,state:'refused'}))}
-    }
     if (event.name === CONFIRM_TOOL) {
       return this.#refusalAcceptance(event, 'unknown_confirmation', UNKNOWN_CONFIRMATION_TOOL_RESULT)
     }
     if(this.#ports.taskHost?.isCurrent?.()===false)return this.#refusalAcceptance(event,'superseded','{"code":"superseded"}')
+    if(event.name==='mobile__action'){
+      const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef),host=this.#ports.spaceMobile
+      if(!host)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')
+      if(!authority||!user||event.session_epoch<=this.#ports.discardedInputEpoch()||user.epoch!==event.session_epoch||originRef!==user.origin_ref)return this.#refusalAcceptance(event,'missing_origin_ref','{"code":"missing_origin_ref"}')
+      const args={...event.arguments};delete args.origin_ref
+      try{const result=await host.invoke(args,{request_id:originRef+':'+event.call_id,stillWanted:authority.stillWanted});return scheduledToolResult(event,result)}catch(error){const code=error instanceof Error?error.message:'mobile_action_failed';return scheduledToolResult(event,{code,state:'refused'},code,false)}
+    }
     if(event.name==='schedule'){
       const user=standalone?.user??this.#ports.intakeUser(),authority=standalone?.authority??this.#ports.currentUserTurn(event,originRef),host=this.#ports.scheduleHost
       if(!host)return this.#refusalAcceptance(event,'unsupported_tool','{"code":"unsupported_tool"}')

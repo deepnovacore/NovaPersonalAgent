@@ -1,0 +1,328 @@
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:nova_mobile/space/client_state.dart';
+import 'package:nova_mobile/space/host_panel.dart';
+import 'space_client_test.dart' show MemorySpacePersistence;
+import 'support/space_client_fixture.dart';
+
+SpaceClientState stateWith(Map<String, dynamic> extra) {
+  final state = SpaceClientState(MemorySpacePersistence());
+  state.snapshot = {'schema_version': 1, 'revision': 1, ...extra};
+  return state;
+}
+
+Future<void> pump(
+  WidgetTester tester,
+  SpaceClientState state, {
+  List<Uri>? opened,
+}) async {
+  tester.view.physicalSize = const Size(800, 6000);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.reset);
+  await tester.pumpWidget(
+    MaterialApp(
+      home: Scaffold(
+        body: ListView(
+          children: [
+            SpaceHostPanel(
+              state: state,
+              onSync: () async {},
+              openUrl: (uri) async => opened?.add(uri),
+            ),
+          ],
+        ),
+      ),
+    ),
+  );
+}
+
+void main() {
+  setUpAll(loadSpaceTestFonts);
+
+  test(
+    'model conflict retry takes the latest Host version and preserves its sparse edit',
+    () {
+      final patch = {
+        'method': 'models.configure',
+        'params': {
+          'expected_version': 3,
+          'routes': {'support': null},
+        },
+      };
+      expect(
+        refreshSettingsPatch(patch, {
+          'host_settings': {
+            'models': {'version': 5},
+          },
+        }),
+        {
+          'method': 'models.configure',
+          'params': {
+            'expected_version': 5,
+            'routes': {'support': null},
+          },
+        },
+      );
+    },
+  );
+
+  testWidgets('hidden for a non-owner device', (tester) async {
+    await pump(
+      tester,
+      stateWith({
+        'owner': false,
+        'host_credentials': {
+          'damaged': false,
+          'credentials': [
+            {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
+          ],
+        },
+      }),
+    );
+    expect(find.text('Host 设置'), findsNothing);
+    expect(find.text('OPENAI_API_KEY'), findsNothing);
+  });
+
+  testWidgets(
+    'Host news interests edit inline with the existing settings.patch version',
+    (tester) async {
+      final state = stateWith({
+        'owner': true,
+        'host_settings': {
+          'news': {
+            'enabled': true,
+            'explore': true,
+            'interests': [],
+            'profile_version': 2,
+          },
+        },
+      });
+      await pump(tester, state);
+      await tester.enterText(
+        find.byKey(const ValueKey('news.interest.word')),
+        '园艺',
+      );
+      await tester.tap(find.byTooltip('添加关注词'));
+      await tester.pumpAndSettle();
+      expect(find.byType(AlertDialog), findsNothing);
+      expect(state.pending.single['kind'], 'settings.patch');
+      expect(state.pending.single['input'], {
+        'method': 'news.configure',
+        'params': {
+          'enabled': true,
+          'explore': true,
+          'interests': ['园艺'],
+          'expected_version': 2,
+        },
+      });
+    },
+  );
+
+  testWidgets('owner edits enqueue settings.patch and credential intents', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_settings': {
+        'identity': {'assistant_name': 'nova', 'user_name': 'Ann'},
+        'soul': {'available': false},
+        'discovery': {'discovery_enabled': false},
+        'news': {'interests': [], 'explore': true, 'profile_version': 0},
+      },
+      'host_credentials': {
+        'damaged': false,
+        'credentials': [
+          {
+            'name': 'OPENAI_API_KEY',
+            'configured': true,
+            'source': 'space',
+            'fingerprint': 'abcd1234',
+          },
+          {'name': 'GEMINI_API_KEY', 'configured': false, 'source': null},
+        ],
+      },
+      'host_feishu': {'configured': true, 'connected': false},
+    });
+    await pump(tester, state);
+    await tester.tap(find.byKey(const ValueKey('host.discovery')).last);
+    await tester.tap(find.byType(Switch));
+    await tester.pump();
+    expect(state.pending.single['kind'], 'settings.patch');
+    expect(state.pending.single['input'], {
+      'method': 'discovery.configure',
+      'params': {'enabled': true},
+    });
+    expect(find.text('OpenAI'), findsOneWidget);
+    expect(find.text('Gemini'), findsOneWidget);
+    expect(find.text('OPENAI_API_KEY'), findsNothing);
+    expect(find.text('GEMINI_API_KEY'), findsNothing);
+    await tester.tap(
+      find.byKey(const ValueKey('host.credential.GEMINI_API_KEY')),
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'g-secret',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(state.pending.last['kind'], 'secret.put');
+    expect(state.pending.last['input'], {
+      'name': 'GEMINI_API_KEY',
+      'value': 'g-secret',
+    });
+    await tester.tap(
+      find.byKey(const ValueKey('host.credential.clear.OPENAI_API_KEY')),
+    );
+    await tester.pump();
+    expect(state.pending.last['kind'], 'secret.clear');
+    expect(state.pending.last['input'], {'name': 'OPENAI_API_KEY'});
+    // Queued offline name edits carry only their own field so neither reverts the other.
+    await tester.tap(find.byKey(const ValueKey('host.assistant_name')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'Nova2',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('host.user_name')));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.descendant(
+        of: find.byType(AlertDialog),
+        matching: find.byType(TextField),
+      ),
+      'Bea',
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    final identity = state.pending
+        .where((op) => (op['input'] as Map)['method'] == 'identity.configure')
+        .map((op) => (op['input'] as Map)['params'])
+        .toList();
+    expect(identity, [
+      {'assistant_name': 'Nova2'},
+      {'user_name': 'Bea'},
+    ]);
+  });
+
+  testWidgets(
+    'a damaged Host credential file asks the owner to re-enter keys',
+    (tester) async {
+      final state = stateWith({
+        'owner': true,
+        'host_credentials': {
+          'damaged': true,
+          'credentials': [
+            {'name': 'OPENAI_API_KEY', 'configured': false, 'source': null},
+          ],
+        },
+      });
+      await pump(tester, state);
+      expect(find.text('Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'), findsOneWidget);
+      expect(find.text('未配置'), findsOneWidget);
+    },
+  );
+
+  testWidgets('Feishu card opens the Host verification URL and completes', (
+    tester,
+  ) async {
+    final opened = <Uri>[];
+    final state = stateWith({
+      'owner': true,
+      'host_feishu': {
+        'configured': true,
+        'connected': false,
+        'verification_url': 'https://accounts.feishu.cn/device?code=x',
+      },
+    });
+    await pump(tester, state, opened: opened);
+    expect(find.text('等待在授权页确认'), findsOneWidget);
+    expect(find.text('登录飞书'), findsNothing);
+    expect(find.text('重新开始登录'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('host.feishu.open')));
+    await tester.pump();
+    expect(opened.single.host, 'accounts.feishu.cn');
+    await tester.tap(find.byKey(const ValueKey('host.feishu.complete')));
+    await tester.pump();
+    expect(state.pending.single['kind'], 'connector.feishu');
+    expect(state.pending.single['input'], {'action': 'complete'});
+  });
+
+  testWidgets('an expired Feishu link can be restarted from the phone', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_feishu': {
+        'configured': true,
+        'connected': false,
+        'login_pending': true,
+        'verification_url': 'https://accounts.feishu.cn/device?code=old',
+      },
+    });
+    await pump(tester, state);
+    await tester.tap(find.byKey(const ValueKey('host.feishu.login')));
+    await tester.pump();
+    expect(state.pending.single['input'], {'action': 'login'});
+  });
+
+  testWidgets('an unverifiable Feishu login is not offered a fresh login', (
+    tester,
+  ) async {
+    final state = stateWith({
+      'owner': true,
+      'host_feishu': {
+        'configured': true,
+        'connected': false,
+        'unverified': true,
+        'error': '飞书暂时无法验证登录，网络恢复后会自动继续',
+      },
+    });
+    await pump(tester, state);
+    expect(find.text('暂时无法验证登录'), findsOneWidget);
+    expect(find.text('飞书暂时无法验证登录，网络恢复后会自动继续'), findsOneWidget);
+    expect(find.text('未连接'), findsNothing);
+    expect(find.text('登录飞书'), findsNothing);
+    expect(find.byKey(const ValueKey('host.feishu.logout')), findsOneWidget);
+  });
+
+  test('conflict retry refreshes the version Host checks', () {
+    final snapshot = {
+      'host_settings': {
+        'soul': {'version': 4},
+        'news': {'profile_version': 7},
+      },
+    };
+    Map<String, dynamic> patch(String method) => {
+      'method': method,
+      'params': {
+        'interests': ['AI'],
+        'expected_version': 1,
+      },
+    };
+    expect(refreshSettingsPatch(patch('news.configure'), snapshot)['params'], {
+      'interests': ['AI'],
+      'expected_version': 7,
+    });
+    expect(
+      refreshSettingsPatch(
+        patch('soul.set'),
+        snapshot,
+      )['params']['expected_version'],
+      4,
+    );
+    final identity = {
+      'method': 'identity.configure',
+      'params': {'user_name': 'x'},
+    };
+    expect(refreshSettingsPatch(identity, snapshot), identity);
+  });
+}

@@ -113,8 +113,9 @@ void main() {
         final durable = jsonDecode(disk.value!);
         expect(durable['manual_pause'], true);
         expect(durable['stage'], 'saved');
-        if (code == 'profile_budget_exhausted' ||
-            code == 'profile_timeline_deferred') {
+        // The removed hard cap no longer produces a terminal code; only
+        // failures that still block paid reruns keep one.
+        if (code == 'profile_timeline_deferred') {
           expect(durable['terminal_code'], code);
         }
         time = time.add(const Duration(days: 1));
@@ -128,8 +129,7 @@ void main() {
         await next.poll();
         expect(calls, 1);
         expect(next.phase, ProfileGenerationPhase.paused);
-        if (code == 'profile_budget_exhausted' ||
-            code == 'profile_timeline_deferred') {
+        if (code == 'profile_timeline_deferred') {
           expect(jsonDecode(disk.value!)['terminal_code'], code);
         }
         next.dispose();

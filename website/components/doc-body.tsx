@@ -11,7 +11,9 @@ export function DocBody({ html }: { html: string }) {
     if (!nodes.length) return;
     // Rendering replaces each node's source with an SVG and marks it done, so
     // re-theming means restoring the source first. Capture it up front.
-    const sources = new Map(nodes.map((node) => [node, node.textContent ?? '']));
+    const sources = new Map(
+      nodes.map((node) => [node, node.textContent ?? '']),
+    );
     let pending = Promise.resolve();
     function draw(theme: keyof typeof mermaidTheme) {
       pending = pending
@@ -36,13 +38,19 @@ export function DocBody({ html }: { html: string }) {
     draw(currentMermaidTheme());
     // Redraw on any theme change, whatever flips the attribute.
     const observer = new MutationObserver(() => draw(currentMermaidTheme()));
-    observer.observe(document.documentElement, { attributeFilter: ['data-theme'] });
+    observer.observe(document.documentElement, {
+      attributeFilter: ['data-theme'],
+    });
     return () => {
       cancelled = true;
       observer.disconnect();
     };
   }, [html]);
   return (
-    <div ref={root} className="markdown-body" dangerouslySetInnerHTML={{ __html: html }} />
+    <div
+      ref={root}
+      className="markdown-body"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
   );
 }

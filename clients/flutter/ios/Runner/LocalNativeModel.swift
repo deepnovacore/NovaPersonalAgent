@@ -30,8 +30,10 @@ struct NativeModelConfiguration: Codable {
 }
 
 final class NativeModelSettings {
+  private let spaceId: String
+  init(spaceId: String) { self.spaceId = spaceId }
   private var query: [String: Any] { [kSecClass as String: kSecClassGenericPassword,
-    kSecAttrService as String: "nova.local-model.v1", kSecAttrAccount as String: "configuration"] }
+    kSecAttrService as String: "nova.local-model.v1", kSecAttrAccount as String: "configuration.space.\(spaceId)"] }
   func read() throws -> NativeModelConfiguration? {
     var request = query; request[kSecReturnData as String] = true
     var result: CFTypeRef?
@@ -41,11 +43,12 @@ final class NativeModelSettings {
     let config = try JSONDecoder().decode(NativeModelConfiguration.self, from: data)
     try config.validate(); return config
   }
+  func clear() throws {
+    let status = SecItemDelete(query as CFDictionary)
+    guard status == errSecSuccess || status == errSecItemNotFound else { throw LocalAgentError("model_keychain_unavailable") }
+  }
   func clearChatGpt() throws {
-    if try read()?.apiProtocol == "chatgptResponses" {
-      let status = SecItemDelete(query as CFDictionary)
-      guard status == errSecSuccess || status == errSecItemNotFound else { throw LocalAgentError("model_keychain_unavailable") }
-    }
+    if try read()?.apiProtocol == "chatgptResponses" { try clear() }
   }
   func status() throws -> [String: Any] {
     let config = try read()
@@ -73,7 +76,7 @@ final class NoModelRedirects: NSObject, URLSessionTaskDelegate {
                   newRequest request: URLRequest, completionHandler: @escaping (URLRequest?) -> Void) { completionHandler(nil) }
 }
 
-final class LocalNativeModel {
+@MainActor final class LocalNativeModel {
   let config: NativeModelConfiguration
   private var activeRequest: String?
   init(_ config: NativeModelConfiguration) { self.config = config }
@@ -108,8 +111,10 @@ final class LocalNativeModel {
     let requestID = UUID().uuidString
     activeRequest = requestID
     defer { activeRequest = nil }
+    try Task.checkCancellation()
+    let reservation = try NativeModelTransfer.shared.reserve(id: requestID)
     var root: [String: Any] = try await withCheckedThrowingContinuation { continuation in
-      NativeModelTransfer.shared.request(id: requestID, configuration: config, body: body) { continuation.resume(with: $0) }
+      NativeModelTransfer.shared.request(id: requestID, reservation: reservation, configuration: config, body: body) { continuation.resume(with: $0) }
     }
     try Task.checkCancellation()
     if config.isResponses && root["_nova_streamed"] as? Bool != true {

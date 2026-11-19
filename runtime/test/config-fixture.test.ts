@@ -71,7 +71,7 @@ function evaluateConfigFixture(fixture: ConfigCase): unknown {
 function loadPythonOwnedFixtureSettings(environment: NodeJS.ProcessEnv): Settings {
   // Pin the retired Python defaults; product defaults are tested separately.
   const watchModelConfigured = environment.WATCH_MODEL !== undefined
-  environment = {MODEL_BASE_URL: 'https://dashscope.aliyuncs.com/compatible-mode/v1', FAST_MODEL: 'qwen3-vl-plus', ...environment, SUPPORT_MODEL: environment.SURROGATE_MODEL ?? 'qwen-flash'}
+  environment = {FAST_MODEL: 'qwen3-vl-plus', ...environment, SUPPORT_MODEL: environment.SURROGATE_MODEL ?? 'qwen-flash'}
   const legacyProvider = stripLikePython(environment.REALTIME_PROVIDER ?? '')
   if (legacyProvider !== 'volcengine') return {...loadSettings(environment), ...(watchModelConfigured ? {} : {watch_model: null}), compressor_model: 'qwen-flash'}
 
@@ -174,8 +174,11 @@ function projectSettings(settings: Settings): Readonly<Record<string, unknown>> 
     executors: settings.executors,
     fast_model: settings.fast_model,
     fresh_window: settings.fresh_window,
-    model_api_key_present: secretPresent(settings.model_api_key),
-    model_base_url: settings.model_base_url,
+    dashscope_model_base_url: settings.dashscope_model_base_url,
+    deepseek_model_base_url: settings.deepseek_model_base_url,
+    openai_model_base_url: settings.openai_model_base_url,
+    gemini_model_base_url: settings.gemini_model_base_url,
+    stepfun_model_base_url: settings.stepfun_model_base_url,
     proactivity: resolveProactivity(settings),
     proactivity_preset: settings.proactivity_preset,
     qwen_controlled_guard_reconnect: settings.qwen_controlled_guard_reconnect,

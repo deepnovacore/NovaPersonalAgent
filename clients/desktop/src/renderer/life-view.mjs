@@ -1,4 +1,4 @@
-import {t} from './locale.mjs'
+import {t,currentLanguage} from './locale.mjs'
 import {renderSoulCard} from './soul-card.mjs'
 import {renderCardTags} from './card-tags.mjs'
 import {renderInterests,renderWarmup} from './profile-preferences.mjs'
@@ -81,6 +81,20 @@ function renderProfileBody(panel,{products,state,news,warmup,command,button,loca
   if(delegate)button('和 Nova 聊聊',()=>delegate('我想完善个人介绍，请根据已有资料和我一起调整。'),actions)
   // The draft is only on screen until the user writes their own; a first draft that is still working or has failed shows its own status box above.
   if(warmup){const working=warmup.status==='working',update=button(working?'正在更新…':'立即更新',()=>command('profile.refresh',{}),actions);update.disabled=working;if(working)update.setAttribute('aria-busy','true')}
+ }
+ // Published versions are display-only history: they never replace the current card and never become generation input.
+ if(warmup?.history?.length){
+  const section=el('section',undefined,'profile-history');section.append(el('h3',t('历史版本')),el('p',t('只读快照，仅保留在本机；历史内容不会回到当前资料。'),'hint'))
+  for(const entry of warmup.history.slice(0,10)){
+   const when=typeof entry.generated_at==='string'&&Number.isFinite(Date.parse(entry.generated_at))?new Date(entry.generated_at).toLocaleString(currentLanguage(),{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}):t('时间未记录')
+   const item=el('details',undefined,'profile-history-item');item.append(el('summary',when))
+   if(entry.about)item.append(el('p',entry.about))
+   if(entry.work?.length)item.append(el('p',entry.work.join(' · ')))
+   if(entry.interests?.length)item.append(el('p',entry.interests.join(' · ')))
+   if(entry.unavailable_sources)item.append(el('p',t('其中 {0} 条来源已不可用',entry.unavailable_sources),'hint'))
+   section.append(item)
+  }
+  panel.append(section)
  }
  const displayedProjects=products?.projects??[]
  if(displayedProjects.length){

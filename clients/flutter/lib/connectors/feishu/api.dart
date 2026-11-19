@@ -50,6 +50,26 @@ class FeishuApi {
     return uri;
   }
 
+  /// App registration may issue its launcher URL on either official domain;
+  /// the page itself detects the tenant brand and redirects when needed.
+  Uri appRegistrationVerificationUri(String text) {
+    final uri = Uri.tryParse(text);
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        !const {
+          'open.feishu.cn',
+          'open.larksuite.com',
+          'accounts.feishu.cn',
+          'accounts.larksuite.com',
+        }.contains(uri.host) ||
+        uri.userInfo.isNotEmpty ||
+        uri.port != 443 ||
+        uri.fragment.isNotEmpty) {
+      throw const FeishuFailure('invalid_verification_url');
+    }
+    return uri;
+  }
+
   Future<FeishuResponse> oauth(
     String brand,
     String path,

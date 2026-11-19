@@ -18,6 +18,22 @@ test('typed attribution and modality gate proposals; importance cannot grant aut
  assert.throws(()=>assertAcceptable({...result[0]!,status:'proposed'},source),/withheld/)
  await assert.rejects(evaluateCandidates(source,rows.map(r=>r.candidate),async()=>({}),new AbortController().signal),/incomplete/)
 })
+test('a transient judgement is withheld while useful and above stay proposed',async()=>{
+ const rows=understandingFixture(),source=rows[0]!.source
+ const judge=(importance:'transient'|'useful'|'lasting')=>async()=>Object.fromEntries(rows.map(r=>[r.candidate.id,{...r.decision,importance}]))
+ const transient=await evaluateCandidates(source,rows.map(r=>r.candidate),judge('transient'),new AbortController().signal)
+ assert.ok(transient.every(r=>r.status==='withheld'&&r.reasons.includes('transient_importance')))
+ for(const level of ['useful','lasting'] as const){
+  const kept=await evaluateCandidates(source,rows.map(r=>r.candidate),judge(level),new AbortController().signal)
+  assert.ok(kept.every(r=>r.status==='proposed'&&!r.reasons.includes('transient_importance')))
+ }
+})
+test('a transient judgement never blocks an explicit update of an existing object',async()=>{
+ const source={id:'synthetic-transient-update',version:1,origin:'user' as const,text:'把日语第一课归档。',observed_at:'2026-09-21T15:30:00Z',timezone:'Asia/Shanghai'}
+ const candidate=validateCandidate(source,{source_id:source.id,source_version:1,span:{start:0,end:source.text.length,quote:source.text},kind:'idea',text:'日语第一课',operation:'update',patch:{status:'archived'}})
+ const result=await evaluateCandidates(source,[candidate],async()=>({[candidate.id]:{attribution:'user',modality:'request',support:'supported',importance:'transient',capture:'explicit'}}),new AbortController().signal)
+ assert.equal(result[0]!.status,'proposed');assert.deepEqual(result[0]!.reasons,[])
+})
 test('correcting source text without version bump invalidates prior acceptance',()=>{
  const r=understandingFixture()[0]!
  assert.throws(()=>assertAcceptable(r,{...r.source,text:r.source.text+'更正：暂时不学了。'}),/stale/)

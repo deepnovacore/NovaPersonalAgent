@@ -86,7 +86,7 @@ const attach = async target => { const c = await connect(target); await c.send('
 
 const base = [`--user-data-dir=${userData}`, `--remote-debugging-port=${opt.port}`, ...(process.platform === 'darwin' ? ['--use-mock-keychain'] : []), ...opt.args]
 const env = {...process.env, ...opt.env}
-for (const key of ['DASHSCOPE_API_KEY', 'MODEL_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY', 'TAVILY_API_KEY']) if (!(key in opt.env) && !opt.keepEnv.includes(key)) delete env[key]
+for (const key of ['DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'OPENAI_API_KEY', 'GEMINI_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY', 'TAVILY_API_KEY']) if (!(key in opt.env) && !opt.keepEnv.includes(key)) delete env[key]
 if (opt.guidedKeyEnv) delete env[opt.guidedKeyEnv]
 const launch = extra => spawn(opt.exe, [...base, ...extra], {env, stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32', windowsHide: false})
 const primary = launch(opt.settingsFirst ? ['--open-settings'] : [])

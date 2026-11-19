@@ -48,3 +48,6 @@ app.*.map.json
 /build
 
 /android/.kotlin
+
+# Generated real-device acceptance inputs (synthetic workbook/public paper).
+/test/support/device_e2e_materials.g.dart

@@ -34,11 +34,12 @@ input.on('line', (line: string) => {
     try {
       let value: unknown
       if (native && macWindow) {
-        const params = request.params as {locate?: {center?: [number, number]}; value?: string; mode?:'append'|'replace'|'typeOnly'; keyName?: string; direction?: string; distance?: number; focusLease?: {focus: unknown; targetStarted: unknown; clickGroup: number}}
+        const params = request.params as {locate?: {center?: [number, number]}; value?: string; mode?:'append'|'replace'|'typeOnly'; keyName?: string; direction?: string; distance?: number; focusLease?: {focus: unknown; targetStarted: unknown; clickGroup: number}; expectedEditor?: unknown}
         const point = params?.locate?.center
         const body: Record<string, unknown> = {...macWindow, op: request.op, target: binding}
         if (request.op === 'Tap') Object.assign(body, {x: point?.[0], y: point?.[1], holdMs: clickHoldMs, focus: params?.focusLease?.focus, targetStarted: params?.focusLease?.targetStarted, clickGroup: params?.focusLease?.clickGroup})
         if (['Input','KeyboardPress'].includes(request.op) && editorPoint) body.editorPoint=editorPoint
+        if (['Input','KeyboardPress'].includes(request.op) && params?.expectedEditor) body.expectedEditor=z.object({role:z.string().max(100),value:z.string().max(400)}).strict().parse(params.expectedEditor)
         if (request.op === 'Input') {body.value = params?.value;body.mode=params?.mode==='replace'?'replace':'append'}
         if (request.op === 'KeyboardPress') body.keyName = params?.keyName
         if (request.op === 'Scroll') {
@@ -55,7 +56,8 @@ input.on('line', (line: string) => {
           const result = await native.request(body)
           if(request.op==='Tap'&&result.editor===true)editorPoint=z.tuple([z.number().finite(),z.number().finite()]).parse(point)
           if (request.op === 'target' || request.op === 'connect') {
-            if (result.keyWindowMatches !== true || typeof result.target !== 'string' || (binding !== undefined && result.target !== binding)) throw Error('screen_changed')
+            // Observation can bind a visible background window; native writes still require its AX key window.
+            if (typeof result.keyWindowMatches !== 'boolean' || typeof result.target !== 'string' || (binding !== undefined && result.target !== binding)) throw Error('screen_changed')
             binding = result.target
           }
           value = request.op === 'screenshot' ? result.image : result
@@ -95,7 +97,7 @@ input.on('line', (line: string) => {
         await action.call(request.op === 'Input' ? {...request.params as {value: string}, mode: (request.params as {mode?:string}).mode==='replace'?'replace':'typeOnly'} : request.params)
       }
       process.stdout.write(JSON.stringify({id: request.id, ok: true, value}) + '\n')
-    } catch(error) {process.stdout.write(JSON.stringify({id: request.id, ok: false,...(error instanceof Error&&/^native_gui:[a-z_]{1,80}$/u.test(error.message)?{detail:error.message}:{})}) + '\n')}
+    } catch(error) {process.stdout.write(JSON.stringify({id: request.id, ok: false,...(error instanceof Error&&/^native_gui:[a-z_]{1,80}$/u.test(error.message)?{detail:error.message}:{}),...(error instanceof Error?{error:error.message.replace(/\s+/gu,' ').slice(0,300)}:{})}) + '\n')}
   }).catch(() => {process.exitCode = 1; process.exit(1)})
 })
 input.on('close', () => process.exit())

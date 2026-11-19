@@ -427,6 +427,16 @@ export const providerErrorEventSchema = sessionEvent(z.literal('provider_error')
   code: realtimeIdentifierSchema,
   recoverable: z.boolean().default(false),
 })
+/**
+ * Service lifecycle, not a provider utterance: the transport finished replacing
+ * the provider session and the new epoch is live.
+ *
+ * Lifecycle owners (the personal-agent conversation runtime) need this to tell
+ * the user their voice session recovered without waiting for them to speak into
+ * the new session first. Providers never emit it themselves; only
+ * `RealtimeService` publishes it through `onProviderEvent`.
+ */
+export const providerReconnectedEventSchema = sessionEvent(z.literal('provider_reconnected'), {})
 
 export const realtimeProviderEventSchema = z.discriminatedUnion('kind', [
   userSpeechStartedSchema,
@@ -444,6 +454,7 @@ export const realtimeProviderEventSchema = z.discriminatedUnion('kind', [
   responseYieldedSchema,
   responseCancelRejectedSchema,
   providerErrorEventSchema,
+  providerReconnectedEventSchema,
 ])
 
 export type RealtimeProviderEvent = z.infer<typeof realtimeProviderEventSchema>

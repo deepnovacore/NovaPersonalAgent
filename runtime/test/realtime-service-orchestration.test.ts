@@ -742,6 +742,21 @@ test('every provider reconnect call site declares one reviewed categorical reaso
   }
 })
 
+test('recoverable idle timeout restores the session and accepts the next user turn', async () => {
+  const notifications: string[] = []
+  const {service, session} = realtimeServiceHarness('pipeline', {onProviderEvent: event => notifications.push(event.kind)})
+  await service.connect()
+  try {
+    await service.handleEvent({kind:'provider_error',session_epoch:1,code:'user_idle_timeout',recoverable:true})
+    assert.equal(session.sessionEpoch, 2)
+    assert.ok(notifications.includes('provider_reconnected'))
+    await service.handleEvent({kind:'user_speech_started',session_epoch:2,speech_id:'after-idle',provider_item_id:'after-idle'})
+    await service.handleEvent({kind:'user_speech_ended',session_epoch:2,speech_id:'after-idle',provider_item_id:'after-idle'})
+    await service.handleEvent({kind:'user_transcript_final',session_epoch:2,item_id:'after-idle',text:'Continue with the invitation'})
+    assert.equal(await session.requestUserResponse(), true)
+  } finally { await service.close() }
+})
+
 test('fatal provider errors settle an admitted user response through the service path', async () => {
   const {service, session} = realtimeServiceHarness('pipeline')
   await service.connect()

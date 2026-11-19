@@ -1,6 +1,6 @@
 import test,{beforeEach,afterEach} from 'node:test'
 import assert from 'node:assert/strict'
-import {timelineGroups,renderTimeline} from '../src/renderer/timeline-view.mjs'
+import {timelineGroups,renderTimeline,effectiveTimelineAnchor} from '../src/renderer/timeline-view.mjs'
 import {disposeSources} from '../src/renderer/source-popover.mjs'
 import {setLanguage} from '../src/renderer/locale.mjs'
 const snapshot={settings:{timezone:'Asia/Shanghai'},life:{goals:[{id:'g',title:'Ship Nova'}],todos:[
@@ -149,16 +149,14 @@ test('briefing retains Today and the date axis while loading without pending sug
  assert.equal(commands.length,0)
 })
 
-test('briefing keeps the date axis for briefs and lists the user todos below it under their own heading',()=>{
+test('briefing keeps the date axis for briefs and no longer lists a separate todo section',()=>{
  const state={...snapshot,timeline:{status:'ready',cards:[]}}
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z'),command:()=>{}})
  assert.equal(parent.querySelectorAll('.timeline-current').length,1)
  assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'],'the axis only carries briefs and today')
- assert.equal(parent.querySelectorAll('.timeline-todos-title')[0].textContent,'我的待办')
- const children=parent.querySelectorAll('.timeline-content')[0].children,heading=children.findIndex(n=>n.className==='timeline-todos-title')
- assert.ok(heading>children.findIndex(n=>n.className==='timeline-attention'),'todos sit below the briefing')
- assert.deepEqual(parent.querySelectorAll('.timeline-undated').map(n=>n.dataset.group),['overdue','soon','waiting'])
- assert.deepEqual(parent.querySelectorAll('article').filter(n=>!n.className.includes('attention')).map(n=>n.dataset.objectId).sort(),['date','past','wait'])
+ assert.equal(parent.querySelectorAll('.timeline-todos-title').length,0)
+ assert.equal(parent.querySelectorAll('.timeline-undated').length,0)
+ assert.deepEqual(parent.querySelectorAll('article').filter(n=>!n.className.includes('attention')).map(n=>n.dataset.objectId),[])
 })
 test('briefing todo list does not repeat suggestions already shown as pending cards',()=>{
  const state={...snapshot,timeline:{status:'ready',cards:[]},derived_understanding:{sources:[],suggestions:[{id:'s1',kind:'action',title:'Proposed',body:'b',refs:[]}]}}
@@ -166,7 +164,7 @@ test('briefing todo list does not repeat suggestions already shown as pending ca
  assert.equal(parent.querySelectorAll('article').filter(n=>n.dataset.objectId==='s1').length,1)
 })
 test('a todo is completed, reopened and rescheduled with versioned life.mutate updates',()=>{
- const commands=[],state={...snapshot,timeline:{status:'ready',cards:[]}}
+ const commands=[],state={...snapshot}
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z'),command:(...args)=>{commands.push(args);return Promise.resolve()}})
  const card=parent.querySelectorAll('article').find(n=>n.dataset.objectId==='date')
  card.querySelectorAll('button').find(n=>n.textContent==='标记完成').listeners.click()
@@ -179,8 +177,8 @@ test('a todo is completed, reopened and rescheduled with versioned life.mutate u
   ['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,due:'2026-10-30'}],
   ['life.mutate',{op:'update',kind:'todo',id:'date',expected_version:1,due:null}]])
 })
-test('a done todo lands in the completed group in briefing mode and offers no done button',()=>{
- const state=structuredClone(snapshot);state.timeline={status:'ready',cards:[]};state.life.todos.push({id:'fin',title:'Finished',status:'done',due:'2026-10-09',version:2})
+test('a done todo lands in the completed group and offers no done button',()=>{
+ const state=structuredClone(snapshot);state.life.todos.push({id:'fin',title:'Finished',status:'done',due:'2026-10-09',version:2})
  const {parent}=render(state,{now:new Date('2026-10-11T08:00:00Z'),command:()=>{}})
  const group=parent.querySelectorAll('section').find(n=>n.dataset.group==='completed')
  assert.deepEqual(group.querySelectorAll('article').map(n=>n.dataset.objectId),['fin'])
@@ -291,15 +289,15 @@ test('briefing pagination exposes every card in descending date order without tr
  assert.equal(render(state,{expanded}).parent.querySelectorAll('.timeline-attention-card').length,19,'batch progress rerenders retain expansion')
  const compact=render(state,{compact:true}).parent
  assert.equal(compact.querySelectorAll('.timeline-attention-card').length,3)
- assert.ok(compact.querySelectorAll('.timeline-brief-count')[0].textContent.includes('19'))
+ assert.ok(compact.querySelectorAll('.timeline-meta-line')[0].textContent.includes('共 19 条（已展示 3）'))
 })
 
 test('partial generation keeps grounded cards visible and explains missing coverage',()=>{
  const state={life:{todos:[],goals:[]},timeline:{status:'ready',cards:[datedBrief('kept',{kind:'event',anchor_date:'2026-10-11'})],diagnostics:{failed_batches:[{batch:2,reason:'invalid_evidence'}]}}}
  const {parent}=render(state)
  assert.equal(parent.querySelectorAll('.timeline-attention-card').length,1)
- assert.equal(parent.querySelectorAll('.timeline-partial').length,1)
- assert.match(parent.querySelectorAll('.timeline-partial')[0].textContent,/部分资料尚未完成/)
+ assert.equal(parent.querySelectorAll('.timeline-meta-issue').length,1)
+ assert.equal(parent.querySelectorAll('.timeline-meta-issue')[0].textContent,'部分资料尚未整理，可刷新补充')
 })
 
 test('briefings display name-only people tags without inventing roles or changing date order',()=>{
@@ -339,14 +337,14 @@ test('unified actions and progress remain visible beside TimelineBrief and use i
  assert.equal(parent.querySelectorAll('.timeline-axis').length,1)
 })
 
-test('historical cards label prior status, assessment and suggestions without shifting the event date',()=>{
+test('historical cards use present-tense labels without shifting the event date',()=>{
  const card={id:'history',version:'v1',kind:'deadline',status_label:'今天截止',category:'交付',title:'Release',why_now:'今天需要交付',facts:[{text:'Recorded release date'}],next_steps:[{title:'确认',detail:'今天核对'}],sources:[],actions:[],time:{as_of:'2026-10-11',anchor_date:'2026-10-11',anchor_basis:'deadline',due_on:'2026-10-11',kind:'deadline'}}
  const {parent}=render({...snapshot,timeline:{status:'ready',cards:[card]}})
  const node=parent.querySelectorAll('.timeline-attention-card')[0]
  assert.equal(node.dataset.historical,'true')
- assert.equal(node.querySelectorAll('.timeline-status-tag')[0].textContent,'当时状态：今天截止')
- assert.equal(node.querySelectorAll('.timeline-attention-reason')[0].querySelectorAll('span')[0].textContent,'当时判断')
- assert.equal(node.querySelectorAll('.timeline-followups')[0].querySelectorAll('h4')[0].textContent,'当时建议')
+ assert.equal(node.querySelectorAll('.timeline-status-tag')[0].textContent,'今天截止')
+ assert.equal(node.querySelectorAll('.timeline-attention-reason')[0].querySelectorAll('span')[0].textContent,'时间窗口')
+ assert.equal(node.querySelectorAll('.timeline-followups')[0].querySelectorAll('h4')[0].textContent,'后续建议')
  const historyNote=node.querySelectorAll('.timeline-history-note')[0].textContent
  assert.ok(historyNote.startsWith('整理于 ')&&historyNote.includes('11')&&!historyNote.includes('2026-10-11'))
  assert.ok(node.querySelectorAll('.timeline-time-label').some(n=>n.textContent==='原截止已过 1 天，结果以最新记录为准'))
@@ -358,7 +356,7 @@ test('deleted-source history keeps its content and date while disabling source a
  const {parent}=render({...snapshot,timeline:{status:'failed',cards:[card]}},{command:()=>{}})
  const node=parent.querySelectorAll('.timeline-attention-card')[0]
  assert.equal(node.querySelectorAll('h3')[0].textContent,'Saved update')
- assert.equal(node.querySelectorAll('.timeline-source-unavailable')[0].textContent,'原始来源已不可用')
+ assert.equal(node.querySelectorAll('.timeline-source-unavailable').length,0)
  assert.ok(!node.querySelectorAll('button').some(button=>button.textContent==='讨论'))
  assert.ok(node.querySelectorAll('button').some(button=>button.textContent==='隐藏'))
  assert.deepEqual(parent.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),['2026-10-11'])
@@ -401,4 +399,99 @@ test('every todo status primary action opens a conversation about that exact tod
  }
  assert.equal(starts.length,4);assert.equal(calls.length,0)
  parent.querySelectorAll('.timeline-title')[0].listeners.click();assert.equal(calls.length,1);assert.equal(starts.length,4)
+})
+
+test('briefing pagination survives progress publishes through the stable page key',()=>{
+ const cards=Array.from({length:10},(_,i)=>datedBrief(String(i),{kind:'event',anchor_date:'2026-10-'+String(i+1).padStart(2,'0'),anchor_basis:'reported'}))
+ const state={life:{todos:[],goals:[]},timeline:{status:'working',cards,pagination_key:'generation-page',updated_at:'2026-10-20T00:00:00Z'}}
+ const expanded=new Set(),{parent}=render(state,{expanded})
+ assert.equal(parent.querySelectorAll('.timeline-attention-card').length,8)
+ parent.querySelectorAll('.timeline-load-more')[0].listeners.click()
+ assert.equal(parent.querySelectorAll('.timeline-attention-card').length,10)
+ state.timeline.updated_at='2026-10-20T00:01:00Z'
+ assert.equal(render(state,{expanded}).parent.querySelectorAll('.timeline-attention-card').length,10,'a later batch timestamp does not collapse the expanded page')
+})
+
+test('briefing reports active and archived card counts separately',()=>{
+ const cards=[briefCard({id:'active',sources_available:true}),briefCard({id:'archived',title:'Retained history',sources_available:false,historical:true})]
+ const state={life:{todos:[],goals:[]},timeline:{status:'ready',cards,active_count:1,archived_count:1}}
+ const {parent}=render(state)
+ const line=parent.querySelectorAll('.timeline-meta-line')[0]
+ assert.ok(line.textContent.includes('共 2 条'))
+ assert.match(line.title,/1 条为来源不可用的归档记录/,'archived count moves to the tooltip')
+ const compact=render({...state,timeline:{status:'ready',cards:[briefCard({id:'active'})],active_count:1,archived_count:0}},{compact:true}).parent
+ assert.equal(compact.querySelectorAll('.timeline-meta-line')[0].title??'','','no archive note when every card is active')
+})
+
+test('briefing metadata is at most two lines and picks one problem sentence by priority',()=>{
+ const cards=[briefCard({id:'a'})],coverage='本轮资料：1519 条消息 · 0 份文档 · 0 条个人记录；消息记录 2026-10-01—2026-10-30'
+ const base={status:'ready',cards,input_count:3,coverage,updated_at:'2026-10-11T00:35:00Z'}
+ const lines=state=>render({life:{todos:[],goals:[]},...state}).parent.querySelectorAll('.timeline-meta-line')
+ const normal=lines({timeline:base})
+ assert.equal(normal.length,1)
+ assert.match(normal[0].textContent,/^整理于 .+ · 1519 条消息 · 0 份文档 · 0 条个人记录 · 共 1 条（已展示 1）$/u)
+ assert.ok(!normal[0].textContent.includes('卡片按事项时间排列')&&!normal[0].textContent.includes('本轮资料'))
+ assert.equal(normal[0].title,'消息记录 2026-10-01—2026-10-30')
+ const consentSources=[{id:'s',state:'connected',processing_consent_required:true}]
+ const consent=lines({timeline:{...base,status:'failed',diagnostics:{pending_batches:1}},sources:consentSources})
+ assert.equal(consent.length,2)
+ assert.equal(consent[1].children[0].textContent,'部分资料需要授权后才能整理 · 查看来源','consent wins over failed and partial')
+ assert.equal(render({life:{todos:[],goals:[]},timeline:base,sources:consentSources}).parent.querySelectorAll('.source-status').length,1,'one source row, not a second one at the top')
+ const failed=lines({timeline:{...base,status:'failed',diagnostics:{pending_batches:1}}})
+ assert.equal(failed.length,2);assert.equal(failed[1].textContent,'本次更新未完成，已保留上次结果')
+ const partial=lines({timeline:{...base,diagnostics:{failed_batches:[{batch:1}]}}})
+ assert.equal(partial.length,2);assert.equal(partial[1].textContent,'部分资料尚未整理，可刷新补充')
+ assert.equal(lines({timeline:{...base,status:'working',diagnostics:{pending_batches:1}}}).length,1,'no partial warning while working')
+})
+
+
+test('effectiveTimelineAnchor uses saved as_of and preserves past, today and unreported activities',()=>{
+ for(const basis of ['deadline','scheduled']){
+  const time={anchor_date:'2026-12-11',anchor_basis:basis,as_of:'2026-11-02',last_reported_on:'2026-10-28'}
+  assert.deepEqual(effectiveTimelineAnchor(time),{anchor_date:'2026-10-28',anchor_basis:'reported'})
+  assert.equal(time.anchor_date,'2026-12-11','legacy data is not mutated')
+  for(const patch of [{anchor_date:'2026-11-01'},{anchor_date:'2026-11-02'},{last_reported_on:null},{as_of:null},{anchor_basis:'occurred'}]){
+   const unchanged={...time,...patch}
+   assert.deepEqual(effectiveTimelineAnchor(unchanged),{anchor_date:unchanged.anchor_date,anchor_basis:unchanged.anchor_basis})
+  }
+ }
+ assert.deepEqual(effectiveTimelineAnchor(null),{anchor_date:null,anchor_basis:'unknown'})
+})
+
+test('future scheduled and deadline briefs group on reports but retain activity dates and countdown',()=>{
+ const cards=[
+  datedBrief('schedule',{kind:'scheduled',anchor_date:'2026-12-11',anchor_basis:'scheduled',scheduled_on:'2026-12-11',last_reported_on:'2026-10-28',as_of:'2026-11-02'}),
+  datedBrief('deadline',{kind:'deadline',anchor_date:'2026-11-24',anchor_basis:'deadline',due_on:'2026-11-24',last_reported_on:'2026-10-27',as_of:'2026-11-02'}),
+  datedBrief('past',{kind:'deadline',anchor_date:'2026-10-26',anchor_basis:'deadline',due_on:'2026-10-26',last_reported_on:'2026-10-29',as_of:'2026-11-02'}),
+  datedBrief('unreported',{kind:'scheduled',anchor_date:'2026-12-12',anchor_basis:'scheduled',scheduled_on:'2026-12-12',as_of:'2026-11-02'}),
+ ]
+ const state={life:{todos:[],goals:[]},timeline:{cards}}
+ const {parent}=render(state,{now:new Date('2026-11-02T08:00:00Z')})
+ const groups=parent.querySelectorAll('.timeline-date-group')
+ assert.deepEqual(groups.map(n=>n.dataset.date),['2026-12-12','2026-10-28','2026-10-27','2026-10-26'])
+ assert.deepEqual(groups.map(n=>n.querySelectorAll('article')[0].dataset.objectId),['unreported','schedule','deadline','past'])
+ const labels=id=>parent.querySelectorAll('article').find(n=>n.dataset.objectId===id).querySelectorAll('.timeline-time-label').map(n=>n.textContent)
+ assert.deepEqual(labels('schedule'),['最近记录 10月28日','安排于 12月11日'])
+ assert.deepEqual(labels('deadline'),['最近记录 10月27日','截止 11月24日','距截止 22 天'])
+ assert.deepEqual(labels('past'),['截止 10月26日','最近记录 10月29日','原截止已过 7 天，结果以最新记录为准'])
+ const later=render(state,{now:new Date('2026-12-20T08:00:00Z')}).parent
+ assert.deepEqual(later.querySelectorAll('.timeline-date-group').map(n=>n.dataset.date),groups.map(n=>n.dataset.date),'placement does not drift when the wall clock passes the activity')
+ const normalized=structuredClone(state)
+ normalized.timeline.cards[0].time={...cards[0].time,anchor_basis:'reported',anchor_date:'2026-10-28'}
+ const reported=render(normalized,{now:new Date('2026-11-02T08:00:00Z')}).parent.querySelectorAll('article').find(n=>n.dataset.objectId==='schedule')
+ assert.deepEqual(reported.querySelectorAll('.timeline-time-label').map(n=>n.textContent),labels('schedule'),'new and legacy cards have identical labels')
+ setLanguage('en')
+ try{
+  const en=render(state,{now:new Date('2026-11-02T08:00:00Z')}).parent
+  assert.deepEqual(en.querySelectorAll('article').find(n=>n.dataset.objectId==='schedule').querySelectorAll('.timeline-time-label').map(n=>n.textContent),['Last recorded Oct 28','Scheduled for Dec 11'])
+  assert.deepEqual(en.querySelectorAll('article').find(n=>n.dataset.objectId==='deadline').querySelectorAll('.timeline-time-label').map(n=>n.textContent),['Last recorded Oct 27','Due Nov 24','Due in 22 days'])
+ }finally{setLanguage('zh-CN')}
+})
+
+test('effective briefing placement is applied before pagination and compact selection',()=>{
+ const cards=[datedBrief('future-activity',{anchor_date:'2026-12-11',anchor_basis:'scheduled',scheduled_on:'2026-12-11',last_reported_on:'2026-10-01',as_of:'2026-11-02'}),...Array.from({length:8},(_,i)=>datedBrief(String(i),{anchor_date:`2026-10-${20+i}`,anchor_basis:'reported'}))]
+ const state={life:{todos:[],goals:[]},timeline:{cards}}
+ const {parent}=render(state)
+ assert.equal(parent.querySelectorAll('article').some(n=>n.dataset.objectId==='future-activity'),false)
+ assert.deepEqual(render(state,{compact:true}).parent.querySelectorAll('article').map(n=>n.dataset.objectId),['7','6','5'])
 })

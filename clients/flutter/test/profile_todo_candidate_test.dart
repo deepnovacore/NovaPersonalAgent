@@ -6,7 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_writer.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/personal/local_life.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
@@ -74,11 +74,11 @@ void main() {
         windowEnd: now,
       );
       await source.grantProcessing('provider', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final repo = ProfileRepository(
         MemoryLifePersistence(),
-        authority,
+        publication,
         source,
       );
       await repo.publish(
@@ -91,7 +91,7 @@ void main() {
             'observed_at': now.toIso8601String(),
           },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: source.revision,
         consentRevision: source.processingRevision,
         provider: 'provider',
@@ -149,11 +149,11 @@ void main() {
         windowEnd: now,
       );
       await source.grantProcessing('provider', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
       final repo = ProfileRepository(
         MemoryLifePersistence(),
-        authority,
+        publication,
         source,
       );
       await repo.publish(
@@ -166,7 +166,7 @@ void main() {
             'observed_at': now.toIso8601String(),
           },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: source.revision,
         consentRevision: source.processingRevision,
         provider: 'provider',
@@ -179,7 +179,7 @@ void main() {
           home: Scaffold(
             body: LocalProfileResults(
               host: host,
-              authority: authority,
+              publication: publication,
               repository: repo,
               kind: 'all',
               adoptTodo: (input, operation) =>
@@ -202,7 +202,7 @@ void main() {
       expect(life.life['todos'], hasLength(1));
       await tester.pumpWidget(const SizedBox());
       host.dispose();
-      authority.dispose();
+      publication.dispose();
     },
   );
 }

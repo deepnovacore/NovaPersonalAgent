@@ -20,7 +20,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 
 只有所选语音管线的密钥是必填的。搜索、摄像头监控、记忆和知识库缺少密钥时自动关闭，设置页和 `novapersonal doctor` 会写明各自需要的密钥。配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用百炼 MCP 搜索。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
 
-选择 Qwen Audio 3.1 时使用 `qwen-audio-3.1-realtime-plus` 和配套音色 `longanqian_v3.1`。StepAudio 3 为预览接入，尚待真实环境验收。选择 StepAudio 3 时，`STEPFUN_API_KEY` 同时用于实时语音和默认辅助对话、视觉模型 Step 3.7 Flash。本地记忆嵌入仍需单独配置嵌入服务；不使用本地记忆时可关闭它。如需自定义辅助模型网关，设置 `MODEL_API_KEY` 和 `MODEL_BASE_URL`。
+选择 Qwen Audio 3.1 时使用 `qwen-audio-3.1-realtime-plus` 和配套音色 `longanqian_v3.1`。StepAudio 3 为预览接入，尚待真实环境验收。选择 StepAudio 3 时，`STEPFUN_API_KEY` 同时用于实时语音和默认辅助对话、视觉模型 Step 3.7 Flash。本地记忆嵌入仍需单独配置嵌入服务；不使用本地记忆时可关闭它。每个供应商使用自己的模型地址：`DASHSCOPE_MODEL_BASE_URL`、`DEEPSEEK_MODEL_BASE_URL`、`OPENAI_MODEL_BASE_URL`、`GEMINI_MODEL_BASE_URL` 和 `STEPFUN_MODEL_BASE_URL`；方舟沿用专属的 `VOLCENGINE_ARK_BASE_URL`。这些地址只作用于文本、视觉和辅助模型通道；实时音频仍使用各供应商的 `*_REALTIME_URL`，嵌入使用独立的 `EMBEDDING_BASE_URL`/`EMBEDDING_API_KEY`。已移除的通用 `MODEL_BASE_URL`/`MODEL_API_KEY` 不再作用于任何供应商。兼容网关使用 `OPENAI_COMPATIBLE_BASE_URL`/`OPENAI_COMPATIBLE_API_KEY`，自托管服务使用 `SELF_HOSTED_LLM_BASE_URL`/`SELF_HOSTED_LLM_API_KEY`。
 
 ## 常用选项
 
@@ -31,7 +31,13 @@ DASHSCOPE_API_KEY=你的百炼密钥
 <!-- BEGIN GENERATED ENV CONTRACT -->
 | 变量 | 默认 | 用途 |
 |---|---|---|
+| `NOVA_SPACE_HOST_CONFIG` | 无 | Host Space 私密配置的绝对路径；runtime 与数据保留在本机 Host。 |
 | `NOVA_LOCAL_TOOL_APPROVAL` | ask | 本地 Build 写入、编辑和命令审批：ask 或 never；独立于执行器审批。 |
+| `DASHSCOPE_MODEL_BASE_URL` | https://dashscope.aliyuncs.com/compatible-mode/v1 | Qwen 文本与视觉模型地址；独立于实时音频、ASR、TTS、搜索和嵌入。 |
+| `DEEPSEEK_MODEL_BASE_URL` | https://api.deepseek.com | DeepSeek 文本与视觉模型地址。 |
+| `OPENAI_MODEL_BASE_URL` | https://api.openai.com/v1 | OpenAI 文本模型地址；实时端点仍使用 OPENAI_REALTIME_URL。 |
+| `GEMINI_MODEL_BASE_URL` | https://generativelanguage.googleapis.com/v1beta/openai | Gemini 文本模型地址；实时端点仍使用 GEMINI_REALTIME_URL。 |
+| `STEPFUN_MODEL_BASE_URL` | https://api.stepfun.com/v1 | StepFun 文本与视觉模型地址；实时端点仍使用 STEPFUN_REALTIME_URL。 |
 | `PIPELINE_MODE` | integrated | 产品管线形态：集成或级联。 |
 | `PROMPT_LANGUAGE` | zh-CN | AI system prompt 语言：zh-CN 或 en；桌面端会提供其保存的偏好。 |
 | `INTEGRATED_PROVIDER` | qwen | 集成实时提供方。 |
@@ -40,7 +46,9 @@ DASHSCOPE_API_KEY=你的百炼密钥
 | `CODEX_APPROVAL_MODE` | ask | 编程审批模式，适用于 Codex 与 ACP 执行器；Pi 不接受询问模式。 |
 | `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | 能力注册表路径。 |
 | `MEMORY_CONNECTION` | local | 记忆连接：disabled、local 或 remote。 |
-| `MEMORY_PROVIDER` | 无 | 本地引擎：voicemem（默认，统一账本）或显式选择 mem0。远程引擎由服务端选择。 |
+| `MEMORY_PROVIDER` | 无 | 已弃用本地提供方：voicemem 保留账本迁移；mem0 保留独立模式。不能与新记忆变量共用。 |
+| `MEMORY_RECALL_ENGINE` | ledger | 高级本地召回引擎：ledger、voicemem 或 mem0；账本仍是权威。无界面选择器。 |
+| `MEMORY_EXTRACTORS` | ledger | 提取器 ledger 或 ledger,voicemem；VoiceMem 仅增加短期回复风格背景，不写事实。不能与 MEMORY_PROVIDER 共用。 |
 | `DASHSCOPE_API_KEY` | 无 | Qwen 实时凭据。 |
 | `QWEN_REALTIME_MODEL` | qwen-audio-3.0-realtime-plus | Qwen 实时模型。 |
 | `QWEN_REALTIME_VOICE` | longanqian | Qwen 实时音色。 |
@@ -80,3 +88,8 @@ TypeScript API 变化：`Settings.surrogate_model` 改为 `support_model`；原�
 [返回上手指南](getting-started.md)
 
 OpenAI 与 Gemini 的模型选项、独立密钥、级联配置和协议限制见 [海外模型接入说明](global-providers.md)。
+
+
+### 记忆引擎服务要求
+
+账本权威的 SDK 召回可用 `MEMORY_RECALL_ENGINE=mem0` 或 `voicemem`；可选 `MEMORY_EXTRACTORS=ledger,voicemem` 增加短期回复风格抽取。请勿同时设置 `MEMORY_PROVIDER`；没有 `MEMORY_BACKEND` 别名。复用现有 embedding 与 fast/抽取路由的凭据及 OpenAI 兼容 `/embeddings`、`/chat/completions` 端点；DashScope 默认复用 `DASHSCOPE_API_KEY`，无需 Mem0 云密钥。默认仍是纯账本。同意校验、有效期与持久重试机制见[记忆架构](archs/02-memory.md)。

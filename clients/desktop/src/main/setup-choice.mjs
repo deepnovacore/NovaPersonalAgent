@@ -6,9 +6,12 @@ export function setupCommit(choice, currentTextLlmProvider = 'qwen') {
   if (!choice || typeof choice !== 'object') throw new Error('invalid setup choice')
   const pipelineMode = choice.pipelineMode
   if (pipelineMode !== 'integrated' && pipelineMode !== 'cascaded') throw new Error('invalid setup choice')
-  const llmProvider = pipelineMode === 'cascaded' ? choice.cascadedLlmProvider : currentTextLlmProvider
+  // The conversation model is what the assistant needs to start, whichever voice path is chosen; voice keys are optional extras.
+  const llmProvider = choice.cascadedLlmProvider ?? currentTextLlmProvider
+  if (choice.cascadedLlmProvider !== undefined && !Object.hasOwn(SETUP_LLM_KEYS, llmProvider)) throw new Error('invalid setup choice')
   if (pipelineMode === 'cascaded' && !Object.hasOwn(SETUP_LLM_KEYS, llmProvider)) throw new Error('invalid setup choice')
-  const allowed = pipelineMode === 'integrated' ? ['dashscopeApiKey'] : [SETUP_LLM_KEYS[llmProvider], 'doubaoBigmodelApiKey']
+  const voiceKey = pipelineMode === 'integrated' ? 'dashscopeApiKey' : 'doubaoBigmodelApiKey'
+  const allowed = [...new Set([SETUP_LLM_KEYS[llmProvider], voiceKey].filter(Boolean))]
   const source = choice.secrets && typeof choice.secrets === 'object' ? choice.secrets : {}
   if (Object.keys(source).some(key => !allowed.includes(key))) throw new Error('invalid setup choice')
   const secrets = {}

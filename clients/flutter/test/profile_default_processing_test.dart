@@ -8,7 +8,7 @@ import 'package:nova_mobile/connectors/feishu/auth.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
 import 'package:nova_mobile/context/profile_agent.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 class _Models extends ModelSettings {
@@ -75,9 +75,9 @@ void main() {
           nextPage: null,
           windowEnd: now,
         );
-        final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-        await authority.open();
-        final agent = ProfileAgent(host, authority, _Models());
+        final publication = LocalPublicationContext(MemoryLifePersistence());
+        await publication.open();
+        final agent = ProfileAgent(host, publication, _Models());
         addTearDown(() {
           agent.dispose();
           host.dispose();

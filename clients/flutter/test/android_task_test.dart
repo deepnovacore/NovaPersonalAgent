@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/services.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'package:nova_mobile/agent/native_chat_task.dart';
 import 'package:nova_mobile/agent/local_agent.dart';
@@ -12,6 +13,8 @@ class Device implements LocalAgent {
   bool appsFail = false;
   Completer<void>? appsGate;
   Completer<Map<String, dynamic>>? runGate;
+  String? runTier;
+  PlatformException? runError, pollError;
   Map<String, dynamic> terminal = {
     'phase': 'verifying',
     'summary': '小红书已在前台',
@@ -32,12 +35,18 @@ class Device implements LocalAgent {
       ];
     }
     if (method == 'run') {
+      if (runError != null) throw runError!;
       dispatched = input;
       return runGate == null
-          ? {'id': input['id'], 'phase': 'running'}
+          ? {
+              'id': input['id'],
+              'phase': 'running',
+              if (runTier != null) 'tier': runTier,
+            }
           : await runGate!.future;
     }
     if (method == 'tasks') {
+      if (pollError != null) throw pollError!;
       return [
         {'id': dispatched!['id'], ...terminal},
       ];
@@ -47,6 +56,71 @@ class Device implements LocalAgent {
 }
 
 void main() {
+  test(
+    'no progress after dispatched effects is not an admission failure',
+    () async {
+      final device = Device()
+        ..terminal = {
+          'phase': 'interrupted',
+          'reason': 'no_progress',
+          'action_in_flight': false,
+          'unresolved_actions': 0,
+          'dispatched_actions': 6,
+        };
+      final result =
+          await NativeChatTaskRunner(
+            agent: device,
+            pollInterval: Duration.zero,
+          ).run({
+            'target_package': 'com.xingin.xhs',
+            'goal': 'like',
+            'acceptance': 'liked',
+          }, 'no-progress');
+      expect(result['status'], 'outcome_unknown');
+      expect(result['reason'], 'no_progress');
+      expect(result['effects'], isNot('none'));
+    },
+  );
+  for (final reason in ['accessibility_required', 'model_settings_required']) {
+    test(
+      'native admission rejection preserves $reason without stopping',
+      () async {
+        final device = Device()
+          ..runError = PlatformException(
+            code: 'local_agent_error',
+            message: reason,
+          );
+        final result = await NativeChatTaskRunner(agent: device).run({
+          'target_package': 'com.xingin.xhs',
+          'goal': 'open',
+          'acceptance': 'visible',
+        }, 'rejected');
+        expect(result['status'], 'failed');
+        expect(result['reason'], reason);
+        expect(device.calls, ['apps', 'run']);
+      },
+    );
+  }
+
+  test('a channel error after dispatch still has an unknown outcome', () async {
+    final device = Device()
+      ..pollError = PlatformException(
+        code: 'local_agent_error',
+        message: 'accessibility_required',
+      );
+    final result =
+        await NativeChatTaskRunner(
+          agent: device,
+          pollInterval: Duration.zero,
+        ).run({
+          'target_package': 'com.xingin.xhs',
+          'goal': 'open',
+          'acceptance': 'visible',
+        }, 'dispatched');
+    expect(result['status'], 'outcome_unknown');
+    expect(device.calls.last, 'stop');
+  });
+
   test('chat completion requires native screen evidence', () async {
     final device = Device()
       ..terminal = {'phase': 'verifying', 'summary': 'unverified'};
@@ -69,6 +143,7 @@ void main() {
     'launch_outcome_unknown',
     'tool_timeout',
     'execution_interrupted',
+    'no_progress',
   ]) {
     test(
       'native terminal classification and legacy reconciliation: $reason',
@@ -146,7 +221,9 @@ void main() {
         'acceptance': 'visible',
       };
       final running = native.run(args, 'cancel-before-dispatch');
-      expect((await native.run(args, 'competing'))['reason'], 'task_busy');
+      final busy = await native.run(args, 'competing');
+      expect(busy['reason'], 'device_busy');
+      expect(busy['status'], 'failed');
       await native.cancel();
       device.appsGate!.complete();
       expect((await running)['status'], 'cancelled');
@@ -163,7 +240,13 @@ void main() {
     'model failure after native dispatch blocks cross-turn replay',
     () async {
       final device = Device()
-        ..terminal = {'phase': 'interrupted', 'reason': 'model_timeout'};
+        ..terminal = {
+          'phase': 'interrupted',
+          'reason': 'model_timeout',
+          'dispatched_actions': 1,
+          'unresolved_actions': 0,
+          'action_in_flight': false,
+        };
       final native = NativeChatTaskRunner(
         agent: device,
         pollInterval: Duration.zero,
@@ -191,12 +274,51 @@ void main() {
         },
         approve: (_) async => false,
       );
-      expect((await run('first'))['data']['status'], 'outcome_unknown');
+      final first = await run('first');
+      expect(first['data']['status'], 'outcome_unknown');
+      expect(first['data']['dispatched_actions'], 1);
+      expect(first['data']['unresolved_actions'], 0);
+      expect(first['data']['action_in_flight'], false);
       final second = await run('second');
       expect(second.toString(), contains('blocked_by_unresolved_prior_action'));
       expect(device.calls.where((call) => call == 'run').length, 1);
     },
   );
+
+  test('a virtual run outlives the 5 minute budget of a main run', () async {
+    NativeChatTaskRunner runner(Device device) => NativeChatTaskRunner(
+      agent: device,
+      pollInterval: const Duration(milliseconds: 5),
+      timeout: Duration.zero,
+      virtualTimeout: const Duration(seconds: 5),
+    );
+    const request = {'scope': 'calendar', 'goal': 'g', 'acceptance': 'a'};
+
+    final main = Device()
+      ..runTier = 'main'
+      ..terminal = {'phase': 'running'};
+    expect((await runner(main).run(request, 'm'))['reason'], 'task_timeout');
+
+    final virtual = Device()
+      ..runTier = 'virtual'
+      ..terminal = {'phase': 'running'};
+    Timer(
+      const Duration(milliseconds: 80),
+      () => virtual.terminal = {'phase': 'completed', 'summary': 'ok'},
+    );
+    final result = await runner(virtual).run(request, 'v');
+    expect(result['status'], 'completed');
+    expect(
+      virtual.calls.where((call) => call == 'tasks').length,
+      greaterThan(2),
+    );
+  });
+
+  test('the default budgets are 5 minutes and 15 plus a margin', () {
+    final runner = NativeChatTaskRunner(agent: Device());
+    expect(runner.timeout, const Duration(minutes: 5));
+    expect(runner.virtualTimeout, greaterThan(const Duration(minutes: 15)));
+  });
 
   test(
     'apps preflight failure never dispatches or becomes an unknown action',

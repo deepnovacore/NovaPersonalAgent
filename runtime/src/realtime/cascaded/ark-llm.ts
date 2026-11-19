@@ -1,7 +1,7 @@
 import {committedConversationPairsSchema,type CommittedConversationPair} from '../history.js'
 import type {PromptLanguage} from '../prompt-language.js'
 import {cascadedNarrationInstructions} from './llm.js'
-import {originalImageUrl, toolObservations, trimToolImages, imageFreeMessage, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
+import {modelOutputTokens, originalImageUrl, toolObservations, trimToolImages, imageFreeMessage, MAX_CASCADED_LLM_HISTORY_ITEMS, MAX_CASCADED_LLM_HISTORY_CODEPOINTS} from './llm.js'
 import {llmToolCallLimit} from './llm-stream-limits.js'
 import { jsonValueSchema, type JsonValue } from '../../core/events.js'
 import { codePointLengthLikePython, stripLikePython } from '../../text/python-text.js'
@@ -187,6 +187,7 @@ class Session implements CascadedLlmSession {
           : localHistory ? [...this.#history.flat(), ...((this.#stateless||this.#portable) && continuing ? this.#turnItems : current)] : current,
         tools: input.tools.map(toolSchema),
         previousResponseId: localHistory || (factOnly && !continuing) ? null : this.#previousResponseId,
+        maxOutputTokens: modelOutputTokens('ark'),
         workspaceContext: factOnly ? null : input.workspaceContext ?? null,
         responseAdaptation: factOnly ? cascadedNarrationInstructions(input.language) : input.responseAdaptation ?? null,
         signal: input.signal,
@@ -231,6 +232,9 @@ class Session implements CascadedLlmSession {
           }
           terminal = true
           if(portableOutput)this.#turnItems.push(...structuredClone(event.outputItems))
+          // Narration before a tool call is part of the user-visible text turn; voice keeps it
+          // withheld so it never reaches TTS before the tool decision is final.
+          if(pendingTools.length && authorityText !== '' && input.previewText === true) yield {kind:'text_delta', text:authorityText}
           if (!pendingTools.length && authorityText !== '') yield {kind:'text_delta', text:authorityText}
           for(const pendingTool of pendingTools) {
             if(!portableOutput) this.#turnItems.push({type: 'function_call', call_id: pendingTool.call_id, name: pendingTool.name, arguments: JSON.stringify(pendingTool.arguments)})
@@ -248,11 +252,15 @@ class Session implements CascadedLlmSession {
           return
         } else {
           if (responseId !== null && event.response_id !== responseId) throw fail('protocol')
+          const code = event.code === 'incomplete' ? 'output_limit' : event.code
+          // An incomplete Responses turn is a provider output ceiling, not a protocol error.
+          // Release text held for the tool decision when the caller asked for display previews.
+          if (code === 'output_limit' && outputText !== '' && input.previewText === true && toolsEnabled) yield {kind:'text_delta', text:outputText}
           this.#previousResponseId = null
           this.#pendingToolContinuation = false
           this.#pendingCallIds = []
           terminal = true
-          yield event
+          yield {...event, code, ...(code === 'output_limit' ? {detail:'length'} : {})}
           return
         }
       }

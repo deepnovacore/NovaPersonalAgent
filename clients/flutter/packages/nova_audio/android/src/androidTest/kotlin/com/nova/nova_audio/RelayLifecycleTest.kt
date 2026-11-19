@@ -6,6 +6,29 @@ import org.junit.Test
 import org.junit.runner.RunWith
 @RunWith(AndroidJUnit4::class)
 class RelayLifecycleTest {
+ @Test fun recordingCompatibilityUsesCapturableMediaWithoutCommunicationMode() {
+  val instrumentation=InstrumentationRegistry.getInstrumentation()
+  val context=instrumentation.targetContext
+  val audio=RelayAudio(context,{_,_->},{})
+  try {
+   audio.start(true,0.045,true)
+   val track=RelayAudio::class.java.getDeclaredField("player").apply{isAccessible=true}.get(audio) as android.media.AudioTrack
+   val recorder=RelayAudio::class.java.getDeclaredField("recorder").apply{isAccessible=true}.get(audio) as android.media.AudioRecord
+   assertEquals(android.media.AudioManager.MODE_NORMAL,context.getSystemService(android.media.AudioManager::class.java).mode)
+   assertEquals(android.media.AudioAttributes.USAGE_MEDIA,track.audioAttributes.usage)
+   if(android.os.Build.VERSION.SDK_INT>=29)assertEquals(android.media.AudioAttributes.ALLOW_CAPTURE_BY_ALL,track.audioAttributes.allowedCapturePolicy)
+   if(android.os.Build.VERSION.SDK_INT>=30)assertFalse(recorder.isPrivacySensitive)
+   assertEquals(android.media.AudioDeviceInfo.TYPE_BUILTIN_SPEAKER,track.preferredDevice?.type)
+   audio.stop();audio.start(true,0.045)
+   val normal=RelayAudio::class.java.getDeclaredField("player").apply{isAccessible=true}.get(audio) as android.media.AudioTrack
+   val normalInput=RelayAudio::class.java.getDeclaredField("recorder").apply{isAccessible=true}.get(audio) as android.media.AudioRecord
+   assertEquals(android.media.AudioManager.MODE_IN_COMMUNICATION,context.getSystemService(android.media.AudioManager::class.java).mode)
+   assertEquals(android.media.AudioAttributes.USAGE_VOICE_COMMUNICATION,normal.audioAttributes.usage)
+   if(android.os.Build.VERSION.SDK_INT>=30)assertTrue(normalInput.isPrivacySensitive)
+
+  } finally {audio.dispose()}
+ }
+
  @Test fun queuedPlaybackSurvivesBriefUiWork() {
   val instrumentation=InstrumentationRegistry.getInstrumentation()
   val done=java.util.concurrent.CountDownLatch(1)

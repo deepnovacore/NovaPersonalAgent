@@ -1,3 +1,4 @@
+import type {SpaceMobilePort} from '../space-host/mobile-tools.js'
 import type {RealtimeCapabilities} from './capabilities.js'
 import type {ToolAcceptance,ToolCallReady} from './bridge.js'
 import type {ScheduleAgentController} from '../personal-agent/schedule-agent.js'
@@ -108,6 +109,8 @@ export interface ServiceRuntime {
   }
 }
 export interface HostItemOptions {
+  /** Internal destination authorization; never serialized into provider/wire content. */
+  readonly authorizeBeforeInject?:(signal:AbortSignal)=>Promise<boolean>
       readonly stillWanted?:()=>boolean
   readonly onNotDelivered?:()=>Promise<void>
       readonly semanticEventId?: string | null
@@ -181,9 +184,11 @@ export interface RealtimeServiceOptions {
 
   readonly onIntakePrepared?:(intake:Readonly<IntakeSession>,proposal:ProjectProposal)=>void
   readonly taskHost?: TaskToolHost
-  readonly requestPlanMode?:(callId:string,originRef:string,stillWanted:()=>boolean)=>Promise<unknown>
+  readonly spaceMobile?:SpaceMobilePort
   readonly scheduleHost?: Pick<ScheduleAgentController,'invoke'>
   readonly scopedTool?: (event:ToolCallReady)=>Promise<ToolAcceptance>
+  readonly toolGate?: (name:string)=>boolean
+  readonly onTool?: (event:{name:string;state:'running'|'ok'|'error';summary:string})=>void
   readonly validateScopedContext?:()=>Promise<boolean>
   readonly onProviderEvent?: (event: RealtimeProviderEvent) => void
   readonly intake?: Pick<

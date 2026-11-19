@@ -5,7 +5,9 @@ import type {LedgerDatabase} from '../memory-ledger/store.js'
 import {canonicalJson} from '../text/canonical-json.js'
 import {sha256} from './source-state.js'
 import {effectiveEvidence,processingStamp,type EvidenceRecord} from './store.js'
-import {profileDraftSchema,PROFILE_GENERATION_VERSION} from '../personal-agent/profile-warmup.js'
+import {type ProfileDraft,profileDraftSchema,PROFILE_GENERATION_VERSION} from '../personal-agent/profile-warmup.js'
+/** Keywords are optional: an empty list is stored as an absent key so older drafts and their hashes stay unchanged. */
+const keywordsField=<T>(items:readonly T[])=>items.length?{keywords:[...items]}:{}
 
 const id=z.string().min(1).max(512)
 const cursorSchema=z.object({seq:z.number().int().nonnegative(),offset:z.number().int().nonnegative()}).strict()
@@ -14,6 +16,14 @@ export type ProcessingRef=z.infer<typeof processingRefSchema>
 export const processingObservationSchema=z.object({kind:z.enum(['people','work','style']),text:z.string().trim().min(1).max(400),refs:z.array(processingRefSchema).min(1).max(8)}).strict()
 export type ProcessingObservation=z.infer<typeof processingObservationSchema>
 
+/** Every prefix of this order covers its lane evenly; the newest quarter comes first so fresh input is never crowded out. */
+export function profileLaneOrder<T>(lane:readonly T[]):T[]{
+ const spread=(n:number,count:number)=>{let value=0;for(let width=1;width<count;width*=2){value=value*2+n%2;n=Math.floor(n/2)}return value}
+ const newestCount=Math.max(1,Math.ceil(lane.length*0.25)),split=Math.max(0,lane.length-newestCount),rest=lane.slice(0,split)
+ const sampled=rest.map((item,index)=>({item,order:spread(index,rest.length)})).sort((a,b)=>a.order-b.order).map(row=>row.item)
+ return [...lane.slice(split).reverse(),...sampled]
+}
+
 const profileCacheSchema=z.object({about_parts:z.array(profileDraftSchema.shape.about.unwrap()).optional(),draft:profileDraftSchema,refs:z.array(processingRefSchema),products:understandingProductsSchema.optional(),generated_at:z.string().optional()}).extend({generation_version:z.string().optional(),fact_scopes:z.record(z.string(),z.array(processingRefSchema)).optional(),publication_key:z.string().optional(),synthesis_key:z.string().optional(),profile_pending:z.boolean().optional()})
 const storedIdentitySchema=z.object({id:z.string(),kind:z.string(),title:z.string(),project_id:z.string().nullable(),source_key:z.string()})
 export const processingTopicSchema=z.object({title:z.string().trim().min(1).max(120),summary:z.string().trim().min(1).max(1500),refs:z.array(processingRefSchema).min(1).max(8)}).strict()
@@ -21,7 +31,7 @@ const batchSchema=z.object({profile_only:z.boolean().optional(),priority:z.boole
 export type ProcessingBatch=z.infer<typeof batchSchema>
 const stateSchema=z.object({cursor:cursorSchema,completed_batches:z.number().int().nonnegative(),processed_chars:z.number().int().nonnegative(),last_success:z.string().nullable()}).strict()
 export const SOURCE_PROCESSING_VERSION='source-processing-v5'
-const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION),participants:z.boolean().default(false)})
+const base=z.object({prefix:z.string().regex(/^personal:[^:]+:$/u),provider:id,recipe:id.default(SOURCE_PROCESSING_VERSION),participants:z.boolean().default(false),correction_provider:z.string().max(256).default('')})
 const owner={batch_id:id,task_id:id,run_id:id}
 export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('claim')}).strict(),
@@ -36,6 +46,7 @@ export const processingRequestSchema=z.discriminatedUnion('action',[
  z.object({action:z.literal('topics'),batch_id:id.optional(),after:z.number().int().nonnegative().default(0),limit:z.number().int().min(1).max(100).default(20),query:z.string().trim().max(200).default('')}).strict(),
  z.object({action:z.literal('evidence'),...owner,refs:z.array(processingRefSchema).min(1).max(8).refine(refs=>refs.reduce((sum,ref)=>sum+ref.end-ref.start,0)<=16000)}).strict(),
  z.object({action:z.literal('profile'),batch_id:id.optional()}).strict(),
+ z.object({action:z.literal('profile.history'),account_scope:id.optional(),limit:z.number().int().min(1).max(20).default(10)}).strict(),
  z.object({action:z.literal('observe'),...owner,refs:z.array(processingRefSchema).min(1).max(8),observations:z.array(processingObservationSchema).max(24)}).strict(),
  z.object({action:z.literal('profile_context'),...owner}).strict(),
  z.object({action:z.literal('identities'),...owner,refs:z.array(processingRefSchema).min(1).max(8)}).strict(),
@@ -87,17 +98,19 @@ export function initializeSourceProcessing(db:LedgerDatabase):void{
  CREATE TRIGGER processing_erase_derived AFTER DELETE ON memory_evidence BEGIN
  INSERT INTO processing_decisions(prefix,kind,id,value)
  SELECT prefix,'policy','cleanup','pending' FROM processing_profiles p WHERE EXISTS(
- SELECT 1 FROM json_each(p.payload_json,'$.draft.interests') interest,json_each(interest.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)
+ SELECT 1 FROM json_each(p.payload_json,'$.draft.interests') interest,json_each(interest.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id
+ UNION ALL SELECT 1 FROM json_each(p.payload_json,'$.draft.keywords') keyword,json_each(keyword.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)
  ON CONFLICT(prefix,kind,id) DO UPDATE SET value='pending';
  DELETE FROM processing_identities WHERE evidence_id=OLD.id;
  DELETE FROM processing_observations WHERE EXISTS(SELECT 1 FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
  INSERT INTO processing_events(prefix,evidence_id) SELECT substr(source_id,1,9+instr(substr(source_id,10),':')),id FROM memory_evidence WHERE id IN (${affected}) AND id<>OLD.id;
  DELETE FROM processing_receipts WHERE evidence_id=OLD.id OR evidence_id IN (${affected});
  DELETE FROM processing_topics WHERE EXISTS(SELECT 1 FROM json_each(processing_topics.payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')=OLD.id);
- UPDATE processing_profiles SET revision=revision+1,payload_json=json_set(payload_json,'$.draft',json_object(
+ UPDATE processing_profiles SET revision=revision+1,payload_json=json_set(payload_json,'$.draft',json_patch(json_object(
  'about',CASE WHEN EXISTS(SELECT 1 FROM json_each(payload_json,'$.draft.about.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id) THEN NULL ELSE json_extract(payload_json,'$.draft.about') END,
  'work',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.work') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
- 'interests',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.interests') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)))),
+ 'interests',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.interests') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id)))
+ ),json_object('keywords',CASE WHEN json_type(payload_json,'$.draft.keywords') IS NULL THEN NULL ELSE json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.draft.keywords') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))) END)),
  '$.refs',json((SELECT json_group_array(json(r.value)) FROM json_each(payload_json,'$.refs') r WHERE json_extract(r.value,'$.evidence_id')<>OLD.id)),
  '$.about_parts',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.about_parts') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
  '$.products.projects',json((SELECT json_group_array(json(item.value)) FROM json_each(payload_json,'$.products.projects') item WHERE NOT EXISTS(SELECT 1 FROM json_each(item.value,'$.refs') r WHERE json_extract(r.value,'$.entry_id')=OLD.id))),
@@ -137,7 +150,10 @@ function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payl
  const content=parsed.data;if(content.profile_pending||!content.draft.about&&!content.draft.work.length&&!content.draft.interests.length)return
  const key=content.publication_key??sha256(payload)
  if(db.prepare('SELECT 1 FROM processing_publications WHERE prefix=? AND provider=? AND publication_key=?').get(prefix,provider,key))return
- const refs=[...(content.draft.about?.refs??[]),...content.draft.work.flatMap(f=>f.refs),...content.draft.interests.flatMap(f=>f.refs),...(content.products?.projects.flatMap(f=>f.refs)??[]),...(content.products?.suggestions.flatMap(f=>f.refs)??[])],accounts=new Set<string>(),sources=[]
+ // Initialization also imports the cache; it must not undo publish's prose deduplication.
+ const latest=db.prepare('SELECT payload_json FROM processing_publications WHERE prefix=? AND provider=? ORDER BY rowid DESC LIMIT 1').get(prefix,provider)
+ if(latest&&sha256(canonicalJson((JSON.parse(String(latest.payload_json)) as {draft:unknown}).draft))===sha256(canonicalJson(content.draft)))return
+ const refs=[...(content.draft.about?.refs??[]),...content.draft.work.flatMap(f=>f.refs),...content.draft.interests.flatMap(f=>f.refs),...(content.draft.keywords??[]).flatMap(f=>f.refs),...(content.products?.projects.flatMap(f=>f.refs)??[]),...(content.products?.suggestions.flatMap(f=>f.refs)??[])],accounts=new Set<string>(),sources=[]
  for(const ref of [...new Map(refs.map(ref=>[ref.entry_id,ref])).values()]){
   if(!ref.entry_id.startsWith(prefix))return
   const row=db.prepare('SELECT payload_json FROM memory_evidence WHERE id=?').get(ref.entry_id);if(!row)return
@@ -150,18 +166,29 @@ function archivePublication(db:LedgerDatabase,prefix:string,provider:string,payl
  const published={draft:content.draft,projects:content.products?.projects??[],suggestions:(content.products?.suggestions??[]).map(suggestion=>{const item={...suggestion};delete item.anchor;delete item.date_evidence;return item}),generation_version:content.generation_version??null,generated_at:content.generated_at??null,sources}
  db.prepare('INSERT OR IGNORE INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,provider,key,canonicalJson([...accounts].sort()),canonicalJson(published))
 }
+interface SavedPublication {draft:z.infer<typeof profileDraftSchema>;projects:unknown[];suggestions:unknown[];generation_version:string|null;generated_at:string|null;sources:{id:string;version:string;label:string;observed_at:string;type:string}[]}
+/** Archived profile prose is display history: it is never current input and never evidence. */
+export interface ProfileHistoryItem {generation_version:string|null;generated_at:string|null;draft:z.infer<typeof profileDraftSchema>;read_only:true;unavailable_sources:number;sources:{id:string;version:string;label:string;observed_at:string;type:string;available:boolean}[]}
+/** Publications of one user scope, newest first. Account scoping matches lastPublication: offline history is read only when it is unambiguous. */
+function publicationRows(db:LedgerDatabase,prefix:string,order:'discussion'|'recent'){
+ const sql=order==='discussion'?"SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY EXISTS(SELECT 1 FROM json_each(payload_json,'$.sources') WHERE json_extract(value,'$.type')='im') DESC,rowid DESC":"SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY rowid DESC"
+ return db.prepare(sql).all(prefix).map(row=>({accounts:JSON.parse(String(row.scope_json)) as string[],saved:JSON.parse(String(row.payload_json)) as SavedPublication}))
+}
+function visiblePublications(rows:ReturnType<typeof publicationRows>,accountScope:string|undefined){
+ const savedAccounts=new Set(rows.flatMap(row=>row.accounts))
+ return rows.filter(row=>!(row.accounts.length&&(accountScope===undefined?savedAccounts.size!==1:row.accounts.some(account=>account!==accountScope))))
+}
+function hydratePublication(db:LedgerDatabase,consumer:string,saved:SavedPublication):ProfileHistoryItem{
+ const sources=saved.sources.map(item=>{const record=effectiveEvidence(db,item.id,{purpose:'extraction',provider:consumer});return {...item,available:!!record&&record.hash===item.version}})
+ return {...saved,sources,read_only:true as const,unavailable_sources:sources.filter(source=>!source.available).length}
+}
 function lastPublication(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined){
- const rows=db.prepare("SELECT scope_json,payload_json FROM processing_publications WHERE prefix=? ORDER BY EXISTS(SELECT 1 FROM json_each(payload_json,'$.sources') WHERE json_extract(value,'$.type')='im') DESC,rowid DESC").all(prefix)
- const savedAccounts=new Set(rows.flatMap(row=>JSON.parse(String(row.scope_json)) as string[]))
- for(const row of rows){
-  const accounts=JSON.parse(String(row.scope_json)) as string[]
-  // Offline history is unambiguous only for one saved account; explicit account switches remain fenced.
-  if(accounts.length&&(accountScope===undefined?savedAccounts.size!==1:accounts.some(account=>account!==accountScope)))continue
-  const saved=JSON.parse(String(row.payload_json)) as {draft:z.infer<typeof profileDraftSchema>;projects:unknown[];suggestions:unknown[];generation_version:string|null;generated_at:string|null;sources:{id:string;version:string;label:string;observed_at:string;type:string}[]}
-  const sources=saved.sources.map(item=>{const record=effectiveEvidence(db,item.id,{purpose:'extraction',provider:consumer});return {...item,available:!!record&&record.hash===item.version}})
-  return {...saved,sources,read_only:true as const,unavailable_sources:sources.filter(source=>!source.available).length}
- }
- return null
+ const first=visiblePublications(publicationRows(db,prefix,'discussion'),accountScope)[0]
+ return first?hydratePublication(db,consumer,first.saved):null
+}
+/** Recent published versions, newest first, read-only. Never consulted as generation evidence. */
+function profileHistory(db:LedgerDatabase,prefix:string,consumer:string,accountScope:string|undefined,limit:number){
+ return visiblePublications(publicationRows(db,prefix,'recent'),accountScope).slice(0,limit).map(row=>hydratePublication(db,consumer,row.saved))
 }
 
 function joinAbout(parts:z.infer<typeof profileDraftSchema>['about'][]){
@@ -201,9 +228,12 @@ function saveState(db:LedgerDatabase,prefix:string,provider:string,state:z.infer
 export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unknown{
  const fields=z.record(z.string(),z.unknown()).parse(input),{prefix,provider:consumer,recipe,participants}=base.parse(fields)
  const provider=sha256(canonicalJson({consumer,recipe,participants,algorithm:SOURCE_PROCESSING_VERSION}))
- const {prefix:ignoredPrefix,provider:ignoredProvider,recipe:ignoredRecipe,participants:ignoredParticipants,...request}=fields
- void ignoredPrefix;void ignoredProvider;void ignoredRecipe;void ignoredParticipants
+ const {prefix:ignoredPrefix,provider:ignoredProvider,recipe:ignoredRecipe,participants:ignoredParticipants,correction_provider:ignoredCorrectionProvider,...request}=fields
+ void ignoredPrefix;void ignoredProvider;void ignoredRecipe;void ignoredParticipants;void ignoredCorrectionProvider
  const q=processingRequestSchema.parse(request)
+ const correctionProvider=typeof fields.correction_provider==='string'?fields.correction_provider:''
+ const explicitCorrections=correctionProvider?Object.fromEntries(db.prepare('SELECT key,value FROM space_source_corrections WHERE prefix=? AND provider=?').all(prefix,correctionProvider).map(row=>[String(row.key),JSON.parse(String(row.value)) as {value:string;event_id:string;sender:string;provider:string}])):{}
+ const suppressCorrected=(draft:ProfileDraft):ProfileDraft=>{const {keywords,...rest}=draft;return {...rest,about:explicitCorrections.about?null:draft.about,work:explicitCorrections.work?[]:draft.work,interests:explicitCorrections.interests?[]:draft.interests,...keywordsField(explicitCorrections.interests?[]:keywords??[])}}
  const decision=(kind:string,key:string,value:string)=>db.prepare('INSERT INTO processing_decisions VALUES(?,?,?,?) ON CONFLICT(prefix,kind,id) DO UPDATE SET value=excluded.value').run(prefix,kind,key,value)
  const priorRecipe=db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='active_recipe'").get(prefix)
  if(priorRecipe?priorRecipe.value!==provider:!!db.prepare('SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? LIMIT 1').get(prefix,provider))decision('policy','cleanup','pending')
@@ -223,7 +253,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
 
  const saved=db.prepare('SELECT payload_json FROM processing_state WHERE prefix=? AND provider=?').get(prefix,provider)
  let state=saved?stateSchema.parse(JSON.parse(String(saved.payload_json))):{cursor:{seq:0,offset:0},completed_batches:0,processed_chars:0,last_success:null}
- const correctionVersion=()=>sha256(canonicalJson(db.prepare("SELECT id,value FROM processing_decisions WHERE prefix=? AND kind='project' ORDER BY id").all(prefix)))
+ const correctionVersion=()=>sha256(canonicalJson({projects:db.prepare("SELECT id,value FROM processing_decisions WHERE prefix=? AND kind='project' ORDER BY id").all(prefix),explicitCorrections}))
  const active=()=>{const row=db.prepare("SELECT payload_json FROM processing_batches WHERE prefix=? AND provider=? AND status IN ('claimed','bound')").get(prefix,provider);return row?batchSchema.parse(JSON.parse(String(row.payload_json))):null}
  if(q.action==='retire'){
   const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=?').get(q.batch_id,prefix)
@@ -302,9 +332,10 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   decision('refresh',provider,'pending')
   return {queued:true}
  }
+ if(q.action==='profile.history')return {items:profileHistory(db,prefix,consumer,q.account_scope,q.limit)}
  if(q.action==='profile'||q.action==='products'){
   const saved=db.prepare('SELECT revision,payload_json FROM processing_profiles WHERE prefix=? AND provider=?').get(prefix,provider)
-  if(!saved&&q.action==='profile')return {revision:0,draft:null}
+  if(!saved&&q.action==='profile')return {revision:0,draft:null,...(Object.keys(explicitCorrections).length?{explicit_corrections:explicitCorrections}:{})}
   const content=profileCacheSchema.parse(saved?JSON.parse(String(saved.payload_json)):{draft:{about:null,work:[],interests:[]},refs:[]})
   const valid=(fact:{refs:{entry_id:string;version:unknown}[]})=>fact.refs.every(ref=>{
    const refs=content.refs.filter(item=>item.evidence_id===ref.entry_id)
@@ -316,8 +347,9 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
    if(db.prepare("SELECT value FROM processing_decisions WHERE prefix=? AND kind='policy' AND id='invalid_interests'").get(prefix)?.value!==invalidKey){decision('policy','cleanup','pending');decision('policy','invalid_interests',invalidKey)}
   }
   if(q.action==='profile'&&q.batch_id)track(q.batch_id,content.refs.filter(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)!==null))
-  const draft={...content.draft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid)}
-  const result={revision:Number(saved?.revision??0),draft:draft.about||draft.work.length||draft.interests.length?draft:null}
+  const {keywords:cachedKeywords,...cachedDraft}=content.draft
+  const draft=suppressCorrected({...cachedDraft,about:content.about_parts?joinAbout(content.about_parts.filter(valid)):content.draft.about&&valid(content.draft.about)?content.draft.about:null,work:content.draft.work.filter(valid),interests:content.draft.interests.filter(valid),...keywordsField((cachedKeywords??[]).filter(valid))})
+  const result={revision:Number(saved?.revision??0),draft:draft.about||draft.work.length||draft.interests.length?draft:null,...(Object.keys(explicitCorrections).length?{explicit_corrections:explicitCorrections}:{})}
   if(q.action==='profile')return result
   const decisions=db.prepare('SELECT kind,id,value FROM processing_decisions WHERE prefix=?').all(prefix)
   const corrections=Object.fromEntries(decisions.filter(row=>row.kind==='project').map(row=>[String(row.id),String(row.value)]))
@@ -325,11 +357,12 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const projects=(content.products?.projects??[]).filter(valid).map(project=>({...project,...(corrections[project.id]==='reference'?{relation:'reference' as const}:corrections[project.id]==='historical'?{status:'historical' as const}:corrections[project.id]==='participating'?{relation:'participating' as const,status:'current' as const}:{})}))
   const changedProjects=(content.products?.projects??[]).filter(p=>corrections[p.id]&&corrections[p.id]!=='automatic'&&canonicalJson(projects.find(current=>current.id===p.id))!==canonicalJson(p)),changedIds=new Set(changedProjects.flatMap(p=>p.refs.map(r=>r.entry_id)))
   const unchanged=(fact:{refs:{entry_id:string}[]})=>!fact.refs.some(r=>changedIds.has(r.entry_id))
-  if(result.draft){result.draft={...result.draft,about:result.draft.about&&unchanged(result.draft.about)?result.draft.about:null,work:result.draft.work.filter(unchanged),interests:result.draft.interests.filter(unchanged)}}
+  if(result.draft){const {keywords,...priorDraft}=result.draft;result.draft={...priorDraft,about:result.draft.about&&unchanged(result.draft.about)?result.draft.about:null,work:result.draft.work.filter(unchanged),interests:result.draft.interests.filter(unchanged),...keywordsField((keywords??[]).filter(unchanged))}}
   const suggestions=(content.products?.suggestions??[]).filter(item=>valid(item)&&(q.include_dismissed===true||!dismissed.has(item.id))&&(!item.project_id||projects.some(project=>project.id===item.project_id&&project.relation==='participating'&&project.status==='current')))
   const originals=content.refs.flatMap(ref=>readRefs(db,prefix,consumer,[ref],recipe,participants)?.items??[])
   const profile_needs_update=!result.draft&&!!db.prepare("SELECT 1 FROM processing_profiles WHERE prefix=? AND provider<>? AND (json_type(payload_json,'$.draft.about')='object' OR json_array_length(payload_json,'$.draft.work')>0 OR json_array_length(payload_json,'$.draft.interests')>0) LIMIT 1").get(prefix,provider)
-  return {...result,projects,suggestions,corrections,...(q.presentation?{last_success:lastPublication(db,prefix,consumer,q.account_scope)}:{}),profile_needs_update,profile_pending:content.profile_pending===true,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
+  const refresh_pending=!!db.prepare("SELECT 1 FROM processing_decisions WHERE prefix=? AND kind='refresh' AND value='pending'").get(prefix)
+  return {...result,projects,suggestions,corrections,...(q.presentation?{last_success:lastPublication(db,prefix,consumer,q.account_scope),history:profileHistory(db,prefix,consumer,q.account_scope,10)}:{}),profile_needs_update,profile_pending:content.profile_pending===true,refresh_pending,news_cleanup_pending:decisions.some(row=>row.kind==='policy'&&row.id==='cleanup'&&row.value==='pending'),generated_at:content.generated_at??null,sources:[...new Map(originals.map(item=>[item.evidence_id,{id:item.evidence_id,version:item.version,label:item.locator,observed_at:item.observed_at,type:item.source_kind==='user_correction'?'conversation':item.source_kind==='task_result'?'task':item.source_kind,...(item.source_metadata?.provider?{provider:item.source_metadata.provider.slice(0,80)}:{}),...(item.source_metadata?.source_url?{url:item.source_metadata.source_url}:{})}])).values()]}
 
  }
  const row=db.prepare('SELECT payload_json FROM processing_batches WHERE id=? AND prefix=? AND provider=?').get(q.batch_id,prefix,provider)
@@ -340,25 +373,43 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   if(result)track(batch.id,refs)
   return result
  }
- const profileContext=()=>{
-  const rows=db.prepare(`WITH ranked AS (
-   SELECT payload_json,row_number() OVER(PARTITION BY json_extract(payload_json,'$.kind') ORDER BY rowid) n,
-   count(*) OVER(PARTITION BY json_extract(payload_json,'$.kind')) total FROM processing_observations WHERE prefix=? AND provider=?
-  ) SELECT payload_json FROM ranked WHERE n=1 OR n=total OR (n-1)%max(1,CAST((total+127)/128 AS INTEGER))=0`).all(prefix,provider)
-  const available=rows.flatMap(row=>{const observation=processingObservationSchema.parse(JSON.parse(String(row.payload_json))),originals=readRefs(db,prefix,consumer,observation.refs,recipe,participants);return originals?[{observation,originals,at:originals.items.map(i=>i.observed_at).sort()[0]??''}]:[]}).sort((a,b)=>a.at.localeCompare(b.at)||canonicalJson(a.observation).localeCompare(canonicalJson(b.observation)))
+const profileContext=()=>{
+  // Unreadable observations are dropped before any sampling, and repeats of the same observation merge their refs: recurrence across batches is itself the evidence.
+  type Readable=NonNullable<ReturnType<typeof readRefs>>
+  const merged=new Map<string,{observation:ProcessingObservation;originals:Readable;at:string}>(),refKey=(ref:ProcessingRef)=>canonicalJson({evidence_id:ref.evidence_id,stamp:ref.stamp,start:ref.start,end:ref.end})
+  for(const row of db.prepare('SELECT payload_json FROM processing_observations WHERE prefix=? AND provider=? ORDER BY rowid').all(prefix,provider)){
+   const observation=processingObservationSchema.parse(JSON.parse(String(row.payload_json))),originals=readRefs(db,prefix,consumer,observation.refs,recipe,participants);if(!originals)continue
+   const at=originals.items.map(i=>i.observed_at).sort()[0]??'',textKey=observation.kind+':'+observation.text.normalize('NFKC').toLowerCase().replace(/[\s\p{P}\p{S}]+/gu,''),existing=merged.get(textKey)
+   if(!existing){merged.set(textKey,{observation,originals,at});continue}
+   const seenRefs=new Set(existing.observation.refs.map(refKey))
+   for(const [index,ref] of observation.refs.entries())if(!seenRefs.has(refKey(ref))){seenRefs.add(refKey(ref));existing.observation.refs.push(ref);existing.originals.items.push(originals.items[index]!)}
+   if(at&&(!existing.at||at<existing.at))existing.at=at
+  }
+  // A heavily repeated observation keeps an evenly spread sample of its history plus its newest ref, so a newer repeat changes the selection (and the synthesis key).
+  for(const entry of merged.values()){
+   if(entry.observation.refs.length<=24)continue
+   const order=entry.originals.items.map((item,index)=>({index,at:item.observed_at})).sort((a,b)=>a.at.localeCompare(b.at)||a.index-b.index).map(item=>item.index)
+   const picked=new Set<number>([order[order.length-1]!])
+   for(let slot=0;picked.size<24&&slot<23;slot++)picked.add(order[Math.floor(slot*(order.length-1)/22)]!)
+   for(let i=order.length-1;picked.size<24&&i>=0;i--)picked.add(order[i]!)
+   const keep=[...picked].sort((a,b)=>a-b)
+   entry.observation={...entry.observation,refs:keep.map(i=>entry.observation.refs[i]!)};entry.originals={...entry.originals,items:keep.map(i=>entry.originals.items[i]!)}
+  }
+  const available=[...merged.values()].sort((a,b)=>a.at.localeCompare(b.at)||canonicalJson(a.observation).localeCompare(canonicalJson(b.observation)))
   // Every prefix samples the entire history, with separate lanes for relationships,
   // recurring work and working style. A high-volume recent topic cannot take all slots.
-  const spread=(n:number,count:number)=>{let value=0;for(let width=1;width<count;width*=2){value=value*2+n%2;n=Math.floor(n/2)}return value}
-  const lanes=(['people','style','work'] as const).map(kind=>{const lane=available.filter(item=>item.observation.kind===kind);return lane.map((item,index)=>({item,order:spread(index,lane.length)})).sort((a,b)=>a.order-b.order).map(row=>row.item)})
-  const refs:ProcessingRef[]=[],observations:ProcessingObservation[]=[],items:NonNullable<ReturnType<typeof readRefs>>['items']=[],chosen=new Set<string>(),texts=new Set<string>();let chars=0
+  const lanes=(['people','style','work'] as const).map(kind=>profileLaneOrder(available.filter(item=>item.observation.kind===kind)))
+  const refs:ProcessingRef[]=[],observations:ProcessingObservation[]=[],items:Readable['items']=[],chosen=new Set<string>();let chars=0
   for(let round=0;round<Math.max(0,...lanes.map(lane=>lane.length));round++)for(const lane of lanes){
    const item=lane[round];if(!item)continue
-   const textKey=item.observation.kind+':'+item.observation.text.normalize('NFKC').replace(/\s+/gu,' ')
-   if(texts.has(textKey))continue
-   const additions=item.originals.items.filter(i=>!chosen.has(canonicalJson({evidence_id:i.evidence_id,stamp:i.stamp,start:i.start,end:i.end})))
-   if(refs.length+additions.length>120||chars+additions.reduce((n,i)=>n+i.text.length,0)>48000)continue
-   for(const original of additions){const ref={evidence_id:original.evidence_id,stamp:original.stamp,start:original.start,end:original.end};refs.push(ref);items.push(original);chosen.add(canonicalJson(ref));chars+=original.text.length}
-   observations.push(item.observation);texts.add(textKey)
+   // Newest slices first: take as many as fit the budgets instead of skipping the whole observation.
+   const additions=item.originals.items.filter(i=>!chosen.has(refKey(i))).sort((a,b)=>b.observed_at.localeCompare(a.observed_at))
+   for(const original of additions){
+    if(refs.length>=120||chars+original.text.length>48000)continue
+    const ref={evidence_id:original.evidence_id,stamp:original.stamp,start:original.start,end:original.end};refs.push(ref);items.push(original);chosen.add(refKey(ref));chars+=original.text.length
+   }
+   const included=item.observation.refs.filter(ref=>chosen.has(refKey(ref)))
+   if(included.length)observations.push({...item.observation,refs:included})
   }
   const key=sha256(canonicalJson({provider,generation_version:PROFILE_GENERATION_VERSION,corrections:correctionVersion(),observations,refs}))
   const current=new Set(batch.items.map(ref=>canonicalJson(ref)))
@@ -417,7 +468,7 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   if(q.product_refs?.some(ref=>!q.refs.some(value=>canonicalJson(value)===canonicalJson(ref))))throw Error('STORE_INVALID_OPERATION')
   const originals=readRefs(db,prefix,consumer,q.refs,recipe,participants);if(!originals)return {applied:false,revision}
   if(q.refs.some(ref=>!db.prepare('SELECT 1 FROM processing_reads WHERE batch_id=? AND ref_key=?').get(batch.id,sha256(canonicalJson(ref)))))throw Error('STORE_INVALID_OPERATION')
-  const cited=[...(q.products?.projects.flatMap(item=>item.refs)??[]),...(q.products?.suggestions.flatMap(item=>item.refs)??[]),...(q.defer_profile?[]:[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs)])]
+  const cited=[...(q.products?.projects.flatMap(item=>item.refs)??[]),...(q.products?.suggestions.flatMap(item=>item.refs)??[]),...(q.defer_profile?[]:[...(q.draft.about?.refs??[]),...q.draft.work.flatMap(item=>item.refs),...q.draft.interests.flatMap(item=>item.refs),...(q.draft.keywords??[]).flatMap(item=>item.refs)])]
   // Shared explicit corrections may remove every inferred clause; originals remain authorized above.
   if(cited.some(ref=>!originals.items.some(item=>item.evidence_id===ref.entry_id&&item.version===ref.version)))throw Error('STORE_INVALID_OPERATION')
   // A bounded batch revises only its evidence scope. Keep other currently authorized facts.
@@ -426,16 +477,21 @@ export function sourceProcessingOperation(db:LedgerDatabase,input:unknown):unkno
   const retain=(fact:{refs:{entry_id:string;version:unknown}[]})=>!(old?.fact_scopes?.[factKey(fact)]??(old?.refs??[]).filter((r:ProcessingRef)=>fact.refs.some(ref=>ref.entry_id===r.evidence_id))).some((prior:ProcessingRef)=>(q.product_refs??q.refs).some(next=>next.evidence_id===prior.evidence_id&&next.start<prior.end&&prior.start<next.end))&&authorizedFact(fact)
   const merge=<T>(fresh:T[],prior:T[],key:(item:T)=>string,limit:number)=>[...new Map([...fresh,...prior].map(item=>[key(item),item] as const).reverse()).values()].reverse().slice(0,limit)
   const aboutParts=q.defer_profile?(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(authorizedFact):q.profile_context_key?(q.draft.about?[q.draft.about]:[]):[...(q.draft.about?[q.draft.about]:[]),...(old?.about_parts??(old?.draft.about?[old.draft.about]:[])).filter(retain)].slice(0,6)
-  const draft=profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact)}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8)})
+  const draft=suppressCorrected(profileDraftSchema.parse(q.defer_profile?{about:joinAbout(aboutParts),work:(old?.draft.work??[]).filter(authorizedFact),interests:(old?.draft.interests??[]).filter(authorizedFact),...keywordsField((old?.draft.keywords??[]).filter(authorizedFact))}:q.profile_context_key?q.draft:{...q.draft,about:joinAbout(aboutParts),work:merge(q.draft.work,(old?.draft.work??[]).filter(retain),(item)=>item.title,6),interests:merge(q.draft.interests,(old?.draft.interests??[]).filter(retain),(item)=>item.text,8),...keywordsField(merge(q.draft.keywords??[],(old?.draft.keywords??[]).filter(retain),(item)=>item.text.toLowerCase(),6))}))
   const products=q.products?understandingProductsSchema.parse({projects:merge(q.products.projects,(old?.products?.projects??[]).filter(retain),(item)=>item.id,24),suggestions:merge(q.products.suggestions,(old?.products?.suggestions??[]).filter(retain),(item)=>item.id,24)}):batch.profile_only&&old?.products?{projects:old.products.projects.filter(authorizedFact),suggestions:old.products.suggestions.filter(authorizedFact)}:undefined
-  const facts=[...(draft.about?[draft.about]:[]),...draft.work,...draft.interests,...(products?.projects??[]),...(products?.suggestions??[])],ids=new Set(facts.flatMap(f=>f.refs.map(r=>r.entry_id)))
+  const facts=[...(draft.about?[draft.about]:[]),...draft.work,...draft.interests,...(draft.keywords??[]),...(products?.projects??[]),...(products?.suggestions??[])],ids=new Set(facts.flatMap(f=>f.refs.map(r=>r.entry_id)))
   const refs=[...new Map([...q.refs,...(old?.refs??[])].filter((r:ProcessingRef)=>ids.has(r.evidence_id)&&readRefs(db,prefix,consumer,[r],recipe,participants)!==null).map((r:ProcessingRef)=>[canonicalJson(r),r])).values()]
   const fact_scopes=Object.fromEntries(facts.map(fact=>[factKey(fact),old?.fact_scopes?.[factKey(fact)]??q.refs.filter(ref=>fact.refs.some(r=>r.entry_id===ref.evidence_id))]));for(const part of aboutParts)fact_scopes[factKey(part)]=old?.fact_scopes?.[factKey(part)]??q.refs.filter(ref=>part.refs.some((r:{entry_id:string})=>r.entry_id===ref.evidence_id))
-  const payload=canonicalJson({draft,refs,about_parts:aboutParts,fact_scopes,publication_key:publicationKey,profile_pending:q.defer_profile===true,...(q.profile_context_key&&!q.defer_profile?{synthesis_key:q.profile_context_key,generation_version:PROFILE_GENERATION_VERSION}:{}),...(products?{products,generated_at:batch.profile_only?old?.generated_at:batch.created_at}:{})})
+  // Publication identity is prose, not the optimistic cache revision or batch timestamp.
+  // This also covers unchangedProfile/deferred synthesis without trusting a caller flag.
+  const latest=db.prepare('SELECT payload_json FROM processing_publications WHERE prefix=? AND provider=? ORDER BY rowid DESC LIMIT 1').get(prefix,provider)
+  const archived=latest?JSON.parse(String(latest.payload_json)) as {draft:unknown;generated_at?:string}:null
+  const reused=!!archived&&sha256(canonicalJson(archived.draft))===sha256(canonicalJson(draft))
+  const payload=canonicalJson({draft,refs,about_parts:aboutParts,fact_scopes,publication_key:publicationKey,profile_pending:q.defer_profile===true,...(q.profile_context_key&&!q.defer_profile?{synthesis_key:q.profile_context_key,generation_version:PROFILE_GENERATION_VERSION}:{}),...(products?{products,generated_at:reused?archived?.generated_at??old?.generated_at:batch.profile_only?old?.generated_at:batch.created_at}:{})})
   for(const item of products?.suggestions??[]){const original=readRefs(db,prefix,consumer,refs.filter((ref:ProcessingRef)=>item.refs.some(r=>r.entry_id===ref.evidence_id)),recipe,participants)?.items[0];if(!original)continue;const identity={id:item.id,kind:item.kind,title:item.title,project_id:item.project_id,source_key:original.source_key};db.prepare('INSERT INTO processing_identities VALUES(?,?,?,?,?) ON CONFLICT(prefix,id) DO UPDATE SET evidence_id=excluded.evidence_id,source_key=excluded.source_key,payload_json=excluded.payload_json').run(prefix,item.id,original.evidence_id,original.source_key,canonicalJson(identity))}
   db.prepare('DELETE FROM processing_identities WHERE prefix=? AND rowid NOT IN (SELECT rowid FROM processing_identities WHERE prefix=? ORDER BY rowid DESC LIMIT 1000)').run(prefix,prefix)
   db.prepare('INSERT INTO processing_profiles VALUES(?,?,?,?) ON CONFLICT(prefix,provider) DO UPDATE SET revision=excluded.revision,payload_json=excluded.payload_json').run(prefix,provider,revision+1,payload)
-  archivePublication(db,prefix,provider,payload)
+  if(!reused)archivePublication(db,prefix,provider,payload)
   decision('published',batch.id,'done')
   if(batch.profile_only&&q.profile_context_key&&!q.defer_profile)decision('observed',batch.id,'done')
   return {applied:true,revision:revision+1}

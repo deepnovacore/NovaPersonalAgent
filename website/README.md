@@ -45,7 +45,7 @@ The support matrix lives in `docs/{en,zh-CN}/support-matrix.md`; executor guides
 
 Search uses a local, build-generated title and full-text index. It loads only when search opens, filters to the current page language, supports Chinese substrings and multi-term queries, and opens with Command/Ctrl+K. No external search account or backend is needed.
 
-Homepage feature copy is maintained independently in `lib/home-features.ts`; images reuse `assets/features/` from the repository. The homepage does not parse README content.
+Homepage copy lives inline in `components/home-page.tsx` (both languages). The gallery reads `assets/gallery/manifest.json`; stills are mirrored in `public/media/gallery`, and clips and the film live only in `public/media/{clips,film}`. The homepage does not parse README content.
 
 ## Product film
 

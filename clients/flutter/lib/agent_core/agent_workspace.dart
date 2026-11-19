@@ -1,8 +1,9 @@
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
+import '../protocol/request_id.dart';
 import 'package:flutter/services.dart';
-import 'package:path_provider/path_provider.dart';
+import '../space/space_storage.dart';
 import 'workspace_posix.dart';
 import 'model_client.dart';
 
@@ -14,6 +15,8 @@ class AgentWorkspace {
   final Future<Map<String, dynamic>> Function(String html, String script)?
   inspect;
   final Future<void> Function(String title, String html)? present;
+  static const documentBytes = 25 * 1024 * 1024;
+  static const documentExtensions = {'pdf', 'xlsx', 'csv', 'txt', 'md', 'json'};
   static const channel = MethodChannel('nova/artifacts/v1');
   static const readBytes = 65536;
   Future<void> _tail = Future.value();
@@ -22,7 +25,7 @@ class AgentWorkspace {
       platform == TargetPlatform.iOS || platform == TargetPlatform.android;
 
   static Future<AgentWorkspace> open() async {
-    final support = await getApplicationSupportDirectory();
+    final support = await SpaceStorage.directory();
     final workspace = AgentWorkspace(
       Directory('${support.path}/nova-workspace'),
       inspect: (html, script) async => Map<String, dynamic>.from(
@@ -118,7 +121,11 @@ class AgentWorkspace {
   Map<String, dynamic> _metadata(String path, int bytes) => {
     'path': normalize(path),
     'bytes': bytes,
-    'url': Uri(scheme: 'nova-file', host: '', path: normalize(path)).toString(),
+    'url': Uri(
+      scheme: 'nova-file',
+      host: '',
+      pathSegments: normalize(path).split('/'),
+    ).toString(),
   };
 
   Future<Map<String, dynamic>> write(String path, String content) =>
@@ -134,6 +141,95 @@ class AgentWorkspace {
         }, create: true);
         return _metadata(path, bytes.length);
       });
+
+  /// Copies picker-owned files through held descriptors; no workspace symlink
+  /// or guest-controlled path is handed to a system viewer.
+  Future<Map<String, dynamic>> importDocument(
+    File source,
+    String name,
+  ) => _serial(() async {
+    if (name.isEmpty ||
+        utf8.encode(name).length > 240 ||
+        RegExp(r'[\x00-\x1f\x7f/\\]').hasMatch(name) ||
+        name == '.' ||
+        name == '..' ||
+        !documentExtensions.contains(name.split('.').last.toLowerCase())) {
+      throw const AgentFailure('unsupported_document_name');
+    }
+    // Walk from / to reject links in the source's ancestors as well as leaf.
+    var sourcePath = source.absolute.path;
+    // Darwin exposes its OS-owned /private/var directory through /var.
+    // Picker cache URLs may use either spelling; no other links are followed.
+    if ((Platform.isIOS || Platform.isMacOS) &&
+        sourcePath.startsWith('/var/')) {
+      sourcePath = '/private$sourcePath';
+    }
+    // In Android's app mount namespace user 0 is an OS-owned alias to
+    // /data/data (unlike adb's namespace). Do not resolve picker-owned links.
+    if (Platform.isAndroid && sourcePath.startsWith('/data/user/0/')) {
+      sourcePath = sourcePath.replaceFirst('/data/user/0/', '/data/data/');
+    }
+    final parts = sourcePath.split('/').where((p) => p.isNotEmpty).toList();
+    var directory = WorkspaceDirectory.openRoot('/', searchOnly: true);
+    late Uint8List bytes;
+    try {
+      for (final part in parts.take(parts.length - 1)) {
+        final next = directory.child(part, searchOnly: true);
+        directory.close();
+        directory = next;
+      }
+      final input = directory.file(parts.last);
+      try {
+        bytes = input.readAll(documentBytes);
+      } finally {
+        input.close();
+      }
+    } finally {
+      directory.close();
+    }
+    final path = '/workspace/inbox/${requestId()}/$name';
+    await resolve(path);
+    _at(
+      path,
+      (directory, name) => directory.atomicWrite(name!, bytes),
+      create: true,
+    );
+    return _metadata(path, bytes.length);
+  });
+
+  /// Snapshot for sharing: the descriptor remains authoritative if a guest
+  /// renames a directory or replaces a leaf while this read is in progress.
+  Future<Uint8List> documentSnapshot(String pathOrUrl) async {
+    final path = previewPath(pathOrUrl);
+    // Only deliberately published outputs and imported inputs may leave the
+    // workspace. In particular .nova logs and arbitrary scripts are not exports.
+    if (!path.startsWith('/workspace/outputs/') &&
+        !path.startsWith('/workspace/inbox/')) {
+      throw const AgentFailure('document_not_exportable');
+    }
+    await resolve(path);
+    return _at(path, (directory, name) {
+      if (name == null) throw const AgentFailure('not_regular_file');
+      final input = directory.file(name);
+      try {
+        return input.readAll(documentBytes);
+      } finally {
+        input.close();
+      }
+    });
+  }
+
+  Future<void> openFile(String pathOrUrl) async {
+    final path = previewPath(pathOrUrl);
+    if (RegExp(r'\.html?$', caseSensitive: false).hasMatch(path)) {
+      return openPreview(pathOrUrl);
+    }
+    final bytes = await documentSnapshot(path);
+    await channel.invokeMethod<void>('shareFile', {
+      'name': path.split('/').last,
+      'bytes': bytes,
+    });
+  }
 
   Future<Map<String, dynamic>> read(
     String path, {
@@ -339,7 +435,14 @@ class AgentWorkspace {
         uri!.host.isEmpty &&
         !uri.hasQuery &&
         !uri.hasFragment) {
-      return normalize(uri.path);
+      final decoded = Uri.decodeComponent(uri.path);
+      if (Uri.decodeComponent(
+        // Preserve raw escapes/dot segments while encoding Unicode.
+        Uri.encodeFull(pathOrUrl).replaceAll('%25', '%'),
+      ).split('/').any((p) => p == '..' || p == '.')) {
+        throw const AgentFailure('invalid_preview_url');
+      }
+      return normalize(decoded);
     }
     if (uri?.scheme == 'nova-artifact' &&
         uri!.path.isEmpty &&
@@ -351,6 +454,9 @@ class AgentWorkspace {
     }
     if (RegExp(r'^[a-zA-Z0-9_-]+$').hasMatch(pathOrUrl)) {
       return '/workspace/artifacts/$pathOrUrl/index.html';
+    }
+    if (pathOrUrl.split('/').any((p) => p == '..' || p == '.')) {
+      throw const AgentFailure('invalid_preview_url');
     }
     return normalize(pathOrUrl);
   }

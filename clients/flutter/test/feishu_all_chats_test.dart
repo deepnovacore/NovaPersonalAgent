@@ -8,6 +8,84 @@ import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
   test(
+    'reopened ingest resumes a page and later sync starts at read-through',
+    () async {
+      var clock = DateTime.utc(2026, 10, 18);
+      final credentials = MemoryLifePersistence()
+        ..value = jsonEncode({
+          'version': 1,
+          'generation': 1,
+          'app': {
+            'brand': 'feishu',
+            'app_id': 'cli_fixture',
+            'secret': 'synthetic',
+          },
+          'identity': {'open_id': 'person'},
+          'credential': {
+            'access_token': 'synthetic',
+            'expires_at': clock
+                .add(const Duration(days: 1))
+                .millisecondsSinceEpoch,
+          },
+        });
+      final queries = <Map<String, String>>[];
+      final auth = FeishuAuth(
+        credentials,
+        FeishuApi(
+          transport: (m, u, h, b) async {
+            queries.add(u.queryParameters);
+            final first = queries.length == 1;
+            return FeishuResponse(200, {
+              'code': 0,
+              'data': {
+                'items': first
+                    ? [
+                        {
+                          'message_id': 'old',
+                          'create_time': '${clock.millisecondsSinceEpoch}',
+                          'msg_type': 'text',
+                          'body': {'content': '{"text":"已保存消息"}'},
+                        },
+                      ]
+                    : [],
+                'has_more': first,
+                if (first) 'page_token': 'saved-next',
+              },
+            });
+          },
+        ),
+        now: () => clock,
+      );
+      await auth.open();
+      final disk = MemoryLifePersistence();
+      var sources = SourceStore(disk, now: () => clock);
+      await sources.bind(auth.identityKey, auth.generation);
+      await sources.select('chat', DateTime.utc(1970));
+      await FeishuIngest(auth, sources, now: () => clock).page('chat');
+      final window = clock;
+      sources.dispose();
+      clock = clock.add(const Duration(minutes: 10));
+      sources = SourceStore(disk, now: () => clock);
+      await sources.open();
+      final ingest = FeishuIngest(auth, sources, now: () => clock);
+      await ingest.page('chat');
+      expect(queries[1]['page_token'], 'saved-next');
+      expect(
+        queries[1]['end_time'],
+        '${window.millisecondsSinceEpoch ~/ 1000}',
+      );
+      await ingest.page('chat');
+      expect(queries[2]['page_token'], isNull);
+      expect(
+        queries[2]['start_time'],
+        '${window.millisecondsSinceEpoch ~/ 1000}',
+      );
+      expect(sources.messages('chat').single['message_id'], 'old');
+      sources.dispose();
+      auth.dispose();
+    },
+  );
+  test(
     'all accessible is default; discovery paginates past 20 and preserves exclusions',
     () async {
       final clock = DateTime.utc(2026, 10, 18);

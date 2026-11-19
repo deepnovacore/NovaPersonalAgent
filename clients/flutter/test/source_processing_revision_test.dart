@@ -3,10 +3,64 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/source_store.dart';
 import 'package:nova_mobile/context/profile_observation_checkpoint.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'local_life_test.dart' show MemoryLifePersistence;
 
 void main() {
+  test(
+    'content updates retain reusable observations while permission changes invalidate them',
+    () async {
+      final now = DateTime.utc(2026, 10, 18);
+      var revoked = 0, changed = 0;
+      final source = SourceStore(
+        MemoryLifePersistence(),
+        now: () => now,
+        onInvalidated: () async {
+          revoked++;
+        },
+        onContentChanged: () async {
+          changed++;
+        },
+      );
+      await source.bind('fixture:self', 1);
+      await source.select('chat', DateTime.utc(1970));
+      final permissions = revoked;
+      final message = {
+        'message_id': 'm',
+        'create_time': '${now.millisecondsSinceEpoch}',
+        'msg_type': 'text',
+        'body': {'content': '{"text":"计划"}'},
+      };
+      await source.ingestPage(
+        source.fence('chat'),
+        [message],
+        nextPage: null,
+        windowEnd: now,
+      );
+      expect(changed, 1);
+      expect(revoked, permissions);
+      await source.ingestPage(
+        source.fence('chat'),
+        [message],
+        nextPage: null,
+        windowEnd: now,
+      );
+      expect(changed, 1);
+      await source.ingestPage(
+        source.fence('chat'),
+        [
+          {...message, 'deleted': true},
+        ],
+        nextPage: null,
+        windowEnd: now,
+      );
+      expect(changed, 2);
+      expect(revoked, permissions);
+      await source.remove('chat');
+      expect(revoked, permissions + 1);
+      source.dispose();
+    },
+  );
   test(
     'fetch-v1 legacy scope is pinned without invalidating empty syncs',
     () async {
@@ -86,9 +140,9 @@ void main() {
         windowEnd: now,
       );
       await source.grantProcessing('provider', 'profile', true);
-      final authority = SpaceAuthorityRepository(MemoryLifePersistence());
-      await authority.open();
-      final repo = ProfileRepository(profileDisk, authority, source);
+      final publication = LocalPublicationContext(MemoryLifePersistence());
+      await publication.open();
+      final repo = ProfileRepository(profileDisk, publication, source);
       await repo.publish(
         jsonEncode([
           {
@@ -99,7 +153,7 @@ void main() {
             'observed_at': now.toIso8601String(),
           },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: source.revision,
         consentRevision: source.processingRevision,
         provider: 'provider',
@@ -119,6 +173,7 @@ void main() {
         {
           'text': '【事】确定的计划',
           'refs': ['e1'],
+          'relevance': 'ongoing_work',
         },
       ]);
       final savedProfile = profileDisk.value,

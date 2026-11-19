@@ -55,6 +55,7 @@ final class NovaScheduleBridge {
     }
   }
   static func install(messenger: FlutterBinaryMessenger) {
+    NovaSpaceScope.install(messenger: messenger)
     let id = UUID().uuidString
     let candidate = FlutterMethodChannel(name: "nova/schedule/v1", binaryMessenger: messenger)
     channels[id] = candidate
@@ -118,6 +119,7 @@ final class NovaScheduleBridge {
       let engine = headless; headless = nil
       if let id = owner { channels.removeValue(forKey: id) }
       workspace = nil; artifactHost = nil
+      if let engine { NovaSpaceScope.uninstall(messenger: engine.binaryMessenger) }
       engine?.destroyContext(); release()
     }
   }

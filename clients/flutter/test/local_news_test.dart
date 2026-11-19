@@ -15,6 +15,7 @@ const rss =
     '''<rss version="2.0"><channel><item><title><![CDATA[New &amp; useful]]></title><link>https://example.com/new?utm_source=rss#top</link><description><![CDATA[<p>Clear &amp; useful</p>]]></description><pubDate>Mon, 19 Oct 2026 10:00:00 GMT</pubDate></item><item><title>Old</title><link>https://example.com/old</link><pubDate>Sun, 18 Oct 2026 10:00:00 GMT</pubDate></item></channel></rss>''';
 final now = DateTime.utc(2026, 10, 19, 12);
 void main() {
+  interestTests();
   test('RSS and Atom decode text, dates and safe canonical URLs', () {
     final rows = parseNewsFeed(rss, source, now);
     expect(rows.first['title'], 'New & useful');
@@ -213,4 +214,105 @@ void main() {
       );
     },
   );
+}
+
+void interestTests() {
+  test(
+    'local news.configure weights interests and fills fresh diverse cards durably',
+    () async {
+      final disk = MemoryLifePersistence();
+      final sources = List.generate(
+        4,
+        (i) => NewsSource(
+          's$i',
+          'Source $i',
+          'https://source-$i.example/rss',
+          'en',
+        ),
+      );
+      String feed(NewsSource s) =>
+          '<rss><channel>${List.generate(10, (i) => '<item><title>${i == 0 ? 'Gardening tips' : 'Other news'} $i</title><link>https://${s.id}.example/$i</link><pubDate>Mon, 19 Oct 2026 10:00:00 GMT</pubDate></item>').join()}</channel></rss>';
+      final news = LocalNews(
+        disk,
+        sources: sources,
+        language: 'en',
+        now: () => now,
+        fetcher: (s) async => feed(s),
+      );
+      await news.open();
+      await news.refresh();
+      final life = LocalLife(MemoryLifePersistence());
+      await life.open();
+      final store = PersonalStore(
+        send: (_) => throw StateError('remote forbidden'),
+        local: life,
+        news: news,
+      );
+      addTearDown(() {
+        store.dispose();
+        news.dispose();
+        life.dispose();
+      });
+      await store.command('news.configure', {
+        'enabled': true,
+        'explore': true,
+        'interests': ['Gardening'],
+        'expected_version': 0,
+      });
+      final snapshot = news.snapshot(),
+          items = (snapshot['items'] as List).cast<Map>();
+      expect(snapshot['mode'], 'personalized');
+      expect(items, hasLength(12));
+      expect(items.first['title'], contains('Gardening'));
+      expect(items.where((a) => a['exploration'] == true), hasLength(2));
+      for (final source in sources) {
+        expect(
+          items.where((a) => a['source_id'] == source.id).length,
+          lessThanOrEqualTo(3),
+        );
+      }
+      await expectLater(
+        store.command('news.configure', {
+          'enabled': true,
+          'explore': true,
+          'interests': ['Food'],
+          'expected_version': 0,
+        }),
+        throwsStateError,
+      );
+      final restored = LocalNews(
+        disk,
+        sources: sources,
+        language: 'en',
+        now: () => now,
+      );
+      await restored.open();
+      expect(
+        (restored.snapshot()['interests'] as List).single['text'],
+        'Gardening',
+      );
+      restored.dispose();
+      await store.command('news.configure', {
+        'enabled': true,
+        'explore': false,
+        'interests': [],
+        'expected_version': 1,
+      });
+      expect(news.snapshot()['mode'], 'timeline');
+      expect(news.snapshot()['items'], hasLength(12));
+    },
+  );
+  test('local freshness fill excludes stale articles', () async {
+    final news = LocalNews(
+      MemoryLifePersistence(),
+      sources: [source],
+      language: 'en',
+      now: () => now.add(const Duration(days: 8)),
+      fetcher: (_) async => rss,
+    );
+    await news.open();
+    await news.refresh();
+    expect(news.snapshot()['items'], isEmpty);
+    news.dispose();
+  });
 }

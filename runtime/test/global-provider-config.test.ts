@@ -1,14 +1,24 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {loadSettings, requireIntegratedRealtime, describeMissingBlockingCredentials} from '../src/config/config.js'
+import {loadSettings, requireIntegratedRealtime, describeMissingBlockingCredentials,resolveSelectedModelConnection,resolveMemoryExtractionConnection} from '../src/config/config.js'
 import {requireSelectedCascadedLlmConfig} from '../src/config/cascaded-realtime-config.js'
 import {createChatCompletionsLlmFactory} from '../src/realtime/cascaded/chat-completions-llm.js'
 import {reportUsage} from '../src/realtime/usage.js'
 
+for(const dashscope of [undefined,'unrelated-voice-key'])test(`desktop default text model keeps DeepSeek support and extraction with DashScope key ${dashscope===undefined?'absent':'present'}`,()=>{
+ const settings=loadSettings({INTEGRATED_PROVIDER:'qwen',CASCADE_LLM_PROVIDER:'deepseek',DEEPSEEK_MODEL_BASE_URL:'https://text.example/v1',DEEPSEEK_API_KEY:'text-key',...(dashscope?{DASHSCOPE_API_KEY:dashscope}:{})},true)
+ assert.equal(requireSelectedCascadedLlmConfig(settings).provider,'deepseek')
+ assert.equal(resolveSelectedModelConnection(settings)?.provider,'deepseek')
+ assert.equal(resolveSelectedModelConnection(settings)?.apiKey,'text-key')
+ assert.equal(resolveMemoryExtractionConnection(settings).baseUrl,'https://text.example/v1')
+ assert.equal(resolveMemoryExtractionConnection(settings).apiKey,'text-key')
+ assert.equal(resolveMemoryExtractionConnection(settings).model,'deepseek-flash')
+})
+
 for (const provider of ['openai', 'gemini'] as const) {
   const keyName = `${provider.toUpperCase()}_API_KEY`
   test(`${provider} selected credentials never fall back to DashScope or generic keys`, () => {
-    const environment = {INTEGRATED_PROVIDER: provider, DASHSCOPE_API_KEY: 'wrong', MODEL_API_KEY: 'wrong'}
+    const environment = {INTEGRATED_PROVIDER: provider, DASHSCOPE_API_KEY: 'wrong'}
     const missing = loadSettings(environment)
     assert.deepEqual(describeMissingBlockingCredentials(missing).missing, [keyName])
     assert.throws(() => requireIntegratedRealtime(missing), new RegExp(keyName))
@@ -21,6 +31,15 @@ for (const provider of ['openai', 'gemini'] as const) {
     assert.equal(selected.provider, provider)
     assert.equal(selected.config.apiKey, 'selected')
     assert.match(selected.config.baseUrl, provider === 'openai' ? /api.openai.com/ : /generativelanguage.googleapis.com/)
+  })
+  test(`${provider} cascaded text uses its own model endpoint`, () => {
+    const selected = requireSelectedCascadedLlmConfig(loadSettings({
+      PIPELINE_MODE: 'cascaded',
+      CASCADE_LLM_PROVIDER: provider,
+      [`${provider.toUpperCase()}_MODEL_BASE_URL`]: `https://${provider}-model.example/v1`,
+      [keyName]: 'selected',
+    }))
+    assert.equal(selected.config.baseUrl, `https://${provider}-model.example/v1`)
   })
   test(`${provider} streamed chat request omits domestic vendor parameters`, async () => {
     let body: Record<string, unknown> = {}

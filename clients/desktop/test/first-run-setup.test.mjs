@@ -148,3 +148,50 @@ test('first-run setup ignores missing keys left over from the previous launch', 
   t.mock.timers.tick(1200)
   assert.equal(page.closed(), 1)
 })
+
+test('the conversation model key is accepted with every voice path, and voice keys stay optional', () => {
+  assert.deepEqual(setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd'}}),
+    {settingsPatch: {pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd'}}})
+  assert.deepEqual(setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd', dashscopeApiKey: 'q'}}),
+    {settingsPatch: {pipelineMode: 'integrated', cascadedLlmProvider: 'deepseek', secrets: {deepseekApiKey: 'd', dashscopeApiKey: 'q'}}})
+  assert.throws(() => setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'openai'}), /invalid setup choice/u)
+  assert.throws(() => setupCommit({pipelineMode: 'integrated', cascadedLlmProvider: 'ark', secrets: {deepseekApiKey: 'd'}}), /invalid setup choice/u)
+})
+
+test('settings key tests: DashScope also checks the realtime handshake, and unsupported keys have no test', async () => {
+  const {probeKeyForSettings, canProbeKey} = await import('../src/main/key-probe.mjs')
+  const {EventEmitter} = await import('node:events')
+  const fetchOk = async () => ({ok: true, status: 200, body: null})
+  const socketFor = outcome => class extends EventEmitter {
+    constructor(url, options) { super(); this.url = url; assert.equal(options.headers.Authorization, 'Bearer sk-private'); setImmediate(() => outcome(this)) }
+    terminate() {}
+  }
+  const ok = await probeKeyForSettings('dashscopeApiKey', ' sk-private ', {fetch: fetchOk, WebSocketImpl: socketFor(s => s.emit('open'))})
+  assert.deepEqual({...ok}, {status: 'ok', realtime: 'ok'})
+  const refused = await probeKeyForSettings('dashscopeApiKey', 'sk-private', {fetch: fetchOk, WebSocketImpl: socketFor(s => s.emit('error', new Error('Unexpected server response: 401')))})
+  assert.equal(refused.status, 'ok'); assert.equal(refused.realtime, 'rejected'); assert.equal(refused.realtimeHttpStatus, 401)
+  const forbidden = await probeKeyForSettings('dashscopeApiKey', 'sk-private', {fetch: fetchOk, WebSocketImpl: socketFor(s => s.emit('unexpected-response', {}, {statusCode: 403}))})
+  assert.equal(forbidden.realtime, 'forbidden')
+  // A key the model listing rejects never reaches the realtime check, and other keys skip it.
+  const rejected = await probeKeyForSettings('dashscopeApiKey', 'sk-private', {fetch: async () => ({ok: false, status: 401, body: null}), WebSocketImpl: socketFor(() => assert.fail('no handshake'))})
+  assert.equal(rejected.status, 'rejected'); assert.equal(rejected.realtime, undefined)
+  assert.deepEqual({...(await probeKeyForSettings('deepseekApiKey', 'd', {fetch: fetchOk}))}, {status: 'ok'})
+  for (const result of [ok, refused, forbidden, rejected]) assert.ok(!JSON.stringify(result).includes('sk-private'))
+  assert.equal(canProbeKey('tavilyApiKey'), false); assert.equal(canProbeKey('arkApiKey'), true)
+  assert.equal((await probeKeyForSettings('tavilyApiKey', 'x', {fetch: fetchOk})).status, 'unsupported')
+})
+
+test('a replaced key is handed over live only when the backend already uses it and nothing else shares it', async () => {
+  const {planSecretChange, rotationPayload, HOT_APPLY_KEYS} = await import('../src/main/credential-hot-apply.mjs')
+  const replaced = planSecretChange({dashscopeApiKey: 'old', deepseekApiKey: 'd'}, {dashscopeApiKey: 'new', deepseekApiKey: 'd'})
+  assert.deepEqual(replaced, {changed: ['dashscopeApiKey'], rotations: [{name: 'dashscopeApiKey', from: 'old', to: 'new'}], needsRestart: false})
+  assert.deepEqual(rotationPayload(replaced), {rotations: [{from: 'old', to: 'new'}]})
+  // A lane that had no key was built unconfigured; clearing leaves nothing to send; unknown modules need a restart.
+  assert.equal(planSecretChange({}, {dashscopeApiKey: 'new'}).needsRestart, true)
+  assert.equal(planSecretChange({dashscopeApiKey: 'old'}, {}).needsRestart, true)
+  assert.equal(planSecretChange({tavilyApiKey: 'a'}, {tavilyApiKey: 'b'}).needsRestart, true)
+  // Two names holding the same old value must not both receive one provider's new key.
+  assert.equal(planSecretChange({dashscopeApiKey: 'same', openaiApiKey: 'same'}, {dashscopeApiKey: 'new', openaiApiKey: 'same'}).needsRestart, true)
+  assert.deepEqual(planSecretChange({dashscopeApiKey: 'a'}, {dashscopeApiKey: 'a'}), {changed: [], rotations: [], needsRestart: false})
+  assert.ok(HOT_APPLY_KEYS.includes('deepseekApiKey') && !HOT_APPLY_KEYS.includes('tavilyApiKey') && !HOT_APPLY_KEYS.includes('composioApiKey'))
+})

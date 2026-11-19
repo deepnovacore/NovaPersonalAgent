@@ -1,7 +1,7 @@
 import {feedNotification,feedNotificationKey} from '../src/notifications/feed.js';
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,readFile,writeFile,rm,realpath} from 'node:fs/promises';
+import {mkdtemp,readFile,writeFile,rm,realpath,readdir} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {PersonalAgentHost} from '../src/personal-agent/host.js';
@@ -34,7 +34,7 @@ async function fixture(){
  state.feed=[{id:'saved-feed',kind:'notify',title:'Saved reminder',why_now:'Retain history',evidence_refs:['fixture-evidence'],memory_refs:[],source:{type:'file',ref:'fixture-evidence'},subject_key:'fixture',task_ref:null,suggestion_id:null,priority:40,created_at:'2026-09-20T00:00:00Z',updated_at:'2026-09-20T00:00:00Z',expires_at:null,user_state:'dismissed',snooze_until:null,lifecycle:'active',delivery:{presented_at:null,notified_at:null,spoken_at:null}}];
  state.dedupe=['saved-dedupe'];state.receipts.saved={payload:'saved-payload',result:{ok:true}};
  const store=new PersonalStore(path);await store.write(state);
- const make=()=>new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:ref=>ref==='fixture-evidence'?{subject_key:'fixture',source:{type:'file',ref}}:null});
+ const make=()=>new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:ref=>ref==='fixture-evidence'?{subject_key:'fixture',source:{type:'file',ref}}:null});
  const preserved=(actual:PersonalState)=>{assert.deepEqual({...actual,revision:0},{...state,revision:0,...(actual.notifications_initialized?{notifications_initialized:true,notification_fingerprints:Object.fromEntries(state.feed.map(item=>[item.id,feedNotificationKey(feedNotification(item))]))}:{})})};
  return {dir,path,state,store,make,preserved,cleanup:()=>rm(dir,{recursive:true,force:true})};
 }
@@ -123,7 +123,7 @@ test('source open can await a notification without processing unrestored compani
 test('read and scope errors retain the original bytes and reject subsequent writes',async t=>{
  const f=await fixture(),before=await readFile(f.path,'utf8');
  for(const fail of ['read','scope']){
-  const host=fail==='scope'?new PersonalAgentHost({path:f.path,userScope:'wrong-scope',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}):f.make();
+  const host=fail==='scope'?new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path:f.path,userScope:'wrong-scope',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}):f.make();
   const mock=fail==='read'?t.mock.method(PersonalStore.prototype,'read',()=>Promise.reject(Error('disk read failed'))):undefined;
   try{await assert.rejects(host.open(),fail==='read'?/disk read failed/:/scope_mismatch/);await host.sourceChanged();await assert.rejects(host.taskResult('after-failure','Must not persist'),/personal_store_not_ready/);assert.equal(await readFile(f.path,'utf8'),before)}
   finally{mock?.mock.restore();await host.close()}
@@ -231,7 +231,7 @@ test('an unreadable state file is preserved and the host starts empty with a not
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-corrupt-')),path=join(dir,'personal.json')
  const diagnostics:string[]=[]
  await writeFile(path,'{"conversations":',{mode:0o600})
- const host=new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null,onDiagnostic:code=>diagnostics.push(code)})
+ const host=new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null,onDiagnostic:code=>diagnostics.push(code)})
  try{
   await host.open({deferBackground:true})
   const snapshot=host.conversationSnapshot()
@@ -251,7 +251,7 @@ test('a newer state version fails loudly without touching the file',async()=>{
  const state={...initialState(),schema_version:2}
  const text=JSON.stringify(state)
  await writeFile(path,text,{mode:0o600})
- const host=new PersonalAgentHost({path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ const host=new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{
   await assert.rejects(host.open({deferBackground:true}),/state_version_unsupported/u)
   assert.equal(await readFile(path,'utf8'),text)
@@ -279,4 +279,23 @@ test('the personal store reports capacity, corruption and version with stable co
   await store.write(await store.read())
   assert.equal((JSON.parse(await readFile(path,'utf8')) as {schema_version:number}).schema_version,1)
  }finally{await rm(dir,{recursive:true,force:true})}
+})
+
+for(const shape of ['root-field','conversation-field','invalid-known-field'] as const)test(`incompatible readable state stays in place without an empty replacement: ${shape}`,async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-incompatible-')),path=join(dir,'personal.json')
+ const state=initialState(),main=state.conversations.items[0]!,at=new Date().toISOString()
+ main.messages=[{id:'preserved',conversation_id:main.id,role:'user',text:'Keep this history',created_at:at}]
+ if(shape==='root-field')Object.assign(state,{future_metadata:{version:2}})
+ else if(shape==='conversation-field')Object.assign(main,{future_metadata:{version:2}})
+ else Object.assign(main,{persona:42})
+ const text=JSON.stringify(state),backup='existing backup remains untouched'
+ await writeFile(path,text,{mode:0o600});await writeFile(path+'.before-schedules.json',backup,{mode:0o600})
+ const host=new PersonalAgentHost({discoveryWindow:{quietMs:0,maxMs:0},path,userScope:'fixture',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  await assert.rejects(host.open({deferBackground:true}),{code:'state_schema_incompatible'})
+  await host.close()
+  assert.equal(await readFile(path,'utf8'),text)
+  assert.equal(await readFile(path+'.before-schedules.json','utf8'),backup)
+  assert.equal((await readdir(dir)).some(name=>name.includes('.state_corrupt-')),false)
+ }finally{await host.close().catch(()=>undefined);await rm(dir,{recursive:true,force:true})}
 })

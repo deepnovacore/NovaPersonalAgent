@@ -6,8 +6,16 @@ import type {JsonValue} from '../core/events.js'
 import type {Readable} from 'node:stream'
 
 export interface LocalShellProcess {platform:'darwin'|'win32';pid:number}
-export interface LocalShellOptions {readonly factory?:CodexProcessOwnerFactory;readonly resourcesPath?:string;readonly environment?:NodeJS.ProcessEnv;readonly platform?:NodeJS.Platform;readonly temporaryRoot?:string;readonly onStarted?:(process:LocalShellProcess)=>Promise<void>}
+export interface LocalShellOptions {readonly factory?:CodexProcessOwnerFactory;readonly resourcesPath?:string;readonly environment?:NodeJS.ProcessEnv;readonly platform?:NodeJS.Platform;readonly temporaryRoot?:string;readonly processState?:(owner:LocalShellProcess)=>'gone'|'alive'|'unknown';readonly onStarted?:(process:LocalShellProcess)=>Promise<void>}
 /** Inspection only. A reused PID stays conservatively occupied; recovery never signals an unrelated process. */
+/** Tree evidence only: 'gone' needs proof the whole tree ended. Windows has no tree probe, so a vanished leader is 'unknown'. */
+export function localShellTreeState(owner:LocalShellProcess,platform:NodeJS.Platform=process.platform):'gone'|'alive'|'unknown'{
+ if(owner.platform!==platform)return 'unknown'
+ try{process.kill(owner.platform==='darwin'?-owner.pid:owner.pid,0);return 'alive'}catch(error){
+  if((error as NodeJS.ErrnoException).code!=='ESRCH')return 'alive'
+  return owner.platform==='darwin'?'gone':'unknown'
+ }
+}
 export function localShellProcessGone(owner:LocalShellProcess):boolean{
  if(owner.platform!==process.platform)return false
  try{process.kill(owner.platform==='darwin'?-owner.pid:owner.pid,0);return false}catch(error){return (error as NodeJS.ErrnoException).code==='ESRCH'}
@@ -43,7 +51,7 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
  const factory=options.factory??(platform==='darwin'?new native.PosixCodexProcessOwnerFactory():resources?native.loadWindowsGuardianFactoryFromResources({resourcesPath:resources,platform,arch:process.arch}):null)
  if(!factory)throw Error('windows_process_guardian_required')
  let temporary:string|undefined,child:OwnedCodexProcess|undefined
- let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),retained=0,truncated=false,status='completed',exitCode:number|null=null,cleanupConfirmed=true,outputIncomplete=false
+ let stdout=Buffer.alloc(0),stderr=Buffer.alloc(0),retained=0,truncated=false,status='completed',exitCode:number|null=null,cleanupConfirmed=true,started=false,outputIncomplete=false
  const environment=localShellEnvironment(options.environment),controller=new AbortController()
  let timer:ReturnType<typeof setTimeout>|undefined,stopPromise:Promise<void>|undefined
  const stopTree=()=>{
@@ -85,7 +93,7 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
   const capture=(stream:'stdout'|'stderr',data:Buffer|string)=>{const bytes=Buffer.isBuffer(data)?data:Buffer.from(data),remaining=Math.max(0,65536-retained),keep=bytes.subarray(0,remaining);retained+=keep.length;truncated ||= keep.length<bytes.length;if(stream==='stdout')stdout=Buffer.concat([stdout,keep]);else stderr=Buffer.concat([stderr,keep])}
   child.stdout.on('data',(data:Buffer)=>capture('stdout',data));child.stderr.on('data',(data:Buffer)=>capture('stderr',data));child.stdin.on('error',()=>{ /* teardown can close stdin first */ })
   // The shell waits at a stdin gate until its identity and execution intent have reached disk.
-  await options.onStarted?.({platform,pid:child.pid});signal.throwIfAborted()
+  await options.onStarted?.({platform,pid:child.pid});started=true;signal.throwIfAborted()
   await new Promise<void>((resolve,reject)=>child!.stdin.write('nova-start\n',error=>error?reject(error):resolve()))
   await child.closeStdin()
   timer=setTimeout(()=>interrupt('timed_out'),input.timeout*1000)
@@ -99,7 +107,7 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
   outputIncomplete=drained.some(value=>!value)
  }catch(error){
   const unconfirmed=native.takeUnconfirmedCodexProcessOwner(error)
-  if(unconfirmed){child=unconfirmed;cleanupConfirmed=false;await stopTree()}
+  if(unconfirmed){child=unconfirmed;cleanupConfirmed=false;if(!started)await options.onStarted?.({platform,pid:child.pid}).catch(()=>{ /* identity is best effort here; the pause copy covers a missing one */ });await stopTree()}
   if(child){status='outcome_unknown';await stopTree()}else if(signal.aborted)status='cancelled';else throw error
  }finally{
   if(timer)clearTimeout(timer);signal.removeEventListener('abort',cancel)
@@ -107,6 +115,6 @@ export async function executeLocalShell(input:{command:string;cwd:string;timeout
   if(child)await child.dispose().catch(()=>{cleanupConfirmed=false})
   if(temporary)await rm(temporary,{recursive:true,force:true}).catch(()=>{ /* retain a script if the OS still owns it */ })
  }
- if(!cleanupConfirmed)status='outcome_unknown'
+ if(!cleanupConfirmed&&exitCode===null)status='outcome_unknown'
  return {stdout:stdout.toString('utf8'),stderr:stderr.toString('utf8'),exit_code:exitCode,status,truncated,output_incomplete:outputIncomplete,cleanup_confirmed:cleanupConfirmed}
 }

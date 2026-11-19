@@ -8,16 +8,20 @@ export const profileDraftSchema=z.object({
  about:z.object({text:z.string().trim().min(1).max(2600),refs:z.array(refs.element).min(1).max(64)}).strict().nullable(),
  work:z.array(z.object({title:z.string().trim().min(1).max(80),text:z.string().trim().min(1).max(500),refs}).strict()).max(6).default([]),
  interests:z.array(z.object({text:z.string().trim().min(1).max(100),refs}).strict()).max(8),
+ /** Short topic labels from the writer. Optional so profiles stored before keywords existed still parse. */
+ keywords:z.array(z.object({text:z.string().trim().min(2).max(24),refs}).strict()).max(6).optional(),
 }).strict()
 export type ProfileDraft=z.infer<typeof profileDraftSchema>
 export type ProfileInput=Pick<MemoryEntry,'id'|'version'|'content'|'origin'> & {identity_key?:string;observed_at?:string;source?:{project:string;document:string;kind?:'im'|'mail';relation?:'self'|'addressed'|'participant';sender_id?:string;sender_name?:string;thread_id?:string;message_id?:string;parent_id?:string;root_id?:string;upper_message_id?:string;recipient_ids?:string[];mention_ids?:string[]}}
 export interface ProfileObservation {kind:'people'|'work'|'style';text:string;refs:{entry_id:string;version:ProfileInput['version']}[]}
-export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal,observations?:readonly ProfileObservation[])=>Promise<z.input<typeof profileDraftSchema>>
+/** The previously published profile as read-only continuity: tone and vocabulary only, never evidence and never citable. */
+export interface ProfileContinuity {generated_at:string|null;about:string|null;work:{title:string;text:string}[];interests:string[]}
+export type ProfileGenerator=(entries:readonly ProfileInput[],signal:AbortSignal,observations?:readonly ProfileObservation[],continuity?:ProfileContinuity)=>Promise<z.input<typeof profileDraftSchema>>
 export interface ProfileOutcome {outcome:'ok'|'timeout'|'aborted'|'schema'|'evidence'|'consent'|'provider'|'persist';latency_ms:number;items:number}
 export interface ProfileWarmupOptions {participants?:boolean;report?:(outcome:ProfileOutcome)=>void;timeoutMs?:number;backoffMs?:readonly number[];minIntervalMs?:number}
 /** Raise this whenever the way a profile is generated changes: drafts written by an older pipeline are then replaced whole instead of being mixed into the new one. */
-export const PROFILE_GENERATION_VERSION='understanding-v9'
-const diskSchema=z.object({key:z.string(),generation_version:z.string().default(''),participants:z.boolean().default(false),news_cleanup_pending:z.boolean().default(false),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),stage:z.number().int().min(0).max(3).default(0),automatic_day:z.string().regex(/^$|^legacy$|^\d{4}-\d{2}-\d{2}$/).default('legacy')})
+export const PROFILE_GENERATION_VERSION='understanding-v10'
+const diskSchema=z.object({key:z.string(),generation_version:z.string().default(''),participants:z.boolean().default(false),news_cleanup_pending:z.boolean().default(false),draft:profileDraftSchema.nullable(),started_at:z.number().nonnegative().default(0),generated_at:z.number().nonnegative().default(0),last_attempt_at:z.string().nullable().default(null),stage:z.number().int().min(0).max(3).default(0),automatic_day:z.string().regex(/^$|^legacy$|^\d{4}-\d{2}-\d{2}$/).default('legacy')})
 const localDay=(at:number)=>{const date=new Date(at);return [date.getFullYear(),String(date.getMonth()+1).padStart(2,'0'),String(date.getDate()).padStart(2,'0')].join('-')}
 const nextDay=(at:number)=>{const date=new Date(at);date.setHours(24,0,0,0);return date.getTime()}
 interface Ref {entry_id:string;version:ProfileInput['version']}
@@ -34,7 +38,7 @@ const classify=(error:unknown,signal:AbortSignal,controller:AbortController):Pro
 export class ProfileWarmup{
  #openError=false
  #deferGeneration=false
- #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,news_cleanup_pending:false,draft:null,started_at:0,generated_at:0,stage:0,automatic_day:''}
+ #store:BoundedJsonStore<z.infer<typeof diskSchema>>;#cache:z.infer<typeof diskSchema>={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,news_cleanup_pending:false,draft:null,started_at:0,generated_at:0,last_attempt_at:null,stage:0,automatic_day:''}
  #entries:ProfileInput[]=[];#eligible:ProfileInput[]=[];#key='';#opened=false
  #abort=new AbortController();#run:Promise<void>|undefined;#runEntries:ProfileInput[]=[];#writes:Promise<void>=Promise.resolve()
  #stale=false;#timer:ReturnType<typeof setTimeout>|undefined;#firstChangeAt=0;#lastRunAt=0;#failures=0;#failedKey='';#withdrawals=0;#withdrawnDuringRun=new Set<string>()
@@ -66,12 +70,12 @@ export class ProfileWarmup{
  startGeneration(){if(!this.#opened)return;this.#deferGeneration=false;this.#schedule()}
  async close(){this.#opened=false;clearTimeout(this.#timer);this.#abort.abort();await this.#run;await this.#writes}
  #persist(cache:z.infer<typeof diskSchema>){const write=this.#writes.then(()=>this.#store.write(cache));this.#writes=write.catch(()=>{/* The caller reports a failed persistence attempt. */});return write}
- async clear(){this.invalidate();this.#cache={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,news_cleanup_pending:this.#cache.news_cleanup_pending,draft:null,started_at:0,generated_at:0,stage:0,automatic_day:this.#cache.automatic_day};await this.#run;await this.#persist(this.#cache)}
+ async clear(){this.invalidate();this.#cache={key:'',generation_version:PROFILE_GENERATION_VERSION,participants:false,news_cleanup_pending:this.#cache.news_cleanup_pending,draft:null,started_at:0,generated_at:0,last_attempt_at:this.#cache.last_attempt_at,stage:0,automatic_day:this.#cache.automatic_day};await this.#run;await this.#persist(this.#cache)}
  // A source file keeps its facts while it is re-read (its version moves); a stated memory must match exactly because a correction replaces it.
  #grounded(ref:Ref,entries:readonly ProfileInput[]){return entries.some(e=>e.id===ref.entry_id&&(e.source&&!e.source.kind?true:(e.source!==undefined||e.origin==='stated')&&e.version===ref.version))}
  #prune(draft:ProfileDraft,entries:readonly ProfileInput[]):ProfileDraft|null{
   const keep=(fact:{refs:Ref[]})=>fact.refs.every(ref=>this.#grounded(ref,entries))
-  const pruned={about:draft.about&&keep(draft.about)?draft.about:null,work:draft.work.filter(keep),interests:draft.interests.filter(keep)}
+  const pruned={about:draft.about&&keep(draft.about)?draft.about:null,work:draft.work.filter(keep),interests:draft.interests.filter(keep),...(draft.keywords?{keywords:draft.keywords.filter(keep)}:{})}
   return factCount(pruned)?pruned:null
  }
  /** Only consent withdrawal and explicit clearing discard the draft wholesale; source churn goes through update(). */
@@ -79,14 +83,15 @@ export class ProfileWarmup{
  snapshot(){
   const draft=this.#cache.draft&&this.#prune(this.#cache.draft,this.#eligible)
   // Refresh status is independent of the usable draft; failures keep grounded content visible.
-  const status=this.#run?'working' as const:this.#openError||this.#failures&&this.#failedKey===this.#key?'failed' as const:draft?'ready' as const:'idle' as const
-  return {status,automatic_available:this.#cache.automatic_day<localDay(Date.now()),draft:draft?structuredClone(draft):null,sources:this.#entries.map(e=>({id:e.id,version:e.version,label:e.source?e.source.document?`${e.source.project}/${e.source.document}`:e.source.project:'你提供的信息'}))}}
+  const queued=!this.#run&&!this.#openError&&!(this.#failures&&this.#failedKey===this.#key)&&(this.#timer!==undefined||this.#deferGeneration&&!!this.#key&&this.#cache.key!==this.#key)
+  const status=this.#run?'working' as const:this.#openError||this.#failures&&this.#failedKey===this.#key?'failed' as const:draft?'ready' as const:queued?'queued' as const:'idle' as const
+  return {status,automatic_available:this.#cache.automatic_day<localDay(Date.now()),last_attempt_at:this.#cache.last_attempt_at,draft:draft?structuredClone(draft):null,sources:this.#entries.map(e=>({id:e.id,version:e.version,label:e.source?e.source.document?`${e.source.project}/${e.source.document}`:e.source.project:'你提供的信息'}))}}
  /** Set on disk together with the purge of a draft written with other people's messages, and kept until the caller confirms that what was derived from the draft is gone too. */
  newsCleanupPending():boolean{return this.#cache.news_cleanup_pending}
  async confirmNewsCleanup(){if(!this.#cache.news_cleanup_pending)return;this.#cache={...this.#cache,news_cleanup_pending:false};await this.#persist(this.#cache)}
  retainedEvidenceIds():string[]{
   const draft=this.#cache.draft
-  return [...new Set([...(draft?.about?.refs??[]),...(draft?.work.flatMap(item=>item.refs)??[]),...(draft?.interests.flatMap(item=>item.refs)??[])].map(ref=>ref.entry_id).concat(this.#runEntries.filter(input=>input.source?.kind).map(input=>input.id)))]
+  return [...new Set([...(draft?.about?.refs??[]),...(draft?.work.flatMap(item=>item.refs)??[]),...(draft?.interests.flatMap(item=>item.refs)??[]),...(draft?.keywords?.flatMap(item=>item.refs)??[])].map(ref=>ref.entry_id).concat(this.#runEntries.filter(input=>input.source?.kind).map(input=>input.id)))]
  }
  update(entries:readonly ProfileInput[]){
   const usable=entries.filter(e=>e.version!==null&&e.content.trim())
@@ -142,6 +147,9 @@ export class ProfileWarmup{
   const whole=retry||this.#stale
   const key=this.#key,entries=structuredClone(this.#entries),controller=new AbortController(),started=Date.now()
   this.#abort=controller;this.#runEntries=entries;this.#lastRunAt=started;this.#withdrawnDuringRun=new Set()
+  // Durable attempt time: a failed or interrupted refresh is still visible as an attempt, never as a success.
+  this.#cache={...this.#cache,last_attempt_at:new Date(started).toISOString()}
+  void this.#persist(this.#cache).catch(()=>undefined)
   const signal=AbortSignal.any([controller.signal,AbortSignal.timeout(this.#timeoutMs)])
   let outcome:ProfileOutcome={outcome:'ok',latency_ms:0,items:0}
   const run=(async()=>{
@@ -169,7 +177,7 @@ export class ProfileWarmup{
     if(!this.#opened)return
     if(!current){this.#failures=0;this.#failedKey='';return}
     // Installed before the write so a withdrawal arriving mid-write prunes this draft and queues its own write after it.
-    const previous=this.#cache,cache={key,generation_version:PROFILE_GENERATION_VERSION,participants:this.#participants,news_cleanup_pending:this.#cache.news_cleanup_pending,draft:current,started_at:this.#cache.started_at,generated_at:started,stage:3,automatic_day:this.#cache.automatic_day},withdrawals=this.#withdrawals;this.#cache=cache
+    const previous=this.#cache,cache={key,generation_version:PROFILE_GENERATION_VERSION,participants:this.#participants,news_cleanup_pending:this.#cache.news_cleanup_pending,draft:current,started_at:this.#cache.started_at,generated_at:started,last_attempt_at:this.#cache.last_attempt_at,stage:3,automatic_day:this.#cache.automatic_day},withdrawals=this.#withdrawals;this.#cache=cache
     try{await this.#persist(cache)}catch{
      // A rollback must not bring back facts withdrawn since the previous draft was captured.
      if(this.#cache===cache){const kept=withdrawals===this.#withdrawals?previous.draft:previous.draft&&this.#prune(previous.draft,this.#eligible);this.#cache={...previous,key:kept?previous.key:'',draft:kept}}

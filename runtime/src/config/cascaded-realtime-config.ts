@@ -2,8 +2,8 @@ import {selfHostedEndpoint} from './self-hosted.js'
 /** Pure normalization and validation for one selected cascaded provider graph. */
 
 import {
-  ConfigurationError, OPENAI_BASE_URL, GEMINI_BASE_URL, cascadedCredentialField,
-  DASHSCOPE_COMPATIBLE_BASE_URL,
+  ConfigurationError, cascadedCredentialField,
+  resolveProviderModelConnection,
   requireCascadedCredentials,
   requiredSetting,
   resolveCascadedSelection,
@@ -110,12 +110,15 @@ export function requireSelectedCascadedLlmConfig(settings:Settings):SelectedCasc
   const field = cascadedCredentialField(selection.llmProvider)
   const apiKey=stripLikePython(settings[field]??'')
   if(!apiKey && selection.llmProvider !== 'self-hosted')throw new ConfigurationError(`缺少 ${field.toUpperCase()}`)
+  const connection=resolveProviderModelConnection(settings, selection.llmProvider)
+  if(connection===null)throw new ConfigurationError('invalid configuration: CASCADE_LLM_PROVIDER')
+  if(connection.baseUrl==='')throw new ConfigurationError(`缺少 ${connection.missing??field.toUpperCase()}`)
   return selection.llmProvider !== 'ark'
     ? Object.freeze({
       provider: selection.llmProvider,
       config: Object.freeze({
         ...(selection.llmProvider === 'openai-compatible' ? {protocol: settings.openai_compatible_protocol} : {}),
-        baseUrl: selection.llmProvider === 'openai-compatible' ? selfHostedEndpoint(settings.openai_compatible_base_url, 'http', 'OPENAI_COMPATIBLE_BASE_URL') : selection.llmProvider === 'self-hosted' ? selfHostedEndpoint(settings.self_hosted_llm_base_url, 'http', 'SELF_HOSTED_LLM_BASE_URL') : selection.llmProvider === 'openai' ? OPENAI_BASE_URL : selection.llmProvider === 'gemini' ? GEMINI_BASE_URL : selection.llmProvider === 'deepseek' ? 'https://api.deepseek.com' : DASHSCOPE_COMPATIBLE_BASE_URL,
+        baseUrl: connection.baseUrl,
         ...(selection.llmProvider !== 'qwen' ? {provider: selection.llmProvider} : {}),
         apiKey: apiKey,
         model: selection.llmModel,

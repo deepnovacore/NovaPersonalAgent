@@ -1,0 +1,432 @@
+{
+  "version": 1,
+  "note": "Single source for README and website. Stills live in assets/gallery/stills; clips and the film live only in website/public/media/{clips,film} to keep the repo lean. All footage is real recording of persona accounts.",
+  "features": [
+    {
+      "id": "computer-use",
+      "title": {
+        "zh-CN": "操作电脑",
+        "en": "Computer use"
+      }
+    },
+    {
+      "id": "mobile-use",
+      "title": {
+        "zh-CN": "操作手机",
+        "en": "Mobile use"
+      }
+    },
+    {
+      "id": "chat-while-working",
+      "title": {
+        "zh-CN": "边干活边聊天",
+        "en": "Chat while it works"
+      }
+    },
+    {
+      "id": "learns-you",
+      "title": {
+        "zh-CN": "越聊越懂你",
+        "en": "Learns you over time"
+      }
+    },
+    {
+      "id": "proactive",
+      "title": {
+        "zh-CN": "主动帮你",
+        "en": "Proactive"
+      }
+    },
+    {
+      "id": "cross-device",
+      "title": {
+        "zh-CN": "跨设备接力",
+        "en": "Across devices"
+      }
+    }
+  ],
+  "items": [
+    {
+      "id": "pc-proactive-invite",
+      "kind": "still",
+      "feature": "proactive",
+      "device": "mac",
+      "src": "stills/pc-proactive-invite.webp",
+      "width": 1444,
+      "height": 1000,
+      "title": {
+        "zh-CN": "主动开口",
+        "en": "Speaks up first"
+      },
+      "caption": {
+        "zh-CN": "看剧时，Nova 用系统通知问你：这个邀请要不要推掉？",
+        "en": "While you watch, Nova asks whether to decline an invite."
+      }
+    },
+    {
+      "id": "pc-draft-unsent",
+      "kind": "still",
+      "feature": "proactive",
+      "device": "mac",
+      "src": "stills/pc-draft-unsent.webp",
+      "width": 1444,
+      "height": 1000,
+      "title": {
+        "zh-CN": "只起草，不替你发",
+        "en": "Drafts, never sends"
+      },
+      "caption": {
+        "zh-CN": "婉拒邮件存进草稿箱，发不发由你决定。",
+        "en": "The reply lands in Drafts. Sending is your call."
+      }
+    },
+    {
+      "id": "pc-computer-use",
+      "kind": "still",
+      "feature": "computer-use",
+      "device": "mac",
+      "src": "stills/pc-computer-use.webp",
+      "width": 1444,
+      "height": 1000,
+      "title": {
+        "zh-CN": "操作电脑",
+        "en": "Computer use"
+      },
+      "caption": {
+        "zh-CN": "在 B 站搜索、打开视频、点赞，全程真实操作。",
+        "en": "Searches Bilibili, opens a video and likes it."
+      }
+    },
+    {
+      "id": "pc-timeline-cited",
+      "kind": "still",
+      "feature": "learns-you",
+      "device": "mac",
+      "src": "stills/pc-timeline-cited.webp",
+      "width": 1444,
+      "height": 1000,
+      "title": {
+        "zh-CN": "回答带着出处",
+        "en": "Answers with sources"
+      },
+      "caption": {
+        "zh-CN": "从时间线卡片开聊，回答引用你的真实记录。",
+        "en": "Start from a timeline card; answers cite your records."
+      }
+    },
+    {
+      "id": "pc-build-receipt",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "mac",
+      "src": "stills/pc-build-receipt.webp",
+      "width": 1444,
+      "height": 1000,
+      "title": {
+        "zh-CN": "写代码，交回执",
+        "en": "Builds and reports"
+      },
+      "caption": {
+        "zh-CN": "Build 会话写完网页，附上可核验的交付回执。",
+        "en": "A build session ships a page with a verifiable receipt."
+      }
+    },
+    {
+      "id": "pc-morning-brief",
+      "kind": "still",
+      "feature": "proactive",
+      "device": "mac",
+      "src": "stills/pc-morning-brief.webp",
+      "width": 1444,
+      "height": 1000,
+      "title": {
+        "zh-CN": "电脑晨报",
+        "en": "Morning brief"
+      },
+      "caption": {
+        "zh-CN": "早上打开电脑，今天该关注的事已经排好。",
+        "en": "Your day, already sorted when you open the laptop."
+      }
+    },
+    {
+      "id": "phone-voice-site",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "stills/phone-voice-site.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "一句话做网站",
+        "en": "A site from one sentence"
+      },
+      "caption": {
+        "zh-CN": "在手机上用语音聊需求，前台对话、后台开工。",
+        "en": "Talk it through by voice; the back brain starts building."
+      }
+    },
+    {
+      "id": "phone-site-file",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "stills/phone-site-file.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "文件直接交付",
+        "en": "Files delivered"
+      },
+      "caption": {
+        "zh-CN": "网页文件生成后，直接在对话里打开。",
+        "en": "The generated page opens right inside the chat."
+      }
+    },
+    {
+      "id": "phone-site-result",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "stills/phone-site-result.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "真实成品",
+        "en": "The real result"
+      },
+      "caption": {
+        "zh-CN": "手机端独立完成的个人作品集网站。",
+        "en": "A portfolio site built entirely on the phone."
+      }
+    },
+    {
+      "id": "phone-site-dark",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "stills/phone-site-dark.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "换个风格",
+        "en": "Another style"
+      },
+      "caption": {
+        "zh-CN": "深色摄影作品集，标题改完重新交付。",
+        "en": "A dark photo portfolio, retitled and redelivered."
+      }
+    },
+    {
+      "id": "phone-mobile-result",
+      "kind": "still",
+      "feature": "mobile-use",
+      "device": "phone",
+      "src": "stills/phone-mobile-result.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "挑好了，等你拍板",
+        "en": "Picked, your call"
+      },
+      "caption": {
+        "zh-CN": "推荐几道午饭，问价也能答，下单仍由你。",
+        "en": "Lunch picks and prices. Ordering stays with you."
+      }
+    },
+    {
+      "id": "iphone-feed",
+      "kind": "still",
+      "feature": "proactive",
+      "device": "phone",
+      "src": "stills/iphone-feed.webp",
+      "width": 460,
+      "height": 948,
+      "title": {
+        "zh-CN": "值得看的才推",
+        "en": "Only what matters"
+      },
+      "caption": {
+        "zh-CN": "重要资讯以系统通知送达，点开接着聊。",
+        "en": "Important news arrives as a native notification."
+      }
+    },
+    {
+      "id": "iphone-morning",
+      "kind": "still",
+      "feature": "proactive",
+      "device": "phone",
+      "src": "stills/iphone-morning.webp",
+      "width": 485,
+      "height": 948,
+      "title": {
+        "zh-CN": "手机晨报",
+        "en": "Morning on iPhone"
+      },
+      "caption": {
+        "zh-CN": "同一份晨报，换一块屏幕也在。",
+        "en": "The same brief, on whichever screen you pick up."
+      }
+    },
+    {
+      "id": "clip-computer-use",
+      "kind": "clip",
+      "feature": "computer-use",
+      "device": "mac",
+      "src": "clips/computer-use.mp4",
+      "poster": "clips/computer-use.webp",
+      "width": 1920,
+      "height": 1126,
+      "title": {
+        "zh-CN": "操作你的电脑",
+        "en": "Works your computer"
+      },
+      "caption": {
+        "zh-CN": "在 Mac 上搜索视频并点赞，全程可见、可随时接管。",
+        "en": "Searches a video and likes it on your Mac, in plain view and interruptible."
+      }
+    },
+    {
+      "id": "clip-mobile-use",
+      "kind": "clip",
+      "feature": "mobile-use",
+      "device": "phone",
+      "src": "clips/mobile-use.mp4",
+      "poster": "clips/mobile-use.webp",
+      "width": 900,
+      "height": 2002,
+      "title": {
+        "zh-CN": "在手机上办事",
+        "en": "Works your phone"
+      },
+      "caption": {
+        "zh-CN": "在虚拟屏幕里浏览读书与外卖应用，只看不下单。",
+        "en": "Browses reading and food apps on a virtual screen. Browse only, nothing is ordered."
+      }
+    },
+    {
+      "id": "clip-proactive-draft",
+      "kind": "clip",
+      "feature": "proactive",
+      "device": "mac",
+      "src": "clips/proactive-draft.mp4",
+      "poster": "clips/proactive-draft.webp",
+      "width": 1920,
+      "height": 1126,
+      "title": {
+        "zh-CN": "看剧时主动开口",
+        "en": "Speaks up while you watch"
+      },
+      "caption": {
+        "zh-CN": "通知里问你要不要婉拒邀请，婉拒邮件只存草稿，不替你发。",
+        "en": "Asks in a notification whether to decline an invite. The reply is saved as a draft, never sent."
+      }
+    },
+    {
+      "id": "clip-phone-docx",
+      "kind": "clip",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "clips/phone-docx.mp4",
+      "poster": "clips/phone-docx.webp",
+      "width": 900,
+      "height": 2002,
+      "title": {
+        "zh-CN": "读论文，出文档",
+        "en": "Reads the paper, writes the doc"
+      },
+      "caption": {
+        "zh-CN": "手机上边聊边做：读完论文，交回一份 docx。",
+        "en": "Keep chatting on your phone while Nova reads a paper and hands back a docx."
+      }
+    },
+    {
+      "id": "clip-phone-site",
+      "kind": "clip",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "clips/phone-site.mp4",
+      "poster": "clips/phone-site.webp",
+      "width": 900,
+      "height": 2002,
+      "title": {
+        "zh-CN": "一句话做网站",
+        "en": "A website from one sentence"
+      },
+      "caption": {
+        "zh-CN": "用语音描述想法，Nova 在后台做成网页并交付文件。",
+        "en": "Describe an idea by voice; Nova builds the page in the background and delivers the file."
+      }
+    },
+    {
+      "id": "clip-morning-brief",
+      "kind": "clip",
+      "feature": "proactive",
+      "device": "mac",
+      "src": "clips/morning-brief.mp4",
+      "poster": "clips/morning-brief.webp",
+      "width": 1920,
+      "height": 1134,
+      "title": {
+        "zh-CN": "晨报",
+        "en": "Morning brief"
+      },
+      "caption": {
+        "zh-CN": "每天开工前，把值得看的事整理好。",
+        "en": "Gathers what matters before your day starts."
+      }
+    },
+    {
+      "id": "clip-handoff-mac",
+      "kind": "clip",
+      "feature": "cross-device",
+      "device": "mac",
+      "src": "clips/handoff-mac.mp4",
+      "poster": "clips/handoff-mac.webp",
+      "width": 1920,
+      "height": 1128,
+      "title": {
+        "zh-CN": "电脑上开始",
+        "en": "Start on the Mac"
+      },
+      "caption": {
+        "zh-CN": "在 Mac 上交代一件事。",
+        "en": "Hand off a task on the Mac."
+      }
+    },
+    {
+      "id": "clip-handoff-iphone",
+      "kind": "clip",
+      "feature": "cross-device",
+      "device": "phone",
+      "src": "clips/handoff-iphone.mp4",
+      "poster": "clips/handoff-iphone.webp",
+      "width": 900,
+      "height": 1972,
+      "title": {
+        "zh-CN": "手机上接着看",
+        "en": "Continue on the iPhone"
+      },
+      "caption": {
+        "zh-CN": "同一件事在 iPhone 上同步到结果。",
+        "en": "The same task shows its result on the iPhone."
+      }
+    },
+    {
+      "id": "film-v1",
+      "kind": "film",
+      "src": "film/nova-launch-720p.mp4",
+      "poster": "film/nova-launch-720p.webp",
+      "width": 1280,
+      "height": 720,
+      "title": {
+        "zh-CN": "Nova 产品片",
+        "en": "Nova launch film"
+      },
+      "caption": {
+        "zh-CN": "产品场景演绎，人物为虚构。完整版链接待补充。",
+        "en": "A product scenario film with fictional characters. Full-length link to be added."
+      },
+      "externalUrl": null
+    }
+  ]
+}

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../personal/personal_store.dart';
 import 'strings.dart';
+import 'reason_copy.dart';
 
 /// Reads task activity; extra instructions stay in the authorized conversation.
 class TaskDetails extends StatefulWidget {
@@ -107,11 +108,10 @@ class _TaskDetailsState extends State<TaskDetails> {
   bool get _zh => widget.language == 'zh';
   String t(String zh, String en) => _zh ? zh : en;
 
-  /// Chinese shows a readable label and never an internal key; English keeps the phase word.
+  /// Unknown phases never leak internal keys in either language.
   String _phase(Object? phase) {
-    if (!_zh) return '$phase';
-    final key = 'phase:$phase', label = tr('zh', key);
-    return label == key ? '处理中' : label;
+    final key = 'phase:$phase', label = tr(widget.language, key);
+    return label == key ? t('处理中', 'Processing') : label;
   }
 
   @override
@@ -130,9 +130,14 @@ class _TaskDetailsState extends State<TaskDetails> {
               style: Theme.of(context).textTheme.titleLarge,
             ),
             Text(
-              _zh
-                  ? _phase(current['phase'])
-                  : '${current['phase']} · ${current['waiting_reason'] ?? ''}',
+              [
+                _phase(current['phase']),
+                if (current['waiting_reason'] != null)
+                  reasonCopy(
+                    current['waiting_reason'],
+                    language: widget.language,
+                  ),
+              ].join(' · '),
             ),
             if (!widget.store.connected)
               Text(t('离线 · 显示缓存的任务', 'Offline · cached task')),

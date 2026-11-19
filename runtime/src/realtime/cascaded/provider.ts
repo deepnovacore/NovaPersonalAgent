@@ -1,6 +1,6 @@
 import {realtimeCapabilities} from '../capabilities.js'
 import type {CommittedConversationPair} from '../history.js'
-import type {PreparedMemoryContext} from './adapter.js'
+import type {CascadedRealtimeAdapterOptions, PreparedMemoryContext} from './adapter.js'
 import type {PromptLanguage} from '../prompt-language.js'
 import type {Frame} from '../../executors/watcher.js'
 import type {
@@ -33,6 +33,8 @@ export interface CascadedRealtimeProviderOptions {
   readonly llmFactory: CascadedLlmFactory
   readonly ttsFactory: TtsFactory
   readonly prerecall?: (query: string, signal: AbortSignal) => Promise<PreparedMemoryContext | null>
+  readonly prerecallPolicy?: CascadedRealtimeAdapterOptions['prerecallPolicy']
+  readonly prerecallMeta?: CascadedRealtimeAdapterOptions['prerecallMeta']
   readonly captureFrame?: (signal: AbortSignal) => Promise<Frame>
   readonly telemetry?: RealtimeTelemetry
   readonly idFactory: () => string
@@ -51,6 +53,8 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
   readonly #llmFactory: CascadedLlmFactory
   readonly #ttsFactory: TtsFactory
   readonly #prerecall: ((query: string, signal: AbortSignal) => Promise<PreparedMemoryContext | null>) | undefined
+  readonly #prerecallPolicy: CascadedRealtimeAdapterOptions['prerecallPolicy']
+  readonly #prerecallMeta: CascadedRealtimeAdapterOptions['prerecallMeta']
   readonly #captureFrame: ((signal: AbortSignal) => Promise<Frame>) | undefined
   readonly #telemetry: RealtimeTelemetry | undefined
   readonly #idFactory: () => string
@@ -70,6 +74,8 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
     this.#llmFactory = options.llmFactory
     this.#ttsFactory = options.ttsFactory
     this.#prerecall = options.prerecall
+    this.#prerecallPolicy = options.prerecallPolicy
+    this.#prerecallMeta = options.prerecallMeta
     this.#captureFrame = options.captureFrame
     this.#telemetry = options.telemetry
     this.#idFactory = options.idFactory
@@ -113,6 +119,8 @@ export class CascadedRealtimeProvider implements RealtimeProvider {
         language: this.#language,
         ...(this.#captureFrame ? {captureFrame: this.#captureFrame} : {}),
         ...(this.#prerecall ? {prerecall: this.#prerecall} : {}),
+        ...(this.#prerecallPolicy ? {prerecallPolicy: this.#prerecallPolicy} : {}),
+        ...(this.#prerecallMeta ? {prerecallMeta: this.#prerecallMeta} : {}),
         endpointing,
         asr,
         llm,

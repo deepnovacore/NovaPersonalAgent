@@ -68,3 +68,26 @@ test('a Windows orphan cannot reclaim a recorded driver using a POSIX group prob
   try {assert.deepEqual(await acquireDeviceLock(dir, 'android', 'serial', 'new'), {ok: false, reason: 'device_busy'})}
   finally {Object.defineProperty(process, 'platform', descriptor)}
 })
+
+test('a quarantined desktop lock is set aside once its host and worker are gone', async t => {
+  const dir = await root(t)
+  const path = deviceLockPath(dir, 'desktop', 'local-input')
+  await mkdir(path)
+  await writeFile(join(path, 'owner.json'), JSON.stringify({taskId: 'old', hostPid: DEAD_PID, devicePid: DEAD_PID}))
+  await writeFile(join(path, 'quarantine.json'), JSON.stringify({taskId: 'old', code: 'cleanup_unknown'}))
+  const acquired = await acquireDeviceLock(dir, 'desktop', 'local-input', 'new')
+  assert.ok(acquired.ok)
+  const names = await readdir(dir)
+  const recovered = names.find(name => name.startsWith(`${path.split('/').at(-1)}.recovered-old-`))
+  assert.ok(recovered, names.join(','))
+  assert.match(await readFile(join(dir, recovered, 'quarantine.json'), 'utf8'), /cleanup_unknown/)
+})
+
+test('a quarantined desktop lock with a live host stays held', async t => {
+  const dir = await root(t)
+  const path = deviceLockPath(dir, 'desktop', 'local-input')
+  await mkdir(path)
+  await writeFile(join(path, 'owner.json'), JSON.stringify({taskId: 'old', hostPid: process.pid}))
+  await writeFile(join(path, 'quarantine.json'), JSON.stringify({taskId: 'old', code: 'cleanup_unknown'}))
+  assert.deepEqual(await acquireDeviceLock(dir, 'desktop', 'local-input', 'new'), {ok: false, reason: 'device_busy'})
+})

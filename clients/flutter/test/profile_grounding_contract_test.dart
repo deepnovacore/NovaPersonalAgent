@@ -25,10 +25,10 @@ void main() {
         for (final record in records)
           <String, dynamic>{
             'text': '【事】${record['text']}',
+            'relevance': 'ongoing_work',
             'refs': [record['evidence_id']],
           },
       ];
-      final timelineRecords = records.skip(1).toList();
       final stages = <String>[];
       Map<String, dynamic> profile(String text) => {
         'timeline': [],
@@ -58,6 +58,7 @@ void main() {
               'why_now': '本人完成了一项功能开发。',
               'next_steps': [],
               'uncertainty': '',
+              'temporal': {'kind': 'unknown', 'dates': []},
             },
             'evidence_ids': ['catalog', 'return'],
             'time_ref': 'catalog',
@@ -71,18 +72,11 @@ void main() {
       ) async {
         stages.add(stage);
         if (stage == 'observations') return {'facts': observations};
-        if (stage == 'timeline_select') {
-          return {
-            'topics': [
-              {
-                'title': '目录与归还功能进展',
-                'observation_indices': [1, 2],
-              },
-            ],
-          };
-        }
         if (stage.startsWith('timeline_')) {
-          expect(input['messages'], timelineRecords);
+          expect(
+            (input['messages'] as List).map((r) => r['evidence_id']).toList(),
+            records.map((r) => r['evidence_id']).toList(),
+          );
           expect(instructions, isNot(contains('约35至65字')));
           if (stage == 'timeline_compose') {
             return timeline('目录检索已经上线并测试通过。');
@@ -129,7 +123,6 @@ void main() {
         'draft',
         'review',
         'edit',
-        'timeline_select',
         'timeline_compose',
         'timeline_review',
       ]);

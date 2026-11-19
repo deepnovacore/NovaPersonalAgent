@@ -1,0 +1,63 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="366" viewBox="0 0 920 366" role="img" aria-label="多执行器调度与审批门控">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#7d8590"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#d29922"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#2dd4bf"/>
+    </marker>
+  </defs>
+  <rect width="920" height="366" rx="20" fill="#0d1117"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'>
+    
+    <text x="40" y="44" font-size="20" font-weight="700" fill="#e6edf3" text-anchor="start">多执行器调度与审批门控</text>
+
+    <rect x="40" y="156" width="120" height="104" rx="14" fill="#21262d" stroke="#484f58" stroke-width="1.5"/>
+    <text x="100" y="202" font-size="14.5" font-weight="700" fill="#e6edf3" text-anchor="middle">用户需求</text>
+    <text x="100" y="224" font-size="12" font-weight="400" fill="#9ea7b3" text-anchor="middle">语音 / 文本</text>
+
+    <line x1="160" y1="208" x2="196" y2="208" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+
+    <rect x="198" y="148" width="138" height="120" rx="14" fill="#271e0f" stroke="#d29922" stroke-width="1.5"/>
+    <text x="267" y="198" font-size="14.5" font-weight="700" fill="#fde68a" text-anchor="middle">宿主准入与</text>
+    <text x="267" y="220" font-size="14.5" font-weight="700" fill="#fde68a" text-anchor="middle">审批门控</text>
+
+    
+    <rect x="380" y="76" width="290" height="54" rx="12" fill="#1c2128" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="398" y="100" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="start">Coding</text>
+    <text x="398" y="118" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="start">Codex · OpenCode · CodeBuddy · Pi · DeepSeek</text>
+    <line x1="336" y1="208" x2="378" y2="103" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="670" y1="103" x2="718" y2="154" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+  
+    <rect x="380" y="146" width="290" height="54" rx="12" fill="#1c2128" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="398" y="170" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="start">Computer Use</text>
+    <text x="398" y="188" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="start">Build 内置 / 独立桌面控制</text>
+    <line x1="336" y1="208" x2="378" y2="173" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="670" y1="173" x2="718" y2="154" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+  
+    <rect x="380" y="216" width="290" height="54" rx="12" fill="#1c2128" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="398" y="240" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="start">Mobile Use</text>
+    <text x="398" y="258" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="start">mobile.run (Midscene) · AutoGLM</text>
+    <line x1="336" y1="208" x2="378" y2="243" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="670" y1="243" x2="718" y2="154" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+  
+    <rect x="380" y="286" width="290" height="54" rx="12" fill="#1c2128" stroke="#388bfd" stroke-width="1.5"/>
+    <text x="398" y="310" font-size="14.5" font-weight="700" fill="#a5d6ff" text-anchor="start">Loop Camera</text>
+    <text x="398" y="328" font-size="11.5" font-weight="400" fill="#9ea7b3" text-anchor="start">独立视觉监控 (watch / guard)</text>
+    <line x1="336" y1="208" x2="378" y2="313" stroke="#7d8590" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <line x1="670" y1="313" x2="718" y2="276" stroke="#2dd4bf" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+  
+
+    <rect x="720" y="104" width="160" height="104" rx="14" fill="#102624" stroke="#2dd4bf" stroke-width="1.5"/>
+    <text x="800" y="150" font-size="15" font-weight="700" fill="#99f6e4" text-anchor="middle">Task Loop</text>
+    <text x="800" y="174" font-size="12" font-weight="400" fill="#e6edf3" text-anchor="middle">证据核验与接管</text>
+
+    <rect x="720" y="232" width="160" height="88" rx="14" fill="#1e1930" stroke="#a371f7" stroke-width="1.5"/>
+    <text x="800" y="270" font-size="14.5" font-weight="700" fill="#d2a8ff" text-anchor="middle">Proactive / Floor</text>
+    <text x="800" y="292" font-size="12" font-weight="400" fill="#e6edf3" text-anchor="middle">节制主动播报</text>
+  
+  </g>
+</svg>

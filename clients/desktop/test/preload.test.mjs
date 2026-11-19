@@ -26,6 +26,15 @@ async function loadPreload() {
   return { exposed, ipcRenderer, invokes, sends, source }
 }
 
+test('presentation requests preserve a fixed main-chat destination without accepting arbitrary conversation ids',async()=>{
+  const {exposed,ipcRenderer}=await loadPreload(),seen=[]
+  const stop=exposed.personal.onPresentationRequest((mode,options)=>seen.push({mode,options:{...options}}))
+  ipcRenderer.emit('nova:personal:presentation-request',{},'workbench',true,'chat:main')
+  ipcRenderer.emit('nova:personal:presentation-request',{},'workbench',true,'task:untrusted')
+  stop()
+  assert.deepEqual(seen,[{mode:'workbench',options:{attention:true,conversationId:'chat:main'}},{mode:'workbench',options:{attention:true}}])
+})
+
 test('preload exposes a removable backend-exit listener without exposing ipcRenderer', async () => {
   const { exposed, ipcRenderer } = await loadPreload()
 
@@ -60,11 +69,23 @@ test('preload exposes sanitized backend status and explicit settings retry', asy
   assert.deepEqual(invokes, [{channel: 'nova:backend:retry', payload: undefined}])
 })
 
+test('settings notification controls invoke the same bounded channels as the main renderer', async () => {
+  const {exposed, invokes} = await loadPreload()
+  await exposed.settings.systemNotifications()
+  await exposed.settings.setSystemNotifications(false)
+  await exposed.settings.openNotificationSettings()
+  assert.deepEqual(invokes, [
+    {channel: 'nova:personal:notifications-status', payload: undefined},
+    {channel: 'nova:personal:notifications-enabled', payload: false},
+    {channel: 'nova:personal:notifications-settings', payload: undefined},
+  ])
+})
+
 test('preload exposes the settings bridge as invoke/invoke/removable listener', async () => {
   const { exposed, ipcRenderer, invokes } = await loadPreload()
 
   assert.deepEqual(Object.keys(exposed.settings).sort(), [
-    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'hubAction', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'personalCommand', 'phoneAction', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'voicePreset', 'voiceprint',
+    'chooseDirectory', 'clearAllManagedWorkspaces', 'clearCurrentManagedWorkspace', 'feishuCommand', 'get', 'knowledgeAction', 'nativeVoiceCapabilities', 'onChanged', 'openConnectorAuthorization', 'openCurrentManagedWorkspace', 'openFeishuVerification', 'openNotificationSettings', 'personalCommand', 'probeCapabilities', 'repairProjects', 'rescanCodex', 'restart', 'retryBackend', 'retryMicrophone', 'set', 'setSystemNotifications', 'spaceCreate', 'systemNotifications', 'testKey', 'voicePreset', 'voiceprint',
   ])
   assert.ok(Object.isFrozen(exposed.settings))
 
@@ -78,6 +99,8 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
   await exposed.settings.clearAllManagedWorkspaces()
   await exposed.settings.knowledgeAction({action: 'status'})
   await exposed.settings.nativeVoiceCapabilities('personaplex')
+  await exposed.settings.spaceCreate({relayUrl: 'https://relay.example', bootstrapToken: 'x'})
+  await exposed.settings.testKey('dashscopeApiKey', '')
   assert.deepEqual(invokes, [
     { channel: 'nova:settings:get', payload: undefined },
     { channel: 'nova:settings:set', payload: {settingsPatch: {palette: 'graphite'}} },
@@ -89,6 +112,8 @@ test('preload exposes the settings bridge as invoke/invoke/removable listener', 
     { channel: 'nova:workspaces:clear-all', payload: undefined },
     { channel: 'nova:knowledge:action', payload: {action: 'status'} },
     { channel: 'nova:settings:native-voice', payload: 'personaplex' },
+    { channel: 'nova:space:create', payload: {relayUrl: 'https://relay.example', bootstrapToken: 'x'} },
+    { channel: 'nova:settings:test-key', payload: 'dashscopeApiKey' },
   ])
 
   const seen = []

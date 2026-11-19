@@ -4,7 +4,7 @@ import type {ExplicitMemoryTurn,ExplicitMemoryArguments,ExplicitMemoryLookup,Exp
 import type {UnderstandingProducts,ProductGenerationContext} from '../personal-agent/understanding-products.js'
 import type {ProcessingRequest} from '../memory-substrate/source-processing.js'
 import type {SourceFilter,SourceRecallResult} from './source-retrieval.js'
-import type {ProfileObservation,ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
+import type {ProfileContinuity,ProfileObservation,ProfileInput,ProfileGenerator} from '../personal-agent/profile-warmup.js'
 import type {EvaluatedCandidate} from '../understanding/candidates.js'
 import type {ResolvedLifeCandidate} from '../memory-substrate/resolution.js'
 import type {LifeBackend} from '../personal-agent/life.js'
@@ -19,6 +19,9 @@ export type PersonalMemoryRecallScope = 'recent' | 'any'
 export interface PersonalMemoryPurgeResult {status:'complete'|'incomplete';operation_id:string;removed_entries:number;removed_evidence:number;removed_entry_ids?:string[];removed_evidence_ids?:string[];index_evidence_ids?:string[];backup_cleanup:{status:'complete'|'incomplete';unresolved:string[]}}
 
 export interface PersonalMemoryRecallHit {
+  readonly memory_scope?: 'user'|'general'
+  /** Fixed engine-record expiry; response style only, never renewed by recall. */
+  readonly expiresAt?: string
   readonly revision?: MemoryVersion
   readonly memoryId: string
   readonly text: string
@@ -89,9 +92,13 @@ export interface PersonalMemoryAdmissionReceipt {
 }
 
 export interface PersonalMemoryRecallPort {
+  readonly maxRecallLimit?: number
+  readonly recallEngine?: 'ledger' | 'mem0' | 'voicemem' | 'remote' | 'knowledge'
   recall(query: string, options?: {
     /** Recent is a bounded candidate window; any searches the full authorized namespace. */
     readonly scope?: PersonalMemoryRecallScope
+    /** Host-only automatic projection; never a model tool argument. Defaults to explicit/all. */
+    readonly userOnly?: boolean
     /** Maximum hits per result group; adapters own relevance filtering. */
     readonly limit?: number
     readonly signal?: AbortSignal
@@ -100,6 +107,12 @@ export interface PersonalMemoryRecallPort {
 
 /** Identity and personal namespace are fixed by the host at construction, never by the model. */
 export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
+  /** Host-configured internal style channel, independent of the factual recall engine. */
+  readonly supportsResponseStyle?: boolean
+  /** In-memory ledger mutation fence; compare only within this resource instance. */
+  readonly recallAuthorityRevision?: () => number
+  /** Only the Nova ledger supplies memory to proactive/product surfaces. */
+  readonly productSurfaces?: true
   readonly beginExplicitTurn?: (turn:ExplicitMemoryTurn)=>Promise<ExplicitMemoryTurn>
   readonly writeExplicit?: (turn:ExplicitMemoryTurn,requestId:string,args:ExplicitMemoryArguments,consumer:string)=>Promise<ExplicitMemoryReceipt>
   readonly lookupExplicit?: (query:ExplicitMemoryLookup,consumer:string)=>Promise<ExplicitMemoryPage>
@@ -107,25 +120,28 @@ export interface PersonalMemoryResource extends PersonalMemoryRecallPort {
   /** Internal built-in maintenance port; identity and provider are supplied by the host. */
   readonly sourceProcessingLlm?: ()=>{baseUrl:string;apiKey:string;model:string}|undefined
   readonly sourceProcessingObserve?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>)=>Promise<ProfileObservation[]>
-  readonly sourceProcessingProfile?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[])=>ReturnType<ProfileGenerator>
+  readonly sourceProcessingProfile?: (entries:readonly ProfileInput[],signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>,observations?:readonly ProfileObservation[],continuity?:ProfileContinuity)=>ReturnType<ProfileGenerator>
   readonly sourceProcessingTodoContext?:()=>Promise<{todos:ProductGenerationContext['todos'];authorize:()=>Promise<void>}>
   readonly sourceProcessingProducts?: (entries:readonly ProfileInput[],context:ProductGenerationContext,signal:AbortSignal,authorize:()=>Promise<void>,modelCall?:(maxTokens:number)=>Promise<void>)=>Promise<UnderstandingProducts>
   readonly sourceProcessingConsumer?: ()=>string
-  readonly syncSharedContext?: ()=>Promise<void>
   readonly sourceProcessing?: (request:ProcessingRequest)=>Promise<unknown>
   readonly profileSources?: (ids?:readonly string[]) => Promise<ProfileInput[]>
   readonly resolveLifeCandidate?: (row:EvaluatedCandidate,signal:AbortSignal,guard:()=>void)=>Promise<ResolvedLifeCandidate>
   readonly lifeBackend?: () => LifeBackend
   readonly timelineEvidence?: (retainedIds?:readonly string[])=>Promise<TimelineInput[]>
+  /** Of the given message evidence ids, those that no longer exist (not merely unauthorized or paused). */
+  readonly timelineRetired?: (ids:readonly string[])=>Promise<string[]>
   readonly dailyBriefEvidence?: (input:{localDate:string;timezone:string;signal?:AbortSignal})=>Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}[]>
   readonly readEvidence?: (id:string) => Promise<{evidence_id:string;locator:string;text:string;source_kind:string;observed_at:string;trust:'untrusted_external'}|null>
   readonly canProcessEvidence?: (id:string,purpose:'extraction'|'embedding')=>Promise<boolean>
   readonly canProcessEvidenceMany?: (ids:readonly string[],purpose:'extraction'|'embedding')=>Promise<string[]>
+  readonly requiresConversationConsumer?: boolean
   readonly canReadConversationEvidence?: (id:string,consumer:string)=>Promise<boolean>
   readonly processingStamp?: (ids:string[])=>Promise<string|null>
   readonly processingGrant?: (consent:boolean,revision?:number,scopeRevision?:number)=>ProcessingGrant
   readonly feishuProcessingConsent?: (mode:'suspend'|'reconcile'|'apply'|'activate',sources:string[],grant:ProcessingGrant,pending?:boolean)=>Promise<ProcessingGrant>
   readonly setProcessingConsent?: (sourceId:string,grant:ProcessingGrant)=>Promise<void>
+  readonly receiveSpaceSourceInput?: (scope:{space:string;sender:string;opId:string},input:unknown)=>Promise<unknown>
   readonly recordEvidence?: (input:{sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}) => Promise<{evidence_id:string}>
   readonly recordEvidenceBatch?: (inputs:readonly {sourceId:string;locator:string;text:string;observedAt:string;kind:'file'|'im';embeddingConsent:boolean;processingConsent?:ProcessingGrant}[]) => Promise<{evidence_id:string}[]>
   readonly evidenceFor?: (id:string,revision:MemoryVersion) => Promise<readonly {id:string;source_kind:string;locator:string;text:string;observed_at:string}[]>

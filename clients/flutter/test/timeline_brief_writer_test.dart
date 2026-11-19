@@ -12,6 +12,7 @@ Map<String, dynamic> brief(String ref, String quote) => {
   'why_now': '本人等待的验证结果已经明确，可以据此安排后续交付。',
   'next_steps': [],
   'uncertainty': '',
+  'temporal': {'kind': 'unknown', 'dates': []},
 };
 
 void main() {
@@ -19,14 +20,17 @@ void main() {
     final observations = <Map<String, dynamic>>[
       {
         'text': '【事】共同背景',
+        'relevance': 'ongoing_work',
         'refs': ['shared-1', 'shared-2'],
       },
       {
         'text': '【事】甲完成',
+        'relevance': 'ongoing_work',
         'refs': ['a-plan', 'a-done'],
       },
       {
         'text': '【事】乙取消',
+        'relevance': 'ongoing_work',
         'refs': ['b-plan', 'b-cancelled'],
       },
     ];
@@ -100,6 +104,7 @@ void main() {
           loadValidatedBatch: (_) async => [
             {
               'text': '【事】本人完成核验',
+              'relevance': 'ongoing_work',
               'refs': ['e0'],
             },
           ],
@@ -157,22 +162,27 @@ void main() {
       final observations = <Map<String, dynamic>>[
         {
           'text': '【事】交付甲计划',
+          'relevance': 'ongoing_work',
           'refs': ['shared', 'a-plan'],
         },
         {
           'text': '【事】交付甲完成',
+          'relevance': 'ongoing_work',
           'refs': ['a-done'],
         },
         {
           'text': '【事】交付乙计划',
+          'relevance': 'ongoing_work',
           'refs': ['shared', 'b-plan'],
         },
         {
           'text': '【事】交付乙取消',
+          'relevance': 'ongoing_work',
           'refs': ['b-cancelled'],
         },
         {
           'text': '【事】甲事项重复观察',
+          'relevance': 'ongoing_work',
           'refs': ['a-done', 'shared', 'a-plan'],
         },
       ];
@@ -232,6 +242,7 @@ void main() {
         552,
         (i) => <String, dynamic>{
           'text': '${['【事】', '【人】', '【风】'][i % 3]}${'项目进展核对' * 15}，观察$i',
+          'relevance': 'ongoing_work',
           'refs': ['e$i'],
         },
       );
@@ -319,6 +330,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】本人验证已完成',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1'],
                 },
               ],
@@ -378,6 +390,52 @@ void main() {
     },
   );
 
+  test('at most one next step survives; malformed steps still fail', () {
+    final source = <String, dynamic>{
+      'e1': {'text': '周五前提交审批，复核已经完成。'},
+    };
+    final steps = [
+      {'title': '周五前提交审批', 'detail': '原文给出明确期限。'},
+      {'title': '复核已完成', 'detail': '已完成进展不凑行动。'},
+    ];
+    final kept =
+        normalizeTimelineBrief(
+              {...brief('e1', '复核已经完成。'), 'next_steps': steps},
+              ['e1'],
+              source,
+            )['next_steps']
+            as List;
+    expect(kept, hasLength(1));
+    expect(kept.single['title'], '周五前提交审批');
+    expect(
+      () => normalizeTimelineBrief(
+        {
+          ...brief('e1', '复核已经完成。'),
+          'next_steps': [
+            {'title': '缺少 detail'},
+          ],
+        },
+        ['e1'],
+        source,
+      ),
+      throwsStateError,
+    );
+    expect(
+      () => normalizeTimelineBrief(
+        {
+          ...brief('e1', '复核已经完成。'),
+          'next_steps': [
+            for (var index = 0; index < 4; index++)
+              {'title': '行动$index', 'detail': '说明'},
+          ],
+        },
+        ['e1'],
+        source,
+      ),
+      throwsStateError,
+    );
+  });
+
   test('brief facts require exact original quotes and per-card refs', () {
     final source = <String, dynamic>{
       'e1': {'text': '验证通过，已完成。'},
@@ -408,10 +466,12 @@ void main() {
       final observations = [
         {
           'text': '【事】本人计划',
+          'relevance': 'ongoing_work',
           'refs': ['e1'],
         },
         {
           'text': '【事】后续完成',
+          'relevance': 'ongoing_work',
           'refs': ['e2'],
         },
       ];
@@ -458,6 +518,7 @@ void main() {
       final selected = ProfileWriter.selectOriginals(records, [
         {
           'text': '【风】profile',
+          'relevance': 'ongoing_work',
           'refs': ['e1'],
         },
       ], priorityGroups: fitted.groups);
@@ -481,6 +542,7 @@ void main() {
         for (var i = 0; i < 130; i++)
           {
             'text': '【风】习惯$i',
+            'relevance': 'ongoing_work',
             'refs': ['e$i'],
           },
       ];
@@ -492,7 +554,11 @@ void main() {
             return {
               'topics': [
                 {
-                  'observation_indices': [129],
+                  'observation_indices': [
+                    (input['observations'] as List).singleWhere(
+                      (row) => row['text'] == '【风】习惯129',
+                    )['index'],
+                  ],
                 },
               ],
             };
@@ -534,6 +600,7 @@ void main() {
         500,
         (i) => <String, dynamic>{
           'text': '【事】$i${'x' * 390}',
+          'relevance': 'ongoing_work',
           'refs': ['e1'],
         },
       );
@@ -586,6 +653,7 @@ void main() {
               'facts': [
                 {
                   'text': '【事】例行授权成功',
+                  'relevance': 'ongoing_work',
                   'refs': ['e1'],
                 },
               ],

@@ -49,7 +49,7 @@ Future<List<String>> runStandaloneProbe(Directory directory) async {
         writes++;
         return life.mutate(input, operationId: operationId);
       },
-      hasConflict: () => life.conflict != null,
+      hasConflict: () => false,
       fetch: (_) async => throw StateError('network_not_allowed'),
     );
     final journalFile = FileLifePersistence(

@@ -233,7 +233,7 @@ test('batch context revalidation includes prior originals read through topic sea
 test('profile writer retries revalidate authorization before sending original text again',async()=>{
  let allowed=true,calls=0
  const gateway={complete:()=>{calls++;allowed=false;return Promise.resolve({text:'invalid-json'})},stream(){throw Error('unused')}} as unknown as ModelGateway
- const resource=new SubstrateMemoryResource({client:{} as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
+ const resource=new SubstrateMemoryResource({client:{memory:()=>Promise.resolve({revision:0,corrections:{}})} as unknown as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
  await assert.rejects(resource.sourceProcessingProfile([{id:'personal:test:e',version:'v',origin:'inferred',content:'synthetic original',source:{project:'synthetic',document:'self',kind:'im',relation:'self',sender_id:'self'}}],new AbortController().signal,()=>allowed?Promise.resolve():Promise.reject(Error('revoked'))),/revoked/)
  assert.equal(calls,1)
 })
@@ -251,7 +251,7 @@ test('profile writer retries revalidate authorization before sending original te
 test('revocation after whole-profile critique prevents the final editing request',async()=>{
  let allowed=true,calls=0
  const gateway={complete:()=>{calls++;if(calls===1)return Promise.resolve({text:JSON.stringify({about:{paragraphs:[{text:'你在准备验证接口。',refs:['e0']}]},work:[],interests:[]})});allowed=false;return Promise.resolve({text:JSON.stringify({review_notes:['保持计划状态。']})})},stream(){throw Error('unused')}} as unknown as ModelGateway
- const resource=new SubstrateMemoryResource({client:{} as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
+ const resource=new SubstrateMemoryResource({client:{memory:()=>Promise.resolve({revision:0,corrections:{}})} as unknown as MemoryLedgerClient,userId:'test',gateway,model:'qwen3-vl-plus'})
  await assert.rejects(resource.sourceProcessingProfile([{id:'personal:test:e',version:'v',origin:'stated',content:'我计划验证接口'}],new AbortController().signal,()=>allowed?Promise.resolve():Promise.reject(Error('revoked'))),/revoked/)
  assert.equal(calls,2)
 })
@@ -564,5 +564,30 @@ test('published discussion profile survives logout and file drafts but never fol
   assert.equal((read('other-account').last_success as typeof fileDraft).draft.about.text,'New file-derived draft')
   db.prepare('INSERT INTO processing_publications VALUES(?,?,?,?,?)').run(prefix,'other-recipe','other-publication','["other-account"]',String(archived.payload_json))
   assert.equal((read().last_success as typeof fileDraft).draft.about.text,'New file-derived draft','logged-out fallback does not guess between different saved accounts')
+ }finally{db.close()}
+})
+
+
+test('published profile versions are exposed as read-only recent history while the current card stays authoritative',()=>{
+ const {db,process,add,bind,commit}=setup()
+ try{
+  const one=add('one','I lead Orchard.'),first=process({action:'claim'})!;bind(first);process({action:'read',batch_id:first.id})
+  process({action:'publish',batch_id:first.id,task_id:'task:'+first.id,run_id:'run:'+first.id,expected_revision:0,refs:first.items,draft:{about:{text:'First portrait',refs:[{entry_id:one,version:'one'}]},work:[],interests:[]},products:{projects:[],suggestions:[]}})
+  commit(first)
+  const two=add('two','I build Nova.'),second=process({action:'claim'})!;bind(second);process({action:'read',batch_id:second.id})
+  process({action:'publish',batch_id:second.id,task_id:'task:'+second.id,run_id:'run:'+second.id,expected_revision:1,refs:second.items,draft:{about:{text:'Second portrait',refs:[{entry_id:two,version:'two'}]},work:[],interests:[]},products:{projects:[],suggestions:[]}})
+  const history=(process({action:'profile.history'}) as {items:{draft:{about:{text:string}};read_only:boolean;unavailable_sources:number}[]}).items
+  assert.equal(history[0]!.draft.about.text,'Second portrait\n\nFirst portrait','newest publication first, with its retained about parts')
+  assert.equal(history[1]!.draft.about.text,'First portrait')
+  assert.ok(history.every(item=>item.read_only))
+  assert.equal((process({action:'profile.history',limit:1}) as {items:unknown[]}).items.length,1)
+  const products=process({action:'products',presentation:true}) as {draft:{about:{text:string}};history:{draft:{about:{text:string}}}[]}
+  assert.equal(products.draft.about.text,history[0]!.draft.about.text,'the current card stays authoritative')
+  assert.deepEqual(products.history.map(item=>item.draft.about.text),history.map(item=>item.draft.about.text))
+  // Archived prose is display-only: withdrawing the evidence flags it unavailable instead of resurrecting it as current input.
+  memoryOperation(db,'delete_source',{source_id:prefix+'source:one'});initializeMemory(db)
+  const after=(process({action:'profile.history'}) as {items:{draft:{about:{text:string}};unavailable_sources:number}[]}).items
+  assert.equal(after.find(item=>item.draft.about.text==='First portrait')?.unavailable_sources,1)
+  assert.equal(after[0]!.draft.about.text,history[0]!.draft.about.text,'the newest version is unchanged by a withdrawn source')
  }finally{db.close()}
 })

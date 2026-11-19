@@ -20,6 +20,7 @@ class FakeAudio implements AudioPort {
     required int generation,
     required bool capture,
     required double threshold,
+    bool recordingCompatible = false,
   }) async {
     if (failStart) throw StateError('capture failed');
     startCount++;

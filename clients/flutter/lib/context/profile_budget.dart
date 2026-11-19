@@ -3,59 +3,32 @@ import 'dart:math';
 import '../agent_core/model_client.dart';
 import '../personal/local_life.dart';
 
-// shortcut: acceptance-only DashScope pricing; add provider pricing before general use.
+// shortcut: acceptance-only official DashScope/DeepSeek pricing; review prices before broader use.
+/// Acceptance-only accounting for `--dart-define=NOVA_PROFILE_BUDGET_ID` builds.
+/// It records conservative reservations for review but enforces no hard cap.
 class ProfileBudget {
-  ProfileBudget(this.persistence, {this.capMicroyuan = limitMicroyuan});
+  ProfileBudget(this.persistence);
   final LifePersistence persistence;
   static Future<void> _tail = Future.value();
-  static const limitMicroyuan = int.fromEnvironment(
-    'NOVA_PROFILE_BUDGET_LIMIT_MICROYUAN',
-    defaultValue: 5000000,
-  );
-  final int capMicroyuan;
   int reservedMicroyuan = 0;
-
-  /// Explicit build approval, scoped to the same acceptance ledger. This only
-  /// reads accounting: old reservations and pending tickets are never released.
-  Future<Map<String, dynamic>?> recoverExhaustedPause(
-    Map<String, dynamic> state, {
-    required String budgetId,
-    required String upgradeId,
-    required int previousCapMicroyuan,
-    String errorKey = 'error_code',
-  }) => _serialize(() async {
-    if (state[errorKey] != 'profile_budget_exhausted' ||
-        state['manual_pause'] == true ||
-        budgetId.isEmpty ||
-        upgradeId.isEmpty ||
-        previousCapMicroyuan <= 0 ||
-        capMicroyuan <= previousCapMicroyuan ||
-        state['budget_resume_approval'] == upgradeId ||
-        (state['budget_id'] != null && state['budget_id'] != budgetId)) {
-      return null;
-    }
-    final pausedCap = state['budget_limit_microyuan'];
-    // A cap-less legacy record requires the explicit from-cap build approval.
-    if (pausedCap != null && pausedCap != previousCapMicroyuan) return null;
-    final ledger = await _read(requireExisting: true);
-    reservedMicroyuan = ledger['reserved_microyuan'] as int;
-    if (reservedMicroyuan >= capMicroyuan) return null;
-    return {
-      ...state,
-      'budget_id': budgetId,
-      'budget_limit_microyuan': capMicroyuan,
-      'budget_resume_approval': upgradeId,
-    }..remove(errorKey);
-  });
 
   static int requestCost(
     ModelConfiguration model,
-    List<Map<String, dynamic>> messages,
-  ) {
-    if (model.requestUri.toString() !=
-            'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' ||
+    List<Map<String, dynamic>> messages, {
+    bool jsonObject = false,
+  }) {
+    final deepseek =
+        model.model == 'deepseek-flash' &&
+        [
+          'https://api.deepseek.com/chat/completions',
+          'https://api.deepseek.com/v1/chat/completions',
+        ].contains(model.requestUri.toString());
+    final dashscope =
+        model.requestUri.toString() ==
+            'https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions' &&
+        ['qwen-flash', 'qwen3-vl-plus'].contains(model.model);
+    if ((!deepseek && !dashscope) ||
         model.protocol != ModelProtocol.chatCompletions ||
-        !['qwen-flash', 'qwen3-vl-plus'].contains(model.model) ||
         messages.isEmpty ||
         messages.any(
           (m) =>
@@ -65,17 +38,28 @@ class ProfileBudget {
         )) {
       throw const AgentFailure('profile_budget_model_unsupported');
     }
-    final body = modelRequestBody(model, messages, []);
+    final body = modelRequestBody(
+      model,
+      messages,
+      [],
+      disableThinking: true,
+      jsonObject: jsonObject,
+      includeUsage: true,
+    );
     // UTF-8 bytes bound text tokens; reserve extra framing and twice list price.
     final input =
         utf8.encode(jsonEncode(body)).length + 4096 + messages.length * 128;
     final output = body['max_tokens'] as int;
     final visionPlus = model.model == 'qwen3-vl-plus';
+    final thinkingDisabled = deepseek
+        ? (body['thinking'] is Map &&
+              (body['thinking'] as Map)['type'] == 'disabled')
+        : body['enable_thinking'] == false;
     if (input > (visionPlus ? 260096 : 990000) ||
         (visionPlus && input + output > 262144) ||
         output < 1 ||
         output > 32768 ||
-        body['enable_thinking'] != false) {
+        !thinkingDisabled) {
       throw const AgentFailure('profile_budget_request_unsupported');
     }
     // Mainland China / Beijing list prices, checked 2026-10-18:
@@ -90,6 +74,11 @@ class ProfileBudget {
   }
 
   static int _tokenCost(String model, int input, int output) {
+    if (model == 'deepseek-flash') {
+      // Twice peak rates, no cache/off-peak discount; verified 2026-10-29:
+      // https://api-docs.deepseek.com/zh-cn/quick_start/pricing/
+      return (input * 2 + output * 8) * 2;
+    }
     final rate = model == 'qwen3-vl-plus'
         ? (input <= 32000
               ? 100
@@ -106,15 +95,13 @@ class ProfileBudget {
 
   Future<ProfileReservation> reserve(
     ModelConfiguration model,
-    List<Map<String, dynamic>> messages,
-  ) => _serialize(() async {
-    final cost = requestCost(model, messages);
+    List<Map<String, dynamic>> messages, {
+    bool jsonObject = false,
+  }) => _serialize(() async {
+    final cost = requestCost(model, messages, jsonObject: jsonObject);
     final ledger = await _read();
     final spent = ledger['reserved_microyuan'] as int;
     reservedMicroyuan = spent;
-    if (spent + cost > capMicroyuan) {
-      throw const AgentFailure('profile_budget_exhausted');
-    }
     final pending = ledger['pending_reservations'] as Map<String, dynamic>;
     final random = Random.secure();
     final bytes = List.generate(16, (_) => random.nextInt(256));
@@ -177,10 +164,7 @@ class ProfileBudget {
     }
     final spent = decoded['reserved_microyuan'];
     final pending = decoded['pending_reservations'] ?? <String, dynamic>{};
-    if (spent is! int ||
-        spent < 0 ||
-        spent > capMicroyuan ||
-        pending is! Map<String, dynamic>) {
+    if (spent is! int || spent < 0 || pending is! Map<String, dynamic>) {
       throw const AgentFailure('profile_budget_unavailable');
     }
     var total = 0;
@@ -190,7 +174,11 @@ class ProfileBudget {
           entry is! Map ||
           entry['cost'] is! int ||
           (entry['cost'] as int) <= 0 ||
-          !['qwen-flash', 'qwen3-vl-plus'].contains(entry['model'])) {
+          ![
+            'qwen-flash',
+            'qwen3-vl-plus',
+            'deepseek-flash',
+          ].contains(entry['model'])) {
         throw const AgentFailure('profile_budget_unavailable');
       }
       total += entry['cost'] as int;

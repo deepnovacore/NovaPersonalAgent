@@ -1,3 +1,4 @@
+import {readHostSpaceConfig,scopeHostSpaceSettings} from '../space-host/config.js'
 import {UsageLedger} from '../usage/ledger.js'
 import {reportUsage} from '../realtime/usage.js'
 import {homedir} from 'node:os'
@@ -28,6 +29,8 @@ import {randomUUID} from 'node:crypto'
 import {loadCapabilityRegistry} from '../config/capability-registry.js'
 import type {CodingBackendId} from '../config/coding-backends.js'
 import {prepareExternalMcp} from '../executors/mcp.js'
+import {overlaySpaceSecrets} from '../space-host/host-admin.js'
+import {overlaySpaceModelRoutes} from '../space-host/model-settings.js'
 import {loadSettings, memoryStatus, requireBlockingCredentials, requireIntegratedRealtime, withoutUncredentialedModules} from '../config/config.js'
 import {requireSelectedCascadedLlmConfig, requireSelectedCascadedRealtimeConfig} from '../config/cascaded-realtime-config.js'
 import {remoteClientMedia} from '../server/server-config.js'
@@ -44,7 +47,16 @@ import {createRealtimeTelemetry} from '../realtime/telemetry.js'
 import type {ApprovalView as ExecutorApprovalView} from '../core/approval-port.js'
 import {buildIntegratedRealtimeAssembly, type IntegratedProviderRegistry} from './cascaded-realtime-assembly.js'
 
-export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage: publishUsage, environment = process.env, deviceRuntimeEnabled = false}: {
+/**
+ * Feishu notification bindings follow the published readiness in both directions. The first published value is only
+ * a baseline — the restore/open path already synced that binding — so construction never syncs twice.
+ */
+export function notificationReadinessEdges(sync:()=>void):(ready:boolean)=>void{
+  let previous:boolean|undefined
+  return ready=>{const initial=previous===undefined;if(ready!==previous&&!initial)sync();previous=ready}
+}
+
+export async function buildProductionComposition({token, stop, ownership, onDiagnostic, remote = false, createServer, integratedProviders, onKnowledge, onCoding, onUsage: publishUsage, environment: operatorEnvironment = process.env, deviceRuntimeEnabled = false}: {
   /** Receives the live coding resource so the desktop host can change the new-session default. */
   readonly onCoding?: (coding: {updateDefaultBackend?(backend: CodingBackendId): void}) => void
   /** Programmatic opt-in only; no device storage or imports when disabled. */
@@ -60,7 +72,13 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   readonly integratedProviders?: IntegratedProviderRegistry
   readonly createServer?: (options: Parameters<NonNullable<DesktopRealtimeOptions['createServer']>>[0], media?: ClientMedia) => ReturnType<NonNullable<DesktopRealtimeOptions['createServer']>>
 }) {
-  const loadedSettings = loadSettings(environment, !remote)
+  // Credentials a Space owner stored from a phone fill only variables the operator left unset.
+  const spaceModelConfigPath = operatorEnvironment.NOVA_SPACE_HOST_CONFIG ? resolve(operatorEnvironment.NOVA_SPACE_HOST_CONFIG) : undefined
+  const environment = overlaySpaceModelRoutes(overlaySpaceSecrets(operatorEnvironment, spaceModelConfigPath, onDiagnostic), spaceModelConfigPath)
+  const baseSettings = loadSettings(environment, !remote)
+  const spaceConfigPath=environment.NOVA_SPACE_HOST_CONFIG?resolve(environment.NOVA_SPACE_HOST_CONFIG):undefined
+  const spaceConfig=spaceConfigPath?readHostSpaceConfig(spaceConfigPath):undefined
+  const loadedSettings = spaceConfig?scopeHostSpaceSettings(baseSettings,spaceConfig):baseSettings
   const media = remote ? remoteClientMedia(loadedSettings) : undefined
   if (!remote) requireSelectedCascadedLlmConfig(loadedSettings)
   else if (loadedSettings.pipeline_mode === 'integrated') requireIntegratedRealtime(loadedSettings)
@@ -96,7 +114,6 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
       : settings.integrated_provider === 'openai' ? settings.openai_realtime_model
       : settings.integrated_provider === 'gemini' ? settings.gemini_realtime_model : settings.qwen_realtime_model,
     asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
-    vision: settings.conversation_vision_enabled,
   })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
   const guiNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile' || name === 'computer' || name === 'browser')
@@ -194,6 +211,10 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
         clock,
       })
       const realtimeOptions: BuildProductionRealtimeAssemblyOptions = {
+        ...(spaceConfigPath?{spaceHostConfigPath:spaceConfigPath}:{}),
+        // The Space owner projection must read the same environment the operator passed, not the process default.
+        spaceHostEnvironment: operatorEnvironment,
+        includeSpaceMobile:!!spaceConfig,
         textOnly:!remote,
         nextPlaybackGeneration,
         blackboard: blackboardOptionsFromSettings(settings),
@@ -281,11 +302,12 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     onAudioFrame:frame=>composition.audioBridge()?.onAudioFrame(frame),onAudioClear:(id,epoch)=>composition.audioBridge()?.onAudioClear(id,epoch),onAudioAlert:(id,epoch)=>composition.audioBridge()?.onAudioAlert(id,epoch),onAudioTerminal:(id,epoch)=>composition.audioBridge()?.onAudioTerminal(id,epoch),
   }),frame=>composition.publishPersonal(frame))
   host.setConnectors(new ComposioConnector({...(process.platform==='darwin'&&environment.CODEX_RESOURCES_PATH?{local:new MacCalendarClient(environment.CODEX_RESOURCES_PATH),mail:new MacMailClient(environment.CODEX_RESOURCES_PATH)}:{}),memory:()=>{const memory=composition.realtime.personalMemory;return memory instanceof SubstrateMemoryResource?memory:undefined},client:environment.COMPOSIO_API_KEY?new ComposioClient(environment.COMPOSIO_API_KEY):null,onChange:()=>{void host.connectionChanged()}}))
+  const syncNotificationOnEdge=notificationReadinessEdges(()=>{void syncNotificationBinding().catch(()=>undefined)})
   const feishu = new FeishuConnector({
     executable: environment.FEISHU_CLI_PATH ?? 'lark-cli',
     credentialRoot: join(host.path + '.feishu', 'credentials'),
     statePath: join(host.path + '.feishu', 'state.json'),
-    onChange:()=>host.connectionChanged(),
+    onChange:snapshot=>{host.connectionChanged();syncNotificationOnEdge(snapshot.notification_ready===true)},
     processingGrant:(...args)=>composition.realtime.personalMemory?.processingGrant?.(...args),
     get processingConsentTransition():FeishuOptions['processingConsentTransition']{
       const memory=composition.realtime.personalMemory;

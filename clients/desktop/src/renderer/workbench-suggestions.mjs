@@ -10,7 +10,7 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  const heading=tab==='goals'?t('可以定下的方向'):t('我想到的')
  const section=el('section',undefined,'workbench-suggestions');section.setAttribute('aria-label',heading);panel.append(section)
  section.append(el('h2',heading))
- if(context?.daily){section.append(el('p',context.automatic_available?t('每天共同整理一次想法和目标。'):t('今天已自动整理，新的资料会在下一轮更新。'),'hint'));button(context.status==='working'?t('正在整理…'):t('重新整理'),()=>command('context.refresh',{}),section,'context:refresh')}
+ if(context?.daily){section.append(el('p',context.automatic_available?t('每天共同整理一次想法和目标。'):t('今天已自动整理，新的资料会在下一轮更新。'),'hint'));button(context.status==='working'?t('正在整理…'):t('重新整理'),()=>command('context.refresh',{force:true}),section,'context:refresh')}
  const cards=(context?.cards??[]).filter(item=>item.tab===tab).slice(0,3)
  for(const item of cards){const card=el('article',undefined,'card');card.append(el('h3',item.title));section.append(card)
   const body=el(clampable?'button':'p',item.body,clampable?'card-body':undefined)
@@ -45,6 +45,6 @@ export function renderSourceSuggestions(panel,{tab,context,sources=[],button,com
  else if(reason==='model_abstained'){title=t('暂时没什么要提的');body=t('资料我都看过了，没找到有把握的建议。')}
  else if(reason==='no_eligible_sources'){title=t('暂时没什么要提的');body=t('现有的资料里还没有适合放这里的事。')}
  empty.append(el('h3',title),el('p',body))
- if(!sources.length&&!context?.daily&&connected&&openSettings)button(t('连接资料'),()=>openSettings('connections'),empty)
- else if(sources.some(source=>source.state==='error'||source.processing_consent_required)&&openSettings)button(t('查看来源'),()=>openSettings('connections'),empty)
+ if(!sources.length&&!context?.daily&&connected&&openSettings)button(t('连接资料'),()=>openSettings('connectors'),empty)
+ else if(sources.some(source=>source.state==='error'||source.processing_consent_required)&&openSettings)button(t('查看来源'),()=>openSettings('connectors'),empty)
 }

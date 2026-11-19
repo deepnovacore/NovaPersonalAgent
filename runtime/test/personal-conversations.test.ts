@@ -353,11 +353,12 @@ function announcementHarness(name:string,voiceReady:Promise<void>=Promise.resolv
  const check=new Promise<boolean>(resolve=>{releaseCheck=resolve})
  const tick=()=>new Promise(resolve=>setImmediate(resolve))
  return {pool,created,delivered,turns,released,errors,releaseCheck:(value:boolean)=>releaseCheck(value),tick,async setup(){
-  const dir=await dirPromise,host=new PersonalAgentHost({path:join(await realpath(dir),'state.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
+  const dir=await dirPromise,host=new PersonalAgentHost({path:join(await realpath(dir),'state.json'),userScope:'test',memory:()=>undefined,pool,evidenceRefs:()=>['fixture'],evidence:ref=>ref==='fixture'?{subject_key:'fixture',source:{type:'file',ref}}:null})
   await host.open()
+  await host.admit({kind:'notify',summary:'Ready',why_now:'Ready',evidence_refs:['fixture'],memory_refs:[]},await host.discoverySnapshot())
   host.setConversationRuntime(async(c,_emit,mode)=>{const label=c.id+':'+mode;created.push(label);if(mode==='voice')await voiceReady;return {runTurn:text=>{turns.push(text);return Promise.resolve({assistant:'ok'})},deliverSuggestion:s=>{delivered.push(s.id)},parkVoice:()=>{released.push('park:'+label);return Promise.resolve()},close:()=>{released.push('close:'+label);return Promise.resolve()}}},frame=>{if(frame.type==='conversation.error')errors.push(frame.error)})
   host.canDeliver=()=>check
-  const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready',personal_feed_id:'feed-gated'},salience:40,expires_at:1e15})
+  const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready',personal_feed_id:host.snapshot().feed[0]!.id},salience:40,expires_at:1e15})
   const reason={kind:'suggestion_selected',priority:40,routing_class:'ambient' as const,origin:null,selected_suggestion:suggestion.id}
   await host.command({type:'personal.command',request_id:'mode-o',method:'presentation.set',params:{mode:'orb'}})
   return {dir,host,suggestion,reason}
@@ -662,4 +663,65 @@ test('task list metadata includes a bounded latest excerpt and failed state for 
  const item=createConversation('topic','Task',null,'task');item.messages.push({id:'failed',conversation_id:item.id,role:'user',text:'x'.repeat(500),created_at:new Date().toISOString(),generation_status:'failed'});state.conversations.items.push(item);await store.write(state)
  const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
  try{await host.open();const snapshot=host.conversationSnapshot(),task=snapshot.items.find(value=>value.id==='task')!;assert.equal(snapshot.selected_id,'chat:main');assert.equal(task.last_message,'x'.repeat(160));assert.equal(task.generation_status,'failed');assert.equal(snapshot.messages.some(message=>message.id==='failed'),false)}finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('a prepared bridge override is not reused for the next normal conversation turn',async()=>{
+ const seen:({chat?:boolean}|undefined)[]=[]
+ const pool=new ConversationRuntimePool((_conversation,_emit,_mode,_lifetime,_recovery,_execution,overrides)=>{seen.push(overrides);return Promise.resolve({runTurn:()=>Promise.resolve({assistant:'ok'}),close:()=>Promise.resolve()})},()=>{/* no transport */})
+ const conversation=createConversation('chat','Bridge',null,'bridge-chat')
+ await pool.prepare(conversation,undefined,{chat:false})
+ await pool.clear(conversation.id)
+ await pool.run(conversation,'next')
+ assert.deepEqual(seen,[{chat:false},undefined])
+})
+
+
+test('isolated dispatch retains work ownership and closes with the pool without replacing Chat',async()=>{
+ let dispatchClosed=0,chatClosed=0,parked=0
+ let dispatchLifetime:AbortSignal|undefined
+ const conversation=createConversation('chat','Test',null,'chat:main')
+ const pool=new ConversationRuntimePool((_conversation,_emit,_mode,lifetime,_recovery,_execution,overrides)=>{
+  const host=overrides?.chat===false
+  if(host)dispatchLifetime=lifetime
+  return Promise.resolve({runTurn:()=>Promise.resolve({assistant:host?'host':'chat'}),retainTasks:()=>host,ownsWork:id=>host&&id==='owned-work',parkVoice:()=>{parked++;return Promise.resolve()},close:()=>{if(host)dispatchClosed++;else chatClosed++;return Promise.resolve()}})
+ },()=>{ /* no transport */ })
+ try{
+  await pool.isolated(conversation,async()=>{
+   assert.equal(pool.workConversation('owned-work'),'chat:main')
+   assert.deepEqual(await pool.run(conversation,'hello'),{assistant:'chat'})
+  })
+  assert.equal(dispatchLifetime?.aborted,true);assert.equal(parked,1);assert.equal(dispatchClosed,0);assert.equal(chatClosed,0)
+  assert.equal(pool.workConversation('owned-work'),'chat:main')
+ }finally{await pool.close()}
+ assert.equal(dispatchClosed,1);assert.equal(chatClosed,1)
+})
+
+test('a Build paused by an authorization change is a paused task, not a failed reply',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-build-paused-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
+ const item=createConversation('build','写一个俄罗斯方块游戏',null,'build:paused');item.build={project:dir,source_conversation_id:'chat:main',status:'paused',reason:'stopped',log_revision:0,approval:null} as unknown as NonNullable<(typeof item)['build']>;state.conversations.items.push(item);state.conversations.selected_id=item.id;await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null}),frames:Record<string,unknown>[]=[]
+ try{
+  await host.open();host.setConversationRuntime(()=>Promise.resolve({runTurn:()=>Promise.reject(Error('context_authorization_changed')),close:()=>Promise.resolve()}),frame=>{frames.push(frame)})
+  await host.command({type:'personal.command',request_id:'workbench',method:'presentation.set',params:{mode:'workbench'}},{client_id:'desktop:local'})
+  await host.submitConversationText('build:paused','打开我电脑的飞书',undefined,undefined,{local_desktop:true})
+  await host.waitConversation('build:paused')
+  const message=(await store.read()).conversations.items.find(row=>row.id==='build:paused')!.messages.find(row=>row.role==='user')!
+  assert.equal(message.generation_status,'completed','a paused Build must not read as a failed reply')
+  assert.equal(message.failure_reason,undefined)
+  assert.equal(frames.some(frame=>frame.type==='conversation.error'),false,'no reply-failed frame is emitted for a pause')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('startup keeps a context-authorization pause from rewriting a Build reply as failed',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-build-paused-restart-')),path=join(dir,'personal.json'),store=new PersonalStore(path),state=initialState();state.user_scope='test'
+ const item=createConversation('build','打开我电脑的飞书',null,'build:restart');item.build={project:dir,source_conversation_id:'chat:main',status:'paused',reason:'context_authorization_changed',log_revision:0,approval:null} as unknown as NonNullable<(typeof item)['build']>
+ item.messages.push({id:'u',conversation_id:item.id,role:'user',text:'打开我电脑的飞书',created_at:new Date().toISOString(),generation_status:'failed',failure_reason:'unknown'});state.conversations.items.push(item);await store.write(state)
+ const host=new PersonalAgentHost({path,userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  await host.open();await host.close()
+  const message=(await store.read()).conversations.items.find(row=>row.id==='build:restart')!.messages[0]!
+  assert.equal(message.generation_status,'completed','stored failed status is repaired on startup')
+  assert.equal(message.failure_reason,undefined)
+  assert.equal((await store.read()).conversations.items.find(row=>row.id==='build:restart')!.build!.reason,'context_authorization_changed')
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

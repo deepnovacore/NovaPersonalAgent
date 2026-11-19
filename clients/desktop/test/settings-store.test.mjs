@@ -32,7 +32,6 @@ const ALL_SECRET_KEYS = Object.freeze([
   'geminiApiKey',
   'tavilyApiKey',
   'openrouterApiKey',
-  'modelApiKey',
   'codexApiKey',
   'arkApiKey',
   'deepseekApiKey',
@@ -81,8 +80,10 @@ async function withTempDirectory(run) {
 
 test('the default settings are the documented schema', () => {
   assert.deepEqual(DEFAULT_SETTINGS, {
-    version: 4,
+    version: 5,
+    modelRoutes: {conversationText: null, support: null, fast: null, compressor: null, watch: null, embedding: null},
     skinId: 'nova', importedSkins: [],
+    companionForm: 'pet',
     startupView: 'workbench',
     lastPresentation: 'workbench',
     workbenchMaximized: true,
@@ -98,7 +99,6 @@ test('the default settings are the documented schema', () => {
     codexBinaryPath: '',
     codexWorkspace: '',
     codexManagedRoot: '',
-    modelBaseUrl: '',
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
@@ -121,29 +121,31 @@ test('the default settings are the documented schema', () => {
     cascadedTtsVoice: 'zh_female_vv_uranus_bigtts',
     codexApprovalMode: 'ask',
     localToolApproval: 'ask',
+    systemNotifications: true,
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
-    buildReasoning: false,
+    buildReasoning: true,
     profileParticipantMessages: false,
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    spaceHostConfigPath: '',
     memoryPrerecallEnabled: false,
-    conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
-    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
+    monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
   })
   assert.deepEqual([...SECRET_KEYS], ALL_SECRET_KEYS)
 })
 
-test('buildReasoning is a boolean host switch that defaults off and survives a round trip', () => {
-  assert.equal(normalizeSettings({}).buildReasoning, false)
+test('buildReasoning is a boolean host switch that defaults on and survives a round trip', () => {
+  assert.equal(normalizeSettings({}).buildReasoning, true)
   assert.equal(normalizeSettings({buildReasoning: true}).buildReasoning, true)
-  assert.equal(normalizeSettings({buildReasoning: 'yes'}).buildReasoning, false)
-  assert.equal(normalizeSettings({buildReasoning: 1}).buildReasoning, false)
+  assert.equal(normalizeSettings({buildReasoning: 'yes'}).buildReasoning, true)
+  assert.equal(normalizeSettings({buildReasoning: 1}).buildReasoning, true)
+  assert.equal(normalizeSettings({buildReasoning: false}).buildReasoning, false)
   assert.equal(publicSettings({buildReasoning: true}).buildReasoning, true)
   assert.equal(publicSettings({buildReasoning: false}).buildReasoning, false)
 })
@@ -156,14 +158,13 @@ test('version 3 migrates to v4 defaults while preserving existing desktop fields
     codexApprovalMode: 'yolo',
   })
 
-  assert.equal(migrated.version, 4)
+  assert.equal(migrated.version, 5)
   assert.equal(migrated.integratedModel, 'qwen-custom')
   assert.equal(migrated.codexBinaryMode, 'auto')
   assert.equal(migrated.codexBinaryPath, '')
   assert.equal(Object.hasOwn(migrated, 'codexProjectsEnabled'), false)
   assert.equal(migrated.codexWorkspace, '')
   assert.equal(migrated.codexManagedRoot, '')
-  assert.equal(migrated.modelBaseUrl, '')
   assert.equal(migrated.startListeningOnLaunch, false)
   assert.equal(migrated.codexApprovalMode, 'ask')
   assert.equal(migrated.clarificationDepth, 'balanced')
@@ -223,22 +224,10 @@ test('v4 fields round-trip and invalid enums fail closed to their defaults', () 
   assert.equal(Object.hasOwn(invalid, 'searchProvider'), false)
 })
 
-test('model base URL accepts HTTPS and loopback HTTP but refuses unsafe schemes', () => {
-  assert.equal(
-    normalizeSettings({ modelBaseUrl: ' https://models.example/v1 ' }).modelBaseUrl,
-    'https://models.example/v1',
-  )
-  assert.equal(
-    normalizeSettings({ modelBaseUrl: 'http://127.0.0.1:8080/v1' }).modelBaseUrl,
-    'http://127.0.0.1:8080/v1',
-  )
-  for (const modelBaseUrl of [
-    'ftp://models.example/v1',
-    'http://models.example/v1',
-    'https://user:password@models.example/v1',
-  ]) {
-    assert.equal(normalizeSettings({ modelBaseUrl }).modelBaseUrl, '')
-  }
+test('normalizeSettings keeps the current provider model configuration unchanged', () => {
+  const normalized = normalizeSettings({})
+  assert.equal(normalized.pipelineMode, 'integrated')
+  assert.equal(normalized.cascadedLlmProvider, 'deepseek')
 })
 
 test('normalizeSettings rebuilds defaults from nothing at all', () => {
@@ -259,7 +248,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     codexBinaryPath: '',
     codexWorkspace: '',
     codexManagedRoot: '',
-    modelBaseUrl: '',
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
@@ -280,8 +268,10 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
   })
 
   assert.deepEqual(normalized, {
-    version: 4,
+    version: 5,
+    modelRoutes: {conversationText: null, support: null, fast: null, compressor: null, watch: null, embedding: null},
     skinId: 'nova', importedSkins: [],
+    companionForm: 'pet',
     startupView: 'workbench',
     lastPresentation: 'workbench',
     workbenchMaximized: true,
@@ -297,7 +287,6 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     codexBinaryPath: '',
     codexWorkspace: '',
     codexManagedRoot: '',
-    modelBaseUrl: '',
     startListeningOnLaunch: false,
     wakeWordEnabled: false,
     autoHideSeconds: 60,
@@ -320,19 +309,20 @@ test('normalizeSettings keeps valid fields and defaults each invalid one on its 
     cascadedTtsVoice: 'zh_female_custom',
     codexApprovalMode: 'ask',
     localToolApproval: 'ask',
+    systemNotifications: true,
     clarificationDepth: 'balanced',
     planReadback: 'summary',
     generatePlan: true,
-    buildReasoning: false,
+    buildReasoning: true,
     profileParticipantMessages: false,
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
     capabilitiesConfigPath: '',
     knowledgePath: '',
+    spaceHostConfigPath: '',
     memoryPrerecallEnabled: false,
-    conversationVisionEnabled: false, monitorCameraDeviceId: '', watchModel: '',
-    phoneConnectionEnabled: false, phoneServerPort: 0, phoneServerTokenFile: '', phoneServerUrl: '',
+    monitorCameraDeviceId: '', watchModel: '',
     secrets: {},
   })
 })
@@ -397,8 +387,8 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'codingBackendPaths',
     'codingBackendProfiles',
     'codingProgressNarration',
+    'companionForm',
     'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleAsrOmitResponseFormat', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
-    'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
     'geminiAsrModel', 'geminiTtsModel', 'geminiTtsVoice',
@@ -413,12 +403,11 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'localToolApproval',
     'memoryPrerecallEnabled',
     'minicpmRealtimeUrl',
-    'modelBaseUrl',
+    'modelRoutes',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
     'personaplexRealtimeUrl',
-    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'proactivity',
@@ -427,14 +416,24 @@ test('normalizeSettings drops unknown keys instead of carrying them forward', ()
     'secrets',
     'selfHostedAsrUrl', 'selfHostedLlmBaseUrl', 'selfHostedTtsUrl',
     'skinId',
+    'spaceHostConfigPath',
     'startListeningOnLaunch',
     'startupView',
+    'systemNotifications',
     'version',
     'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
     'watchModel',
     'workbenchMaximized',
   ])
+})
+
+test('the Host Space config path is main-owned: absolute only, kept across patches, never public', () => {
+  const stored = applySettingsUpdate(DEFAULT_SETTINGS, {spaceHostConfigPath: '/Users/a/Library/Application Support/nova/space/config.json'})
+  assert.equal(stored.spaceHostConfigPath, '/Users/a/Library/Application Support/nova/space/config.json')
+  assert.equal(applySettingsUpdate(stored, {proactivity: 'quiet'}).spaceHostConfigPath, stored.spaceHostConfigPath)
+  for (const value of ['relative/config.json', '/a\u0000b', 7]) assert.equal(normalizeSettings({spaceHostConfigPath: value}).spaceHostConfigPath, '')
+  assert.ok(!Object.hasOwn(publicSettings(stored), 'spaceHostConfigPath'))
 })
 
 test('JSON settings rebuild only declared fields and keep invalid nested values at defaults', () => {
@@ -553,7 +552,7 @@ test('normalizeSettings keeps only well-formed secret entries', () => {
     secrets: {
       dashscopeApiKey: { enc: 'safeStorage', data: 'c2VhbGVk' },
       tavilyApiKey: { enc: 'none', data: 'aGk=' },
-      modelApiKey: { enc: 'rot13', data: 'aGk=' },
+      deepseekApiKey: { enc: 'rot13', data: 'aGk=' },
       codexApiKey: { enc: 'none', data: 'not base64!' },
       arkApiKey: { enc: 'safeStorage', data: 'YXJr' },
       doubaoBigmodelApiKey: { enc: 'none', data: 'ZG91YmFv' },
@@ -574,7 +573,7 @@ test('normalizeSettings rejects secret entries that are not objects or lack data
     secrets: {
       dashscopeApiKey: 'plaintext-would-be-a-bug',
       tavilyApiKey: { enc: 'none' },
-      modelApiKey: { enc: 'none', data: '' },
+      deepseekApiKey: { enc: 'none', data: '' },
       codexApiKey: null,
       arkApiKey: [],
       doubaoBigmodelApiKey: { enc: 'none', data: 'not base64!' },
@@ -612,8 +611,8 @@ test('publicSettings never carries the secrets object', () => {
     'codingBackend',
     'codingBackendPaths',
     'codingProgressNarration',
+    'companionForm',
     'compatibleAsrBaseUrl', 'compatibleAsrModel', 'compatibleAsrOmitResponseFormat', 'compatibleTtsBaseUrl', 'compatibleTtsModel', 'compatibleTtsSendSampleRate', 'compatibleTtsVoice',
-    'conversationVisionEnabled',
     'embeddingModel',
     'embeddingProvider',
     'geminiAsrModel', 'geminiTtsModel', 'geminiTtsVoice',
@@ -627,12 +626,11 @@ test('publicSettings never carries the secrets object', () => {
     'localToolApproval',
     'memoryPrerecallEnabled',
     'minicpmRealtimeUrl',
-    'modelBaseUrl',
+    'modelRoutes',
     'monitorCameraDeviceId',
     'openaiCompatibleBaseUrl', 'openaiCompatibleProtocol',
     'palette',
     'personaplexRealtimeUrl',
-    'phoneConnectionEnabled', 'phoneServerPort', 'phoneServerTokenFile', 'phoneServerUrl',
     'pipelineMode',
     'planReadback',
     'proactivity',
@@ -642,6 +640,7 @@ test('publicSettings never carries the secrets object', () => {
     'skinId',
     'startListeningOnLaunch',
     'startupView',
+    'systemNotifications',
     'version',
     'voiceprintEnabled', 'voiceprintId', 'voiceprintName', 'voiceprintUploadUrl',
     'wakeWordEnabled',
@@ -656,8 +655,7 @@ test('orb settings expose only renderer-owned appearance and activation fields',
     palette: 'graphite',
     startListeningOnLaunch: true,
     codexBinaryPath: 'C:\\private\\codex.exe',
-    modelBaseUrl: 'https://private.example/v1',
-  }), {conversationVisionEnabled: false, progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
+  }), {progressBubbles: 'milestones', codingProgressNarration: 'smart', language: 'zh-CN', palette: 'graphite', skinId: 'nova', importedSkins: [], companionForm: 'pet', startListeningOnLaunch: true, wakeWordEnabled: false, autoHideSeconds: 60})
 })
 
 test('secretsPresent reports booleans for every key and leaks no ciphertext', () => {
@@ -678,7 +676,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     geminiApiKey: false,
     tavilyApiKey: false,
     openrouterApiKey: false,
-    modelApiKey: false,
     codexApiKey: true,
     arkApiKey: false,
     deepseekApiKey: false,
@@ -696,7 +693,6 @@ test('secretsPresent reports booleans for every key and leaks no ciphertext', ()
     geminiApiKey: false,
     tavilyApiKey: false,
     openrouterApiKey: false,
-    modelApiKey: false,
     codexApiKey: false,
     arkApiKey: false,
     deepseekApiKey: false,
@@ -739,20 +735,20 @@ test('applySettingsUpdate seals plaintext through the codec and round-trips it b
     'sealed:tvly-secret',
   )
   assert.equal(readSecret(updated, 'tavilyApiKey', codec), 'tvly-secret')
-  assert.equal(readSecret(updated, 'modelApiKey', codec), null)
+  assert.equal(readSecret(updated, 'deepseekApiKey', codec), null)
 })
 
 test('applySettingsUpdate falls back to enc:none when no keyring is available', () => {
   const codec = fakeCodec({ available: false })
   const updated = applySettingsUpdate(DEFAULT_SETTINGS, {
-    secrets: { modelApiKey: 'sk-plain' },
+    secrets: { deepseekApiKey: 'sk-plain' },
   }, codec)
 
-  assert.deepEqual(updated.secrets.modelApiKey, {
+  assert.deepEqual(updated.secrets.deepseekApiKey, {
     enc: 'none',
     data: Buffer.from('sk-plain', 'utf8').toString('base64'),
   })
-  assert.equal(readSecret(updated, 'modelApiKey', codec), 'sk-plain')
+  assert.equal(readSecret(updated, 'deepseekApiKey', codec), 'sk-plain')
 })
 
 test('the safeStorage codec refuses linux basic_text, which is not protected storage', () => {
@@ -790,12 +786,12 @@ test('the safeStorage codec refuses linux basic_text, which is not protected sto
 test('a secret saved under linux basic_text is stored as plaintext and says so', () => {
   const codec = createSafeStorageCodec(fakeSafeStorage({ backend: 'basic_text' }), 'linux')
   const updated = applySettingsUpdate(DEFAULT_SETTINGS, {
-    secrets: { modelApiKey: 'sk-linux' },
+    secrets: { deepseekApiKey: 'sk-linux' },
   }, codec)
 
-  assert.equal(updated.secrets.modelApiKey.enc, 'none')
+  assert.equal(updated.secrets.deepseekApiKey.enc, 'none')
   assert.equal(hasPlaintextSecret(updated), true, 'the panel warning must be on')
-  assert.equal(readSecret(updated, 'modelApiKey', codec), 'sk-linux')
+  assert.equal(readSecret(updated, 'deepseekApiKey', codec), 'sk-linux')
 })
 
 test('hasPlaintextSecret answers for what is stored, not for the codec of the moment', () => {
@@ -925,9 +921,9 @@ test('a secret carrying a NUL or other control character is refused, not stored'
   // total success.
   assert.deepEqual(patched.rejectedSecrets, ['dashscopeApiKey'])
   for (const bad of ['\u0000', 'sk-\u0000x', 'sk-\u001bx', 'sk\nx', 'sk\tx', 'sk\u007fx']) {
-    const attempt = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: { modelApiKey: bad } }, codec)
+    const attempt = applySettingsUpdate(DEFAULT_SETTINGS, { secrets: { deepseekApiKey: bad } }, codec)
     assert.deepEqual(attempt.secrets, {}, `${JSON.stringify(bad)} never reaches the store`)
-    assert.deepEqual(attempt.rejectedSecrets, ['modelApiKey'], `${JSON.stringify(bad)} is named as rejected`)
+    assert.deepEqual(attempt.rejectedSecrets, ['deepseekApiKey'], `${JSON.stringify(bad)} is named as rejected`)
   }
 })
 
@@ -1134,7 +1130,7 @@ test('saveSettings normalizes before writing so junk can never reach disk', asyn
 test('the next save rewrites a plaintext entry on disk as ciphertext', async () => {
   await withTempDirectory(async directory => {
     const file = join(directory, 'nova-audio-agent-desktop-settings.json')
-    await saveSettings(file, { secrets: { modelApiKey: plaintextEntry('sk-stale') } })
+    await saveSettings(file, { secrets: { deepseekApiKey: plaintextEntry('sk-stale') } })
 
     // An unrelated field changes; the stale entry rides along with that write,
     // so the migration is atomic with the save rather than a separate rewrite.
@@ -1154,7 +1150,7 @@ test('the next save rewrites a plaintext entry on disk as ciphertext', async () 
     )
     const reloaded = await loadSettings(file)
     assert.equal(reloaded.integratedVoice, 'longcheng')
-    assert.equal(readSecret(reloaded, 'modelApiKey', fakeCodec()), 'sk-stale')
+    assert.equal(readSecret(reloaded, 'deepseekApiKey', fakeCodec()), 'sk-stale')
   })
 })
 
@@ -1273,15 +1269,13 @@ test('coding narration mode changes persist without requesting a backend restart
   assert.equal(orbSettings({codingProgressNarration: 'continuous'}).codingProgressNarration, 'continuous')
 })
 
-test('native vision settings persist independently and device IDs have a bounded UTF-16 limit', () => {
-  const valid = normalizeSettings({conversationVisionEnabled:true,monitorCameraDeviceId:'usb-device',watchModel:'qwen3-vl-plus'})
-  assert.equal(valid.conversationVisionEnabled,true)
+test('monitor camera and watch model persist independently with a bounded device ID', () => {
+  const valid = normalizeSettings({monitorCameraDeviceId:'usb-device',watchModel:'qwen3-vl-plus'})
   assert.equal(valid.monitorCameraDeviceId,'usb-device')
   assert.equal(valid.watchModel,'qwen3-vl-plus')
   assert.equal(publicSettings(valid).monitorCameraDeviceId,'usb-device')
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x'.repeat(257)}).monitorCameraDeviceId,'')
   assert.equal(normalizeSettings({monitorCameraDeviceId:'x\n'}).monitorCameraDeviceId,'')
-  assert.equal(normalizeSettings({conversationVisionEnabled:'true'}).conversationVisionEnabled,false)
 })
 
 test('explicit integrated preference is preserved for existing users', () => {
@@ -1294,23 +1288,6 @@ test('memory prerecall defaults off and preserves explicit opt-in', () => {
   assert.equal(publicSettings(settings).memoryPrerecallEnabled,true)
   assert.equal(backendSettings(settings).memoryPrerecallEnabled,true)
   assert.equal(normalizeSettings({memoryPrerecallEnabled:'false'}).memoryPrerecallEnabled,false)
-})
-
-test('phone pairing configuration persists but does not restart or leak into the voice backend', async t => {
-  const dir = await mkdtemp(join(tmpdir(), 'nova-phone-settings-'))
-  t.after(() => rm(dir, {recursive: true, force: true}))
-  const fields = {phoneServerPort: 9020, phoneServerTokenFile: '/private/host.token', phoneServerUrl: 'wss://host.example'}
-  const next = applySettingsUpdate(DEFAULT_SETTINGS, fields)
-  const file = join(dir, 'settings.json')
-  await saveSettings(file, next)
-  const loaded = publicSettings(await loadSettings(file))
-  for (const [key, value] of Object.entries(fields)) assert.equal(loaded[key], value)
-  assert.deepEqual(backendSettings(next), backendSettings(DEFAULT_SETTINGS))
-  for (const invalid of [{phoneServerPort: 65536}, {phoneServerTokenFile: '../token'},
-    {phoneServerUrl: 'wss://' + 'x'.repeat(2049)}, {phoneServerUrl: 'ws://host.example'}, {phoneServerUrl: 'wss://u:p@host.example'}, {phoneServerUrl: 'wss://host.example/?token=x'}]) {
-    const rejected = publicSettings(applySettingsUpdate(next, invalid))
-    for (const key of Object.keys(invalid)) assert.equal(rejected[key], fields[key])
-  }
 })
 
 test('unsupported embedding settings never become cloud defaults during normalize, save or load', async () => {
@@ -1349,7 +1326,7 @@ test('startup presentation persists, validates and does not restart the backend'
 })
 
 test('presentation writes preserve secrets without opening the keychain and remain ordered', async () => {
-  let current = normalizeSettings({secrets: {modelApiKey: plaintextEntry('keep')}})
+  let current = normalizeSettings({secrets: {deepseekApiKey: plaintextEntry('keep')}})
   const original = current.secrets
   const write = createSettingsWriter({getCurrent: () => current, commit: next => {current = next}, save: async () => {}, codec: {available() {assert.fail('presentation opened keychain')}}})
   await Promise.all([
@@ -1408,6 +1385,15 @@ test('reading other people\'s messages for the profile is off by default and onl
   assert.equal(applySettingsUpdate(on, {language: 'en'}).profileParticipantMessages, true, 'an unrelated update keeps the choice')
 })
 
+test('removed direct-phone connection settings are never restored or exposed to the backend',async t=> {
+ const directory=await mkdtemp(join(tmpdir(),'nova-removed-phone-'));t.after(()=>rm(directory,{recursive:true,force:true}));
+ const obsolete={phoneConnectionEnabled:true,phoneServerPort:19876,phoneServerTokenFile:'/tmp/obsolete.token',phoneServerUrl:'wss://obsolete.example'};
+ const settings=applySettingsUpdate(DEFAULT_SETTINGS,obsolete);
+ const file=join(directory,'settings.json');await saveSettings(file,settings);
+ for(const view of [settings,await loadSettings(file),publicSettings(settings),backendSettings(settings)]) {
+  for(const field of Object.keys(obsolete))assert.equal(Object.hasOwn(view,field),false);
+ }
+});
 test('the workbench fill preference defaults on, is backend-invisible and only accepts booleans', () => {
   assert.equal(normalizeSettings({}).workbenchMaximized, true)
   assert.equal(normalizeSettings({workbenchMaximized: false}).workbenchMaximized, false)
@@ -1415,4 +1401,29 @@ test('the workbench fill preference defaults on, is backend-invisible and only a
   assert.equal(normalizeSettings({workbenchMaximized: 0}).workbenchMaximized, true)
   assert.equal('workbenchMaximized' in backendSettings({workbenchMaximized: false}), false)
   assert.equal('workbenchMaximized' in publicSettings({workbenchMaximized: false}), false)
+})
+
+test('model routes round-trip per lane and an explicit null clears the override', () => {
+  const routed = applySettingsUpdate(DEFAULT_SETTINGS, {modelRoutes: {
+    support: {provider: 'qwen', model: 'qwen-plus'},
+    watch: {provider: 'qwen', model: 'qwen3-vl-plus'},
+    embedding: {provider: 'dashscope', model: 'text-embedding-v4'},
+  }})
+  assert.deepEqual(routed.modelRoutes.support, {provider: 'qwen', model: 'qwen-plus'})
+  assert.deepEqual(publicSettings(routed).modelRoutes.watch, {provider: 'qwen', model: 'qwen3-vl-plus'})
+  assert.equal(routed.modelRoutes.conversationText, null)
+  const cleared = applySettingsUpdate(routed, {modelRoutes: {support: null}})
+  assert.equal(cleared.modelRoutes.support, null)
+  assert.deepEqual(cleared.modelRoutes.watch, {provider: 'qwen', model: 'qwen3-vl-plus'})
+  assert.equal(normalizeSettings({modelRoutes: {support: {provider: 'unknown', model: 'x'}}}).modelRoutes.support, null)
+  assert.equal(normalizeSettings({modelRoutes: {watch: {provider: 'qwen', model: '   '}}}).modelRoutes.watch, null)
+})
+
+test('companion form is renderer-owned, defaults to pet and only accepts orb or pet', () => {
+  assert.equal(normalizeSettings({}).companionForm, 'pet')
+  assert.equal(normalizeSettings({companionForm: 'dragon'}).companionForm, 'pet')
+  assert.equal(normalizeSettings({companionForm: 'orb'}).companionForm, 'orb')
+  assert.equal(publicSettings({companionForm: 'pet'}).companionForm, 'pet')
+  assert.equal(orbSettings({companionForm: 'pet'}).companionForm, 'pet')
+  assert.equal('companionForm' in backendSettings({companionForm: 'orb'}), false)
 })

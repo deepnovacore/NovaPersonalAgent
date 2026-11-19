@@ -79,6 +79,7 @@ test('acceptance text backend uses only the granted Dashscope model without chan
  assert.equal(saved.cascadedLlmProvider,'deepseek')
  assert.equal(saved.cascadedLlmModels.qwen,'qwen3.8-max')
  assert.equal(acceptanceBackendSettings(saved,null),saved)
+ assert.equal(acceptanceBackendSettings(saved,{readExistingOnly:true,providers:[]}),saved)
  assert.throws(()=>acceptanceBackendSettings(saved,{providers:[]}),/acceptance_text_model_missing/)
 })
 

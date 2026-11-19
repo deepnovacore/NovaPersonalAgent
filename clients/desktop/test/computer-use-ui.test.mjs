@@ -108,7 +108,7 @@ test('turning Computer Use on sends the permission readout and lists each missin
  const rows=panel.children[1].children
  assert.deepEqual(rows.map(row=>row.attributes['data-item']),['accessibility_permission','configuration'])
  rows[0].children[1].listeners.click();rows[1].children[1].listeners.click();await flush()
- assert.deepEqual(opened,['accessibility','settings:connections'])
+ assert.deepEqual(opened,['accessibility','settings:permissions'])
  assert.ok(texts(panel).includes('电脑操作暂不可用'))
 })
 
@@ -122,16 +122,15 @@ test('turning Computer Use off sends no permissions and a vision-less model is e
  assert.equal(limited.panel.attributes['data-tone'],'warning');assert.ok(texts(limited.panel).includes('当前模型不支持图片，切换到视觉模型后即可使用电脑操作。'))
 })
 
-test('a new Build session turns Computer Use on by itself once, stays quiet when a precondition is missing, and respects an explicit off',async()=>{
+test('a new Build session turns Computer Use on by itself once, explains a missing permission without a modal, and respects an explicit off',async()=>{
  const item={id:'b',kind:'build',build:{status:'paused'}}
  const ok=controlFixture(item,{autoEnable:true,response:{ok:true,state:{enabled:true,direct:true},missing:[]}})
  ok.control.update();ok.control.update();await flush()
  assert.deepEqual(ok.commands,[['build.computer_use',{conversation_id:'b',enabled:true,permissions:{screen:'granted',accessibility:'denied'}}]],'asked exactly once')
  const blocked=controlFixture({id:'b2',kind:'build',build:{status:'paused'}},{autoEnable:true,response:{ok:false,state:{enabled:false,direct:false},missing:['screen_permission']}})
  blocked.control.update();await flush();blocked.control.update();await flush()
- assert.equal(blocked.commands.length,1);assert.equal(blocked.panel.hidden,true,'a failed automatic attempt does not interrupt with the preflight panel')
- blocked.toggle.listeners.click();await flush()
- assert.equal(blocked.panel.hidden,false,'a manual attempt still explains what is missing')
+ assert.equal(blocked.commands.length,1);assert.equal(blocked.panel.hidden,false,'a failed automatic attempt says which permission is missing')
+ assert.equal(blocked.panel.attributes.role,'status')
  const off=controlFixture({id:'b3',kind:'build',build:{status:'paused',computer_use:{enabled:false,direct:false}}},{autoEnable:true})
  off.control.update();await flush();assert.deepEqual(off.commands,[],'an explicit off is never switched back on')
  const chat=controlFixture({id:'chat:main',kind:'chat'},{autoEnable:true});chat.control.update();await flush();assert.deepEqual(chat.commands,[])
@@ -167,11 +166,11 @@ test('automatic Computer Use preflight waits for presentation recovery',async()=
  f.c.presentationReady=true;f.control.update();await flush();assert.equal(f.commands.length,1);assert.equal(f.panel.hidden,true)
 })
 
-for(const missing of ['vision_model','display_count'])test(`automatic ${missing} preflight is a non-modal warning`,async()=>{
- const {commands,panel,control}=controlFixture({id:'warning',kind:'build',build:{status:'paused'}},{autoEnable:true,permissions:{screen:'granted',accessibility:'granted',displayCount:2},response:{ok:false,state:{enabled:false,direct:false},missing:[missing]}})
+for(const missing of ['vision_model','screen_permission','accessibility_permission'])test(`automatic ${missing} preflight is a non-modal warning`,async()=>{
+ const {commands,panel,control}=controlFixture({id:'warning',kind:'build',build:{status:'paused'}},{autoEnable:true,permissions:{screen:'granted',accessibility:'granted'},response:{ok:false,state:{enabled:false,direct:false},missing:[missing]}})
  control.update();await flush()
- assert.equal(commands[0][1].permissions.displayCount,2)
+ assert.deepEqual(commands[0][1].permissions,{screen:'granted',accessibility:'granted'})
  assert.equal(panel.hidden,false);assert.equal(panel.attributes.role,'status');assert.equal(panel.attributes['data-tone'],'warning')
  assert.ok(texts(panel).includes('仍可正常对话和使用其他 Build 工具。'))
- assert.ok(texts(panel).some(value=>value.includes(missing==='vision_model'?'视觉模型':'单屏')))
+ assert.ok(texts(panel).some(value=>value.includes({vision_model:'视觉模型',screen_permission:'屏幕录制',accessibility_permission:'辅助功能'}[missing])))
 })

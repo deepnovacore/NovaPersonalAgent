@@ -206,6 +206,10 @@ export class DesktopSocketBridge {
   #approvalView: ExecutorApprovalView | null
   #lastApprovalViewSent: ExecutorApprovalView | null = null
   #uplinkFrames = 0
+  /** Time spent handing frames on, and how many were handled; shows whether frames wait in line before the provider. */
+  #uplinkHandledMs = 0
+  #uplinkHandled = 0
+  #uplinkSlowestMs = 0
   #uplinkBytes = 0
   #uplinkFlushedAt: number
   readonly #pingSent = new Map<string, number>()
@@ -536,6 +540,15 @@ export class DesktopSocketBridge {
 
   async receiveAudio(raw: Uint8Array): Promise<void> {
     this.#recordUplink(raw.length)
+    const startedAt = Date.now()
+    try { await this.#receiveAudioFrame(raw) } finally {
+      const took = Date.now() - startedAt
+      this.#uplinkHandled += 1; this.#uplinkHandledMs += took; if (took > this.#uplinkSlowestMs) this.#uplinkSlowestMs = took
+      this.flushUplink()
+    }
+  }
+
+  async #receiveAudioFrame(raw: Uint8Array): Promise<void> {
     const pcm = validateInputPcm(raw)
     if (this.#dictation) {
       const draft = this.#dictation
@@ -931,9 +944,15 @@ export class DesktopSocketBridge {
       frames: this.#uplinkFrames,
       bytes: this.#uplinkBytes,
       elapsed: now - this.#uplinkFlushedAt,
+      handled: this.#uplinkHandled,
+      handled_ms: this.#uplinkHandledMs,
+      slowest_ms: this.#uplinkSlowestMs,
     })
     this.#uplinkFrames = 0
     this.#uplinkBytes = 0
+    this.#uplinkHandled = 0
+    this.#uplinkHandledMs = 0
+    this.#uplinkSlowestMs = 0
     this.#uplinkFlushedAt = now
   }
 
@@ -1615,7 +1634,7 @@ export function buildDesktopRealtimeComposition(
       // implicit owner and drains its audio independently of phone visibility.
       if (input.method === 'presentation.set' && (result as {ok?:boolean}).ok &&
           side === 'desktop' && params.mode !== 'orb' && audioOwner === side &&
-          requireRealtime().personalAgent.conversationSnapshot().voice_id === null) {
+          requireRealtime().personalAgent.voiceConversationId() === null) {
         audioClosing++
         try {
           await requireRealtime().service.discardInputAudio?.()
@@ -1725,12 +1744,12 @@ export function buildDesktopRealtimeComposition(
     personalSnapshot: () => realtime.personalAgent.snapshot(),
     onConnectionReleased:()=>{
       const hadPresentation = presentation.delete(side)
-      if(audioOwner===side && (realtime.personalAgent.conversationSnapshot().voice_id!==null || voiceOperations.has(side))){
+      if(audioOwner===side && (realtime.personalAgent.voiceConversationId()!==null || voiceOperations.has(side))){
         audioClosing++
         let released=false
         void (async()=>{
           await voiceOperations.get(side)?.catch(()=>{ /* the failed operation already reported its error */ })
-          const id=realtime.personalAgent.conversationSnapshot().voice_id
+          const id=realtime.personalAgent.voiceConversationId()
           if(id){const result=await realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'conversations.voice',params:{id,enabled:false}}) as {ok?:boolean};if(!result.ok)throw Error('voice_release_failed')}
           released=true
         })().catch(()=>{/* Keep owner if draining failed; that endpoint can reconnect and retry stop. */}).finally(()=>{if(released&&audioOwner===side)audioOwner=null;audioClosing--})
@@ -2210,7 +2229,7 @@ function desktopEntryFailureCode(error: unknown): string {
     if (['state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity'].includes(String(value.code))) return String(value.code)
     // state_corrupt/state_version_unsupported are shared with ProjectStateError; only the personal
     // store owns the reset-state guidance.
-    if (value.name === 'PersonalStoreError' && ['state_corrupt', 'state_version_unsupported'].includes(String(value.code))) return String(value.code)
+    if (value.name === 'PersonalStoreError' && ['state_corrupt', 'state_version_unsupported', 'state_schema_incompatible'].includes(String(value.code))) return String(value.code)
     if (value.code === 'frontbrain_tool_budget_exceeded') return 'configuration_required'
     if (value.code === 'credential_missing') return 'authentication_failed'
     if (new Set([

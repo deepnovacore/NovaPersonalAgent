@@ -27,6 +27,7 @@ Map<String, dynamic> observations() => {
   'facts': [
     {
       'text': '【人】本人关注核验',
+      'relevance': 'ongoing_work',
       'refs': ['e0'],
     },
   ],
@@ -45,7 +46,7 @@ void main() {
       ) async {
         stages.add(stage);
         if (stage == 'observations') return observations();
-        if (stage == 'timeline_select') {
+        if (stage == 'timeline_compose') {
           expect(publications, hasLength(1));
           throw const AgentFailure('model_http_503');
         }
@@ -71,7 +72,7 @@ void main() {
         'draft',
         'review',
         'edit',
-        'timeline_select',
+        'timeline_compose',
       ]);
       expect(publications.single['profile_pending'], 0);
       expect(publications.single['timeline_pending'], 1);
@@ -132,7 +133,7 @@ void main() {
         Map<String, dynamic> input,
       ) async {
         stages.add(stage);
-        return stage == 'observations' ? observations() : {'topics': []};
+        return stage == 'observations' ? observations() : {'timeline': []};
       }
 
       final writer = ProfileWriter(
@@ -152,7 +153,7 @@ void main() {
       );
       final result = jsonDecode(await writer.generate(records)) as List;
       expect(result.single['key'], 'work');
-      expect(stages, ['observations', 'timeline_select']);
+      expect(stages, ['observations', 'timeline_compose', 'timeline_review']);
       expect(writer.isPartial, false);
     },
   );
@@ -165,7 +166,7 @@ void main() {
       Map<String, dynamic> input,
     ) async {
       stages.add(stage);
-      return stage == 'observations' ? observations() : {'topics': []};
+      return stage == 'observations' ? observations() : {'timeline': []};
     }
 
     final writer = ProfileWriter(
@@ -178,7 +179,7 @@ void main() {
       loadProfileOutput: (_) async => '[]',
     );
     expect(jsonDecode(await writer.generate(records)), isEmpty);
-    expect(stages, ['observations', 'timeline_select']);
+    expect(stages, ['observations', 'timeline_compose', 'timeline_review']);
     expect(writer.isPartial, false);
     expect(writer.coverage['profile_pending'], 0);
   });
@@ -199,7 +200,7 @@ void main() {
         ) async {
           stages.add(stage);
           if (stage == 'observations') return observations();
-          if (stage == 'timeline_select') return {'topics': []};
+          if (stage == 'timeline_compose') return {'timeline': []};
           throw failure;
         }
 
@@ -228,7 +229,7 @@ void main() {
       ) async {
         stages.add(stage);
         if (stage == 'observations') return observations();
-        if (stage == 'timeline_select') return {'topics': []};
+        if (stage == 'timeline_compose') return {'timeline': []};
         return stage == 'review' ? {'review_notes': []} : output();
       }
 

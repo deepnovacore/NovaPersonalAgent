@@ -1,9 +1,12 @@
+import '../space/space_storage.dart';
 import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_secure_storage/flutter_secure_storage.dart';
 
 import '../agent_core/model_client.dart';
+import '../agent_core/model_settings.dart';
+import '../agent_core/provider_credentials.dart';
 
 enum VoicePipeline { integrated, cascaded }
 
@@ -26,6 +29,119 @@ enum SpeechProvider {
 
 enum FastLlmProtocol { chatCompletions, arkResponses, responses }
 
+/// Official realtime endpoints and built-in model/voice catalog for the
+/// integrated (realtime) voice service. The phone app only connects to these
+/// official endpoints, so historical custom endpoints are replaced on load and
+/// the settings sheet never exposes an endpoint field. Keys remain user supplied
+/// and are stored in the device secure storage.
+class IntegratedVoiceCatalog {
+  const IntegratedVoiceCatalog._();
+
+  static const qwenEndpoint = 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime';
+  static const stepfunEndpoint = 'wss://api.stepfun.com/v1/realtime';
+  static const openaiEndpoint = 'wss://api.openai.com/v1/realtime';
+  static const geminiEndpoint =
+      'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent';
+
+  static const qwenDefaultModel = 'qwen-audio-3.0-realtime-plus';
+  static const qwenDefaultVoice = 'longanqian';
+  static const qwenV31Model = 'qwen-audio-3.1-realtime-plus';
+  static const qwenV31Voice = 'longanqian_v3.1';
+  static const qwenOmniVoice = 'Ethan';
+  static const stepfunDefaultModel = 'stepaudio-3-realtime-preview';
+  static const stepfunDefaultVoice = 'default';
+  static const openaiDefaultModel = 'gpt-realtime-2.1-mini';
+  static const openaiDefaultVoice = 'marin';
+  static const geminiDefaultModel = 'gemini-3.8-live';
+  static const geminiDefaultVoice = 'Kore';
+
+  static const _qwenModels = <String>[
+    qwenV31Model,
+    qwenDefaultModel,
+    'qwen-audio-3.0-realtime-flash',
+    'qwen3.5-omni-flash-realtime',
+    'qwen3.5-omni-plus-realtime',
+  ];
+  static const _qwenStandardVoices = <String>[
+    qwenDefaultVoice,
+    'longanlingxin',
+    'longanlingxi',
+    'longanxiaoxin',
+    'longanlufeng',
+  ];
+  static const _stepfunModels = <String>[stepfunDefaultModel];
+  static const _stepfunVoices = <String>[stepfunDefaultVoice];
+  static const _openaiModels = <String>[openaiDefaultModel, 'gpt-realtime-2.1'];
+  static const _openaiVoices = <String>[
+    openaiDefaultVoice,
+    'cedar',
+    'alloy',
+    'coral',
+  ];
+  static const _geminiModels = <String>[geminiDefaultModel];
+  static const _geminiVoices = <String>[
+    geminiDefaultVoice,
+    'Puck',
+    'Aoede',
+    'Charon',
+    'Fenrir',
+  ];
+
+  static String officialEndpoint(IntegratedVoiceService provider) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen => qwenEndpoint,
+        IntegratedVoiceService.stepfun => stepfunEndpoint,
+        IntegratedVoiceService.openai => openaiEndpoint,
+        IntegratedVoiceService.gemini => geminiEndpoint,
+      };
+
+  static List<String> models(IntegratedVoiceService provider) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen => _qwenModels,
+        IntegratedVoiceService.stepfun => _stepfunModels,
+        IntegratedVoiceService.openai => _openaiModels,
+        IntegratedVoiceService.gemini => _geminiModels,
+      };
+
+  /// The default model is a product decision per provider, not the first entry
+  /// of the dropdown catalog (newest Qwen models are listed first).
+  static String defaultModel(IntegratedVoiceService provider) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen => qwenDefaultModel,
+        IntegratedVoiceService.stepfun => stepfunDefaultModel,
+        IntegratedVoiceService.openai => openaiDefaultModel,
+        IntegratedVoiceService.gemini => geminiDefaultModel,
+      };
+
+  /// Model-specific voices. Unknown saved models keep the general Qwen voice
+  /// list so historical values remain selectable.
+  static List<String> voices(IntegratedVoiceService provider, String model) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen =>
+          model == qwenV31Model
+              ? const [qwenV31Voice]
+              : model.startsWith('qwen3.5-omni-')
+              ? const [qwenOmniVoice]
+              : _qwenStandardVoices,
+        IntegratedVoiceService.stepfun => _stepfunVoices,
+        IntegratedVoiceService.openai => _openaiVoices,
+        IntegratedVoiceService.gemini => _geminiVoices,
+      };
+
+  static String defaultVoice(IntegratedVoiceService provider, String model) =>
+      switch (provider) {
+        IntegratedVoiceService.qwen =>
+          model == qwenV31Model
+              ? qwenV31Voice
+              : model.startsWith('qwen3.5-omni-')
+              ? qwenOmniVoice
+              : qwenDefaultVoice,
+        IntegratedVoiceService.stepfun => stepfunDefaultVoice,
+        IntegratedVoiceService.openai => openaiDefaultVoice,
+        IntegratedVoiceService.gemini => geminiDefaultVoice,
+      };
+}
+
 /// Drafts may have empty credentials. Validate the selected pipeline before use.
 class VoiceServiceConfiguration {
   const VoiceServiceConfiguration({
@@ -34,8 +150,10 @@ class VoiceServiceConfiguration {
     this.key = '',
     this.voice = '',
     this.resourceId = '',
+    this.credentialId,
   });
   final String endpoint, model, key, voice, resourceId;
+  final String? credentialId;
 
   VoiceServiceConfiguration copyWith({
     String? endpoint,
@@ -43,12 +161,18 @@ class VoiceServiceConfiguration {
     String? key,
     String? voice,
     String? resourceId,
+    String? credentialId,
   }) => VoiceServiceConfiguration(
     endpoint: endpoint ?? this.endpoint,
     model: model ?? this.model,
     key: key ?? this.key,
     voice: voice ?? this.voice,
     resourceId: resourceId ?? this.resourceId,
+    credentialId:
+        credentialId ??
+        (endpoint == null || endpoint.trim() == this.endpoint.trim()
+            ? this.credentialId
+            : null),
   );
 
   Map<String, dynamic> toJson() => {
@@ -57,14 +181,16 @@ class VoiceServiceConfiguration {
     'key': key,
     'voice': voice,
     'resourceId': resourceId,
+    if (credentialId != null) 'credentialId': credentialId,
   };
   factory VoiceServiceConfiguration.fromJson(Map<String, dynamic> value) =>
       VoiceServiceConfiguration(
         endpoint: value['endpoint'] as String,
         model: value['model'] as String,
-        key: value['key'] as String,
+        key: value['key'] as String? ?? '',
         voice: value['voice'] as String,
         resourceId: value['resourceId'] as String? ?? '',
+        credentialId: value['credentialId'] as String?,
       );
 
   void validate({
@@ -104,12 +230,13 @@ class VoiceServiceConfiguration {
 
 class VoiceConfiguration {
   const VoiceConfiguration({
+    this.recordingCompatible = false,
     this.pipeline = VoicePipeline.integrated,
     this.integratedProfile = IntegratedVoiceService.qwen,
     this.integrated = const VoiceServiceConfiguration(
-      endpoint: 'wss://dashscope.aliyuncs.com/api-ws/v1/realtime',
-      model: 'qwen-audio-3.0-realtime-plus',
-      voice: 'longanqian',
+      endpoint: IntegratedVoiceCatalog.qwenEndpoint,
+      model: IntegratedVoiceCatalog.qwenDefaultModel,
+      voice: IntegratedVoiceCatalog.qwenDefaultVoice,
     ),
     this.asrProvider = SpeechProvider.gemini,
     this.asr = const VoiceServiceConfiguration(
@@ -125,6 +252,7 @@ class VoiceConfiguration {
     this.fastLlm = const VoiceServiceConfiguration(),
     this.fastLlmProtocol = FastLlmProtocol.chatCompletions,
   });
+  final bool recordingCompatible;
   final VoicePipeline pipeline;
   final FastLlmProtocol fastLlmProtocol;
   final IntegratedVoiceService integratedProfile;
@@ -135,24 +263,14 @@ class VoiceConfiguration {
   // service, preset or credential is bundled with the phone application.
   static VoiceServiceConfiguration integratedDefaults(
     IntegratedVoiceService p,
-  ) => switch (p) {
-    IntegratedVoiceService.qwen => const VoiceConfiguration().integrated,
-    IntegratedVoiceService.stepfun => const VoiceServiceConfiguration(
-      endpoint: 'wss://api.stepfun.com/v1/realtime',
-      model: 'stepaudio-3-realtime-preview',
-    ),
-    IntegratedVoiceService.openai => const VoiceServiceConfiguration(
-      endpoint: 'wss://api.openai.com/v1/realtime',
-      model: 'gpt-realtime-2.1-mini',
-      voice: 'marin',
-    ),
-    IntegratedVoiceService.gemini => const VoiceServiceConfiguration(
-      endpoint:
-          'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.v1beta.GenerativeService.BidiGenerateContent',
-      model: 'gemini-3.8-live',
-      voice: 'Kore',
-    ),
-  };
+  ) {
+    final model = IntegratedVoiceCatalog.defaultModel(p);
+    return VoiceServiceConfiguration(
+      endpoint: IntegratedVoiceCatalog.officialEndpoint(p),
+      model: model,
+      voice: IntegratedVoiceCatalog.defaultVoice(p, model),
+    );
+  }
 
   static VoiceServiceConfiguration speechDefaults(
     SpeechProvider provider, {
@@ -257,6 +375,7 @@ class VoiceConfiguration {
   }
 
   VoiceConfiguration copyWith({
+    bool? recordingCompatible,
     VoicePipeline? pipeline,
     FastLlmProtocol? fastLlmProtocol,
     IntegratedVoiceService? integratedProfile,
@@ -267,6 +386,7 @@ class VoiceConfiguration {
     VoiceServiceConfiguration? tts,
     VoiceServiceConfiguration? fastLlm,
   }) => VoiceConfiguration(
+    recordingCompatible: recordingCompatible ?? this.recordingCompatible,
     pipeline: pipeline ?? this.pipeline,
     fastLlmProtocol: fastLlmProtocol ?? this.fastLlmProtocol,
     integratedProfile: integratedProfile ?? this.integratedProfile,
@@ -280,6 +400,7 @@ class VoiceConfiguration {
 
   Map<String, dynamic> toJson() => {
     'version': 1,
+    'recordingCompatible': recordingCompatible,
     'pipeline': pipeline.name,
     'fastLlmProtocol': fastLlmProtocol.name,
     'integratedProfile': integratedProfile.name,
@@ -295,6 +416,7 @@ class VoiceConfiguration {
       throw const AgentFailure('invalid_voice_settings');
     }
     return VoiceConfiguration(
+      recordingCompatible: value['recordingCompatible'] as bool? ?? false,
       pipeline: VoicePipeline.values.byName(value['pipeline'] as String),
       fastLlmProtocol: FastLlmProtocol.values.byName(
         value['fastLlmProtocol'] as String? ?? 'chatCompletions',
@@ -320,15 +442,20 @@ class VoiceConfiguration {
   }
 }
 
-/// Independent of text settings and never projected to a computer or Hub.
+/// Independent of text settings and never projected to a other Spaces.
 class VoiceSettings {
-  const VoiceSettings({this.storage = const FlutterSecureStorage()});
+  VoiceSettings({this.storage = const FlutterSecureStorage()})
+    : modelSettings = ModelSettings(storage: storage);
   final FlutterSecureStorage storage;
+  final ModelSettings modelSettings;
+  ProviderCredentials get credentials => modelSettings.credentials;
+  final String _scopedKey = SpaceStorage.secureKey(storageKey);
   static const storageKey = 'nova.voice.v1';
 
   Future<VoiceConfiguration?> read() async {
-    final config = await readDraft();
     try {
+      final draft = await readDraft();
+      final config = draft == null ? null : await _resolve(draft);
       config?.validate();
       return config;
     } catch (_) {
@@ -338,9 +465,16 @@ class VoiceSettings {
 
   /// Dictation needs only ASR, independent of conversation/LLM/TTS settings.
   Future<VoiceConfiguration?> readForDictation() async {
-    final config = await readDraft();
     try {
-      config?.validateAsr();
+      final draft = await readDraft();
+      if (draft == null) return null;
+      final config = draft.copyWith(
+        asr: await _resolveService(
+          draft.asr,
+          useDefault: draft.asrProvider != SpeechProvider.selfHosted,
+        ),
+      );
+      config.validateAsr();
       return config;
     } catch (_) {
       throw const AgentFailure('dictation_settings_required');
@@ -349,22 +483,70 @@ class VoiceSettings {
 
   Future<VoiceConfiguration?> readDraft() async {
     try {
-      final raw = await storage.read(key: storageKey);
+      await credentials.list();
+      final raw = await storage.read(key: _scopedKey);
       if (raw == null) return null;
-      final config = VoiceConfiguration.fromJson(
+      final value = VoiceConfiguration.fromJson(
         jsonDecode(raw) as Map<String, dynamic>,
       );
-      return config;
+      if ([
+        value.integrated,
+        value.asr,
+        value.tts,
+        value.fastLlm,
+      ].any((s) => s.key.isNotEmpty)) {
+        throw const AgentFailure('voice_settings_unavailable');
+      }
+      return value;
     } catch (_) {
       throw const AgentFailure('voice_settings_unavailable');
     }
   }
 
   Future<VoiceConfiguration> save(VoiceConfiguration draft) async {
-    final old = await readDraft();
-    final value = _mergeDraft(draft, old);
-    value.validate();
-    return _write(value);
+    final value = await _prepare(_mergeDraft(draft, await readDraft()));
+    final resolved = await _resolve(value);
+    resolved.validate();
+    await _write(value);
+    return resolved;
+  }
+
+  Future<VoiceServiceConfiguration> _resolveService(
+    VoiceServiceConfiguration service, {
+    bool useDefault = true,
+  }) async {
+    if (service.endpoint.isEmpty ||
+        service.key.isNotEmpty ||
+        (!useDefault && service.credentialId == null)) {
+      return service;
+    }
+    final credential = await credentials.resolve(
+      service.endpoint,
+      credentialId: service.credentialId,
+    );
+    return service.copyWith(
+      key: credential?.key ?? '',
+      credentialId: credential?.id,
+    );
+  }
+
+  Future<VoiceConfiguration> _resolve(VoiceConfiguration value) async {
+    if (value.pipeline == VoicePipeline.integrated) {
+      return value.copyWith(
+        integrated: await _resolveService(value.integrated),
+      );
+    }
+    return value.copyWith(
+      asr: await _resolveService(
+        value.asr,
+        useDefault: value.asrProvider != SpeechProvider.selfHosted,
+      ),
+      tts: await _resolveService(
+        value.tts,
+        useDefault: value.ttsProvider != SpeechProvider.selfHosted,
+      ),
+      fastLlm: await _resolveService(value.fastLlm),
+    );
   }
 
   Future<VoiceConfiguration> saveAsr({
@@ -376,9 +558,72 @@ class VoiceSettings {
       asrProvider: provider,
       asr: asr,
     );
-    final value = _mergeDraft(draft, old);
-    value.validateAsr();
-    return _write(value);
+    final value = await _prepare(_mergeDraft(draft, old), asrOnly: true);
+    final resolved = value.copyWith(
+      asr: await _resolveService(
+        value.asr,
+        useDefault: provider != SpeechProvider.selfHosted,
+      ),
+    );
+    resolved.validateAsr();
+    await _write(value);
+    return resolved;
+  }
+
+  Future<VoiceConfiguration> _prepare(
+    VoiceConfiguration value, {
+    bool asrOnly = false,
+  }) async {
+    Future<VoiceServiceConfiguration> prepare(
+      VoiceServiceConfiguration service,
+      bool useDefault,
+      bool active,
+    ) async {
+      if (service.endpoint.isEmpty) return service;
+      ProviderCredential? credential;
+      if (service.key.isNotEmpty) {
+        final referenced = service.credentialId == null
+            ? null
+            : await credentials.resolve(
+                service.endpoint,
+                credentialId: service.credentialId,
+              );
+        credential = await credentials.save(
+          id: referenced?.id,
+          endpoint: service.endpoint,
+          key: service.key,
+        );
+      } else if (active && (service.credentialId != null || useDefault)) {
+        credential = await credentials.resolve(
+          service.endpoint,
+          credentialId: service.credentialId,
+        );
+      }
+      return service.copyWith(key: '', credentialId: credential?.id);
+    }
+
+    return value.copyWith(
+      integrated: await prepare(
+        value.integrated,
+        true,
+        !asrOnly && value.pipeline == VoicePipeline.integrated,
+      ),
+      asr: await prepare(
+        value.asr,
+        value.asrProvider != SpeechProvider.selfHosted,
+        asrOnly || value.pipeline == VoicePipeline.cascaded,
+      ),
+      tts: await prepare(
+        value.tts,
+        value.ttsProvider != SpeechProvider.selfHosted,
+        !asrOnly && value.pipeline == VoicePipeline.cascaded,
+      ),
+      fastLlm: await prepare(
+        value.fastLlm,
+        true,
+        !asrOnly && value.pipeline == VoicePipeline.cascaded,
+      ),
+    );
   }
 
   VoiceConfiguration _mergeDraft(
@@ -390,29 +635,30 @@ class VoiceSettings {
       VoiceServiceConfiguration? previous,
       bool sameProvider,
     ) {
-      final trimmed = next.copyWith(
+      final sameEndpoint = next.endpoint.trim() == previous?.endpoint;
+      return VoiceServiceConfiguration(
         endpoint: next.endpoint.trim(),
         model: next.model.trim(),
         voice: next.voice.trim(),
-        resourceId: next.resourceId.trim(),
-      );
-      return trimmed.copyWith(
-        resourceId:
-            trimmed.resourceId.isEmpty &&
-                sameProvider &&
-                trimmed.endpoint == previous?.endpoint
+        resourceId: next.resourceId.isEmpty && sameProvider && sameEndpoint
             ? previous!.resourceId
-            : trimmed.resourceId,
-        key:
-            trimmed.key.isEmpty &&
-                sameProvider &&
-                trimmed.endpoint == previous?.endpoint
-            ? previous!.key
-            : trimmed.key,
+            : next.resourceId.trim(),
+        key: next.key,
+        credentialId: sameProvider && sameEndpoint
+            ? next.credentialId ?? previous?.credentialId
+            : next.credentialId == previous?.credentialId
+            ? null
+            : next.credentialId,
       );
     }
 
-    final value = draft.copyWith(
+    if (old != null &&
+        draft.integratedProfile != old.integratedProfile &&
+        draft.integrated.endpoint.trim() == old.integrated.endpoint &&
+        draft.integrated.key.isEmpty) {
+      throw const AgentFailure('invalid_voice_settings');
+    }
+    return draft.copyWith(
       integrated: merge(
         draft.integrated,
         old?.integrated,
@@ -420,21 +666,19 @@ class VoiceSettings {
       ),
       asr: merge(draft.asr, old?.asr, draft.asrProvider == old?.asrProvider),
       tts: merge(draft.tts, old?.tts, draft.ttsProvider == old?.ttsProvider),
-      fastLlm: merge(
-        draft.fastLlm,
-        old?.fastLlm,
-        draft.fastLlmProtocol == old?.fastLlmProtocol,
-      ),
+      fastLlm: merge(draft.fastLlm, old?.fastLlm, true),
     );
-    return value;
   }
 
-  Future<VoiceConfiguration> _write(VoiceConfiguration value) async {
+  Future<void> _write(VoiceConfiguration value) async {
     try {
-      await storage.write(key: storageKey, value: jsonEncode(value.toJson()));
+      final record = value.toJson();
+      for (final slot in ['integrated', 'asr', 'tts', 'fastLlm']) {
+        (record[slot] as Map).remove('key');
+      }
+      await storage.write(key: _scopedKey, value: jsonEncode(record));
     } catch (_) {
       throw const AgentFailure('voice_settings_save_failed');
     }
-    return value;
   }
 }

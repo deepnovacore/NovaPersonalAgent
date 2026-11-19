@@ -5,7 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/connectors/feishu/host.dart';
 import 'package:nova_mobile/context/profile_repository.dart';
 import 'package:nova_mobile/context/source_store.dart';
-import 'package:nova_mobile/device/space_authority.dart';
+import 'package:nova_mobile/context/local_publication.dart';
 import 'package:nova_mobile/personal/personal_store.dart';
 import 'package:nova_mobile/ui/local_profile_results.dart';
 import 'package:nova_mobile/ui/theme.dart';
@@ -34,10 +34,19 @@ class _ReadyHost extends FeishuHost {
   @override
   bool get ready => true;
   @override
+  bool get restored => true;
+  @override
   void dispose() {
     sources.removeListener(notifyListeners);
     super.dispose();
   }
+}
+
+/// Local data is open while Feishu authorization remains unavailable.
+class _RestoredOnlyHost extends _ReadyHost {
+  _RestoredOnlyHost(super.sources);
+  @override
+  bool get ready => false;
 }
 
 class _ControlledPersistence extends MemoryLifePersistence {
@@ -54,13 +63,13 @@ class _Fixture {
   final now = DateTime(2026, 10, 18, 18);
   late final sources = SourceStore(MemoryLifePersistence(), now: () => now);
   late final host = _ReadyHost(sources);
-  final authority = SpaceAuthorityRepository(MemoryLifePersistence());
+  final publication = LocalPublicationContext(MemoryLifePersistence());
   final disk = _ControlledPersistence();
-  late final profile = ProfileRepository(disk, authority, sources);
+  late final profile = ProfileRepository(disk, publication, sources);
   final life = PersonalStore(send: (_) => false);
 
-  Future<void> open({bool publish = true}) async {
-    await authority.open();
+  Future<void> open({bool publish = true, String? anchorDate}) async {
+    await publication.open();
     await sources.bind('self', 1);
     final times = [
       DateTime(2026, 10, 16, 10),
@@ -97,6 +106,21 @@ class _Fixture {
             {
               'key': 'event_$i',
               'kind': 'timeline',
+              'policy_revision': 2,
+              if (i == 2 && anchorDate != null)
+                'time': {
+                  'kind': 'event',
+                  'anchor_basis': 'occurred',
+                  'anchor_date': anchorDate,
+                  'occurred_on': anchorDate,
+                  'started_on': null,
+                  'due_on': null,
+                  'scheduled_on': null,
+                  'last_reported_on': '2026-10-17',
+                  'evidence_from': '2026-10-16',
+                  'evidence_to': '2026-10-17',
+                  'as_of': '2026-10-18',
+                },
               'text': [
                 '较早的项目讨论',
                 '当天上午的计划',
@@ -111,7 +135,7 @@ class _Fixture {
                   : [refs[times[i].millisecondsSinceEpoch]],
             },
         ]),
-        epoch: authority.epoch,
+
         sourceRevision: sources.revision,
         consentRevision: sources.processingRevision,
         provider: 'p',
@@ -139,7 +163,7 @@ class _Fixture {
           now: now,
           sourceTimeline: LocalProfileResults(
             host: host,
-            authority: authority,
+            publication: publication,
             repository: profile,
             kind: 'timeline',
             language: language,
@@ -151,12 +175,40 @@ class _Fixture {
 
   void dispose() {
     host.dispose();
-    authority.dispose();
+    publication.dispose();
     life.dispose();
   }
 }
 
 void main() {
+  testWidgets('Timeline groups by event anchor instead of report date', (
+    tester,
+  ) async {
+    final f = _Fixture();
+    await f.open(anchorDate: '2026-10-15');
+    await tester.pumpWidget(f.app());
+    await tester.pumpAndSettle();
+    final cards = tester.widgetList<ListTile>(find.byType(ListTile)).toList();
+    String title(ListTile card) =>
+        ((card.title as Column).children.last as Text).data!;
+    expect(cards.take(3).map(title).toList(), [
+      '当天上午的计划',
+      '较早的项目讨论',
+      '最新的项目进展：确认已完成的部分，并保留下一步尚待讨论的安排。',
+    ]);
+    expect(
+      find.byKey(
+        ValueKey(
+          'brief-timeline-marker-${DateTime(2026, 10, 15).toIso8601String()}',
+        ),
+      ),
+      findsOneWidget,
+    );
+    expect(find.text('更新依据 · 2026年10月17日 15:00'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    f.dispose();
+  });
+
   testWidgets(
     'compact profile uses validated saved profile, not timeline text',
     (tester) async {
@@ -171,7 +223,6 @@ void main() {
             'evidence_ids': [f.sources.messages('c').first['evidence_id']],
           },
         ]),
-        epoch: f.authority.epoch,
         sourceRevision: f.sources.revision,
         consentRevision: f.sources.processingRevision,
         provider: 'p',
@@ -181,7 +232,7 @@ void main() {
           home: Scaffold(
             body: LocalProfileResults(
               host: f.host,
-              authority: f.authority,
+              publication: f.publication,
               repository: f.profile,
               kind: 'profile',
               compact: true,
@@ -269,12 +320,12 @@ void main() {
       expect(find.text('还没有近况'), findsNothing);
       f.disk.pending!.completeError(StateError('locked'));
       await tester.pumpAndSettle();
-      expect(find.text('暂时无法加载近况'), findsOneWidget);
+      expect(find.text('无法读取此前生成的资料'), findsOneWidget);
       f.disk.pending = null;
       await tester.tap(find.text('重试'));
       await tester.pumpAndSettle();
       expect(find.text('还没有近况'), findsOneWidget);
-      expect(find.text('暂时无法加载近况'), findsNothing);
+      expect(find.text('无法读取此前生成的资料'), findsNothing);
       expect(find.text('独立的待办安排'), findsOneWidget);
       await tester.pumpWidget(const SizedBox());
       f.dispose();
@@ -299,7 +350,7 @@ void main() {
         expect(find.text('Loading updates…'), findsOneWidget);
         f.disk.pending!.completeError(StateError('unavailable'));
         await tester.pumpAndSettle();
-        expect(find.text('Could not load updates'), findsOneWidget);
+        expect(find.text('Could not read your saved results'), findsOneWidget);
         expect(find.textContaining('解锁'), findsNothing);
         await tester.ensureVisible(find.text('Retry'));
         f.disk.pending = null;
@@ -339,6 +390,75 @@ void main() {
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
       f.dispose();
+    },
+  );
+  testWidgets(
+    'saved timeline renders while local data is restored but Feishu is not ready',
+    (tester) async {
+      final f = _Fixture();
+      await f.open();
+      final host = _RestoredOnlyHost(f.sources);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: Scaffold(
+            body: TimelinePage(
+              store: f.life,
+              language: 'zh',
+              now: f.now,
+              sourceTimeline: LocalProfileResults(
+                host: host,
+                publication: f.publication,
+                repository: f.profile,
+                kind: 'timeline',
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(host.ready, false);
+      expect(find.text('最新的项目进展：确认已完成的部分，并保留下一步尚待讨论的安排。'), findsOneWidget);
+      expect(find.text('还没有近况'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
+    },
+  );
+
+  testWidgets(
+    'timeline empty state renders the real reason and connect action',
+    (tester) async {
+      final f = _Fixture();
+      await f.open(publish: false);
+      final host = _RestoredOnlyHost(f.sources);
+      var opened = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: Scaffold(
+            body: TimelinePage(
+              store: f.life,
+              language: 'zh',
+              now: f.now,
+              sourceTimeline: LocalProfileResults(
+                host: host,
+                publication: f.publication,
+                repository: f.profile,
+                kind: 'timeline',
+                emptyHint: '打开连接器并连接数据源，之后会自动整理到这里。',
+                onOpenConnectors: () => opened++,
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('还没有近况'), findsOneWidget);
+      expect(find.text('打开连接器并连接数据源，之后会自动整理到这里。'), findsOneWidget);
+      await tester.tap(find.text('前往连接器'));
+      expect(opened, 1);
+      await tester.pumpWidget(const SizedBox());
+      host.dispose();
     },
   );
 }

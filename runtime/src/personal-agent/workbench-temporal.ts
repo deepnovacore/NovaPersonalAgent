@@ -3,15 +3,19 @@ import type {TimelineInput} from './timeline-brief.js'
 import {workbenchHash,type WorkbenchMatter} from './workbench-evidence.js'
 
 export const TEMPORAL_RECIPE='temporal-v2'
-export const temporalReplySchema=z.object({groups:z.array(z.object({
- members:z.array(z.string()).min(1).max(512),
+const temporalGroupSchema=(maxMembers:number)=>z.object({
+ members:z.array(z.string()).min(1).max(maxMembers),
  state:z.enum(['open','completed','cancelled','uncertain']),
  current:z.string(),basis:z.array(z.string()).min(1).max(8),
-}).strict()).max(512)}).strict()
+}).strict()
+/** One model reply covers at most one bounded shard. */
+export const temporalReplySchema=z.object({groups:z.array(temporalGroupSchema(512)).max(512)}).strict()
+/** The reconciled result of every shard together; persisted and resolved as one. */
+export const temporalResultSchema=z.object({groups:z.array(temporalGroupSchema(4096)).max(4096)}).strict()
 export interface TemporalGroup {id:string;members:WorkbenchMatter[];state:WorkbenchMatter['state'];current:WorkbenchMatter;basis:WorkbenchMatter[]}
 /** Coverage and closure are code gates; semantic identity still requires evidence review. */
 export function resolveWorkbenchGroups(matters:readonly WorkbenchMatter[],raw:unknown):TemporalGroup[]{
- const parsed=temporalReplySchema.parse(raw),byId=new Map(matters.map(m=>[m.id,m])),seen=new Set<string>()
+ const parsed=temporalResultSchema.parse(raw),byId=new Map(matters.map(m=>[m.id,m])),seen=new Set<string>()
  const groups=parsed.groups.map(group=>{
   for(const id of group.members){if(!byId.has(id)||seen.has(id))throw Error('invalid_temporal_members');seen.add(id)}
   if(!group.members.includes(group.current)||!group.basis.includes(group.current)||group.basis.some(id=>!group.members.includes(id)))throw Error('invalid_temporal_members')

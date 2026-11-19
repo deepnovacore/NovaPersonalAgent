@@ -1,0 +1,49 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="920" height="374" viewBox="0 0 920 374" role="img" aria-label="Space / Host / Client Pairing &amp; E2EE Flow">
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#64748b"/>
+    </marker>
+    <marker id="arrow-amber" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#f59e0b"/>
+    </marker>
+    <marker id="arrow-teal" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6.5" markerHeight="6.5" orient="auto-start-reverse">
+      <path d="M 1 1.5 L 9 5 L 1 8.5 z" fill="#14b8a6"/>
+    </marker>
+  </defs>
+  <rect width="920" height="374" rx="20" fill="#ffffff"/>
+  <g font-family='-apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif'>
+    
+    <text x="40" y="44" font-size="20" font-weight="700" fill="#0f172a" text-anchor="start">Space / Host / Client Pairing &amp; E2EE Flow</text>
+
+    <rect x="40" y="72" width="230" height="44" rx="12" fill="#f0fdfa" stroke="#14b8a6" stroke-width="1.5"/>
+    <text x="155" y="99" font-size="14" font-weight="700" fill="#134e4a" text-anchor="middle">Host (Desktop / Headless)</text>
+
+    <rect x="345" y="72" width="230" height="44" rx="12" fill="#f5f3ff" stroke="#8b5cf6" stroke-width="1.5"/>
+    <text x="460" y="99" font-size="14" font-weight="700" fill="#4c1d95" text-anchor="middle">Encrypted Relay (Blind)</text>
+
+    <rect x="650" y="72" width="230" height="44" rx="12" fill="#eff6ff" stroke="#3b82f6" stroke-width="1.5"/>
+    <text x="765" y="99" font-size="14" font-weight="700" fill="#1e3a8a" text-anchor="middle">Mobile Client (NovaCore)</text>
+
+    <line x1="155" y1="116" x2="155" y2="346" stroke="#14b8a6" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="460" y1="116" x2="460" y2="346" stroke="#8b5cf6" stroke-width="1.5" stroke-dasharray="4 4"/>
+    <line x1="765" y1="116" x2="765" y2="346" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4 4"/>
+
+    <line x1="155" y1="146" x2="456" y2="146" stroke="#64748b" stroke-width="1.75" marker-end="url(#arrow)"/>
+    <text x="306" y="138" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle">1. Register Space</text>
+
+    <line x1="155" y1="186" x2="761" y2="186" stroke="#f59e0b" stroke-width="1.75" stroke-dasharray="5 4" marker-end="url(#arrow-amber)"/>
+    <text x="460" y="178" font-size="12" font-weight="600" fill="#78350f" text-anchor="middle">2. One-time QR Pairing</text>
+
+    <line x1="765" y1="226" x2="159" y2="226" stroke="#64748b" stroke-width="1.75" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+    <text x="460" y="218" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle">3. Verify Fingerprint &amp; Confirm</text>
+
+    <line x1="155" y1="266" x2="456" y2="266" stroke="#14b8a6" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+    <line x1="460" y1="266" x2="761" y2="266" stroke="#14b8a6" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
+    <text x="306" y="258" font-size="12" font-weight="600" fill="#134e4a" text-anchor="middle">4. Deliver Space Key</text>
+    <text x="612" y="258" font-size="12" font-weight="600" fill="#134e4a" text-anchor="middle">Ciphertext Forward</text>
+
+    <line x1="765" y1="306" x2="159" y2="306" stroke="#64748b" stroke-width="1.75" marker-end="url(#arrow)" marker-start="url(#arrow)"/>
+    <text x="460" y="298" font-size="12" font-weight="600" fill="#0f172a" text-anchor="middle">5. E2EE Chat · Approvals · Intent Sync</text>
+  
+  </g>
+</svg>

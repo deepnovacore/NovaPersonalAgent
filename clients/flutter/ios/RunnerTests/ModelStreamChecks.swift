@@ -13,11 +13,26 @@ import Foundation
   assert((message["tool_calls"] as! [[String:Any]])[0]["id"] as? String == "x")
   let truncated = ModelStreamParser { _ in }
   do { try truncated.append(Data("data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n".utf8)); fatalError("truncation accepted") } catch let error as LocalAgentError { assert(error.code == "model_output_limit") }
+  var reasoningEvents = [[String:Any]]()
+  let reasoningStream = ModelStreamParser { reasoningEvents.append($0) }
+  let reasoningText = "data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"想\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"reasoning\":\"法\"}}]}\n\ndata: {\"choices\":[{\"delta\":{\"content\":\"答\"}}]}\n\ndata: [DONE]\n\n"
+  for byte in Data(reasoningText.utf8) { try reasoningStream.append(Data([byte])) }
+  assert(reasoningStream.finished); assert(reasoningEvents.count == 3)
+  assert(reasoningEvents[0]["reasoning"] as? String == "想")
+  assert(reasoningEvents[1]["reasoning"] as? String == "法")
+  assert(reasoningEvents[2]["content"] as? String == "答")
+  let reasoningMessage = (reasoningStream.response()["choices"] as! [[String:Any]])[0]["message"] as! [String:Any]
+  assert(reasoningMessage["content"] as? String == "答")
+  assert(reasoningMessage["reasoning_content"] as? String == "想法")
+  let big = String(repeating: "x", count: 512 * 1024 + 1)
+  let oversized = ModelStreamParser { _ in }
+  do { try oversized.append(Data("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"\(big)\"}}]}\n\n".utf8)); fatalError("oversized reasoning accepted") } catch let error as LocalAgentError { assert(error.code == "model_response_too_large") }
   var responseEvents = [[String:Any]]()
   let responses = ModelStreamParser(responses: true) { responseEvents.append($0) }
   for event: [String:Any] in [
     ["type":"response.output_text.delta","delta":"hello"],
     ["type":"response.output_item.done","item":["type":"reasoning","id":"r","encrypted_content":"opaque","summary":[]]],
+    ["type":"response.output_item.done","item":["type":"reasoning","id":"r2","summary":[["type":"summary_text","text":"先想"]]]],
     ["type":"response.output_item.done","item":["type":"function_call","id":"f","call_id":"call","name":"lookup","arguments":"{}"]],
     ["type":"response.completed","response":["status":"completed"]]
   ] {
@@ -27,10 +42,12 @@ import Foundation
   assert(responses.finished)
   let responseMessage = (responses.response()["choices"] as! [[String:Any]])[0]["message"] as! [String:Any]
   assert(responseMessage["content"] as? String == "hello")
-  assert((responseMessage["_nova_response_items"] as! [[String:Any]]).count == 2)
+  assert((responseMessage["_nova_response_items"] as! [[String:Any]]).count == 3)
   assert((responseMessage["tool_calls"] as! [[String:Any]])[0]["id"] as? String == "call")
+  assert(responseEvents.contains { $0["reasoning"] as? String == "先想" })
+  assert(responseMessage["reasoning_content"] as? String == "先想")
   let incompleteResponses = ModelStreamParser(responses:true) { _ in }
   do { try incompleteResponses.append(Data("data: [DONE]\n\n".utf8)); fatalError("premature done accepted") } catch { }
-  print("Model stream: split UTF8, incremental text/tools, final response and truncation passed")
+  print("Model stream: split UTF8, incremental text/tools, reasoning, final response and truncation passed")
  }
 }

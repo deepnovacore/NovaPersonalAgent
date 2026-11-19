@@ -2,18 +2,18 @@ package com.nova.nova_mobile
 
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
-import io.flutter.plugin.common.MethodChannel
+import android.content.Context
 import android.content.Intent
-import android.os.Build
-import android.provider.Settings
-import org.json.JSONObject
-import org.json.JSONArray
 import android.content.pm.ApplicationInfo
-import java.util.concurrent.Executors
+import com.nova.nova_mobile.phone.PhoneBridge
 
 class MainActivity : FlutterActivity() {
+    private val runtime get() = (application as NovaPushApplication).runtime
+    private var spacePush: NovaSpacePush? = null
+    private var spaceTools: NovaSpaceTools? = null
     private var artifactHost: ArtifactWebHost? = null
-    private var linuxWorkspaceHost: LinuxWorkspaceHost? = null
+    override fun provideFlutterEngine(context: Context): FlutterEngine = runtime.engine
+    override fun shouldDestroyEngineWithHost() = false
     override fun onResume() {
         super.onResume()
         artifactHost?.resume()
@@ -23,11 +23,12 @@ class MainActivity : FlutterActivity() {
         super.onPause()
     }
     override fun onDestroy() {
+        spacePush?.detach(this)
+        spaceTools?.close()
         artifactHost?.dispose()
-        linuxWorkspaceHost?.dispose()
-        linuxWorkspaceHost = null
         artifactHost = null
         super.onDestroy()
+        android.util.Log.i("NovaRuntime", "Activity detached; engine retained")
     }
     override fun onCreate(savedInstanceState:android.os.Bundle?) {
         super.onCreate(savedInstanceState)
@@ -37,62 +38,23 @@ class MainActivity : FlutterActivity() {
             window.addFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         }
     }
-    companion object {
-        private var controller:LocalAgentController?=null
-        private val worker=Executors.newSingleThreadExecutor()
+    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); NovaSpacePush.opened(intent) }
+    override fun onRequestPermissionsResult(code: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(code, permissions, grantResults)
+        spacePush?.onRequestPermissionsResult(code, grantResults)
+        spaceTools?.onRequestPermissionsResult(code, grantResults)
     }
-    override fun configureFlutterEngine(flutterEngine:FlutterEngine){
+    override fun onActivityResult(code: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(code, resultCode, data)
+        spaceTools?.onActivityResult(code, resultCode, data)
+    }
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+        PhoneBridge.register(this, flutterEngine)
         NovaScheduleBridge.install(this, flutterEngine)
-        linuxWorkspaceHost?.dispose()
-        linuxWorkspaceHost = LinuxWorkspaceHost(this, flutterEngine.dartExecutor.binaryMessenger)
-        artifactHost?.dispose()
+        spacePush = runtime.attachPush(this)
+        spaceTools = NovaSpaceTools(this, flutterEngine.dartExecutor.binaryMessenger)
         artifactHost = ArtifactWebHost(this, flutterEngine.dartExecutor.binaryMessenger)
-        if(controller==null)controller=LocalAgentController(applicationContext)
-        MethodChannel(flutterEngine.dartExecutor.binaryMessenger,"nova/local_agent/v1").setMethodCallHandler { call,result ->
-            try {
-                val args=JSONObject(call.arguments as? String?:"{}")
-                when(call.method){
-                    "capabilities" -> result.success(JSONObject().put("schema_version",1).put("platform","android").put("host_package",packageName).put("android_api",Build.VERSION.SDK_INT).put("accessibility",LocalGuiService.current!=null).put("screenshots",Build.VERSION.SDK_INT>=30).put("model_runtime",true).put("model_configured",controller!!.modelSettings().getBoolean("configured")).toString())
-                    "modelSettings" -> result.success(controller!!.modelSettings().toString())
-                    "clearChatGptSettings" -> result.success(controller!!.clearChatGptSettings().toString())
-                    "saveModelSettings" -> result.success(controller!!.saveModelSettings(args).toString())
-                    "run" -> result.success(controller!!.runModel(args).toString())
-                    "approve" -> result.success(JSONObject().put("accepted",false).toString())
-                    "apps" -> worker.execute {
-                        try {
-                            val rows=JSONArray()
-                            packageManager.queryIntentActivities(Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_LAUNCHER),0)
-                                .distinctBy {it.activityInfo.packageName}.sortedBy {it.loadLabel(packageManager).toString()}
-                                .forEach { rows.put(JSONObject().put("package",it.activityInfo.packageName).put("label",it.loadLabel(packageManager).toString())) }
-                            runOnUiThread { result.success(rows.toString()) }
-                        } catch(error:Exception) {
-                            runOnUiThread { result.error("local_agent_error",error.message,null) }
-                        }
-                    }
-                    "accessibilitySettings" -> {startActivity(Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));result.success(null)}
-                    // Stop bypasses the worker, including a blocked observation.
-                    "stop" -> result.success(controller!!.stop(args.getString("id"))?.toString())
-                    "start" -> {
-                        check(applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0){"debug_command_only"}
-                        result.success(controller!!.start(args).toString())
-                    }
-                    "verify" -> result.success(controller!!.verify(args.getString("id")).toString())
-                    "tasks" -> result.success(controller!!.tasks().toString())
-                    "observe","execute","finish" -> worker.execute {
-                        try {
-                            check(applicationInfo.flags and ApplicationInfo.FLAG_DEBUGGABLE != 0){"debug_command_only"}
-                            val reply=when(call.method){"observe"->controller!!.observe(args);"execute"->controller!!.execute(args);else->controller!!.finish(args)}
-                            runOnUiThread{result.success(reply.toString())}
-                        }catch(error:Exception){runOnUiThread{result.error("local_agent_error",error.message,null)}}
-                    }
-                    else -> result.notImplemented()
-                }
-            }catch(error:Exception){
-                val reason=error.message?.takeIf{it.matches(Regex("[a-z_]{1,80}"))} ?: error.javaClass.simpleName
-                android.util.Log.w("NovaLocalAgent","${call.method} failed: $reason")
-                result.error("local_agent_error",error.message,null)
-            }
-        }
+        android.util.Log.i("NovaRuntime", "Activity attached to retained engine")
     }
 }

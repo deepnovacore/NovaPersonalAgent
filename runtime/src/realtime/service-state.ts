@@ -229,6 +229,7 @@ export interface ProjectExpiryBatch {
  * key must not be ordered by their contents, or delivery order would depend on text.
  */
 export interface QueuedHostResponse {
+  readonly authorizeBeforeInject?:(signal:AbortSignal)=>Promise<boolean>
   readonly stillWanted?:()=>boolean
   readonly onNotDelivered?:()=>Promise<void>
   readonly sortKey: readonly [number, number, number]

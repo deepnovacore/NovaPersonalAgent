@@ -367,11 +367,13 @@ class SelfHostedPcmTts implements CascadeTts {
         'multipart/form-data; boundary=$boundary',
       );
       for (final entry in {'text': text, 'instruction': instruction}.entries) {
-        request.write(
-          '--$boundary\r\nContent-Disposition: form-data; name="${entry.key}"\r\n\r\n${entry.value}\r\n',
+        request.add(
+          utf8.encode(
+            '--$boundary\r\nContent-Disposition: form-data; name="${entry.key}"\r\n\r\n${entry.value}\r\n',
+          ),
         );
       }
-      request.write('--$boundary--\r\n');
+      request.add(utf8.encode('--$boundary--\r\n'));
       final response = await request.close();
       if (response.statusCode != 200) {
         throw const CascadeFailure('tts_http_failed');

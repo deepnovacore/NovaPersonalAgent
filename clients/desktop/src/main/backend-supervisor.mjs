@@ -1,5 +1,6 @@
 import {publicUsageReport} from './frontend-usage.mjs'
 import {randomUUID} from 'node:crypto'
+import {publicStartupConfiguration} from '../renderer/startup-configuration.mjs'
 
 const FAILURE_KINDS = new Set([
   'configuration_required', 'authentication_failed', 'unavailable', 'recoverable',
@@ -11,7 +12,8 @@ function failureOf(value) {
     const code = typeof value.code === 'string' && /^[a-z0-9_]{1,64}$/.test(value.code)
       ? value.code
       : value.kind
-    return Object.freeze({kind: value.kind, code})
+    const configuration = publicStartupConfiguration(value.startupConfiguration)
+    return Object.freeze({kind: value.kind, code, ...(configuration ? {startupConfiguration: configuration} : {})})
   }
   return Object.freeze({kind: 'recoverable', code: 'backend_disconnected'})
 }
@@ -50,8 +52,8 @@ export function createBackendSupervisor({
     state: 'stopped', connection: null, retryInMs: null, diagnostic: null,
   })
 
-  const publish = (state, connection = null, retryInMs = null, diagnostic = null) => {
-    current = Object.freeze({state, connection, retryInMs, diagnostic})
+  const publish = (state, connection = null, retryInMs = null, diagnostic = null, startupConfiguration = null) => {
+    current = Object.freeze({state, connection, retryInMs, diagnostic, ...(startupConfiguration ? {startupConfiguration} : {})})
     onStatus(current)
   }
   const cancelRetry = () => {
@@ -80,7 +82,7 @@ export function createBackendSupervisor({
     const failure = failureOf(value)
     if (failure.kind !== 'recoverable') {
       cancelRetry()
-      publish(failure.kind, null, null, failure.code)
+      publish(failure.kind, null, null, failure.code, failure.startupConfiguration)
       return
     }
     if (timer !== null) return
@@ -200,6 +202,8 @@ export function publicRuntimeCapabilityStatus(value) {
   result.servers = (Array.isArray(value.servers) ? value.servers : []).slice(0, 8).filter(server => /^[a-z][a-z0-9_]{0,31}$/u.test(server?.name ?? '')).map(server => ({name: server.name, ...status(server), ...(server.codex ? {codex: status(server.codex)} : {})}))
   if (result.state === 'startup_failed' && value.reason === 'configuration_required') {
     result.reason = 'configuration_required'
+    const configuration = publicStartupConfiguration(value.startupConfiguration)
+    if (configuration) result.startupConfiguration = configuration
     if (['integrated', 'cascaded'].includes(value.pipeline)) result.pipeline = value.pipeline
     result.missing = (Array.isArray(value.missing) ? value.missing : []).slice(0, 4).filter(name => BLOCKING_CREDENTIALS.has(name))
   }
@@ -210,12 +214,19 @@ export function publicRuntimeCapabilityStatus(value) {
 const BLOCKING_CREDENTIALS = new Set(['OPENAI_API_KEY', 'GEMINI_API_KEY', 'STEPFUN_API_KEY', 'DASHSCOPE_API_KEY', 'DEEPSEEK_API_KEY', 'ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
 
 /** One private utility child owns every pending request; replacement closes this handle. */
-export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}} = {}) {
+export function createBackendControl(child, {onStatus = () => {}, onUsage = () => {}, onSpaceModelsChanged = () => {}} = {}) {
   const pending = new Map()
   let closed = false
+  // Short, fixed reasons let the settings page tell a slow backend from a missing or restarting one.
   const unavailable = () => new Error('backend control unavailable')
+  const failure = reason => new Error(`backend control ${reason}`)
+  const REPLY_FAILURES = {busy: 'busy', not_ready: 'not ready'}
   const receive = message => {
     if (closed || !message || typeof message !== 'object') return
+    if (message.type === 'nova.space.models.changed') {
+      if (Object.keys(message).length === 1) onSpaceModelsChanged()
+      return
+    }
     if (message.type === 'nova.usage') {
       const report = publicUsageReport(message.report)
       if (report) onUsage(report)
@@ -231,7 +242,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
     if (!request) return
     pending.delete(message.id)
     clearTimeout(request.timer)
-    if (message.error) request.reject(unavailable())
+    if (message.error) request.reject(Object.hasOwn(REPLY_FAILURES, message.error) ? failure(REPLY_FAILURES[message.error]) : unavailable())
     else request.resolve(message.result)
   }
   function close() {
@@ -240,7 +251,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
     child.off('message', receive)
     child.off('exit', close)
     child.off('error', close)
-    for (const request of pending.values()) { clearTimeout(request.timer); request.reject(unavailable()) }
+    for (const request of pending.values()) { clearTimeout(request.timer); request.reject(failure('closed')) }
     pending.clear()
   }
   child.on('message', receive)
@@ -249,11 +260,13 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
   return {
     close,
     request(method, params = {}, {timeoutMs = 30000} = {}) {
-      if (closed || pending.size >= 8 || typeof method !== 'string' || method.length > 80
+      if (closed) return Promise.reject(failure('closed'))
+      if (pending.size >= 8) return Promise.reject(failure('busy'))
+      if (typeof method !== 'string' || method.length > 80
         || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 3600000) return Promise.reject(unavailable())
       return new Promise((resolve, reject) => {
         const id = randomUUID()
-        const timer = setTimeout(() => {pending.delete(id); reject(unavailable())}, timeoutMs)
+        const timer = setTimeout(() => {pending.delete(id); reject(failure('timeout'))}, timeoutMs)
         pending.set(id, {resolve, reject, timer})
         try { child.postMessage({type: 'nova.control.request', id, method, params}) }
         catch { pending.delete(id); clearTimeout(timer); reject(unavailable()) }
@@ -265,7 +278,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
 const RUNTIME_CODES = new Set([
   'configuration_required', 'authentication_failed', 'backend_unavailable', 'assembly_failed',
   'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid',
-  'personal_store_capacity', 'state_corrupt', 'state_version_unsupported',
+  'personal_store_capacity', 'state_corrupt', 'state_version_unsupported', 'state_schema_incompatible',
 ])
 const CODEX_DIAGNOSTIC_CODES = new Set([
   'codex_login_status_nonzero',
@@ -291,25 +304,31 @@ const CODEX_DIAGNOSTIC_CODES = new Set([
 ])
 const LINE = /\[runtime-diagnostic\]\s+([a-z0-9_]{1,64})/g
 const CONFIG_WARNING = /\[config-warning\] [\x20-\x7e]{1,160}/g
-const STARTUP_ERROR = /\[runtime-startup-error\] [^\r\n]{1,296}/g
+const STARTUP_ERROR = /\[runtime-startup-error\] ([^\r\n]{1,296})(?=\r?\n|$)/g
 
 /** Runtime configuration warnings name only variables, never values, so the main process can echo them verbatim. */
 export function configWarnings(chunk) {
   return String(chunk).match(CONFIG_WARNING) ?? []
 }
 
-/** The runtime's sanitised startup exception; terminal-only, never a failure code. */
+/** Echo only the runtime's fixed startup contract; arbitrary stderr is not safe exception prose. */
 export function startupErrors(chunk) {
-  return String(chunk).match(STARTUP_ERROR) ?? []
+  const lines = []
+  for (const [, detail] of String(chunk).matchAll(STARTUP_ERROR)) {
+    if (detail === 'startup_failed') { lines.push('[runtime-startup-error] startup_failed'); continue }
+    const [code, variables] = detail.split(': ')
+    const configuration = publicStartupConfiguration({code, variables: variables?.split(', ')})
+    if (configuration && detail === `${configuration.code}: ${configuration.variables.join(', ')}`) lines.push(`[runtime-startup-error] ${detail}`)
+  }
+  return lines
 }
 
 export function classifyBackendFailure(code) {
-  if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity', 'state_corrupt', 'state_version_unsupported'].includes(code)) return Object.freeze({kind: 'unavailable', code})
+  if (['credential_access_failed', 'credential_invalid', 'startup_presentation_required', 'filesystem_permissions', 'state_permissions', 'state_busy', 'state_lock_failed', 'personal_store_locked', 'workspace_not_found', 'workspace_invalid', 'personal_store_capacity', 'state_corrupt', 'state_version_unsupported', 'state_schema_incompatible'].includes(code)) return Object.freeze({kind: 'unavailable', code})
   if (code === 'backend_start_timeout') {
     return Object.freeze({kind: 'recoverable', code})
   }
-  if (code === 'configuration_required' || code === 'manual_path_required'
-    || code === 'model_base_url_invalid') {
+  if (code === 'configuration_required' || code === 'manual_path_required') {
     return Object.freeze({kind: 'configuration_required', code})
   }
   if (code === 'authentication_failed') {
@@ -330,7 +349,8 @@ export function createBackendDiagnosticCollector() {
       const status = publicRuntimeCapabilityStatus(value)
       if (status?.state === 'startup_failed' && (status.reason === 'configuration_required'
         || (status.toolCount !== null && status.toolCount > status.toolBudget))) {
-        startupFailure = classifyBackendFailure('configuration_required')
+        startupFailure = Object.freeze({...classifyBackendFailure('configuration_required'),
+          ...(status.startupConfiguration ? {startupConfiguration: status.startupConfiguration} : {})})
       }
     },
     push(chunk) {

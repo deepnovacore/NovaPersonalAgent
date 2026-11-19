@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 novapersonal
 ```
 
-升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@0.4.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
+升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
 
 从 `nova-audio-agent` 切换包名时，请先运行 `npm uninstall --global nova-audio-agent`，再安装新包，以免命令链接冲突；本地数据与设置会保留。
 
@@ -54,11 +54,9 @@ npm run start:client
 
 源码启动时，项目 `.env` 中的值优先于同名 shell 环境变量。修改 `.env` 后需重新启动桌面应用。
 
-桌面源码启动命令目前不提供热重载或文件监听。`start:client` 和 `start:workbench` 会先构建再启动；已有构建可用时，`npm run start:built --workspace @nova-personal-agent/desktop` 可以跳过构建快速启动。修改主进程、preload 或 runtime 后需要退出并重启；runtime 源码修改还需要重新构建。开发构建和缓存应放在已挂载的外置盘隔离目录。
+桌面源码启动命令目前不提供热重载或文件监听。`start:client` 和 `start:workbench` 会先构建再启动；已有构建可用时，`npm run start:built --workspace @nova-personal-agent/desktop` 可以跳过构建快速启动。修改主进程、preload 或 runtime 后需要退出并重启；runtime 源码修改还需要重新构建。请将隔离的构建输出与缓存放在本机内置存储中并按 worktree/任务区分（例如 `npm run build:space -- --output-root <dir> --run-id <id>`）。可使用 `npm run check` 与 `npm test` 校验类型、环境契约与测试。
 
 ## 3. 交办第一个任务
-
-[![Nova 在执行任务前澄清需求](../../assets/features/conversation-polished.png)](../../assets/features/conversation-polished.png)
 
 直接说：“帮我创建一个展示个人作品的网页。”Nova 会询问必要的信息，并在需要新建或切换项目时请求确认，然后交给 Codex 执行。
 
@@ -113,7 +111,7 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 | 问题 | 检查方式 |
 |---|---|
-| macOS 提示应用「已损坏」 | 应用未签名，浏览器下载的文件带有隔离标记。拖到「应用程序」后运行 `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent Desktop.app"`，再重新打开 |
+| macOS 提示应用「已损坏」 | 应用未签名，浏览器下载的文件带有隔离标记。拖到「应用程序」后运行 `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent.app"`，再重新打开 |
 | 语音连接失败 | 检查所选模式的密钥、服务权限和网络连接 |
 | Codex 无法执行 | 确认 Codex 已登录，项目目录可访问 |
 | 保存后没有变化 | 查看是否提示「待重启」，点击重启后台 |

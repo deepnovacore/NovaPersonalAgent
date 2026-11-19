@@ -16,6 +16,7 @@ import { z } from 'zod'
 import type { Clock } from '../core/clock.js'
 import type { JsonValue } from '../core/events.js'
 
+import {rotatedCredential} from '../config/credential-rotation.js'
 export interface GatewayTextDelta {
   readonly kind: 'text'
   readonly text: string
@@ -32,6 +33,8 @@ export type GatewayDelta = GatewayTextDelta | GatewayToolCallDelta
 
 export interface GatewayCompletion {
   readonly text: string
+  /** The provider's stop reason when the transport reports one, so a caller can tell a cut-off reply from a malformed one. */
+  readonly finish_reason?: string | null
 }
 
 export interface GatewayImage {
@@ -265,7 +268,7 @@ export class OpenAIModelGateway implements ModelGateway {
     this.#clock = options.clock
     this.#metrics = options.metrics ?? new LoggingMetrics()
     this.#fetch = options.fetch ?? globalThis.fetch
-    // The official DashScope endpoint has a known protocol, even when selected through MODEL_BASE_URL.
+    // The official DashScope endpoint has a known protocol, even when selected through DASHSCOPE_MODEL_BASE_URL.
     this.#thinkingControl = options.thinkingControl ?? (new URL(this.#endpoint).hostname==='dashscope.aliyuncs.com'?'qwen':new URL(this.#endpoint).hostname==='api.deepseek.com'?'deepseek':undefined)
     this.#requestTimeout = options.requestTimeout ?? 120
     this.#streamIdleTimeout = options.streamIdleTimeout ?? 600
@@ -357,7 +360,7 @@ export class OpenAIModelGateway implements ModelGateway {
       }
       const choice = payload.choices[0]!
       finishReason = choice.finish_reason ?? null
-      return {text: choice.message.content ?? ''}
+      return {text: choice.message.content ?? '', ...(finishReason === null ? {} : {finish_reason: finishReason})}
     } catch (error) {
       errorType = classify(error)
       throw new GatewayError(errorType)
@@ -386,7 +389,7 @@ export class OpenAIModelGateway implements ModelGateway {
         redirect: this.#redirect,
         headers: {
           // The credential rides in the header and never in a log line or metric.
-          ...(this.#apiKey ? {authorization: `Bearer ${this.#apiKey}`} : {}),
+          ...(this.#apiKey ? {authorization: `Bearer ${rotatedCredential(this.#apiKey)}`} : {}),
           'content-type': 'application/json',
           accept: body.stream === true ? 'text/event-stream' : 'application/json',
         },

@@ -1,9 +1,11 @@
 import 'package:flutter/cupertino.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter/material.dart';
 import '../agent_core/scheduled_agent_runner.dart';
 import 'components.dart';
 import 'scheduled_tasks_page.dart' show scheduleRuleText;
 import 'theme.dart';
+import 'reason_copy.dart';
 
 /// Standalone phone-schedule screen. Set [embedded] when the Tasks tab renders
 /// it in place: the host supplies the title and page chrome, so this page keeps
@@ -32,7 +34,7 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
         title: Text(run['definition']['title']),
         content: SingleChildScrollView(
           child: SelectableText(
-            '${run['status']}\n${run['reason'] ?? ''}\n\n$text',
+            '${_runStatus(run['status'])}\n${humanReason(run['reason'])}\n\n$text',
           ),
         ),
         actions: [
@@ -51,8 +53,17 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
     try {
       await action();
       if (mounted) setState(() => error = null);
-    } catch (_) {
-      if (mounted) setState(() => error = '操作未完成，请检查模型配置、时间和当前任务状态。');
+    } catch (e) {
+      if (mounted) {
+        setState(
+          () => error =
+              '操作未完成：${e is PlatformException
+                  ? humanReason(e.message ?? e.code, fallback: '请稍后再试')
+                  : e is StateError
+                  ? humanReason(e.message, fallback: '请稍后再试')
+                  : '请稍后再试'}',
+        );
+      }
     } finally {
       if (mounted) setState(() => busy = false);
     }
@@ -189,11 +200,11 @@ class _LocalSchedulesPageState extends State<LocalSchedulesPage> {
   }
 
   String _runStatus(Object? status) => switch (status) {
-    'completed' => '已返回结果，待核对',
+    'completed' => '已执行完毕，请核对结果',
     'claimed' => '等待执行',
     'running' => '执行中',
     'waiting_approval' => '等待你确认',
-    'outcome_unknown' => '结果不明，请核对，未自动重试',
+    'outcome_unknown' => '结果没有回执，我没有重试',
     'cancelled' => '已取消',
     'failed' => '未完成',
     _ => '已绑定任务',

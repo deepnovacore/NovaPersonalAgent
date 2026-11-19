@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Build the pinned arm64 Android Linux runtime into an explicit external directory.
+"""Build the pinned arm64 Android Linux runtime into an isolated internal directory.
 
 Adapted build flags/talloc compatibility shim from OpenMinis deps/build_proot.sh
 at b4c0661d5631ebab4d1a2e6f3fd4c805d4030a6c (GPL-3.0). No generated binaries
@@ -13,8 +13,12 @@ from pathlib import Path
 import platform
 import shutil
 import subprocess
+import sys
 import tarfile
 import zipfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'documents'))
+from bake_rootfs import bake, sha256
 
 PROOT_REV = '1b444ee1cb2f4896c08166e9a12c905af5416f1c'
 TERMUX_REV = '4dba3afbf3a63af89b4d9c1a59bf2bda10f4d10f'
@@ -29,16 +33,15 @@ SOURCES = {
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--external-root', type=Path, required=True, help='Mounted external disk (must be a mount point)')
-    parser.add_argument('--session-root', type=Path, required=True, help='Unique worktree/chat build namespace beneath external-root')
+    parser.add_argument('--session-root', type=Path, required=True, help='Explicit canonical-worktree/chat namespace on internal storage')
     parser.add_argument('--ndk', type=Path, required=True)
+    parser.add_argument('--docker', default='docker')
+    parser.add_argument('--verify-reproducible', action='store_true')
+    parser.add_argument('--without-font', action='store_true', help='Size comparison only')
     args = parser.parse_args()
-    external = args.external_root.resolve()
-    if not external.is_mount():
-        parser.error('external-root is not mounted; refusing internal-disk fallback')
     session = args.session_root.resolve()
-    if not session.is_relative_to(external) or session == external:
-        parser.error('session-root must be a unique namespace below external-root')
+    if not args.session_root.is_absolute() or session == Path(session.anchor) or session.is_relative_to('/Volumes'):
+        parser.error('session-root must be an explicit isolated directory on internal storage')
     sources = session / 'native-sources/android'
     build = session / 'native-build/android'
     output = session / 'android/linux-runtime'
@@ -90,6 +93,13 @@ def main():
 ''')
     subprocess.run([str(cc), '-c', str(talloc / 'talloc.c'), '-o', str(build / 'talloc.o'), '-I' + str(talloc), '-fPIC', '-O2', '-std=gnu99', '-DHAVE_STDARG_H=1', '-DHAVE_VA_COPY=1', '-DHAVE_UNISTD_H=1', '-DHAVE_INTPTR_T=1'], check=True)
     subprocess.run([str(toolchain / 'llvm-ar'), 'rcs', str(build / 'libtalloc.a'), str(build / 'talloc.o')], check=True)
+    # The pinned loader awk uses GNU strtonum/word-boundaries. Use a POSIX
+    # equivalent so the documented Linux build works with mawk as well.
+    (proot / 'src/loader/loader-info.awk').write_text('''function hex(s, n,i,c) { n=0; for(i=1;i<=length(s);i++){c=index("0123456789abcdef",tolower(substr(s,i,1)))-1;if(c<0)return 0;n=n*16+c}return n }
+$8 == "pokedata_workaround" { pokedata_workaround=hex($2) }
+$8 == "_start" { start=hex($2) }
+END { print "#include <unistd.h>"; print "const ssize_t offset_to_pokedata_workaround=" (pokedata_workaround-start) ";" }
+''')
     subprocess.run(['make', '-j4', 'CC=' + str(cc), 'STRIP=' + str(toolchain / 'llvm-strip'), 'OBJCOPY=' + str(toolchain / 'llvm-objcopy'), 'OBJDUMP=' + str(toolchain / 'llvm-objdump'), f'CPPFLAGS=-D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -I. -DARG_MAX=131072 -I{talloc}', 'CFLAGS=-O2 -Wall -Wextra -fPIE', f'LDFLAGS=-Wl,-z,noexecstack -Wl,-z,max-page-size=16384 -pie -L{build} -ltalloc'], cwd=proot / 'src', check=True)
     libs = output / 'jniLibs/arm64-v8a'
     assets = output / 'assets/nova-linux'
@@ -110,13 +120,17 @@ def main():
         if data[:4] != b'\x7fELF' or int.from_bytes(data[18:20], 'little') != 183:
             raise RuntimeError(f'Not an ARM64 ELF executable: {binary}')
         binary.chmod(0o755)
-    shutil.copy2(sources / 'alpine-minirootfs-3.22.2-aarch64.tar.gz', assets / 'rootfs.tgz')
-    (assets / 'rootfs.sha256').write_text(ROOTFS_SHA + '\n')
+    baked = bake('android', session / 'documents-android', docker=args.docker,
+                 without_font=args.without_font, verify_reproducible=args.verify_reproducible)
+    shutil.copy2(baked, assets / 'rootfs.tgz')
+    (assets / 'rootfs.sha256').write_text(sha256(baked) + '\n')
+    if not args.without_font:
+        shutil.copy2(baked.parent / 'inputs/font/OFL.txt', licenses / 'NovaDocumentSansSC-OFL.txt')
     for directory, label in [(proot, 'proot'), (talloc, 'talloc'), (termux, 'termux-loader')]:
         for candidate in ['COPYING', 'COPYING.LESSER', 'LICENSE']:
             if (directory / candidate).is_file(): shutil.copy2(directory / candidate, licenses / f'{label}-{candidate}')
     shutil.copy2(Path(__file__).with_name('THIRD_PARTY.md'), licenses / 'THIRD_PARTY.md')
-    manifest = {'architecture': 'arm64-v8a', 'proot_revision': PROOT_REV, 'loader_revision': TERMUX_REV, 'ndk': (args.ndk / 'source.properties').read_text(), 'sources': {name: {'url': url, 'sha256': sha} for name, (url, sha) in SOURCES.items()}, 'artifacts': {str(f.relative_to(output)): hashlib.sha256(f.read_bytes()).hexdigest() for f in output.rglob('*') if f.is_file()}}
+    manifest = {'documents': json.loads((baked.parent / 'manifest.json').read_text()), 'architecture': 'arm64-v8a', 'proot_revision': PROOT_REV, 'loader_revision': TERMUX_REV, 'ndk': (args.ndk / 'source.properties').read_text(), 'sources': {name: {'url': url, 'sha256': sha} for name, (url, sha) in SOURCES.items()}, 'artifacts': {str(f.relative_to(output)): hashlib.sha256(f.read_bytes()).hexdigest() for f in output.rglob('*') if f.is_file()}}
     (output / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n')
     print(f'Runtime ready: {output}\nSet NOVA_ANDROID_LINUX_RUNTIME={output}')
 

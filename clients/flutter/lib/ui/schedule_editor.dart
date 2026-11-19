@@ -46,7 +46,6 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
   Map<String, dynamic>? next, pending;
   String? error;
   bool busy = false, conflict = false;
-  bool shared = false;
   int sequence = 0;
   Timer? timer;
   String t(String text) => tr(widget.language, text);
@@ -170,7 +169,6 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
             : 'schedules.update',
         'id': requestId(),
         'params': {
-          if (original['id'] == null && shared) 'shared': true,
           'input': {
             'title': title.text.trim(),
             'goal': goal.text.trim(),
@@ -460,17 +458,6 @@ class _ScheduleEditorState extends State<ScheduleEditor> {
                 ),
               ],
             ),
-            if (original['id'] == null)
-              CheckboxListTile(
-                title: const Text('创建共享规则，由主电脑负责'),
-                subtitle: const Text(
-                  '需要主电脑已加入 Hub。已有本机规则不会迁移；共享规则的暂停和交接由负责人管理。',
-                ),
-                value: shared,
-                onChanged: locked
-                    ? null
-                    : (value) => setState(() => shared = value!),
-              ),
             if (error != null)
               Padding(
                 padding: const EdgeInsets.symmetric(vertical: 12),

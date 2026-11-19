@@ -95,7 +95,7 @@ const environment={...process.env,PIPELINE_MODE:'cascaded',EXECUTOR:'codex',CODE
   MEMORY_PATH:join(directory,'personal-memory.sqlite'),CAPABILITIES_CONFIG:join(directory,'capabilities.json'),
   MEMORY_CONNECTION:'disabled',CAMERA_MODULE_ENABLED:'false',
   CONVERSATION_VISION_ENABLED:'false',CODEX_RESOURCES_PATH:resolve('clients/desktop/build')}
-delete environment.MEMORY_PROVIDER
+for (const name of ['MEMORY_PROVIDER', 'MEMORY_RECALL_ENGINE', 'MEMORY_EXTRACTORS', 'MEMORY_BACKEND']) delete environment[name]
 const command=async(method,params={})=>{
   const result=await host.command({type:'personal.command',request_id:randomUUID(),method,params},{client_id:'live-acceptance',can_takeover:true})
   event('command',{method,params,result});await save();return result

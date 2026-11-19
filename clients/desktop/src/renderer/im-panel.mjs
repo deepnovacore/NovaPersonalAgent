@@ -14,7 +14,7 @@ export function createImPanel({document, api}) {
  function render(){
   if(actionPending)actionNeedsRender=true
   root.replaceChildren()
-  const card=(title,description)=>{const node=el('article',undefined,'im-card');node.append(el('h3',title),el('p',description));root.append(node);return node}
+  const card=(title,description)=>{const node=el('article',undefined,'im-card');node.dataset.connector=title===t('飞书')?'feishu':'messages';node.append(el('h3',title),el('p',description));root.append(node);return node}
   if(state===null){const loading=card(t('飞书'),t('正在读取连接状态…'));loading.setAttribute('aria-busy',String(busy));return}
   renderNotificationSettings({state:notifications,feishu:state,local,card,el,button,command,refresh:render,openVerification:api.openFeishuVerification})
   renderFeishu({state,notifications,local,card,el,button,command,refresh:render,api:{personal:{openFeishuVerification:api.openFeishuVerification}}})
