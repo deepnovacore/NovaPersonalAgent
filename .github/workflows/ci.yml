@@ -61,7 +61,7 @@ jobs:
       - run: npm run build -w relay && npm run build -w push-gateway
       - name: Install pinned Flutter SDK
         run: |
-          git clone --depth 1 --branch 3.47.7 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter-sdk"
+          git clone --depth 1 --branch 3.44.6 https://github.com/flutter/flutter.git "$RUNNER_TEMP/flutter-sdk"
           echo "$RUNNER_TEMP/flutter-sdk/bin" >> "$GITHUB_PATH"
       - name: Analyze and exercise real Dart to Node Space contracts
         working-directory: clients/flutter
