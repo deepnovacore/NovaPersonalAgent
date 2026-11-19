@@ -144,7 +144,10 @@ test('direct initial filter obeys one caller deadline and cannot inject after la
   const {conversationRuntimeFactory}=await import('../src/personal-agent/conversation-runtime.js'),{settingsSchema}=await import('../src/config/config.js')
   let providerStarts=0
   const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'fixture'}),createTextProvider:()=>{providerStarts++;throw Error('must not create a provider after timed-out authorization')}})
-  await assert.rejects(factory(conversation,()=>{/* local */},'text',new AbortController().signal,false,undefined,{},AbortSignal.timeout(20)),{name:'TimeoutError'})
+  const deadline=new AbortController()
+  const timer=setTimeout(()=>deadline.abort(new DOMException('Authorization timed out','TimeoutError')),20)
+  try{await assert.rejects(factory(conversation,()=>{/* local */},'text',new AbortController().signal,false,undefined,{},deadline.signal),{name:'TimeoutError'})}
+  finally{clearTimeout(timer)}
   release();for(let i=0;i<5;i++)await new Promise(resolve=>setImmediate(resolve))
   assert.equal(providerStarts,0)
  }finally{release();await host.close();await rm(directory,{recursive:true,force:true})}

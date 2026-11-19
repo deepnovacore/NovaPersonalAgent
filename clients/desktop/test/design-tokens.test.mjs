@@ -47,7 +47,10 @@ test('both settings and workbench load the token file instead of re-declaring ge
 })
 
 test('content surfaces are flat: no content gradients, no white inset highlights, no hover elevation', () => {
-  assert.doesNotMatch(workbenchCss, /linear-gradient/, 'workbench content carries no gradient')
+  for (const rule of workbenchCss.matchAll(/([^{}]+)\{([^{}]*linear-gradient[^{}]*)\}/gu)) {
+    assert.equal(rule[1].trim(), '.build-steps-live', 'only the live status text may shimmer')
+    assert.match(rule[2], /background-clip:text/, 'the gradient must never cover the surface')
+  }
   assert.doesNotMatch(indexCss, /radial-gradient/, 'the orb page draws its depth in canvas, not CSS')
   assert.doesNotMatch(settingsCss, /gradient/, 'settings surfaces are flat')
   assert.doesNotMatch(welcomeCss, /gradient/, 'welcome hero and permission rows are flat')
