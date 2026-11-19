@@ -3,12 +3,26 @@ import {spawn} from 'node:child_process'
 import {mkdtemp, realpath, rm, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {resolve} from 'node:path'
-import test from 'node:test'
+import test, {after, before} from 'node:test'
 
 import {buildWindowsJobGuardian} from '../scripts/build-windows-job-guardian.mjs'
 
 const packageRoot = resolve(import.meta.dirname, '..')
 const targetFixture = resolve(import.meta.dirname, 'fixtures/windows-guardian-target.cjs')
+
+// Cold MSVC setup can block Node's event loop. Compile the shared, immutable fixture before
+// measuring the guardian's process lifetime. Each test still launches its own process tree.
+let guardian
+let outputRoot
+if (process.platform === 'win32') {
+  before(async () => {
+    outputRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-guardian-build-'))
+    guardian = await buildWindowsJobGuardian({packageRoot, outputRoot, platform: process.platform, arch: process.arch})
+  }, {timeout: 180_000})
+  after(async () => {
+    if (outputRoot) await rm(outputRoot, {recursive: true, force: true})
+  })
+}
 
 function waitForText(stream, predicate, timeoutMs = 10_000) {
   return new Promise((resolveWait, rejectWait) => {
@@ -77,38 +91,38 @@ async function launchGuardian(guardian, cwd, targetArguments, terminateOnLeaderE
   const control = child.stdio[3]
   assert.ok(child.stdin && child.stdout && child.stderr && control)
   child.stderr.on('data', chunk => { control.guardianStderr = (control.guardianStderr ?? '') + String(chunk) })
-  return {child, control}
+  const exit = new Promise(resolveExit => child.once('exit', resolveExit))
+  return {child, control, exit}
 }
 
 test('Windows command guardian returns the real leader exit and removes lingering descendants', {
   skip: process.platform !== 'win32',
   timeout: 60_000,
 }, async () => {
-  const outputRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-command-build-'))
   const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-command-fixture-'))
   const marker = resolve(fixtureRoot, 'grandchild-alive')
   await writeFile(marker, '')
   let child = null
   let control = null
+  let exit
   try {
-    const guardian = await buildWindowsJobGuardian({packageRoot, outputRoot, platform: process.platform, arch: process.arch})
-    ;({child, control} = await launchGuardian(guardian, await realpath(packageRoot), [targetFixture, 'leader-first', marker], true))
-    const ready = await waitForText(control, value => value.includes('\n'))
+    ;({child, control, exit} = await launchGuardian(guardian, await realpath(packageRoot), [targetFixture, 'leader-first', marker], true))
+    const [ready, targetLine, exited] = await Promise.all([
+      waitForText(control, value => value.includes('\n')),
+      waitForText(child.stdout, value => value.includes('\n')),
+      waitForText(control, value => value.includes('"treeEmpty":true}\n')),
+    ])
     const targetPid = Number(/"targetPid":(\d+)/u.exec(ready)?.[1])
-    const exitPromise = waitForText(control, value => value.includes('"treeEmpty":true}\n'))
-    const targetLine = await waitForText(child.stdout, value => value.includes('\n'))
     const grandchildPid = Number(/^grandchild:(\d+)\n/u.exec(targetLine)?.[1])
     assert.ok(targetPid > 0 && grandchildPid > 0)
-    const exited = await exitPromise
     assert.match(exited, /\{"type":"exit","version":1,"leaderExitCode":0,"treeEmpty":true\}\n/u)
-    assert.equal(await new Promise(resolveExit => child.once('exit', resolveExit)), 0)
+    assert.equal(await exit, 0)
     await waitProcessGone(targetPid)
     await waitProcessGone(grandchildPid)
   } finally {
     if (child?.exitCode === null) child.kill()
     control?.destroy()
     await rm(fixtureRoot, {recursive: true, force: true})
-    await rm(outputRoot, {recursive: true, force: true})
   }
 })
 
@@ -116,20 +130,14 @@ test('Windows Job guardian keeps leader-first descendants owned and force-closes
   skip: process.platform !== 'win32',
   timeout: 60_000,
 }, async () => {
-  const outputRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-guardian-build-'))
   const fixtureRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-guardian-fixture-'))
   const marker = resolve(fixtureRoot, 'grandchild-alive')
   await writeFile(marker, '')
   let child = null
   let control = null
+  let exit
   try {
-    const guardian = await buildWindowsJobGuardian({
-      packageRoot,
-      outputRoot,
-      platform: process.platform,
-      arch: process.arch,
-    })
-    ;({child, control} = await launchGuardian(guardian, await realpath(packageRoot), [
+    ;({child, control, exit} = await launchGuardian(guardian, await realpath(packageRoot), [
       targetFixture, 'leader-first', marker,
     ]))
     const readyPromise = waitForText(control, value => value.includes('\n'))
@@ -151,14 +159,13 @@ test('Windows Job guardian keeps leader-first descendants owned and force-closes
     control.write('{"type":"force","version":1}\n')
     const exited = await exitPromise
     assert.match(exited, /\{"type":"exit","version":1,"leaderExitCode":0,"treeEmpty":true\}\n/u)
-    const guardianExit = await new Promise(resolveExit => child.once('exit', resolveExit))
+    const guardianExit = await exit
     assert.equal(guardianExit, 0)
     await waitProcessGone(grandchildPid)
   } finally {
     if (child?.exitCode === null) child.kill()
     control?.destroy()
     await rm(fixtureRoot, {recursive: true, force: true})
-    await rm(outputRoot, {recursive: true, force: true})
   }
 })
 
@@ -166,17 +173,11 @@ test('Windows Job guardian treats owner-pipe EOF as owner death', {
   skip: process.platform !== 'win32',
   timeout: 60_000,
 }, async () => {
-  const outputRoot = await mkdtemp(resolve(tmpdir(), 'nova-windows-owner-death-build-'))
   let child = null
   let control = null
+  let exit
   try {
-    const guardian = await buildWindowsJobGuardian({
-      packageRoot,
-      outputRoot,
-      platform: process.platform,
-      arch: process.arch,
-    })
-    ;({child, control} = await launchGuardian(
+    ;({child, control, exit} = await launchGuardian(
       guardian,
       await realpath(packageRoot),
       [targetFixture, 'hold'],
@@ -185,11 +186,10 @@ test('Windows Job guardian treats owner-pipe EOF as owner death', {
     const targetPid = Number(/"targetPid":(\d+)/u.exec(ready)?.[1])
     assert.ok(Number.isSafeInteger(targetPid) && targetPid > 0)
     control.destroy()
-    await new Promise(resolveExit => child.once('exit', resolveExit))
+    await exit
     await waitProcessGone(targetPid)
   } finally {
     if (child?.exitCode === null) child.kill()
     control?.destroy()
-    await rm(outputRoot, {recursive: true, force: true})
   }
 })
