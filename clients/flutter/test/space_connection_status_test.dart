@@ -10,6 +10,7 @@ import 'package:nova_mobile/space/relay_transport.dart';
 import 'package:nova_mobile/space/space_crypto.dart';
 import 'package:nova_mobile/space/space_root.dart';
 import 'package:nova_mobile/space/space_storage.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
 
 SpaceRecord client(String id) => SpaceRecord(
@@ -154,6 +155,7 @@ void main() {
   testWidgets(
     'chooser shows status icons, probes visible bindings only, and pauses in background',
     (tester) async {
+      SharedPreferences.setMockInitialValues({'language': 'zh'});
       tester.binding.handleAppLifecycleStateChanged(
         AppLifecycleState.resumed,
       );
