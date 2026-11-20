@@ -43,7 +43,7 @@ Open `http://127.0.0.1:3108/nova-personal-agent/`. The server binds only to loop
 
 ## GitHub Pages
 
-`.github/workflows/website.yml` is kept identical on `main` and `website`. A push to `website`, or a docs/assets change on `main`, checks out `main` at the root and this branch into `website/`, builds, and deploys. Pull requests against `website` build without deploying. It never publishes from `internal` or the internal repository. Enable **Settings → Pages → Build and deployment → Source: GitHub Actions** before the first deployment.
+`main` and `website` each carry `.github/workflows/website.yml` with the same build; only the triggers differ. A push to `website`, or a docs/assets change on `main`, checks out `main` at the root and this branch into `website/`, builds, and deploys. Pull requests against `website` build without deploying. It never publishes from `internal` or the internal repository. Enable **Settings → Pages → Build and deployment → Source: GitHub Actions** before the first deployment.
 
 The workflow derives its base path from the GitHub repository name (`/nova-personal-agent` after renaming). For a custom domain hosted at its root, change `NEXT_PUBLIC_BASE_PATH` in the workflow to an empty string and configure the domain in GitHub Pages. The generated `out/` directory is the deployment artifact; no generated-content Git branch is needed.
 
