@@ -1,5 +1,6 @@
 name: Website
-# main's copy: rebuild when the docs or assets the site reads change.
+# main's copy: rebuild when the docs or assets the site reads change, or when
+# the website branch dispatches it.
 on:
   push:
     branches: [main]
@@ -18,7 +19,8 @@ env:
 
 # The site lives on the `website` branch but reads ../docs and ../assets from
 # `main`, so the build checks out main at the root and the site into website/.
-# main and website each carry this file; only the `on:` block differs.
+# The website branch carries a small copy that dispatches this workflow on push
+# (the github-pages environment only deploys from main) and builds its PRs.
 jobs:
   build:
     if: github.repository == 'deepnovacore/NovaPersonalAgent'
