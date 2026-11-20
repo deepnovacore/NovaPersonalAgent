@@ -176,8 +176,8 @@ test('ACP coding backend claims stay scoped to the non-Codex agents in both lang
   assert.match(await read('docs/en/archs/06-verification.md'), /OpenCode, CodeBuddy, Pi and DeepSeek Harness sessions use ACP\./u)
   assert.match(await read('docs/zh-CN/archs/06-verification.md'), /OpenCode、CodeBuddy、Pi 与 DeepSeek Harness 会话通过 ACP 接入。/u)
   const readme = await read('README.md')
-  assert.match(readme, /OpenCode, CodeBuddy, Pi or DeepSeek Harness over ACP[^\n]*Live steering stays a Codex feature\./u)
-  assert.match(await read('README.zh-CN.md'), /通过 ACP 交给 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness[^\n]*执行中追加要求目前只有 Codex 支持。/u)
+  assert.match(readme, /\| Coding agent \| Codex, OpenCode, CodeBuddy, Pi, DeepSeek Harness \|/u)
+  assert.match(await read('README.zh-CN.md'), /\| 编码 Agent \| Codex、OpenCode、CodeBuddy、Pi、DeepSeek Harness \|/u)
   for (const [file, steer] of [['docs/en/executors/coding.md', /\| Add requirements while running \| Yes \| No \| No \| No \| No \|/u],
     ['docs/zh-CN/executors/coding.md', /\| 执行中追加要求 \| 支持 \| 不支持 \| 不支持 \| 不支持 \| 不支持 \|/u]] as const) {
     assert.match(await read(file), steer, file)
