@@ -1,28 +1,32 @@
 name: Website
-# website's copy: rebuild on every site change; PRs build without deploying.
+# website's copy. Pages only deploys from main (environment policy), so a push
+# here asks main's copy of this workflow to rebuild; that run checks out main at
+# the root and this branch into website/. Pull requests build without deploying.
 on:
   push:
     branches: [website]
   pull_request:
     branches: [website]
-  workflow_dispatch:
 
 permissions:
   contents: read
-concurrency:
-  group: website-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
-  cancel-in-progress: true
 
 env:
   NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
   NEXT_TELEMETRY_DISABLED: '1'
 
-# The site lives on the `website` branch but reads ../docs and ../assets from
-# `main`, so the build checks out main at the root and the site into website/.
-# main and website each carry this file; only the `on:` block differs.
 jobs:
+  deploy-from-main:
+    if: github.repository == 'deepnovacore/NovaPersonalAgent' && github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - run: gh workflow run website.yml --repo "$GITHUB_REPOSITORY" --ref main
+        env:
+          GH_TOKEN: ${{ github.token }}
   build:
-    if: github.repository == 'deepnovacore/NovaPersonalAgent'
+    if: github.repository == 'deepnovacore/NovaPersonalAgent' && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     defaults:
       run:
@@ -33,7 +37,7 @@ jobs:
           ref: main
       - uses: actions/checkout@v4
         with:
-          ref: ${{ github.event_name == 'pull_request' && github.ref || 'website' }}
+          ref: ${{ github.ref }}
           path: website
       - uses: actions/setup-node@v4
         with:
@@ -43,21 +47,3 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: npm run check:links
-      - uses: actions/upload-pages-artifact@v3
-        with:
-          path: website/out
-  deploy:
-    if: github.event_name != 'pull_request'
-    needs: build
-    runs-on: ubuntu-latest
-    permissions:
-      pages: write
-      id-token: write
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - uses: actions/configure-pages@v5
-      - name: Deploy
-        id: deployment
-        uses: actions/deploy-pages@v4
