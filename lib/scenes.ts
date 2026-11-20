@@ -8,7 +8,8 @@ export type Line = { who: 'you' | 'nova'; zh: string; en: string };
 export type Text = { zh: string; en: string };
 export type Clip = {
   name: string;
-  device: 'mac' | 'phone';
+  // 'cut': an edited phone clip that already draws its own frame and labels.
+  device: 'mac' | 'phone' | 'cut';
   width: number;
   height: number;
 };

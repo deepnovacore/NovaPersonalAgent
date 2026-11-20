@@ -25,7 +25,7 @@ export function InstallCommand({ en = false }: { en?: boolean }) {
   return (
     <>
       <div className="install-command">
-        <span aria-hidden="true">$</span>
+        <span className="install-prompt" aria-hidden="true">$</span>
         <code>npm install --global nova-personal-agent@latest</code>
         <button
           onClick={copy}

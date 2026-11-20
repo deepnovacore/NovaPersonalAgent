@@ -85,8 +85,11 @@ export function generateDocs() {
   fs.writeFileSync(path.join(site, 'generated/search.json'), JSON.stringify(index));
   for (const lang of ['en', 'zh-CN']) {
     for (const theme of ['light', 'dark']) {
-      const svg = `assets/architecture/nova-overview.${lang}.${theme}.svg`;
-      assets.set(svg, path.join(repoRoot, svg));
+      // The homepage shows these diagrams outside any doc page.
+      for (const name of ['nova-overview', 'executor-dispatch', 'space-e2ee-flow']) {
+        const svg = `assets/architecture/${name}.${lang}.${theme}.svg`;
+        assets.set(svg, path.join(repoRoot, svg));
+      }
     }
   }
   const assetRoot = path.join(site, 'public/doc-assets');

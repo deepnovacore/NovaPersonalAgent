@@ -38,25 +38,37 @@ export function ClipPlayer({ clip, label }: { clip: Clip; label: string }) {
     io.observe(video);
     return () => io.disconnect();
   }, []);
+  const player = (
+    <video
+      ref={ref}
+      muted
+      loop
+      playsInline
+      controls
+      preload="none"
+      poster={sitePath(`/media/clips/${clip.name}.webp`)}
+      aria-label={label}
+    >
+      <source
+        src={sitePath(`/media/clips/${clip.name}.mp4`)}
+        type="video/mp4"
+      />
+    </video>
+  );
   return (
     <div className={`clip clip-${clip.device}`}>
-      <DeviceFrame kind={clip.device} width={clip.width} height={clip.height}>
-        <video
-          ref={ref}
-          muted
-          loop
-          playsInline
-          controls
-          preload="none"
-          poster={sitePath(`/media/clips/${clip.name}.webp`)}
-          aria-label={label}
+      {clip.device === 'cut' ? (
+        <div
+          className="clip-cut-box"
+          style={{ aspectRatio: `${clip.width} / ${clip.height}` }}
         >
-          <source
-            src={sitePath(`/media/clips/${clip.name}.mp4`)}
-            type="video/mp4"
-          />
-        </video>
-      </DeviceFrame>
+          {player}
+        </div>
+      ) : (
+        <DeviceFrame kind={clip.device} width={clip.width} height={clip.height}>
+          {player}
+        </DeviceFrame>
+      )}
     </div>
   );
 }

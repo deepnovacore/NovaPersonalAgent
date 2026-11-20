@@ -34,7 +34,6 @@ export function LanguageSwitch({
       aria-label={en ? '切换到中文' : 'Switch to English'}
     >
       {en ? '中文' : 'EN'}
-      <span aria-hidden="true">⌄</span>
     </a>
   );
 }

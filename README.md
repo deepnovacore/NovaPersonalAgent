@@ -10,6 +10,14 @@ Edit `../docs/en/**/*.md` or `../docs/zh-CN/**/*.md`. `scripts/docs.mjs` generat
 
 Markdown keeps its repository-relative links. Website links point to the corresponding page; links to source code point to the public `main` branch on GitHub. Every document has an English and Simplified Chinese counterpart. Users and Developers have separate top-level navigation and sidebars. Language switching is available only in the shared header. Language switching preserves the selected article.
 
+## Where this lives
+
+The site lives on its own `website` branch so the code branches carry no site media. It still reads `../docs` and `../assets` from the code branch, so check it out as a nested worktree inside a code checkout (the code branches ignore `/website/`):
+
+```sh
+git worktree add website website
+```
+
 ## Local development
 
 From this directory:
@@ -35,7 +43,7 @@ Open `http://127.0.0.1:3108/nova-personal-agent/`. The server binds only to loop
 
 ## GitHub Pages
 
-The root `.github/workflows/website.yml` builds relevant pull requests and deploys changes from the public `main` branch only. It never publishes from `internal` or the internal repository. Enable **Settings → Pages → Build and deployment → Source: GitHub Actions** before the first deployment.
+`.github/workflows/website.yml` is kept identical on `main` and `website`. A push to `website`, or a docs/assets change on `main`, checks out `main` at the root and this branch into `website/`, builds, and deploys. Pull requests against `website` build without deploying. It never publishes from `internal` or the internal repository. Enable **Settings → Pages → Build and deployment → Source: GitHub Actions** before the first deployment.
 
 The workflow derives its base path from the GitHub repository name (`/nova-personal-agent` after renaming). For a custom domain hosted at its root, change `NEXT_PUBLIC_BASE_PATH` in the workflow to an empty string and configure the domain in GitHub Pages. The generated `out/` directory is the deployment artifact; no generated-content Git branch is needed.
 

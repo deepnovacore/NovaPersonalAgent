@@ -1,18 +1,23 @@
 import { sitePath } from '../lib/site-path';
-import { ArrowUpRight } from 'lucide-react';
+import { ArrowUpRight, Download } from 'lucide-react';
 import { DocsSearch } from './docs-search';
 import { LanguageSwitch } from './language-switch';
 import { ThemeToggle } from './theme-toggle';
+import { EclipseMark } from './eclipse-mark';
+// The company mark beside the app's eclipse.
 function NovaMark() {
   return (
-    <img
-      className="nova-mark"
-      src={sitePath('/brand/deepnovacore-mark.png')}
-      alt=""
-      aria-hidden="true"
-      width={256}
-      height={127}
-    />
+    <span className="nova-mark" aria-hidden="true">
+      {/* oxlint-disable-next-line next/no-img-element -- a small fixed mark on a static export */}
+      <img
+        className="mark-company"
+        src={sitePath('/brand/deepnovacore-mark-hd.png')}
+        alt=""
+        width={480}
+        height={232}
+      />
+      <EclipseMark className="mark-eclipse" />
+    </span>
   );
 }
 export const repo = 'https://github.com/deepnovacore/NovaPersonalAgent';
@@ -21,13 +26,11 @@ export function Header({
   docs = false,
   alternate,
   section,
-  hero = false,
 }: {
   en?: boolean;
   docs?: boolean;
   alternate?: string;
   section?: 'users' | 'developers';
-  hero?: boolean;
 }) {
   const home = sitePath(en ? '/' : '/zh');
   const doc = sitePath(en ? '/en/docs' : '/docs');
@@ -37,16 +40,15 @@ export function Header({
       <a className="skip" href="#main">
         {en ? 'Skip to content' : '跳转到正文'}
       </a>
-      <header className={hero ? 'header theme-dark' : 'header'}>
+      <header className="header">
         <div className="header-leading">
           <a href={home} className="brand" aria-label="Nova Personal Agent">
-            <NovaMark />
-            <span className="brand-name">nova</span>
-            <span className="brand-caption">
-              {en ? 'by DeepNovaCore' : '深穹星核'}
+            <span className="brand-name">
+              <span className="brand-full">Nova Personal Agent</span>
+              <span className="brand-short">NPA</span>
             </span>
           </a>
-          <DocsSearch en={en} />
+          {docs && <DocsSearch en={en} />}
         </div>
         <nav aria-label={en ? 'Main navigation' : '主导航'}>
           <a
@@ -71,6 +73,10 @@ export function Header({
           >
             GitHub <ArrowUpRight size={12} />
           </a>
+          <a className="nav-download" href={`${home}#get`}>
+            <Download size={14} aria-hidden="true" />
+            {en ? 'Download' : '下载'}
+          </a>
           <div className="header-controls">
             <ThemeToggle en={en} />
             <LanguageSwitch en={en} docs={docs} alternate={alternate} />
@@ -85,7 +91,7 @@ export function Footer({ en = false }: { en?: boolean }) {
     <footer className="footer wrap">
       <a className="brand" href={sitePath(en ? '/' : '/zh')}>
         <NovaMark />
-        nova
+        Nova Personal Agent
       </a>
       <span>© 2026 {en ? 'DeepNovaCore' : '深穹星核'}</span>
       <a href={repo + '/blob/main/LICENSE'}>GPL-3.0-or-later</a>
