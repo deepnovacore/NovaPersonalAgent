@@ -2,7 +2,7 @@
 
 小诺把对话、授权上下文和后台执行连接起来。Workbench 让时间线、想法、目标和交出去的任务与对话并排；宿主管理权限和任务状态，执行结果带着证据返回。
 
-[![Nova 个人 Agent 架构：交互、上下文、协调、执行与表达](../../assets/architecture/nova-personal-agent.zh-CN.png)](../../assets/architecture/nova-personal-agent.zh-CN.png)
+[![Nova 个人 Agent 架构：交互、上下文、协调、执行与表达](../../assets/architecture/nova-personal-agent.zh-CN.webp)](../../assets/architecture/nova-personal-agent.zh-CN.webp)
 
 ## 系统与 Monorepo 全景
 

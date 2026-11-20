@@ -2,7 +2,7 @@
 
 Nova connects conversation, authorized context and background execution. The Workbench keeps your timeline, ideas, goals and delegated tasks beside the conversation; the host tracks permissions and task state, and results return with evidence.
 
-[![Nova personal agent architecture: interaction, context, coordination, execution and expression](../../assets/architecture/nova-personal-agent.en.png)](../../assets/architecture/nova-personal-agent.en.png)
+[![Nova personal agent architecture: interaction, context, coordination, execution and expression](../../assets/architecture/nova-personal-agent.en.webp)](../../assets/architecture/nova-personal-agent.en.webp)
 
 ## System & Monorepo Overview
 

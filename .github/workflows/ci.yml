@@ -19,6 +19,7 @@ jobs:
         with:
           node-version: "22"
       - run: node --test .github/scripts/pr-review.test.cjs
+      - run: node scripts/check-file-size.mjs
 
   space-stack:
     strategy:

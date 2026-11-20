@@ -4,7 +4,7 @@
 
 [Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](https://deepnovacore.github.io/NovaPersonalAgent/en/docs/) · [GitHub](https://github.com/deepnovacore/NovaPersonalAgent) · [简体中文](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/README.zh-CN.md)
 
-![Nova personal agent architecture](https://raw.githubusercontent.com/deepnovacore/NovaPersonalAgent/main/assets/architecture/nova-personal-agent.en.png)
+![Nova personal agent architecture](https://raw.githubusercontent.com/deepnovacore/NovaPersonalAgent/main/assets/architecture/nova-personal-agent.en.webp)
 
 ## New in 1.0.0
 
