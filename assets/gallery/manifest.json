@@ -234,6 +234,40 @@
       }
     },
     {
+      "id": "phone-docx",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "stills/phone-docx.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "读论文，出文档",
+        "en": "Paper to doc"
+      },
+      "caption": {
+        "zh-CN": "读完论文，按你的命名习惯交付 Word 文档。",
+        "en": "Reads a paper and delivers a doc named your way."
+      }
+    },
+    {
+      "id": "phone-dual-brain",
+      "kind": "still",
+      "feature": "chat-while-working",
+      "device": "phone",
+      "src": "stills/phone-dual-brain.webp",
+      "width": 449,
+      "height": 948,
+      "title": {
+        "zh-CN": "手机上的前后脑",
+        "en": "Dual brain on phone"
+      },
+      "caption": {
+        "zh-CN": "聊着天，它在后台开了个新任务。",
+        "en": "Keep chatting while a new task runs in the back."
+      }
+    },
+    {
       "id": "iphone-feed",
       "kind": "still",
       "feature": "proactive",

@@ -115,8 +115,6 @@ references/
 
 # Release-excluded deployment and unreviewed media
 /deploy/novacore-beta/
-/assets/gallery/stills/phone-docx.webp
-/assets/gallery/stills/phone-dual-brain.webp
 /clients/flutter/test/goldens/chat-conversation.png
 /clients/flutter/test/goldens/chat-home-empty.png
 /clients/flutter/test/goldens/chat-home.png
