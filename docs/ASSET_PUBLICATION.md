@@ -252,3 +252,28 @@ On 2026-11-19 the project owner approved these recordings for the public website
 | `website` branch `public/media/clips/phone-site-v2.webp` | poster frame | `be662c3768272aa7aadef9a34ae4ee9e2efc3d295d27fdf87d519c841853dddf` |
 | `website` branch `public/media/gallery/pc-timeline.webp` | R01 `desktop/stills/lin-timeline-top` | `b4bf4422b1d62e0b7c20bbf6bed7169e672ac4219cb3bf07812a94800a97893c` |
 | `website` branch `public/media/gallery/pc-profile.webp` | R01 `desktop/stills/lin-profile-top` | `b6fdb97d2a9102efae9af93216049307220fe9c7980417df5bc6b750efc421e7` |
+
+## Website brand and edited stills (2026-11-20)
+
+On 2026-11-20 the project owner approved these files for the public website and repository: the two phone stills the 1.0.0 release had held back (phone-docx, phone-dual-brain), the back-to-top beaver cutout (a matte of the approved `nova_orb_avatar.png`), the Eclipse app icon used as the site favicon, the Deepnovacore company logos cropped from the 2560 px masked masters, and the website copies of the approved gallery stills whose opaque surround was made transparent.
+
+| File | SHA-256 |
+| --- | --- |
+| `assets/gallery/stills/phone-docx.webp` | `47a3c751f6a3e73ea7a238c366f8fcd26768def050676ede47d5c24d80bbff2b` |
+| `assets/gallery/stills/phone-dual-brain.webp` | `883410ce2495810f7817c08ff9b5923581cb718504affaa37051bebf5c95550c` |
+| `website` branch `public/brand/beaver-cut.png` | `98398cbb89e1513dfaa96b1e5b247c93ca780585853bad4d75ffcde18a49ac62` |
+| `website` branch `public/brand/nova-icon.png` | `8a67f7cc87a4c70e0cd30ceecad71cb6e9b132add9a722d34257292355aa42fa` |
+| `website` branch `public/brand/deepnovacore-logo-en-on-dark.png` | `4e31042d410979845ba218142d0533d2ea94f3edc178fd4cf7fb35d53569b2aa` |
+| `website` branch `public/brand/deepnovacore-logo-en-on-light.png` | `25dfd53cb2a2e5bf272cc966d80be75f17f43ea92778ad51cdca50e8566d2cc2` |
+| `website` branch `public/brand/deepnovacore-logo-zh-on-dark.png` | `edd5c34c38d81e522f5394ee7413c8a0f3226995dd08d6b29b50dbb568ac9916` |
+| `website` branch `public/brand/deepnovacore-logo-zh-on-light.png` | `fc4002311d20beefa69ae9e42129c3b795be3339a3a0af11202b0a91e8e00905` |
+| `website` branch `public/brand/deepnovacore-mark-hd.png` | `e8a8e2c3ad8749ae2bd70d9093f2a1eaed301752ca8a309489d3f99e8bd2122d` |
+| `website` branch `public/media/gallery/iphone-feed.webp` | `98c5cce5b45786eb571c82c0e4925ecc5b961378b9ec1a59a5beacb6de2c30cf` |
+| `website` branch `public/media/gallery/iphone-morning.webp` | `7e136e7aef839de10bceab83eab8e684a86288dc02640271220918b21ae5683f` |
+| `website` branch `public/media/gallery/phone-docx.webp` | `306c46d1c4a1725b5d2c3129baf886381656d93edb8a3803ce28547c78d36d1d` |
+| `website` branch `public/media/gallery/phone-dual-brain.webp` | `c4a822f15e03e128458905b95df695d82967ea397c8217a32d0e28329c797f9d` |
+| `website` branch `public/media/gallery/phone-mobile-result.webp` | `dc2b53d0f5c1ab0429f71d8a7dbd1fdc0004e951945a2239a9313c0c66510f79` |
+| `website` branch `public/media/gallery/phone-site-dark.webp` | `5a257780624d9640d2bb2975fe528a2fb668e42dc853fcc5924b6f63f0af7aa6` |
+| `website` branch `public/media/gallery/phone-site-file.webp` | `15783bf687e6bdaf934b25cdd747c6346b2f21bde56ba9d43f64baadfb4bbd24` |
+| `website` branch `public/media/gallery/phone-site-result.webp` | `3d7eaebd77b5460f80a441d46e6fd096455e4edcf416b37efbee8606daeb744f` |
+| `website` branch `public/media/gallery/phone-voice-site.webp` | `123fac705fdf0c3ff5cd8255b3d56722222ae1773300740157652c21ee799b24` |
