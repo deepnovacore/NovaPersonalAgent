@@ -234,40 +234,6 @@
       }
     },
     {
-      "id": "phone-docx",
-      "kind": "still",
-      "feature": "chat-while-working",
-      "device": "phone",
-      "src": "stills/phone-docx.webp",
-      "width": 449,
-      "height": 948,
-      "title": {
-        "zh-CN": "读论文，出文档",
-        "en": "Paper to doc"
-      },
-      "caption": {
-        "zh-CN": "读完论文，按你的命名习惯交付 Word 文档。",
-        "en": "Reads a paper and delivers a doc named your way."
-      }
-    },
-    {
-      "id": "phone-dual-brain",
-      "kind": "still",
-      "feature": "chat-while-working",
-      "device": "phone",
-      "src": "stills/phone-dual-brain.webp",
-      "width": 449,
-      "height": 948,
-      "title": {
-        "zh-CN": "手机上的前后脑",
-        "en": "Dual brain on phone"
-      },
-      "caption": {
-        "zh-CN": "聊着天，它在后台开了个新任务。",
-        "en": "Keep chatting while a new task runs in the back."
-      }
-    },
-    {
       "id": "iphone-feed",
       "kind": "still",
       "feature": "proactive",
@@ -392,24 +358,6 @@
       }
     },
     {
-      "id": "clip-timeline-memory",
-      "kind": "clip",
-      "feature": "learns-you",
-      "device": "mac",
-      "src": "clips/timeline-memory.mp4",
-      "poster": "clips/timeline-memory.webp",
-      "width": 1920,
-      "height": 1134,
-      "title": {
-        "zh-CN": "回答带着出处",
-        "en": "Answers with sources"
-      },
-      "caption": {
-        "zh-CN": "从时间线里找回你说过的话，引用可核对。",
-        "en": "Finds what you said before from the timeline, with checkable references."
-      }
-    },
-    {
       "id": "clip-morning-brief",
       "kind": "clip",
       "feature": "proactive",
@@ -425,24 +373,6 @@
       "caption": {
         "zh-CN": "每天开工前，把值得看的事整理好。",
         "en": "Gathers what matters before your day starts."
-      }
-    },
-    {
-      "id": "clip-phone-feed",
-      "kind": "clip",
-      "feature": "proactive",
-      "device": "phone",
-      "src": "clips/phone-feed.mp4",
-      "poster": "clips/phone-feed.webp",
-      "width": 900,
-      "height": 1950,
-      "title": {
-        "zh-CN": "值得看的才推",
-        "en": "Only what is worth a nudge"
-      },
-      "caption": {
-        "zh-CN": "手机通知只推送判断过的重要内容。",
-        "en": "Phone notifications carry only items Nova judged worth your attention."
       }
     },
     {

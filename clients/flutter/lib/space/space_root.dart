@@ -106,9 +106,14 @@ class _SpaceRootState extends State<SpaceRoot> {
   }
 
   Future<void> _openNotification(String handle) async {
-    final id = await SpaceNotificationRouter.resolve(handle, catalog.spaces);
+    final id = await SpaceNotificationRouter.resolve(
+      handle,
+      catalog.spaces.toList(),
+    );
     if (!mounted) return;
-    if (id != null && catalog.selectedId != id) await catalog.select(id);
+    if (id != null && catalog.selectedId != id) {
+      await catalog.select(id, ignoreMissing: true);
+    }
   }
 
   @override
@@ -200,6 +205,8 @@ class _SpaceChooser extends StatefulWidget {
   @override
   State<_SpaceChooser> createState() => _SpaceChooserState();
 }
+
+enum _SpaceAction { cleanBindings, remove }
 
 class _SpaceChooserState extends State<_SpaceChooser>
     with WidgetsBindingObserver {
@@ -361,6 +368,59 @@ class _SpaceChooserState extends State<_SpaceChooser>
     if (result != null) await catalog.select(result.id);
   }
 
+  Future<void> _removeSpace(SpaceRecord space) async {
+    final name = ExperiencePersona.spaceDisplayName(space);
+    final confirmed = await showCupertinoDialog<bool>(
+      context: context,
+      builder: (dialogContext) => CupertinoAlertDialog(
+        title: Text(t('删除「$name」？', 'Delete “$name”?')),
+        content: Text(
+          space.mode == SpaceMode.client
+              ? t(
+                  '将从这部手机移除连接。电脑上的 Space 和数据会保留。',
+                  'This removes the connection from this phone. The Space and its data stay on the computer.',
+                )
+              : t(
+                  '将从 Space 列表移除。本机数据会保留以便恢复。',
+                  'This removes it from the Space list. Local data is kept for recovery.',
+                ),
+        ),
+        actions: [
+          CupertinoDialogAction(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: Text(t('取消', 'Cancel')),
+          ),
+          CupertinoDialogAction(
+            isDestructiveAction: true,
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: Text(t('删除', 'Delete')),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    try {
+      final removed = await catalog.removeSpace(space.id);
+      for (final record in removed.where((v) => v.mode == SpaceMode.client)) {
+        unawaited(
+          SpacePushClient(
+            record,
+            null,
+            onWake: () async {},
+          ).disable().catchError((Object _) {}),
+        );
+      }
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(t('删除失败，请重试。', 'Could not delete Space. Try again.')),
+          ),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) => NovaPage(
     title: 'Space',
@@ -430,13 +490,28 @@ class _SpaceChooserState extends State<_SpaceChooser>
                         ? connection(space).$2
                         : Nova.mint,
                   ),
-                  trailing: catalog.bindings(space).length > 1
-                      ? IconButton(
-                          tooltip: t('清理旧绑定', 'Clean up old connections'),
-                          icon: const Icon(CupertinoIcons.ellipsis_circle),
-                          onPressed: () => manageBindings(context, space),
-                        )
-                      : const CupertinoListTileChevron(),
+                  trailing: PopupMenuButton<_SpaceAction>(
+                    tooltip: t('管理 Space', 'Manage Space'),
+                    icon: const Icon(CupertinoIcons.ellipsis_circle),
+                    onSelected: (action) => switch (action) {
+                      _SpaceAction.cleanBindings => manageBindings(
+                        context,
+                        space,
+                      ),
+                      _SpaceAction.remove => _removeSpace(space),
+                    },
+                    itemBuilder: (_) => [
+                      if (catalog.bindings(space).length > 1)
+                        PopupMenuItem(
+                          value: _SpaceAction.cleanBindings,
+                          child: Text(t('清理旧绑定', 'Clean up old connections')),
+                        ),
+                      PopupMenuItem(
+                        value: _SpaceAction.remove,
+                        child: Text(t('删除 Space', 'Delete Space')),
+                      ),
+                    ],
+                  ),
                   onTap: () => catalog.select(space.id),
                 ),
             ],

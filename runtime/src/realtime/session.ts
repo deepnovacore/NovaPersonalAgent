@@ -1689,9 +1689,13 @@ export class RealtimeSession {
     }
     const answered = this.#responseQuestions.get(this.#turnKey(completion.response_id, completion.session_epoch))
     if (answered && this.#latestQuestion?.id === answered.id) this.#latestQuestion = null
-    this.#finishResponseAuthority(completion.response_id, completion.session_epoch)
-    this.#onSpoken(completion.text)
-    this.#reportDelivery(completion)
+    // Delivery observers need the host event ids to mark a proactive reminder as heard.
+    try {
+      this.#onSpoken(completion.text)
+      this.#reportDelivery(completion)
+    } finally {
+      this.#finishResponseAuthority(completion.response_id, completion.session_epoch)
+    }
     this.#floor = this.#floor.onSpeakEnd(utteranceId)
     this.#state.advanceSnapshot()
     return completion

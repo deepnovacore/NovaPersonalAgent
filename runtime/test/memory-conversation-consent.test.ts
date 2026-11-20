@@ -2,7 +2,7 @@ import {configuredDiscoveryConsumer,configuredMemoryConsumers,configuredTaskVeri
 import {settingsSchema} from '../src/config/config.js'
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import {mkdtemp,rm,readdir,readFile,writeFile} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,readdir,readFile,writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
@@ -12,7 +12,7 @@ const gateway:ModelGateway={async *stream(){ /* complete only */ },complete(){re
 const now=()=>new Date().toISOString()
 
 test('actual conversation recipients require separate grants and fresh preparation observes revocation',async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-conversation-consent-')),client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'scope',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a','consumer-b']})
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-conversation-consent-')),client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'scope',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a','consumer-b']})
  try{
   await resource.open();await resource.remember({sourceId:'one',sessionId:'fixture',sequence:1,text:'我不吃辣',occurredAt:now(),confirmed:true});await resource.flush()
   assert.deepEqual(resource.processingGrant(true).conversation_providers,['consumer-a','consumer-b'])
@@ -28,7 +28,7 @@ test('actual conversation recipients require separate grants and fresh preparati
 })
 
 for(const revokeBeforeEdit of [false,true])test(`send-time preparation reconciles hand edits without leaking old or ungranted content (revoked=${revokeBeforeEdit})`,async()=>{
- const root=await mkdtemp(join(tmpdir(),'nova-conversation-hand-edit-')),path=join(root,'memory.sqlite'),client=new MemoryLedgerClient(path),resource=new SubstrateMemoryResource({client,userId:'edit',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a']})
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-conversation-hand-edit-')),path=join(root,'memory.sqlite'),client=new MemoryLedgerClient(path),resource=new SubstrateMemoryResource({client,userId:'edit',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a']})
  try{
   await resource.open();await resource.remember({sourceId:'one',sessionId:'fixture',sequence:1,text:'我不吃辣',occurredAt:now(),confirmed:true});await resource.flush()
   assert.ok((await resource.prepareResponseAdaptation('consumer-a')).memoryContext?.voice.includes('我不吃辣'))
@@ -70,7 +70,7 @@ test('discovery consumer follows the actual support route and is included in adm
 
 test('ledger host discovery, evidence citations, delivered feed and expired-history preference retain existing behavior',async()=>{
  const {PersonalAgentHost}=await import('../src/personal-agent/host.js'),{SuggestionPool}=await import('../src/core/suggestions.js'),{UnifiedRetrieval}=await import('../src/memory/retrieval.js')
- const root=await mkdtemp(join(tmpdir(),'nova-ledger-host-control-')),client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'scope',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a']})
+ const root=await mkdtemp(join(await realpath(tmpdir()),'nova-ledger-host-control-')),client=new MemoryLedgerClient(join(root,'memory.sqlite')),resource=new SubstrateMemoryResource({client,userId:'scope',gateway,model:'extractor',inputConsent:true,conversationProviders:['consumer-a']})
  let consumer='consumer-a'
  const host=new PersonalAgentHost({path:join(root,'host.json'),userScope:'scope',memory:()=>resource,pool:new SuggestionPool(),evidence:()=>null,discoveryMemoryConsumer:()=>consumer})
  host.setRetrieval(new UnifiedRetrieval({memory:()=>resource}))
@@ -86,6 +86,8 @@ test('ledger host discovery, evidence citations, delivered feed and expired-hist
   consumer='consumer-b'
   assert.deepEqual((await host.discoverySnapshot()).recent_delivery,before.recent_delivery)
   assert.deepEqual((await host.dailyBriefSnapshot()).recent_delivery,dailyBefore.recent_delivery)
+  assert.deepEqual((await host.discoverySnapshot()).memory,[],'a new conversation recipient has no grant')
+  consumer='consumer-a'
   assert.deepEqual((await host.discoverySnapshot()).memory,before.memory)
   await host.revalidate();assert.equal(host.snapshot().feed[0]!.lifecycle,'active')
  }finally{await host.close();await resource.close();await rm(root,{recursive:true,force:true})}

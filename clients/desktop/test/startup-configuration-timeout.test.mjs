@@ -9,7 +9,7 @@ import {
   createLifecycleCoordinator,
   prepareDesktopStartup,
   reportStartupFailure,
-  runConfigurationStage,
+  runConfigurationStage as runDesktopStage,
   startupFailureCode,
 } from '../src/main/desktop-startup.mjs'
 import {startupMessage} from '../src/renderer/startup-notice.mjs'
@@ -20,6 +20,15 @@ const configurationLifecycle = source.slice(
   source.indexOf('async function refreshManagedWorkspaceCapabilities('),
 )
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
+
+// Electron supplies a live event loop. Return the timer ID so the Node test
+// harness keeps the stage deadline referenced while the fake I/O is parked.
+function runConfigurationStage(attempt, stage, operation, options) {
+  return runDesktopStage(attempt, stage, operation, {
+    schedule: (complete, ms) => Number(setTimeout(complete, ms)),
+    ...options,
+  })
+}
 
 function configurationContext(overrides = {}) {
   const published = []

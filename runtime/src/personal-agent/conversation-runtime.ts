@@ -83,7 +83,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
  try{const selected=requireSelectedCascadedLlmConfig(options.settings);options.host.setWorkbenchModel({provider:selected.provider,model:selected.config.model})}
  catch{options.host.setWorkbenchModel({provider:'',model:''})}
  options.host.setWorkbenchExecutors([...(options.agentDescriptors??[]),...(options.codexResource?.agentDescriptor?[options.codexResource.agentDescriptor]:[])].map(agent=>agent.name))
- return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides:{chat?:boolean}={},startup)=>{
+ return async(conversation,emit,mode='text',lifetime=new AbortController().signal,recovery=false,execution,overrides={},startup)=>{
   const startupSignal=startup??AbortSignal.any([lifetime,AbortSignal.timeout(10000)])
   startupSignal.throwIfAborted()
   if(!execution)conversation=await options.host.productConversation(conversation,configuredMemoryConsumer(options.settings,mode)??null,startupSignal)
@@ -91,20 +91,24 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let contextDependencies:ContextDependencies=emptyContextDependencies()
   let authorizationRevision:string|undefined
   let authorizationCacheable=false
+  let authorizationFailure:'unauthorized'|undefined
   const addDependencies=(value:ContextDependencies)=>{contextDependencies=mergeContextDependencies(contextDependencies,value);authorizationRevision=undefined}
   const authorizeContext=async(force=false)=>{
    lifetime.throwIfAborted()
    if(execution||contextDependencies.state==='tracked'&&!contextDependencies.items.length)return
+   authorizationFailure=undefined
    const authorizationSignal=AbortSignal.any([lifetime,AbortSignal.timeout(5000)])
    for(let attempt=0;attempt<2;attempt++){
     const before=await abortable(options.host.contextAuthorizationRevision(authorizationSignal),authorizationSignal)
     if(!force&&authorizationCacheable&&before!==undefined&&before===authorizationRevision)return
-    if(!await abortable(options.host.contextDependenciesAuthorized(contextDependencies,configuredMemoryConsumer(options.settings,mode)??null),authorizationSignal))throw Error('context_authorization_changed')
+    if(!await abortable(options.host.contextDependenciesAuthorized(contextDependencies,configuredMemoryConsumer(options.settings,mode)??null),authorizationSignal)){authorizationFailure='unauthorized';throw Error('context_authorization_changed')}
     const after=await abortable(options.host.contextAuthorizationRevision(authorizationSignal),authorizationSignal)
     lifetime.throwIfAborted()
     if(before===after){authorizationRevision=after;authorizationCacheable=options.host.contextDependenciesCacheable(contextDependencies);return}
    }
-   throw Error('context_authorization_changed')
+   // A moving revision cannot prove authority; defer this operation without ending the call.
+   authorizationRevision=undefined
+   throw Error('context_authorization_pending')
   }
   const telemetry:RealtimeTelemetry|undefined=options.telemetry?{
    record:(kind,payload)=>options.telemetry!.record(kind,{...payload,conversation_id:conversation.id,conversation_generation:conversation.generation}),
@@ -118,8 +122,9 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    addDependencies(await abortable(options.host.planContextDependencies(plan),startupSignal))
    await abortable(authorizeContext(true),startupSignal);startupSignal.throwIfAborted()
   }
-  const workbenchVoice=mode==='voice'&&(conversation.kind==='build'||conversation.mode==='plan')&&!execution
-  const chatMode=overrides?.chat!==false&&!execution&&['chat','topic'].includes(conversation.kind)&&(conversation.mode??'chat')==='chat'
+  const voiceMode=mode==='voice'?overrides?.voice_mode:undefined
+  const workbenchVoice=mode==='voice'&&overrides?.chat!==false&&(voiceMode?voiceMode==='plan'||voiceMode==='build':conversation.kind==='build'||conversation.mode==='plan')&&!execution
+  const chatMode=overrides?.chat!==false&&!workbenchVoice&&!execution&&['chat','topic'].includes(conversation.kind)&&(voiceMode??conversation.mode??'chat')==='chat'
   if((conversation.kind==='build'||conversation.mode==='plan')&&!execution&&mode==='text'){
    const workbenchMode=conversation.kind==='build'?'build':'plan'
    const reporter=bindUsageReporter(options.onUsage,{feature:'conversation',conversationId:conversation.id,trigger:'manual'})
@@ -259,6 +264,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
   let providerEpoch = 0
   const emitVoiceNotice = (code: string, message: string) => {
    if (mode !== 'voice') return
+   telemetry?.record('voice.notice', {code})
    emit({type: 'conversation.notice', code, message})
   }
   const graph=buildRealtimeAssembly({core,provider,usageContext,...(chatToolNames?{providerToolView:tools=>({...tools,schemas:tools.schemas.filter(schema=>{const name=(schema.function as {name?:string}|undefined)?.name;return typeof name==='string'&&chatToolNames.has(name)})}),toolGate:name=>chatToolNames.has(name),onTool:recordToolEvent}:{}),...(options.additionalAgentControllers?{additionalAgentControllers:options.additionalAgentControllers}:{}),...(!execution?{conversationContext:async()=>{const value=await options.host.scheduledConversationContext(conversation.id,conversation.generation,memoryConsumerFingerprint??null);if(value){const parsed=JSON.parse(value) as {results:{run_id:string;text?:string}[]};addDependencies({state:'tracked',items:parsed.results.filter(item=>item.text!==undefined).map(item=>({kind:'scheduled',run_id:item.run_id}))});await authorizeContext(true)}return value}}:{}),suppressMemoryAdaptation:!!execution,memoryReadMode:mode,taskSourceTodo:origin=>{if(!sourceTodo||origin!==sourceOrigin||graph.service.taskTurnOrigin()!==origin)return;const todo=options.host.life.snapshot().todos.find(todo=>todo.id===sourceTodo!.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict');return {...sourceTodo}},taskConversationId:conversation.id,taskConversationGeneration:conversation.generation,taskFrontendCurrent:()=>!lifetime.aborted,
@@ -267,7 +273,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(workbenchVoice?{suppressConversationMemoryCapture:true,providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
-   ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(conversation.id!=='chat:main'||options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
+   ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
    ...(projectConfirmation?{projectConfirmation}:{}),...(codingTarget?{codingTarget}:{}),
    ...(options.codexResource?{codexResource:options.codexResource,codingAgentControllerFactory:options.codexResource.agentControllerFactory}:{}),
    ...(approval?{executorApproval:approval}:{}),
@@ -364,7 +370,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(mode==='background')projectConfirmation?.setBackground(true)
    else if(!seen)projectConfirmation?.setBackground(false,{awaitPresentation:true})
    else if(seen?.proposal_id&&seen.conversation_id===conversation.id&&projectConfirmation?.view.pending_confirmation_id===seen.proposal_id)projectConfirmation.setBackground(false)
-   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||!textOnly&&mode==='workbench'&&conversation.id==='chat:main'&&options.host.voiceConversationId()!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
+   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||!textOnly&&mode==='workbench'&&options.host.voiceConversationId()!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   })
   const syncIdentityContext=createIdentityContextSync({identity:()=>options.host.identity(),epoch:()=>graph.service.session.sessionEpoch,
    inject:(content,signal)=>provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})})
@@ -398,7 +404,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     const messages=conversation.messages.filter(message=>message.generation_status!=='pending')
     // shortcut: older context is a bounded excerpt, replace with semantic summary when truncation loses needed detail.
     const summary=messages.slice(0,-VOICE_CONTEXT_MESSAGES).map(message=>message.role+': '+message.text).join('\n').slice(-2000)
-    const handoff={purpose:'conversation_handoff',trust:'untrusted_external',summary,recent_messages:messages.slice(-VOICE_CONTEXT_MESSAGES).map(message=>({role:message.role,text:message.text.slice(0,600)})),state:{mode:conversation.kind==='build'?'build':conversation.mode??'chat',...(conversation.plan?{plan:{title:conversation.plan.title,version:conversation.plan.version}}:{}),...(conversation.build?{build:{project:conversation.build.project.slice(0,512),status:conversation.build.status,pending_approval:!!conversation.build.approval}}:{})},...(workbenchVoice?{instruction:'Voice is only for conversation and clarification. No tools or local actions are allowed. Ask the user to return to text mode to confirm execution.'}:{})}
+    const handoff={purpose:'conversation_handoff',trust:'untrusted_external',summary,recent_messages:messages.slice(-VOICE_CONTEXT_MESSAGES).map(message=>({role:message.role,text:message.text.slice(0,600)})),state:{mode:voiceMode??(conversation.kind==='build'?'build':conversation.mode??'chat'),...(conversation.plan?{plan:{title:conversation.plan.title,version:conversation.plan.version}}:{}),...(conversation.build?{build:{project:conversation.build.project.slice(0,512),status:conversation.build.status,pending_approval:!!conversation.build.approval}}:{})},...(workbenchVoice?{instruction:'Voice is only for conversation and clarification. No tools or local actions are allowed. Ask the user to return to text mode to confirm execution.'}:{})}
     while([...JSON.stringify(handoff)].length>3900){handoff.summary=handoff.summary.slice(Math.ceil(handoff.summary.length/2));for(const message of handoff.recent_messages)message.text=message.text.slice(0,Math.floor(message.text.length/2));if(!handoff.summary&&handoff.recent_messages.every(message=>!message.text)){if(handoff.state.plan)handoff.state.plan.title=handoff.state.plan.title.slice(0,Math.floor(handoff.state.plan.title.length/2));if(handoff.state.build)handoff.state.build.project=handoff.state.build.project.slice(0,Math.floor(handoff.state.build.project.length/2))}}
     await provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content:JSON.stringify(handoff)},{confirmationTimeout:null,asUserActivation:false,signal:startupSignal})
    }else if(workbenchVoice)throw Error('voice_context_unavailable');
@@ -486,21 +492,32 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     }}:{})
    })().catch(()=>close())},
    ownsWork:id=>core.runtime.inFlightDelegate(id)!==undefined,bridgeService:graph.service,sendAudio:async(pcm)=>{
-    await authorizeContext()
-    const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
-    const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.voiceConversationId()!==conversation.id?'other_voice_owner':undefined
-    const current=()=>reason()===undefined
     // Frames dropped here are otherwise invisible; count them by reason and report at most every five seconds.
-    const dropped=(why:string)=>{audioDrops[why]=(audioDrops[why]??0)+1;const now=Date.now();if(now-audioDropReportedAt>=5000){audioDropReportedAt=now;telemetry?.record('voice.audio_dropped',{...audioDrops});for(const key of Object.keys(audioDrops))delete audioDrops[key]}}
-    if(!current()){dropped(reason()??'unknown');return}
-    // The names are read from memory, which takes over a second; doing that for every 10 ms frame stalls the serial audio path.
-    // Once per provider session is enough, because identity edits are injected by their own command path.
-    if(audioIdentityEpoch!==epoch){
-      audioIdentitySync??=syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)])).then(()=>{audioIdentityEpoch=epoch}).finally(()=>{audioIdentitySync=undefined})
-      await audioIdentitySync
-      await authorizeContext()
+     const dropped=(why:string)=>{audioDrops[why]=(audioDrops[why]??0)+1;const now=Date.now();if(now-audioDropReportedAt>=5000){audioDropReportedAt=now;telemetry?.record('voice.audio_dropped',{...audioDrops});for(const key of Object.keys(audioDrops))delete audioDrops[key]}}
+    try{
+     await authorizeContext()
+     const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
+     const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.voiceConversationId()!==conversation.id?'other_voice_owner':undefined
+     const current=()=>reason()===undefined
+
+     if(!current()){dropped(reason()??'unknown');return}
+     // The names are read from memory, which takes over a second; doing that for every 10 ms frame stalls the serial audio path.
+     // Once per provider session is enough, because identity edits are injected by their own command path.
+     if(audioIdentityEpoch!==epoch){
+       audioIdentitySync??=syncIdentity(AbortSignal.any([lifetime,AbortSignal.timeout(10000)])).then(()=>{audioIdentityEpoch=epoch}).finally(()=>{audioIdentitySync=undefined})
+       await audioIdentitySync
+       await authorizeContext()
+     }
+     if(current())await graph.service.sendAudio(pcm);else dropped(reason()??'unknown')
+    }catch(error){
+     if(error instanceof Error&&error.message==='context_authorization_pending'){dropped('authorization_pending');return}
+     if(error instanceof Error&&error.message==='context_authorization_changed'&&voiceEnabled){
+      telemetry?.record('voice.context_rejected',{reason:authorizationFailure??'resource_changed'})
+      voiceEnabled=false
+      emitVoiceNotice('voice_provider_failed','相关资料或授权已变化，请重新开启语音后继续。')
+     }
+     throw error
     }
-    if(current())await graph.service.sendAudio(pcm);else dropped(reason()??'unknown')
    },
    runTurn:async(text,callerSignal,context)=>{
     const deadline=createTurnDeadline({clock:core.runtime.clock,parent:callerSignal,isWaiting:()=>(approval?.pending===true||projectConfirmation?.pending===true),subscribe:listener=>{waitingListeners.add(listener);return()=>waitingListeners.delete(listener)}})

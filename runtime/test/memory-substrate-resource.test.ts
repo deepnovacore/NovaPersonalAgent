@@ -93,6 +93,7 @@ test('delayed extraction cannot replace a revision written while the model was r
   release();await resource.flush()
   assert.equal((await resource.get(first.id))?.content,'最新状态：仍然不吃辣')
   assert.equal((await resource.get(first.id))?.version,2)
+  assert.equal((await resource.get(first.id))?.written_by,'merge')
   assert.equal((await client.memory('pending_evidence',{source_prefix:resource.prefix,provider:'fixture'}) as unknown[]).length,1,'conflict leaves evidence retryable')
  }finally{release?.();await resource.close();await rm(root,{recursive:true,force:true})}
 })
@@ -208,6 +209,7 @@ test('substrate resource keeps identity, correction, restart and source deletion
   await resource.reextract(first.id);assert.equal(calls,2);assert.equal((await resource.get(first.id))?.version,1,'equivalent re-extraction does not append revisions')
   await resource.ingestEvidence({processingConsent:resource.processingGrant(true),sourceId:'expired',locator:'expired',text:'旧消息',observedAt:'2020-01-01T00:00:00Z',kind:'im',retentionUntil:'2020-02-01T00:00:00Z'});await resource.flush();assert.equal(calls,2,'expired raw text never reaches the model')
   const corrected=await resource.correct(first.id,first.version,'改到下周一交报告',{type:'conversation',ref:'correction:one',observed_at:'2026-09-12T11:00:00Z'})
+  assert.equal(corrected.entry.written_by,'user_correction')
   assert.equal(corrected.entry.commitment?.due,null,'free-text correction must not retain a stale parsed deadline')
   assert.equal(corrected.entry.id,first.id);assert.equal(corrected.entry.version,2);assert.equal(corrected.entry.origin,'stated')
   await assert.rejects(resource.correct(first.id,1,'旧修改',{type:'conversation',ref:'correction:stale',observed_at:'2026-09-12T11:00:00Z'}),/CONFLICT/)

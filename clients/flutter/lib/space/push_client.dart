@@ -60,7 +60,7 @@ class SpacePushClient {
        now = now ?? DateTime.now,
        request = request ?? gatewayRequest;
   final SpaceRecord space;
-  final SpaceClientState state;
+  final SpaceClientState? state;
   final SpacePersistence persistence, installationPersistence;
   final DateTime Function() now;
   final Future<void> Function() onWake;
@@ -215,7 +215,7 @@ class SpacePushClient {
             unawaited(
               _register(event).catchError((Object _) {
                 status = '通知令牌更新失败，将在恢复连接后重试';
-                state.changed();
+                state?.changed();
               }),
             );
           }
@@ -228,7 +228,7 @@ class SpacePushClient {
         },
         onError: (Object _) {
           status = '此平台推送服务暂不可用';
-          state.changed();
+          state?.changed();
         },
       );
       if (registration['enabled'] == true) {
@@ -255,12 +255,12 @@ class SpacePushClient {
         refreshRegistration().catchError((Object _) {
           if (registration['enabled'] == true) {
             status = '通知注册等待重试，空间内容仍可同步';
-            state.changed();
+            state?.changed();
           }
         }),
       );
     });
-    state.changed();
+    state?.changed();
   }
 
   Future<bool> _enableCurrent(String generation) => _locked(() async {
@@ -294,7 +294,7 @@ class SpacePushClient {
       if (!await _enableCurrent(generation)) return;
       if (!allowed) {
         status = '通知权限未授予';
-        state.changed();
+        state?.changed();
         return;
       }
       final enabled = await _locked(() async {
@@ -319,7 +319,7 @@ class SpacePushClient {
       if (!await _enableCurrent(generation)) return;
       if (token == null) {
         status = '等待系统提供推送令牌';
-        state.changed();
+        state?.changed();
         return;
       }
       await _register(token);
@@ -388,7 +388,7 @@ class SpacePushClient {
       status = registration['notification_key'] != null
           ? '锁屏通知已启用'
           : '等待 Host 完成通知密钥配置';
-      state.changed();
+      state?.changed();
       return;
     }
     if (registration['handle'] != null &&
@@ -417,7 +417,7 @@ class SpacePushClient {
         status = registration['notification_key'] != null
             ? '锁屏通知已启用'
             : '等待 Host 完成通知密钥配置';
-        state.changed();
+        state?.changed();
         return;
       } on RelayFailure catch (error) {
         if (error.code != 'gateway_401') rethrow;
@@ -426,7 +426,7 @@ class SpacePushClient {
     final installationCredential = await _installationCredential();
     if (installationCredential == null) {
       status = '需要一次性邀请才能注册或续期锁屏通知';
-      state.changed();
+      state?.changed();
       return;
     }
     final old = {...registration};
@@ -460,7 +460,7 @@ class SpacePushClient {
           }
         });
         status = '通知准入已失效，请兑换新的一次性邀请';
-        state.changed();
+        state?.changed();
       }
       rethrow;
     }
@@ -491,7 +491,7 @@ class SpacePushClient {
     }
     await _retire();
     status = '等待 Host 完成通知密钥配置';
-    state.changed();
+    state?.changed();
     unawaited(onWake());
     if (registration['token'] != token['token'] ||
         registration['provider'] != token['provider']) {
@@ -499,7 +499,7 @@ class SpacePushClient {
       unawaited(
         _register(token).catchError((Object _) {
           status = '通知令牌更新等待重试';
-          state.changed();
+          state?.changed();
         }),
       );
     }
@@ -510,7 +510,7 @@ class SpacePushClient {
         registration['credential'] == null) {
       return;
     }
-    await state.enqueue('push.register', {
+    await state?.enqueue('push.register', {
       'handle': registration['handle'],
       'credential': registration['credential'],
       'gateway_url': registration['gateway_url'] ?? gatewayUrl,
@@ -563,7 +563,7 @@ class SpacePushClient {
           });
         }).catchError((Object _) {
           status = '通知密钥等待系统存储恢复，将自动重试';
-          state.changed();
+          state?.changed();
         });
     _drainingKeys = work.whenComplete(() {
       _drainingKeys = null;
@@ -591,7 +591,7 @@ class SpacePushClient {
       'notificationKey': key,
     });
     status = '锁屏通知已启用';
-    state.changed();
+    state?.changed();
   }
 
   Future<void> disable() => _locked(() async {
@@ -607,13 +607,13 @@ class SpacePushClient {
       await channel.invokeMethod<void>('removeSpace', {
         'handle': old['handle'],
       });
-      await state.enqueue('push.unregister', {
+      await state?.enqueue('push.unregister', {
         'handle': old['handle'],
       }, operationId: 'unregister_${old['handle']}');
     }
     await _retire();
     status = _retired().isEmpty ? '锁屏通知已关闭' : '已在本机关闭，等待网关注销';
-    state.changed();
+    state?.changed();
     unawaited(onWake());
   });
   static Future<void> refreshSavedTokens(
@@ -622,7 +622,8 @@ class SpacePushClient {
     SpaceGatewayRequest? request,
   }) async {
     final send = request ?? gatewayRequest;
-    for (final space in spaces.where((s) => s.mode == SpaceMode.client)) {
+    for (final space
+        in spaces.where((s) => s.mode == SpaceMode.client).toList()) {
       await _PushLocks.run(space.id, () async {
         final persistence = SpaceSecurePersistence(
           'nova.space.push.${space.id}',

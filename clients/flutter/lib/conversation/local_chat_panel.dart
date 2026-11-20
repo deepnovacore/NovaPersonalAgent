@@ -754,7 +754,11 @@ class LocalChatPanelState extends State<LocalChatPanel> {
     return false;
   }
 
+  // Delegated tasks must continue through the bridge that owns their status.
   bool get _canRegenerate =>
+      widget.onTaskText == null &&
+      widget.host.store.conversation(widget.conversationId)['delegate_origin']
+          is! String &&
       widget.active &&
       !widget.host.busy &&
       !widget.voiceBusy &&

@@ -4,9 +4,10 @@ import {ChevronDown,Monitor,FolderOpen} from 'lucide-react'
 import {t} from '../../locale.mjs'
 import {refusalText} from '../../host-refusals.mjs'
 import {readComputerPermissions} from '../../computer-use-control.mjs'
+import {composerMode as modeOf} from '../../composer-mode.mjs'
 export type Context={c:any,run:(fn:()=>any)=>any,api?:any}
 export const Action=React.forwardRef<HTMLButtonElement,React.ButtonHTMLAttributes<HTMLButtonElement>>(function Action({children,...props},ref){return <Button asChild><button ref={ref} type="button" {...props}>{children}</button></Button>})
-export const modeOf=(item:any,state:any)=>item?.kind==='build'?'build':item?.mode==='plan'?(state?.execution==='delegate'?'delegate':'plan'):(state?.execution==='build'?'build':'chat')
+export {modeOf}
 export const MODES=['chat','plan','build','delegate']
 export const MODE_CAPTIONS={chat:'直接对话',plan:'先澄清需求并制定计划，再选择 Build 或执行器',build:'直接在工作区里动手：读取、编辑、运行命令，同步完成；每次都会新建一个 Build 任务',delegate:'制定计划后交给本机执行器异步完成'}
 export function useComposerMode({c,run}:Context){

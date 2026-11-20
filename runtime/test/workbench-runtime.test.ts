@@ -68,6 +68,15 @@ const buildView=(host:PersonalAgentHost,id:string)=>host.conversationSnapshot().
 const toolOutputs=(request:Request)=>request.inputs.flatMap(input=>input.kind==='tool_result'?[input.output as unknown as {status:string;message?:string}]:[])
 const supported=['darwin','win32'].includes(process.platform)
 
+test('local Build is unavailable on unsupported platforms', {skip:supported}, async () => {
+ const f=await fixture(()=>({}))
+ try{
+  await assert.rejects(f.build(),/local_build_unavailable/)
+  assert.equal(f.host.conversationSnapshot().selected_id,'chat:main')
+  assert.equal(f.script.requests.length,0)
+ }finally{await f.close()}
+})
+
 test('production Plan factory admits batched wire calls through the real conversation tool bridge',async context=>{
  const root=await mkdtemp(join(await realpath(tmpdir()),'nova-plan-production-')),requests:Record<string,unknown>[]=[],frames:Record<string,unknown>[]=[]
  const host=new PersonalAgentHost({path:join(root,'personal.json'),userScope:'production-test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
@@ -1102,8 +1111,7 @@ test('direct Build instructions skip planning but retain approval and completion
  assert.match(workbenchInstructions('build','en',true),/executing the user-confirmed plan/)
 })
 
-test('Workbench previews grow and Build records narration before tools', async () => {
- for(const mode of ['plan','build'] as const){
+for(const mode of ['plan','build'] as const)test(`Workbench previews grow and Build records narration before tools (${mode})`, {skip:mode==='build'&&!supported}, async () => {
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
    assert.equal(request.previewText,true)
@@ -1128,11 +1136,9 @@ test('Workbench previews grow and Build records narration before tools', async (
    const message=f.host.conversationSnapshot().messages.at(-1)!
    assert.equal(message.text,merged);assert.equal(message.turn_id,captions.at(-1)!.turn_id)
   }finally{await f.close()}
- }
 })
 
-test('Plan and Build keep authoritative narration before a tool call', async () => {
- for(const mode of ['plan','build'] as const){
+for(const mode of ['plan','build'] as const)test(`Plan and Build keep authoritative narration before a tool call (${mode})`, {skip:mode==='build'&&!supported}, async () => {
   const script=scripted((_request,step)=>step===0?{call:{name:mode==='plan'?'monitor':'file_read',arguments:mode==='plan'?{}:{path:'missing.txt'}}}:{text:'final answer'})
   const factory:CascadedLlmFactory={open:()=>{const base=script.factory.open();let round=0;return {...base,async *stream(request){
    for await(const event of base.stream(request)){yield event;if(event.kind==='response_started'&&round===0)yield {kind:'text_delta' as const,text:'narration before the tool'}}
@@ -1154,7 +1160,6 @@ test('Plan and Build keep authoritative narration before a tool call', async () 
    assert.equal(f.frames.some(x=>x.type==='conversation.error'),false)
    assert.equal(f.host.conversationSnapshot().messages.at(-1)!.text,merged)
   }finally{await f.close()}
- }
 })
 
 test('a model output limit continues the reply twice and keeps one turn identity', async () => {
@@ -1520,7 +1525,7 @@ for(const mode of ['plan','build'] as const)test(`${mode} quotes only typed user
  }finally{await f.close()}
 })
 
-for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async()=>{
+for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as const)test(`workbench background memory ${outcome} is bounded, authorized and never user input`,async t=>{
  const events:{kind:string;payload:Readonly<Record<string,JsonValue>>}[]=[]
  const f=await fixture(()=>({text:'done'}),'ask',undefined,undefined,undefined,{record:(kind,payload)=>events.push({kind,payload}),close:()=>undefined})
  try{
@@ -1528,7 +1533,10 @@ for(const outcome of ['relevant','irrelevant','timeout','failure','revoked'] as 
   const text=outcome==='irrelevant'?'unrelated tea':'TypeScript project constraints'
   const resource:PersonalMemoryResource={open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:(_query,options)=>{
    recalls++;recallSignal=options?.signal
-   if(outcome==='timeout')return new Promise(()=>{ /* ignores cancellation to exercise the outer budget */ })
+   if(outcome==='timeout')return new Promise((_resolve,reject)=>{
+    const pending=setTimeout(()=>reject(Error('test recall exceeded outer budget')),10000)
+    t.after(()=>clearTimeout(pending))
+   })
    if(outcome==='failure')return Promise.reject(Error('unavailable'))
    return Promise.resolve({source:'personal',state:'ok',scope:'any',degraded:false,hits:[{memoryId:'project',text,revision:1,evidenceIds:['source'],score:1}]})
   },get:()=>Promise.resolve({memory_scope:'user',id:'project',version:1,status:'active',kind:'fact',origin:'stated',content:text,source_refs:[],observed_at:new Date().toISOString(),recorded_at:new Date().toISOString(),topic:'',corrected_to:null,confidence_note:null}),canReadConversationEvidence:(_ref,consumer)=>{authorizationChecks++;assert.equal(consumer,'configured-text-model');return Promise.resolve(allowed)}}
@@ -1980,7 +1988,7 @@ test('a denied compound shell command also denies a respelling of its destructiv
   await f.host.submitConversationText(id,'再试一次',undefined,undefined,{local_desktop:true})
   const asked=await until(()=>buildView(f.host,id),value=>value.status==='awaiting_approval')
   assert.ok(asked.approval)
-  await f.command('build.approve',{id,approval_id:asked.approval!.id,approved:false});await f.host.waitConversation(id)
+  await f.command('build.approve',{id,approval_id:asked.approval.id,approved:false});await f.host.waitConversation(id)
  }finally{await f.close()}
 })
 

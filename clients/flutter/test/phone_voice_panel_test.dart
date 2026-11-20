@@ -134,6 +134,80 @@ Widget panelHost(
 );
 
 void main() {
+  testWidgets('silent input notice appears without stopping the call', (
+    tester,
+  ) async {
+    final session = PanelSession()..microphoneSilent = true;
+    addTearDown(session.dispose);
+    await tester.pumpWidget(panelHost(session, reduced: true));
+    expect(find.textContaining('未采集到麦克风声音'), findsOneWidget);
+    expect(session.active, isTrue);
+    session.microphoneSilent = false;
+    session.notifyListeners();
+    await tester.pump();
+    expect(find.textContaining('未采集到麦克风声音'), findsNothing);
+  });
+  testWidgets(
+    'voice stage uses the loaded selected pet across all call states',
+    (tester) async {
+      final directory = Directory.systemTemp.createTempSync(
+        'voice-selected-pet-',
+      );
+      final custom = File('${directory.path}/selected.png');
+      custom.writeAsBytesSync(File('assets/pets/nova.png').readAsBytesSync());
+      SharedPreferences.setMockInitialValues({
+        petAvatarPreferenceKey: jsonEncode({
+          'mode': 'custom',
+          'path': custom.path,
+        }),
+      });
+      final avatar = PetAvatarStore(supportDirectory: () async => directory);
+      await tester.runAsync(avatar.load);
+      final session = PanelSession();
+      addTearDown(() async {
+        session.dispose();
+        avatar.dispose();
+        directory.deleteSync(recursive: true);
+      });
+      await tester.pumpWidget(
+        panelHost(session, petAvatar: avatar, reduced: true),
+      );
+      expect(
+        tester.widget<PetAvatar>(find.byType(PetAvatar)).store,
+        same(avatar),
+      );
+      expect(avatar.customPath, custom.path);
+      for (final entry in {
+        'connecting': const Color(0xffb8a7ff),
+        'thinking': const Color(0xffb8a7ff),
+        'listening': const Color(0xff86e5ff),
+        'speaking': const Color(0xffffb46b),
+        'error': const Color(0xffff7b83),
+        'muted': const Color(0xffcdd0da),
+      }.entries) {
+        session.phase = entry.key;
+        session.notifyListeners();
+        await tester.pump();
+        final aura = tester.widget<DecoratedBox>(
+          find.byKey(ValueKey('voice-pet-${entry.key}')),
+        );
+        final decoration = aura.decoration as BoxDecoration;
+        expect((decoration.border as Border).top.color, entry.value);
+        final provider = tester.widget<Image>(find.byType(Image)).image;
+        final fileImage = provider is ResizeImage
+            ? provider.imageProvider
+            : provider;
+        expect((fileImage as FileImage).file.path, custom.path);
+      }
+      await tester.runAsync(avatar.resetToDefault);
+      await tester.pump();
+      final provider = tester.widget<Image>(find.byType(Image)).image;
+      final asset = provider is ResizeImage ? provider.imageProvider : provider;
+      expect((asset as AssetImage).assetName, petAvatarAsset);
+      expect(tester.takeException(), isNull);
+      await tester.pumpWidget(const SizedBox());
+    },
+  );
   testWidgets(
     'voice stage uses the loaded selected pet across all call states',
     (tester) async {

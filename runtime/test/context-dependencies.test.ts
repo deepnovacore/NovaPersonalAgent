@@ -79,3 +79,25 @@ test('versioned plan provenance is optional for local legacy reads and strictly 
  assert.equal(planSchema.safeParse({...plan,context_dependencies:{state:'tracked',items:Array.from({length:65},(_,i)=>({kind:'scheduled',run_id:'run-'+i}))}}).success,false)
  assert.equal(planSchema.safeParse({...plan,context_dependencies:{state:'tracked',items:[],trusted:true}}).success,false)
 })
+
+test('delivery receipts preserve feed context while source invalidation still revokes it',async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-feed-receipts-'))
+ let at=new Date('2026-11-14T12:00:00Z'),available=true
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),now:()=>at,
+  evidence:ref=>available&&ref==='conversation:1'?{subject_key:ref,source:{type:'conversation',ref}}:null,evidenceRefs:()=>['conversation:1']})
+ try{
+  await host.open()
+  await host.admit({kind:'question',summary:'Reply to the invitation?',why_now:'A reply is due',evidence_refs:['conversation:1'],memory_refs:[]},await host.discoverySnapshot())
+  const feed=host.snapshot().feed[0]!,dependencies=host.feedContextDependencies(feed.id)
+  assert.equal(await host.contextDependenciesAuthorized(dependencies),true)
+  for(const action of ['presented','notified','spoken','open'] as const){
+   at=new Date(at.getTime()+1000)
+   if(action==='spoken')await host.spoken(feed.suggestion_id!)
+   else await host.action({id:feed.id,action})
+   assert.equal(await host.contextDependenciesAuthorized(dependencies),true,action+' must not invalidate the next voice turn')
+  }
+  assert.ok(host.snapshot().feed[0]!.delivery.spoken_at)
+  at=new Date(at.getTime()+1000);available=false;await host.revalidate()
+  assert.equal(await host.contextDependenciesAuthorized(dependencies),false,'real source withdrawal remains fail-closed')
+ }finally{await host.close();await rm(directory,{recursive:true,force:true})}
+})

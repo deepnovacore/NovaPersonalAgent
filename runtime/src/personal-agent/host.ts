@@ -16,7 +16,7 @@ import {realpath} from 'node:fs/promises'
 import {canonicalProject,projectResourceKey} from './local-tools.js'
 import {taskResourcesBusy,quarantineTaskResources,releaseQuarantinedTaskResources} from '../executors/task-resources.js'
 import {localShellTreeState,type LocalShellProcess} from './local-shell.js'
-import type {Conversation} from './conversations.js'
+import {voiceModeSchema,type Conversation,type VoiceMode} from './conversations.js'
 import {explicitMemoryTurn,type ExplicitMemoryTurn} from '../memory/explicit-memory.js'
 import {DailyWorkbench} from './daily-workbench.js'
 import type {WorkbenchGenerator} from './workbench-evidence.js'
@@ -44,7 +44,7 @@ import {interleave} from './sampling.js';
 import type {CodingTarget, CodingTargetPort} from './coding-targets.js'
 import type {ApprovalView} from '../core/approval-port.js'
 import type {ProjectConfirmationView} from '../projects/project-confirmation.js'
-import {memoryEligibleForDiscovery} from '../memory/entry.js';
+import {MemoryEntrySchema,memoryEligibleForDiscovery} from '../memory/entry.js';
 import {PersonalUnderstanding} from './understanding.js';
 import type {UnderstandingPipeline} from '../understanding/pipeline.js';
 import {LifeService,goalCheckinEligible} from './life.js';
@@ -103,6 +103,7 @@ export interface DiscoverySnapshot {
     retrieval?: UnifiedRetrievalResult;
     user_scope: string;
     local_date: string;
+    local_time?: string;
     weekday: string;
     timezone: string;
     memory: MemoryEntry[];
@@ -174,6 +175,8 @@ export interface HostOptions {
     now?: () => Date;
 }
 const hash = (s: unknown): string => createHash('sha256').update(JSON.stringify(s)).digest('hex');
+const reminderBasisSchema=MemoryEntrySchema.pick({content:true,kind:true,origin:true,memory_scope:true,topic:true,life:true,commitment:true,corrected_to:true,confidence_note:true}).strip();
+const reminderBasis=(entry:MemoryEntry):string=>hash(reminderBasisSchema.parse(entry));
 const goalProposalRevision=(id:string,title:string,criteria:string,cadence:string)=>hash(['goal-proposal',id,title,criteria,cadence]).slice(0,32);
 /** Count cards that cite at least one source entry at its current version. */
 export function countSourceGroundedContextCards(cards:readonly {tab:'ideas'|'goals';refs:readonly {entry_id:string;version:string|number}[]}[],entries:readonly ContextEntry[]):{cards:number;ideas:number;goals:number}{
@@ -758,15 +761,26 @@ export class PersonalAgentHost {
     taskApprovals(taskId:string):ApprovalView[]{const task=this.tasks.get(taskId);return [...this.#taskApprovals.values()].filter(entry=>entry.conversation_id===task.conversation_id&&entry.generation===(task.conversation_generation??0)&&entry.view.work&&task.work_ids.includes(entry.view.work.work_id)).map(entry=>structuredClone(entry.view))}
     #pendingDecisions(){const views=[...this.#taskApprovals.values()].map(entry=>({view:entry.view,conversation_id:entry.conversation_id})),global=this.#approvalView?.();if(global?.pending_approval&&!views.some(entry=>entry.view.pending_approval_id===global.pending_approval_id)){const approvalOwner=global.pending_approval_id?this.#state.conversations.approval_owners[global.pending_approval_id]:undefined;views.push({view:global,conversation_id:approvalOwner??(global.work?this.workConversation(global.work.work_id)??'':'')})}return {pending_approvals:views.filter(entry=>entry.view.pending_approval&&entry.view.pending_approval_id).map(({view,conversation_id})=>({approval_id:view.pending_approval_id!,conversation_id:conversation_id||null,summary:view.operation_summary??'',queued:view.queued,task_id:view.work?this.tasks.list().find(task=>task.work_ids.includes(view.work!.work_id))?.id:undefined})),pending_confirmations:[...this.#confirmationViews].map(([id,view])=>({proposal_id:view.pending_confirmation_id,conversation_id:id||null,summary:view.pending_workspace_display_name??view.workspace_display_name??'',action:view.pending_action??null,workspace:view.pending_workspace_display_name??null,session:view.pending_session_title??null,busy:view.pending_confirmation_busy}))}}
     #presentationMode:PresentationMode|null=null;
+    #orbVoiceBinding:{conversation_id:string;voice_mode:VoiceMode}={conversation_id:'chat:main',voice_mode:'delegate'};
+    #voiceMode:VoiceMode|undefined;
     #presentationNeedsRetry=false;
     #presentationListeners=new Set<(mode:PresentationMode,seen?:PresentedDecision)=>void|Promise<void>>();
     get presentationMode(){return this.#presentationMode}
     disconnectPresentation():Promise<void>{const run=this.#commands.then(()=>this.#setPresentation('background'));this.#commands=run.catch(()=>{/* transport shutdown preserves background safety */});return run;}
     subscribePresentation(listener:(mode:PresentationMode,seen?:PresentedDecision)=>void|Promise<void>):()=>void{this.#presentationListeners.add(listener);return()=>this.#presentationListeners.delete(listener)}
-    async #setPresentation(mode:PresentationMode,seen?:PresentedDecision):Promise<void>{
+    async #setPresentation(mode:PresentationMode,seen?:PresentedDecision,voiceBinding?:{conversation_id:string;voice_mode:VoiceMode}):Promise<void>{
         if(seen&&this.#presentationMode==='background')throw Error('presentation_hidden');
+        const source=this.#presentationMode==='workbench'?this.#state.conversations.items.find(item=>item.id===this.#state.conversations.selected_id):undefined;
         const changed=this.#presentationMode!==mode||this.#presentationNeedsRetry;
         if(!seen){this.#presentationMode=mode;this.#noteActive()}
+        if(!seen&&mode!=='workbench'){
+            const binding=voiceBinding??(source?{conversation_id:source.id,voice_mode:source.kind==='build'?'build' as const:source.mode??'chat'}:this.#orbVoiceBinding);
+            if(binding.conversation_id!==this.#orbVoiceBinding.conversation_id||binding.voice_mode!==this.#orbVoiceBinding.voice_mode){
+                await this.#supersedeAnnouncements();
+                if(!this.#state.conversations.voice_id&&this.#conversationPool?.hasVoice(this.#orbVoiceBinding.conversation_id))await this.#conversationPool.stopVoice(this.#orbVoiceBinding.conversation_id);
+            }
+            this.#orbVoiceBinding=binding;
+        }
         let failed=false;
         for(const listener of this.#presentationListeners){try{await listener(mode,seen)}catch{failed=true}}
         if(!seen)this.#presentationNeedsRetry=failed;
@@ -812,7 +826,7 @@ export class PersonalAgentHost {
     // generation instead of waiting on delivery checks that may never settle.
     #announcementGeneration=0;
     #announcementStart:Promise<void>|undefined;
-    #inboxTextTransition=false;
+    #announcementTextTransition=false;
     announcementStartGrace(signal:AbortSignal):Promise<void>{return new Promise(resolve=>{const timer=setTimeout(resolve,3000);signal.addEventListener('abort',()=>{clearTimeout(timer);resolve()},{once:true})})}
     #supersedeAnnouncements():Promise<void>|undefined{
         this.#announcementGeneration++;
@@ -849,7 +863,7 @@ export class PersonalAgentHost {
         const background=frame.type==='conversation.completed';
         const voice=(frame.type==='caption'&&frame.role==='user')||frame.type==='conversation.delivered'||frame.type==='conversation.generated';
         if((!background&&!voice)||frame.final!==true||typeof frame.text!=='string'||!frame.text.trim()||typeof frame.conversation_id!=='string')return;
-        if(!background&&this.#state.conversations.voice_id!==frame.conversation_id&&!(frame.conversation_id==='chat:main'&&this.#presentationMode==='orb'))return;
+        if(!background&&this.#state.conversations.voice_id!==frame.conversation_id&&!(frame.conversation_id===this.#orbVoiceBinding.conversation_id&&this.#presentationMode==='orb'))return;
         await this.#serial(async()=>{const next=structuredClone(this.#state),item=next.conversations.items.find(item=>item.id===frame.conversation_id);if(!item)return;
             const turn=typeof frame.turn_id==='string'?frame.turn_id:randomUUID();const previous=item.messages.find(message=>message.turn_id===turn);const trace=Array.isArray(frame.tool_trace)?frame.tool_trace.filter(entry=>entry&&typeof entry==='object'&&!Array.isArray(entry)&&typeof (entry as {name?:unknown}).name==='string'&&['running','ok','error'].includes(String((entry as {state?:unknown}).state))).slice(0,16).map(entry=>({name:String((entry as {name:unknown}).name).slice(0,128),state:String((entry as {state:unknown}).state) as 'running'|'ok'|'error',summary:typeof (entry as {summary?:unknown}).summary==='string'?String((entry as {summary:unknown}).summary).slice(0,160):''})):[];
             const delivery=frame.delivery==='generated'||frame.delivery==='interrupted'?frame.delivery:'completed';
@@ -913,8 +927,8 @@ export class PersonalAgentHost {
         }
         if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');
         if(this.#clearingConversations.has(id))throw Error('conversation_clearing');
-        if(this.#state.conversations.voice_id===id||this.#voiceTransition||id==='chat:main'&&this.#inboxTextTransition)throw Error('voice_active');
-        if(id==='chat:main'){const starting=this.#supersedeAnnouncements();if(starting||this.#conversationPool.hasVoice(id)){this.#inboxTextTransition=true;try{await starting;if(this.#conversationPool.hasVoice(id))await this.#conversationPool.stopVoice(id)}finally{this.#inboxTextTransition=false}}}
+        if(this.#state.conversations.voice_id===id||this.#voiceTransition||id===this.#orbVoiceBinding.conversation_id&&this.#announcementTextTransition)throw Error('voice_active');
+        if(id===this.#orbVoiceBinding.conversation_id){const starting=this.#supersedeAnnouncements();if(starting||this.#conversationPool.hasVoice(id)){this.#announcementTextTransition=true;try{await starting;if(this.#conversationPool.hasVoice(id))await this.#conversationPool.stopVoice(id)}finally{this.#announcementTextTransition=false}}}
         if(!this.#conversationPool.acceptsText(id))throw Error('conversation_busy');
         if(requestId){const prior=conversation.messages.find(message=>message.request_id===requestId);if(prior){if(prior.text!==text||canonicalJson(prior.source_todo??null)!==canonicalJson(sourceTodo??null)||canonicalJson(prior.references??null)!==canonicalJson(context.references??null))throw Error('request_id_conflict');return}}
         if(sourceTodo){const todo=this.life.snapshot().todos.find(todo=>todo.id===sourceTodo.id);if(todo?.version!==sourceTodo.version)throw Error('source_todo_conflict')}
@@ -1000,7 +1014,7 @@ export class PersonalAgentHost {
         item.coding_target=target;item.updated_at=this.#now().toISOString();await this.#commit(next);return true;
     })}
     rememberWorkOwner(id:string,conversationId:string,approvalId?:string):Promise<void>{return this.#serial(async()=>{const next=structuredClone(this.#state);if(!next.conversations.items.some(item=>item.id===conversationId))return;next.conversations.work_owners[id]=conversationId;if(approvalId)next.conversations.approval_owners[approvalId]=conversationId;for(const owners of [next.conversations.work_owners,next.conversations.approval_owners])for(const key of Object.keys(owners).slice(0,-1024))delete owners[key];await this.#commit(next)})}
-    voiceService(){const id=this.#state.conversations.voice_id??(this.#presentationMode==='orb'?'chat:main':null);return id?this.#conversationPool?.service(id):undefined}
+    voiceService(){const id=this.#state.conversations.voice_id??(this.#presentationMode==='orb'?this.#orbVoiceBinding.conversation_id:null);return id&&this.#conversationPool?.hasVoice(id)?this.#conversationPool.service(id):undefined}
     async sendConversationAudio(id:string,pcm:Uint8Array):Promise<void>{if(this.#presentationMode==='background')throw Error('presentation_hidden');if(this.#state.conversations.voice_id!==id)throw Error('voice_not_owned');await this.#conversationPool?.sendAudio(id,pcm)}
     async #conversationCommand(method:string,p:Record<string,unknown>):Promise<unknown>{
         if(typeof p.id==='string'&&this.#state.conversations.items.some(item=>item.id===p.id&&item.kind==='schedule'))throw Error('hidden_conversation');
@@ -1008,7 +1022,7 @@ export class PersonalAgentHost {
         if(method==='conversations.target'){
             const q=z.object({id:z.string().min(1).max(128),target:z.object({workspace_id:z.string().min(1).max(128),session_id:z.string().min(1).max(128).nullable()}).strict().nullable()}).strict().parse(p);
             if(!this.#state.conversations.items.some(item=>item.id===q.id))throw Error('conversation_not_found');
-            if(this.#state.conversations.voice_id===q.id||this.#voiceTransition||q.id==='chat:main'&&this.#inboxTextTransition||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
+            if(this.#state.conversations.voice_id===q.id||this.#voiceTransition||q.id===this.#orbVoiceBinding.conversation_id&&this.#announcementTextTransition||this.#conversationPool?.canChangeTarget(q.id)===false)throw Error('conversation_busy');
             if(q.target&&!this.#codingTargets)throw Error('coding_unavailable');
             const target=q.target?await this.#codingTargets!.validate(q.target):null;
             // Admission can race target validation; never clear a runtime that acquired work meanwhile.
@@ -1019,11 +1033,26 @@ export class PersonalAgentHost {
         }
 
         if(method==='conversations.voice'){
-            const q=z.object({id:z.string(),enabled:z.boolean()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');
+            const q=z.object({id:z.string(),enabled:z.boolean(),voice_mode:voiceModeSchema.optional()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');
             // Starting voice clears the conversation runtime; on the active Build that would abort
             // its in-flight run. Voice on other conversations stays available during a Build.
             if(q.enabled&&item.kind==='build'&&this.activeLocalBuild()?.id===item.id)throw Error('conversation_busy');
-            const c=this.#state.conversations;if(q.enabled){if(c.voice_id&&c.voice_id!==q.id)throw Error('voice_active');if(c.voice_id===q.id)return this.conversationSnapshot();if(!this.#conversationPool)throw Error('voice_unavailable');this.#voiceTransition=true;try{await this.#supersedeAnnouncements();if(this.#conversationPool.hasVoice('chat:main'))await this.#conversationPool.stopVoice('chat:main');await this.#conversationPool.startVoice(item)}finally{this.#voiceTransition=false}}else{if(c.voice_id!==q.id)throw Error('voice_not_owned');await this.#conversationPool?.stopVoice(q.id)}await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.voice_id=q.enabled?q.id:null;await this.#commit(next)});return this.conversationSnapshot()}
+            const c=this.#state.conversations;
+            const voiceMode=q.voice_mode??(this.#presentationMode==='orb'&&this.#orbVoiceBinding.conversation_id===q.id?this.#orbVoiceBinding.voice_mode:item.kind==='build'?'build':item.mode??'chat');
+            if(q.enabled){
+                if(c.voice_id&&c.voice_id!==q.id)throw Error('voice_active');
+                if(c.voice_id===q.id){if(q.voice_mode!==undefined&&voiceMode!==this.#voiceMode)throw Error('conversation_busy');return this.conversationSnapshot()}
+                if(!this.#conversationPool)throw Error('voice_unavailable');
+                this.#voiceTransition=true;
+                try{
+                    await this.#supersedeAnnouncements();
+                    if(this.#conversationPool.hasVoice(this.#orbVoiceBinding.conversation_id))await this.#conversationPool.stopVoice(this.#orbVoiceBinding.conversation_id);
+                    await this.#conversationPool.startVoice(item,voiceMode);
+                    this.#voiceMode=voiceMode;
+                    if(this.#presentationMode==='orb')this.#orbVoiceBinding={conversation_id:q.id,voice_mode:voiceMode};
+                }finally{this.#voiceTransition=false}
+            }else{if(c.voice_id!==q.id)throw Error('voice_not_owned');await this.#conversationPool?.stopVoice(q.id);this.#voiceMode=undefined}
+            await this.#serial(async()=>{const next=structuredClone(this.#state);next.conversations.voice_id=q.enabled?q.id:null;await this.#commit(next)});return this.conversationSnapshot()}
         if(method==='conversations.clear'){const q=z.object({id:z.string(),expected_generation:z.number().int().optional()}).strict().parse(p);const item=this.#state.conversations.items.find(item=>item.id===q.id);if(!item)throw Error('conversation_not_found');if(q.expected_generation!==undefined&&item.generation!==q.expected_generation)throw Error('generation_conflict');if(this.#state.conversations.voice_id===q.id)throw Error('voice_active');this.#localBuildAuthority.delete(q.id);this.#clearingConversations.add(q.id);try{await this.#conversationPool?.clear(q.id);await this.#serial(async()=>{const next=structuredClone(this.#state);const target=next.conversations.items.find(item=>item.id===q.id)!;target.messages=[];target.read_through_id=null;target.generation++;target.prepared=null;delete target.scheduled_result_focus;delete target.plan;if(target.kind==='build'){target.kind='chat';target.mode='chat';delete target.build}await this.#commit(next)});}finally{this.#clearingConversations.delete(q.id)}return this.conversationSnapshot()}
         if(method==='conversations.open_feed'){const feed=this.#state.feed.find(f=>f.id===p.feed_id);const item=feed?this.#state.conversations.items.find(c=>c.feed_ids.includes(feed.id)||c.kind==='topic'&&c.subject_key===feed.subject_key):undefined;if(item&&JSON.stringify(item.prepared)!==JSON.stringify(feed?.prepared)){if(this.#state.conversations.voice_id===item.id)throw Error('voice_active');await this.#conversationPool?.clear(item.id)}}
         return this.#serial(async()=>{const next=structuredClone(this.#state),c=next.conversations;
@@ -2021,14 +2050,18 @@ export class PersonalAgentHost {
         const type:FeedItem['source']['type']=row.source_kind==='task_result'?'task':['file','mail','calendar','im'].includes(row.source_kind)?row.source_kind as FeedItem['source']['type']:'conversation'
         return {subject_key:'evidence:'+row.source_kind+':'+hash(row.locator),source:{type,ref:row.evidence_id}}
     }
-    async #valid(p: Pick<Proposal, 'memory_refs' | 'evidence_refs'> & {schedule_ref?:FeedItem['schedule_ref']}, forDiscovery=false): Promise<boolean> {
+    async #valid(p: Pick<Proposal, 'memory_refs' | 'evidence_refs'> & {schedule_ref?:FeedItem['schedule_ref'];memory_basis?:FeedItem['memory_basis']}, forDiscovery=false): Promise<boolean> {
         if(forDiscovery&&!await this.#productDependencies(p))return false;
         if(p.schedule_ref?.run_id&&!await this.#productDependencies(p))return false;
         for (const ref of p.evidence_refs)
         if (!(p.schedule_ref?.run_id&&ref.startsWith('app:'))&&!await this.#evidence(ref,forDiscovery))
             return false; for (const ref of p.memory_refs) {
         const entry = await this.options.memory()?.get?.(ref.entry_id);
-        if (!memoryEligibleForDiscovery(entry) || entry.version !== ref.version)
+        // Admission remains snapshot-exact. Existing reminders may retain their original
+        // provenance across an explicitly automatic merge, but never across a correction
+        // or an opaque provider version change. Eligibility and evidence stay live below.
+        const automaticAdvance=!forDiscovery&&entry?.written_by==='merge'&&typeof entry.version==='number'&&typeof ref.version==='number'&&entry.version>ref.version&&p.memory_basis?.[ref.entry_id]===reminderBasis(entry);
+        if (!memoryEligibleForDiscovery(entry) || entry.version !== ref.version&&!automaticAdvance)
             return false;
         const memory=this.options.memory();
         if(memory?.canProcessEvidence && (!entry.evidence_refs?.length || !(await Promise.all(entry.evidence_refs.map(id=>memory.canProcessEvidence!(id,'extraction')))).every(Boolean)))return false;
@@ -2062,19 +2095,32 @@ export class PersonalAgentHost {
     }
     async discoverySnapshot(): Promise<DiscoverySnapshot> {
         if(this.#productMemory()||!this.options.memory())await this.refreshMemory();const now=this.#now(),timezone=dailyBriefSettings(this.#state.settings).timezone,memory=this.#productMemory(),rawContext=this.options.context?.(),context=rawContext?await this.authorizeModelContext(rawContext,this.options.discoveryMemoryConsumer?.()??null,AbortSignal.any([this.#abort.signal,AbortSignal.timeout(5000)])):undefined;let relevant=memory?this.#memory.entries:[]
-        const query=context?.channels.find(c=>c.name==='conversation')?.recent.map(i=>typeof i.content.text==='string'?i.content.text:'').filter(Boolean).slice(-1)[0]??now.toLocaleDateString('en-CA')
+        const consumer=this.options.discoveryMemoryConsumer?.()??undefined
+        const recent=memory&&this.#retrieval?(await memory.timelineEvidence?.()??[]).filter(row=>!row.history_only).sort((a,b)=>b.observed_at.localeCompare(a.observed_at)):[]
+        const arrivals=interleave(['mail','calendar','im'].map(kind=>recent.filter(row=>row.kind===kind).map(row=>row.id)),8)
+        const originals=this.#retrieval?await Promise.all(arrivals.map(id=>this.#retrieval!.evidence(id,{signal:this.#abort.signal,...(consumer?{consumer}:{})}))):[]
+        const newest=recent.find(row=>originals.some(result=>result.evidence?.evidence_id===row.id))
+        const query=(newest?originals.find(result=>result.evidence?.evidence_id===newest.id)?.evidence?.text.slice(0,200):undefined)??context?.channels.find(c=>c.name==='conversation')?.recent.map(i=>typeof i.content.text==='string'?i.content.text:'').filter(Boolean).slice(-1)[0]??now.toLocaleDateString('en-CA')
         let retrieval:UnifiedRetrievalResult|undefined
         if(memory&&this.#retrieval){
             const cached=this.#prefetched?.query===query&&now.getTime()-this.#prefetched.at>=0&&now.getTime()-this.#prefetched.at<30000
-            retrieval=cached?structuredClone(this.#prefetched!.result):await this.#retrieval.recall(query,{scope:'any',limit:8,signal:this.#abort.signal})
-            if(cached){const current=await Promise.all(retrieval.snippets.map(row=>this.#retrieval!.evidence(row.evidence_id,{signal:this.#abort.signal})));retrieval.snippets=current.flatMap(result=>result.evidence?[{...result.evidence,text:result.evidence.text.slice(0,300)}]:[])}
+            retrieval=cached?structuredClone(this.#prefetched!.result):await this.#retrieval.recall(query,{scope:'any',limit:8,signal:this.#abort.signal,...(consumer?{consumer}:{})})
+            // New arrivals need not match the previous conversation or today's date string.
+            const refs=[...new Set([...arrivals,...retrieval.snippets.map(row=>row.evidence_id)])].slice(0,16)
+            const current=await Promise.all(refs.map(id=>this.#retrieval!.evidence(id,{signal:this.#abort.signal,...(consumer?{consumer}:{})})))
+            retrieval.snippets=current.flatMap(result=>result.evidence?[result.evidence]:[])
+            if(retrieval.snippets.length)retrieval.state='ok'
             if(memory?.get){const hits=await Promise.all(retrieval.entries.map(async ref=>{const row=await memory.get!(ref.entry_id);return row?.version===ref.revision?row:null}));relevant=[...hits.filter((e):e is MemoryEntry=>e!==null),...relevant];retrieval.entries=retrieval.entries.filter(ref=>hits.some(hit=>hit?.id===ref.entry_id&&hit.version===ref.revision&&memoryEligibleForDiscovery(hit)))}else{retrieval.entries=[]}
         }else if(memory?.get&&typeof memory.recall==='function'){
             const recalled=await memory.recall(query,{scope:'recent',limit:Math.min(8,memory.maxRecallLimit??8),signal:AbortSignal.any([this.#abort.signal,AbortSignal.timeout(5000)])});const hits=await Promise.all(recalled.hits.slice(0,8).map(hit=>memory.get!(hit.memoryId)));relevant=[...hits.filter((e):e is MemoryEntry=>e!==null),...relevant]
         }
         const dueDate=(entry:MemoryEntry):string=>entry.life?.due??(entry.commitment?.due?new Date(entry.commitment.due).toLocaleDateString('en-CA',{timeZone:timezone}):'9999-12-31')
         relevant=relevant.filter((e,i,all)=>all.findIndex(a=>a.id===e.id)===i).sort((a,b)=>dueDate(a).localeCompare(dueDate(b)))
-        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,daily_budget_remaining:Math.max(0,(this.#state.settings.proactive_daily_cap??5)-this.notifications.deliveredToday(['brief','suggestion'],timezone,now.getTime())),memory:relevant.filter(memoryEligibleForDiscovery).slice(0,16),evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].filter(ref=>!ref.startsWith('app:')&&this.#productMemoryDependencies({memory_refs:[],evidence_refs:[ref]})).slice(0,16),recent_delivery:(await this.#discoveryDelivery(this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)))).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
+        relevant=relevant.filter(memoryEligibleForDiscovery)
+        if(memory?.canReadConversationEvidence&&consumer){const allowed=await Promise.all(relevant.map(entry=>entry.evidence_refs?.length?Promise.all(entry.evidence_refs.map(id=>memory.canReadConversationEvidence!(id,consumer))).then(values=>values.every(Boolean)):Promise.resolve(false)));relevant=relevant.filter((_,index)=>allowed[index])}
+        const preferences=relevant.filter(entry=>entry.kind==='preference').slice(0,4),reserved=new Set(preferences.map(entry=>entry.id))
+        const selected=[...relevant.filter(entry=>!reserved.has(entry.id)).slice(0,16-preferences.length),...preferences]
+        return {...(context?{context}:{}),...(retrieval?{retrieval}:{}),user_scope:this.options.userScope,local_date:now.toLocaleDateString('en-CA',{timeZone:timezone}),weekday:now.toLocaleDateString('en-US',{weekday:'long',timeZone:timezone}),timezone,local_time:now.toLocaleTimeString('en-GB',{timeZone:timezone,hour:'2-digit',minute:'2-digit',hourCycle:'h23'}),daily_budget_remaining:Math.max(0,(this.#state.settings.proactive_daily_cap??5)-this.notifications.deliveredToday(['brief','suggestion'],timezone,now.getTime())),memory:selected,evidence_refs:[...new Set(interleave([(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),this.options.evidenceRefs?.()??[],(retrieval?.snippets??[]).map(item=>item.evidence_id)],48))].filter(ref=>!ref.startsWith('app:')&&this.#productMemoryDependencies({memory_refs:[],evidence_refs:[ref]})).slice(0,16),recent_delivery:(await this.#discoveryDelivery(this.#state.feed.filter(f=>f.lifecycle!=='invalidated'&&Object.values(f.delivery).some(Boolean)))).sort((a,b)=>b.updated_at.localeCompare(a.updated_at)).slice(0,8)}
     }
     /** Judges everything that has arrived: a run already in flight started from an older snapshot, so one more follows it. */
     async discoverLatest(): Promise<void> {
@@ -2085,11 +2131,11 @@ export class PersonalAgentHost {
     }
     discover(): Promise<void> { if (this.#discovery)
         return this.#discovery; if (acceptanceEnabled() || !this.#opened || !this.#state.settings.discovery_enabled || !this.options.discover)
-        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); this.options.onTick?.(snapshot); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals: Proposal[] = found === null ? [] : Array.isArray(found) ? (found as readonly Proposal[]).slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; const matters = new Set<string>(); for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
+        return Promise.resolve(); const controller=this.#abort; const run = (async () => { await this.revalidate(); const snapshot = await this.discoverySnapshot(); if(snapshot.memory.length===0&&snapshot.evidence_refs.length===0)return; const found = await this.options.discover!(snapshot, AbortSignal.any([controller.signal, AbortSignal.timeout(30000)])); const proposals: Proposal[] = found === null ? [] : Array.isArray(found) ? (found as readonly Proposal[]).slice(0, MAX_PROPOSALS_PER_DISCOVERY) : [found as Proposal]; const matters = new Set<string>(); for (const proposal of proposals) { if (controller.signal.aborted || !this.#opened || !this.#state.settings.discovery_enabled) break;
         // Concrete evidence identifies the matter; a shared background memory must not merge separate tasks.
         const resolved=(await Promise.all(proposal.evidence_refs.map(ref=>this.#evidence(ref,true)))).filter((e):e is Evidence=>e!==null),entities=resolved.filter(e=>e.task_ref!==undefined||e.source.type!=='conversation');
         const refs=entities.length?entities.map(e=>e.subject_key):proposal.memory_refs.length?proposal.memory_refs.map(ref=>'memory:'+ref.entry_id):resolved.map(e=>e.subject_key);if(refs.some(ref=>matters.has(ref)))continue;
-        if (await this.admit(proposal, snapshot) === 'admitted') refs.forEach(ref => matters.add(ref)); } })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
+        if (await this.admit(proposal, snapshot) === 'admitted') refs.forEach(ref => matters.add(ref)); } this.options.onTick?.(snapshot); })(); this.#discovery = run; void run.finally(() => { if (this.#discovery === run)
         this.#discovery = undefined; }).catch(() => { /* optional observer or cleanup already reported */ }); return run; }
     async admit(input:unknown,snapshot:DiscoverySnapshot):Promise<'admitted'|'rejected'|'suppressed_duplicate'>{
         const parsed=proposalSchema.safeParse(input);if(!parsed.success)return 'rejected';
@@ -2114,7 +2160,7 @@ export class PersonalAgentHost {
         const subject = briefKey ?? (primary.subject_key || hash([...p.evidence_refs].sort()));
         const keyFor=(subjectKey:string)=>hash([this.options.userScope,p.kind,subjectKey,snapshot.local_date]);
         const key=keyFor(subject);
-        if([subject,...(briefKey?[]:entities.length>0?entities.map(e=>e.subject_key):memorySubjects)].some(candidate=>this.#state.dedupe.includes(keyFor(candidate)))) return 'suppressed_duplicate'; const now = this.#now(); const item: FeedItem = { ...(prepared?{prepared:prepared.prepared,action_label:prepared.action_label}:{}), id: randomUUID(), kind: p.kind, title: p.summary.slice(0, 120), why_now: p.why_now, evidence_refs: p.evidence_refs, memory_refs: p.memory_refs, source: primary.source, subject_key: subject, task_ref: entities[0]?.task_ref ?? null, suggestion_id: null, priority: 40, created_at: now.toISOString(), updated_at: now.toISOString(), expires_at: new Date(now.getTime() + 86400000).toISOString(), user_state: 'new', snooze_until: null, lifecycle: 'active', delivery: { presented_at: null, notified_at: null, spoken_at: null } }; const next = structuredClone(this.#state); next.feed.push(item); next.dedupe.push(key); if(briefKey){next.dedupe.push(briefKey);const run=next.brief_runs[briefKey];if(run)run.status='success'} await this.#commit(next); return 'admitted' as const; }).then(async result=>{await this.flushNotifications();return result}); }
+        if([subject,...(briefKey?[]:entities.length>0?entities.map(e=>e.subject_key):memorySubjects)].some(candidate=>this.#state.dedupe.includes(keyFor(candidate)))) return 'suppressed_duplicate'; const now = this.#now(); const item: FeedItem = { ...(prepared?{prepared:prepared.prepared,action_label:prepared.action_label}:{}), id: randomUUID(), kind: p.kind, title: p.summary.slice(0, 120), why_now: p.why_now, evidence_refs: p.evidence_refs, memory_refs: p.memory_refs, ...(p.memory_refs.length?{memory_basis:Object.fromEntries(p.memory_refs.map(ref=>[ref.entry_id,reminderBasis(snapshot.memory.find(entry=>entry.id===ref.entry_id&&entry.version===ref.version)!)]))}:{}), source: primary.source, subject_key: subject, task_ref: entities[0]?.task_ref ?? null, suggestion_id: null, priority: 40, created_at: now.toISOString(), updated_at: now.toISOString(), expires_at: new Date(now.getTime() + 86400000).toISOString(), user_state: 'new', snooze_until: null, lifecycle: 'active', delivery: { presented_at: null, notified_at: null, spoken_at: null } }; const next = structuredClone(this.#state); next.feed.push(item); next.dedupe.push(key); if(briefKey){next.dedupe.push(briefKey);const run=next.brief_runs[briefKey];if(run)run.status='success'} await this.#commit(next); return 'admitted' as const; }).then(async result=>{await this.flushNotifications();return result}); }
     #newsPush:Promise<void>|undefined;#newsRerun=false
     /** Strong news matches go to the main conversation like any other proactive message, within their own allowance. */
     #pushNews():Promise<void>{
@@ -2189,8 +2235,12 @@ export class PersonalAgentHost {
                 const next={...this.#sourcePending,ready:[...this.#sourcePending.ready]};this.#sourcePending.legacy=false;
                 try{
                     await this.refreshMemory();await this.revalidate();await this.#serial(()=>this.#commit(structuredClone(this.#state)));
-                    if(next.legacy||next.ready.length){
-                        const signature=hash({refs:(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref).sort(),revision:next.ready});
+                    // Authorized originals can be judged before background extraction finishes.
+                    const rawEvidence=this.#retrieval?await this.#productMemory()?.timelineEvidence?.():undefined
+                    const rawChanged=next.invalidated>this.#sourceSeen.invalidated&&rawEvidence!==undefined
+                    if(next.legacy||next.ready.length||rawChanged){
+                        // Empty connector polls must not keep moving the quiet-window deadline.
+                        const signature=hash({refs:[...(this.#sources?.evidenceSnapshot?.()??[]).map(item=>item.ref),...(rawEvidence??[]).map(item=>item.id)].sort(),revision:rawEvidence?this.#memory.entries.map(item=>[item.id,item.version]):next.ready});
                         if(signature!==this.#sourceSignature){this.#sourceSignature=signature;if(this.#opened)await this.#discoveryWindow.touch();}
                     }
                     this.#sourceSeen.invalidated=Math.max(this.#sourceSeen.invalidated,next.invalidated);
@@ -2209,7 +2259,7 @@ export class PersonalAgentHost {
     } item.task_ref={work_id:workId};if(verifiedTask)item.task_id=verifiedTask.id;if(this.options.memory()&&!this.#productMemory())item.memory_origin='non_product';if(verifiedTask){const evidence=this.tasks.evidence(verifiedTask.id).filter(e=>e.goal_revision===verifiedTask.goal_revision&&e.kind!=='input').at(-1);let content:unknown;try{content=evidence?.kind==='delivery'?{text:evidence.content}:evidence?JSON.parse(evidence.content):undefined}catch{content=undefined}const text=notificationResultText(content,title);item.prepared={trust:'untrusted_external',text:text.slice(0,12000),evidence_refs:[]}}else delete item.prepared;item.title = title.slice(0, 120); item.kind = 'task_result'; item.lifecycle = 'resolved'; item.updated_at = this.#now().toISOString(); if (item.suggestion_id)
         this.options.pool.withdraw(item.suggestion_id); await this.#commit(next);}); await this.flushNotifications(); }
     async spoken(suggestionId: string): Promise<void> { await this.#serial(async () => { const next = structuredClone(this.#state); const feedId=this.options.pool.get(suggestionId)?.content.personal_feed_id; const item = next.feed.find(f => f.id===feedId || f.suggestion_id === suggestionId); if (!item)
-        return; item.delivery.spoken_at ??= this.#now().toISOString(); item.updated_at = this.#now().toISOString(); await this.#commit(next); }); }
+        return; item.delivery.spoken_at ??= this.#now().toISOString(); await this.#commit(next); }); }
     async imDelivered(id: string): Promise<void> { await this.#serial(async () => {
         const next = structuredClone(this.#state), item = next.feed.find(f => f.id === id);
         if (!item) throw Error('not_found');
@@ -2232,18 +2282,19 @@ export class PersonalAgentHost {
                 if(!speakable())return;
                 let id=this.#state.conversations.voice_id;
                 if(!id){
-                    const inbox=this.#state.conversations.items.find(item=>item.id==='chat:main')!;
-                    if(!pool.hasVoice(inbox.id)){
+                    const source=this.#state.conversations.items.find(item=>item.id===this.#orbVoiceBinding.conversation_id);
+                    if(!source)throw Error('conversation_not_found');
+                    if(!pool.hasVoice(source.id)){
                         // A runtime that finishes starting after the announcement was superseded is released immediately.
-                        const start=pool.startVoice(inbox).then(async()=>{if(!current())await pool.stopVoice(inbox.id)});
+                        const start=pool.startVoice(source,this.#orbVoiceBinding.voice_mode).then(async()=>{if(!current())await pool.stopVoice(source.id)});
                         this.#announcementStart=start;
                         try{await start}finally{if(this.#announcementStart===start)this.#announcementStart=undefined}
                         if(!speakable())return;
                     }
-                    id=this.#state.conversations.voice_id??inbox.id;
+                    id=this.#state.conversations.voice_id??source.id;
                 }
                 if(speakable()&&(typeof feedId!=='string'||await this.canDeliver(feedId)))pool.deliverSuggestion(id,suggestion,reason);
-            }).catch(()=>{if(current())this.#conversationEmit?.({type:'conversation.error',conversation_id:'chat:main',error:'announcement_unavailable'})});
+            }).catch(()=>{if(current())this.#conversationEmit?.({type:'conversation.error',conversation_id:this.#state.conversations.voice_id??this.#orbVoiceBinding.conversation_id,error:'announcement_unavailable'})});
             return true;
         }
         if(!this.#conversationPool)return false;
@@ -2284,7 +2335,9 @@ export class PersonalAgentHost {
         item.delivery.notified_at ??= this.#now().toISOString();
     }
     else if (p.action === 'open')
-        item.user_state = 'seen'; item.updated_at = this.#now().toISOString(); await this.#commit(next); return item; }); }
+        item.user_state = 'seen';
+    // Delivery receipts do not change the source version held by an active conversation.
+    if(p.action!=='presented'&&p.action!=='notified'&&p.action!=='open')item.updated_at = this.#now().toISOString(); await this.#commit(next); return item; }); }
     #taskInputRuns=new Set<Promise<unknown>>();
     #readRuns=new Set<Promise<unknown>>();
     /** Snapshot reads (no connector or CLI work; only the usual receipt is written) must not wait behind a slow command. */
@@ -2394,7 +2447,9 @@ export class PersonalAgentHost {
             if(command.method==='tasks.control'&&(p as {action?:string}).action==='return')void this.wakeTask((data as TaskRecord).id);
         }
         else if(command.method==='presentation.set'){
-            const q=z.object({mode:z.enum(['background','workbench','orb'])}).strict().parse(p);
+            const q=z.object({mode:z.enum(['background','workbench','orb']),conversation_id:z.string().min(1).max(128).optional(),voice_mode:voiceModeSchema.optional()}).strict().refine(value=>(value.conversation_id===undefined)===(value.voice_mode===undefined)&&(value.mode==='orb'||value.voice_mode===undefined)).parse(p);
+            const voiceBinding=q.conversation_id!==undefined&&q.voice_mode!==undefined?{conversation_id:q.conversation_id,voice_mode:q.voice_mode}:undefined;
+            if(voiceBinding){const source=this.#state.conversations.items.find(item=>item.id===voiceBinding.conversation_id);if(!source)throw Error('conversation_not_found');if(source.kind==='schedule')throw Error('hidden_conversation')}
             let returned:TaskRecord[]=[];
             // Reserve identity before either handback or presentation listeners can take effect.
             try{
@@ -2406,7 +2461,7 @@ export class PersonalAgentHost {
                 if(q.mode==='background')await this.#setPresentation(context?.presentation_mode??'background');
                 return {type:'personal.result',request_id:command.request_id,ok:false,error:q.mode==='workbench'?'presentation_sync_failed':'handback_pending'};
             }
-            await this.#setPresentation(context?.presentation_mode??q.mode);data={mode:q.mode,returned_task_ids:returned.map(task=>task.id),task_control_revisions:Object.fromEntries(returned.map(task=>[task.id,task.control_revision]))};
+            await this.#setPresentation(context?.presentation_mode??q.mode,undefined,voiceBinding);data={mode:q.mode,returned_task_ids:returned.map(task=>task.id),task_control_revisions:Object.fromEntries(returned.map(task=>[task.id,task.control_revision]))};
         }
         else if(command.method==='presentation.seen'){const q=z.object({approval_id:z.string().min(1).max(128).optional(),conversation_id:z.string().min(1).max(128).optional(),proposal_id:z.string().min(1).max(128).optional()}).strict().parse(p);if(!this.#presentationMode)throw Error('presentation_unavailable');await this.#setPresentation(this.#presentationMode,q);data={mode:this.#presentationMode}}
         else if(command.method==='conversations.confirm'){if(!client)throw Error('unauthenticated');const q=z.object({id:z.string().min(1).max(128),proposal_id:z.string().min(1).max(128),confirmed:z.boolean()}).strict().parse(p);if(!this.#pendingDecisions().pending_confirmations.some(item=>item.proposal_id===q.proposal_id&&item.conversation_id===q.id))throw Error('confirmation_not_owned');if(!this.#conversationPool)throw Error('conversation_runtime_unavailable');await this.#conversationPool.confirm(q.id,q.proposal_id,q.confirmed);data={accepted:true}}

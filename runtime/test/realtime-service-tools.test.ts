@@ -972,6 +972,31 @@ test('a terminal for a different response does not close the bound batch', async
   assert.deepEqual(service.deliveryState().continuationOrder, [], 'closed by its own terminal')
 })
 
+test('automatic recall continues when the response finishes before the user transcript', async () => {
+  let release!: () => void
+  const gate = new Promise<void>(resolve => { release = resolve })
+  const {service, actions, injectedItems} = realtimeServiceHarness('pipeline', {
+    userResponseMode: 'automatic', includeRecall: true,
+    personalMemory: {recall: async () => {
+      await gate
+      return {source: 'personal', state: 'empty', scope: 'recent', degraded: false, hits: [], contextHits: []}
+    }},
+  })
+  await service.connect()
+  try {
+    await service.handleEvent({kind:'user_speech_started',session_epoch:1,speech_id:'speech',provider_item_id:'user'})
+    await service.handleEvent({kind:'user_speech_ended',session_epoch:1,speech_id:'speech',provider_item_id:'user'})
+    await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'recall'})
+    await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'recall',item_id:'tool',call_id:'call',name:'memory__recall',arguments:{query:'invitation',source:'personal',scope:'any'}})
+    await service.handleEvent({kind:'response_terminal',session_epoch:1,response_id:'recall',status:'completed',reason:''})
+    await service.handleEvent({kind:'user_transcript_final',session_epoch:1,item_id:'user',text:'Decline the invitation and save a draft.'})
+    release()
+    await new Promise<void>(resolve => setImmediate(resolve))
+    assert.equal(injectedItems.filter(item => item.call_id === 'call').length, 1)
+    assert.equal(actions.filter(action => action === 'create_response:tool_result').length, 1)
+  } finally { release(); await service.close() }
+})
+
 test('personal recall resolves through the ordinary tool-output continuation ledger', async () => {
   const {service, actions, injectedItems} = realtimeServiceHarness('pipeline', {
     includeRecall: true,

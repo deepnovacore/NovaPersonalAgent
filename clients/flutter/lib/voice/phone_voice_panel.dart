@@ -458,6 +458,15 @@ class _PhoneVoicePanelState extends State<PhoneVoicePanel> {
                                 ),
                               },
                         ),
+                      if (session.active &&
+                          !session.muted &&
+                          session.microphoneSilent)
+                        _notice(
+                          t(
+                            '未采集到麦克风声音。请检查屏幕共享、镜像或其他设备占用，关闭后重试。',
+                            'No microphone sound detected. Check screen sharing, mirroring, or other device use, then retry.',
+                          ),
+                        ),
                       if (session.active && !session.supportsVoiceDelegation)
                         _notice(
                           t(

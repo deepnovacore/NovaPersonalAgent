@@ -16,7 +16,7 @@
   "signed_indexes": [
     {
       "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/APKINDEX.tar.gz",
-      "sha256": "06dda9a431a53f4fa9cfc7f17893863c1f4455010bc6d6a41815a9083f8c4724"
+      "sha256": "d19440d7f3394b5a8c71baabedaca77bbf58a3e7d3ef65805e56758cd6aacb01"
     },
     {
       "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/community/aarch64/APKINDEX.tar.gz",
@@ -250,11 +250,11 @@
     },
     {
       "name": "zlib",
-      "version": "1.3.2-r1",
-      "filename": "zlib-1.3.2-r1.apk",
-      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/zlib-1.3.2-r1.apk",
-      "sha256": "47bdb66edfddca8b64438369affabd9debc05159aa1bff5c26027270cb28b3f7",
-      "apkindex_checksum": "Q1YvvkcqTZUW0Fk+hcg4wl+nf1rPU="
+      "version": "1.4-r0",
+      "filename": "zlib-1.4-r0.apk",
+      "url": "https://dl-cdn.alpinelinux.org/alpine/v3.21/main/aarch64/zlib-1.4-r0.apk",
+      "sha256": "05b5663e2559dcd4b0914b946e358f34830c6897ed73404cdfa958ea3b0d0b46",
+      "apkindex_checksum": "Q12PvLXuRDDMmHKc0uFxtdYCN00QQ="
     }
   ]
 }

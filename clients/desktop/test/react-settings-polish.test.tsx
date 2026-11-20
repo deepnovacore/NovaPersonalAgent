@@ -39,6 +39,23 @@ test('knowledge page is a compact toolbar, URL row and source list with icon act
  fireEvent.click(v.getByRole('button',{name:'导入网页'}))
  await waitFor(()=>assert.ok(calls.some(call=>call.action==='url'&&call.url==='https://example.com/notes'&&call.consent===true),'import should carry consent'))
 })
+test('knowledge refresh accepts a request from the first committed toolbar',async()=>{
+ const {KnowledgePanel}=await import('../src/renderer/react/settings/panels')
+ const view={capabilities:{runtime:{modules:{knowledge:{enabled:true}}}}}
+ const source={id:'first',title:'First document',status:'ready'}
+ const api={knowledgeAction:async()=>({sources:[source]})}
+ function FirstRefresh(){
+  const host=React.useRef<HTMLDivElement>(null)
+  React.useLayoutEffect(()=>{
+   const refresh=host.current?.querySelector<HTMLButtonElement>('#knowledge-refresh')
+   assert.ok(refresh)
+   refresh.click()
+  },[])
+  return <div ref={host}><KnowledgePanel api={api} view={view}/></div>
+ }
+ const page=render(<FirstRefresh/>)
+ assert.ok(await page.findByText(source.title))
+})
 test('knowledge page stays hidden until the knowledge module is enabled',async()=>{
  const b=bridge(base({focusCategory:'knowledge'}));const v=render(<SettingsApp bridge={b.bridge}/>)
  await waitFor(()=>assert.equal(v.container.querySelector('#knowledge-panel')?.hasAttribute('hidden'),true))

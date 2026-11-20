@@ -235,23 +235,37 @@ class SpaceCatalog extends ChangeNotifier {
     return result;
   }
 
-  Future<void> retireBindings(SpaceRecord keep) async {
-    final obsolete = bindings(keep).where((v) => v.id != keep.id).toList();
-    final previous = List<SpaceRecord>.of(spaces),
-        retiredCount = retired.length;
-    retired.addAll(obsolete);
-    spaces.removeWhere((v) => obsolete.any((old) => old.id == v.id));
-    try {
-      await _save();
-    } catch (_) {
-      spaces
-        ..clear()
-        ..addAll(previous);
-      retired.removeRange(retiredCount, retired.length);
-      rethrow;
-    }
-    notifyListeners();
+  Future<void> _mutations = Future.value();
+
+  Future<T> _serial<T>(Future<T> Function() change) {
+    final result = _mutations.then((_) => change());
+    _mutations = result.then<void>(
+      (_) {},
+      onError: (Object _, StackTrace _) {},
+    );
+    return result;
   }
+
+  Future<void> retireBindings(SpaceRecord keep) => _serial(() async {
+    final obsolete = bindings(keep).where((v) => v.id != keep.id).toList();
+    await _commit(
+      selectedId,
+      nextSpaces: spaces.where((v) => !obsolete.contains(v)).toList(),
+      nextRetired: [...retired, ...obsolete],
+    );
+  });
+
+  Future<List<SpaceRecord>> removeSpace(String id) => _serial(() async {
+    final space = spaces.where((v) => v.id == id).firstOrNull;
+    if (space == null) return const [];
+    final removed = bindings(space);
+    await _commit(
+      removed.any((v) => v.id == selectedId) ? null : selectedId,
+      nextSpaces: spaces.where((v) => !removed.contains(v)).toList(),
+      nextRetired: [...retired, ...removed],
+    );
+    return removed;
+  });
 
   Future<void>? _opening;
   SpaceRecord? get selected =>
@@ -282,52 +296,57 @@ class SpaceCatalog extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> _save() => persistence.write(
-    jsonEncode({
-      'v': 1,
-      'selected': selectedId,
-      'retired': retired.map((s) => s.toJson()).toList(),
-      'spaces': spaces.map((s) => s.toJson()).toList(),
-    }),
-  );
-  Future<void> add(SpaceRecord space) async {
+  Future<void> _commit(
+    String? selection, {
+    List<SpaceRecord>? nextSpaces,
+    List<SpaceRecord>? nextRetired,
+  }) async {
+    await persistence.write(
+      jsonEncode({
+        'v': 1,
+        'selected': selection,
+        'retired': (nextRetired ?? retired).map((s) => s.toJson()).toList(),
+        'spaces': (nextSpaces ?? spaces).map((s) => s.toJson()).toList(),
+      }),
+    );
+    if (nextSpaces != null) {
+      spaces
+        ..clear()
+        ..addAll(nextSpaces);
+    }
+    if (nextRetired != null) {
+      retired
+        ..clear()
+        ..addAll(nextRetired);
+    }
+    selectedId = selection;
+    SpaceStorage.active = selected;
+    notifyListeners();
+  }
+
+  Future<void> add(SpaceRecord space) => _serial(() async {
     if (spaces.any((v) => sameClientHost(v, space))) {
       throw StateError('client_binding_exists');
     }
     if (spaces.any((v) => v.id == space.id)) throw StateError('space_exists');
-    spaces.add(space);
-    selectedId = space.id;
-    await _save();
-    SpaceStorage.active = space;
-    notifyListeners();
-  }
+    await _commit(space.id, nextSpaces: [...spaces, space]);
+  });
 
-  Future<void> updateBinding(SpaceRecord record) async {
+  Future<void> updateBinding(SpaceRecord record) => _serial(() async {
     final index = spaces.indexWhere((v) => v.id == record.id);
     if (index < 0 || !sameClientHost(spaces[index], record)) {
       throw StateError('binding_identity_changed');
     }
-    final previous = spaces[index], selected = selectedId;
-    spaces[index] = record;
-    selectedId = record.id;
-    try {
-      await _save();
-    } catch (_) {
-      spaces[index] = previous;
-      selectedId = selected;
-      rethrow;
-    }
-    SpaceStorage.active = record;
-    notifyListeners();
-  }
+    final next = List<SpaceRecord>.of(spaces)..[index] = record;
+    await _commit(record.id, nextSpaces: next);
+  });
 
-  Future<void> select(String? id) async {
-    if (id != null && !spaces.any((s) => s.id == id)) {
-      throw StateError('unknown_space');
-    }
-    selectedId = id;
-    await _save();
-    SpaceStorage.active = selected;
-    notifyListeners();
-  }
+  Future<void> select(String? id, {bool ignoreMissing = false}) =>
+      _serial(() async {
+        if (id != null && !spaces.any((s) => s.id == id)) {
+          if (ignoreMissing) return;
+          throw StateError('unknown_space');
+        }
+        await _commit(id);
+      });
 }

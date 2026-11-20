@@ -25,6 +25,7 @@ import type { DelegateRequest } from '../src/core/ports.js'
 import { RealtimeRuntimeBridge, validParams, type BridgeRuntime, type PersonalMemoryRecallPort } from '../src/realtime/bridge.js'
 import type { WakeReason } from '../src/core/slots.js'
 import { compileToolSchema } from '../src/core/tool-schema.js'
+import {hostContextItemSchema,hostResponseIntentSchema} from '../src/realtime/protocol.js'
 
 const fixtureRoot = resolve(import.meta.dirname, '../../../tests/fixtures/realtime/bridge/v1')
 
@@ -743,9 +744,9 @@ test('joint recall uses the cancellable read lane and never dispatches retrieved
   let queried=0
   const resource={
     recall:()=>Promise.resolve({state:'ok',hits:[],contextHits:[],degraded:false}),
-    readEvidence:()=>Promise.resolve({evidence_id:'ev-review',source_kind:'file',locator:'review.md',text:'材料已准备，等待周五评审',observed_at:new Date().toISOString()}),
+    readEvidence:(id:string)=>Promise.resolve({evidence_id:id,source_kind:'file',locator:'review.md',text:'材料已准备，等待周五评审。'.repeat(30),observed_at:new Date().toISOString()}),
   } as unknown as PersonalMemoryResource
-  const retrieval=new UnifiedRetrieval({memory:()=>resource,rawRecall:()=>{queried++;return Promise.resolve([{evidence_id:'ev-review'}])}})
+  const retrieval=new UnifiedRetrieval({memory:()=>resource,rawRecall:()=>{queried++;return Promise.resolve(Array.from({length:8},(_,i)=>({evidence_id:`ev-review-${i}-${'a'.repeat(180)}`})))}})
   const bridge=new RealtimeRuntimeBridge({runtime:{clock:new VirtualClock(),memory,executors:new Map(),ingestUserInput:()=>Promise.reject(Error('unused')),dispatchExternal:()=>{throw Error('retrieval_must_not_dispatch')}},tools:compileToolSchema([],{includeMemoryRecall:true}),idFactory:()=> 'joint-result',retrieval})
   const call={kind:'tool_call_ready' as const,session_epoch:1,call_id:'joint',item_id:'tool',name:'memory__recall',arguments:{query:'评审进展',scope:'any'},response_id:'r-1'}
   assert.equal((await bridge.acceptPersonalMemoryRecall(call)).code,'missing_origin_ref')
@@ -756,6 +757,26 @@ test('joint recall uses the cancellable read lane and never dispatches retrieved
   assert.equal(accepted.code,'ok')
   assert.equal(queried,1)
   assert.match(accepted.host_item?.content??'',/等待周五评审/)
+  assert.ok([...accepted.host_item.content].length>4000)
+  hostContextItemSchema.parse(accepted.host_item)
+  hostResponseIntentSchema.parse(accepted.response_intent)
+  retrieval.recall=()=>Promise.resolve({state:'ok',scope:'any',entries:[],snippets:[{evidence_id:'large',source_kind:'file',locator:'large.md',observed_at:new Date().toISOString(),trust:'untrusted_external',text:'x'.repeat(32768)}],degraded:false})
+  const oversized=await bridge.acceptPersonalMemoryRecall({...call,call_id:'large'},{originRef:`${origin.channel}:${origin.seq}`})
+  assert.equal(oversized.code,'result_too_large')
+  hostContextItemSchema.parse(oversized.host_item)
+})
+
+test('memory_unsupported remains an invoke-time defence for legacy offered explicit tools', async () => {
+  const memory = new Memory(), clock = new VirtualClock()
+  const origin = `conversation:${memory.append('conversation', {ts: 0, trust: 'trusted_user', priority: 100, content: {role: 'user', text: 'remember this'}}).seq}`
+  const runtime = new ScriptedRuntime(clock, memory, new Map(), {ingest_refs: [origin]})
+  const resource: PersonalMemoryResource = {open: () => Promise.resolve(), close: () => Promise.resolve(), recall: () => Promise.resolve({source: 'personal', state: 'empty', scope: 'any', hits: [], degraded: false})}
+  const bridge = new RealtimeRuntimeBridge({runtime, tools: compileToolSchema([], {includeExplicitMemory: true}), explicitMemory: () => resource, idFactory: () => 'unsupported'})
+  const acceptedOrigin = await bridge.acceptUserTranscript('remember this')
+  for (const name of ['memory__remember', 'memory__lookup']) {
+    const result = await bridge.acceptToolCall({kind: 'tool_call_ready', name, call_id: name, item_id: name, response_id: 'reply', session_epoch: 1, arguments: {}}, {originRef: acceptedOrigin})
+    assert.equal(result.code, 'memory_unsupported')
+  }
 })
 
 test('memory_unsupported remains an invoke-time defence for legacy offered explicit tools', async () => {

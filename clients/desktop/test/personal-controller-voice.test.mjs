@@ -124,3 +124,54 @@ test('a superseded voice start stays quiet when the failure is only the cancella
   controller.disconnect()
   assert.equal(await started,undefined,'a disconnect rejection is not a provider failure')
 })
+
+for(const mode of ['chat','plan','build','delegate'])test(`orb freezes the workbench ${mode} composer and conversation before presentation handoff`,async()=>{
+  const {controller,sent}=makeController({voiceId:null}),commands=[]
+  controller.mode='text'
+  controller.snapshot.conversations.items.push({id:'source',kind:'topic',mode:['plan','delegate'].includes(mode)?'plan':'chat'})
+  controller.snapshot.conversations.selected_id='source'
+  if(['build','delegate'].includes(mode))controller.state('source').execution=mode
+  await controller.applyMode('workbench')
+  let release
+  controller.command=async(method,params)=>{
+    commands.push({method,params})
+    if(method==='presentation.set')await new Promise(resolve=>{release=resolve})
+    return {mode:params.mode}
+  }
+  const switching=controller.setPresentation('orb')
+  assert.deepEqual(commands[0].params,{mode:'orb',conversation_id:'source',voice_mode:mode})
+  controller.snapshot.conversations.selected_id='chat:main'
+  delete controller.state('source').execution
+  release();await switching
+  await controller.voice({wake:false})
+  assert.deepEqual(commands[1],{method:'conversations.voice',params:{id:'source',enabled:true,voice_mode:mode}})
+  assert.equal(sent.at(-1).conversation_id,'source')
+})
+
+test('direct orb entry defaults to delegate on chat:main and keeps that binding through background',async()=>{
+  const {controller}=makeController({voiceId:null}),commands=[]
+  controller.mode='text'
+  controller.snapshot.conversations.selected_id='another'
+  controller.command=async(method,params)=>{commands.push({method,params});return {mode:params.mode}}
+  await controller.setPresentation('orb')
+  await controller.setPresentation('background')
+  await controller.setPresentation('orb')
+  await controller.voice({wake:false})
+  assert.deepEqual(commands.at(-1),{method:'conversations.voice',params:{id:'chat:main',enabled:true,voice_mode:'delegate'}})
+})
+
+test('retrying an orb handoff keeps its original binding when workbench intent changed after failure',async()=>{
+  const {controller}=makeController({voiceId:null}),commands=[]
+  controller.mode='text'
+  controller.snapshot.conversations.items[0].mode='plan'
+  controller.state('chat:main').execution='delegate'
+  await controller.applyMode('workbench')
+  let fail=true
+  controller.command=async(method,params)=>{commands.push({method,params});if(fail)throw Error('presentation failed');return {mode:params.mode}}
+  await assert.rejects(controller.setPresentation('orb'),/presentation failed/)
+  delete controller.state('chat:main').execution
+  controller.snapshot.conversations.items[0].mode='chat'
+  fail=false;await controller.setPresentation('orb');await controller.voice()
+  assert.equal(commands[1].params.voice_mode,'delegate')
+  assert.equal(commands[2].params.voice_mode,'delegate')
+})

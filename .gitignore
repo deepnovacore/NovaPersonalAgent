@@ -113,5 +113,23 @@ references/
 # Per-task scratch, local review logs and generated integration fixtures
 /work/
 
+# Release-excluded deployment and unreviewed media
+/deploy/novacore-beta/
+/assets/gallery/stills/phone-docx.webp
+/assets/gallery/stills/phone-dual-brain.webp
+/clients/flutter/test/goldens/chat-conversation.png
+/clients/flutter/test/goldens/chat-home-empty.png
+/clients/flutter/test/goldens/chat-home.png
+/clients/flutter/test/goldens/chat-personal.png
+/clients/flutter/test/goldens/chat-settings.png
+/clients/flutter/test/goldens/chat-task-draft.png
+/clients/flutter/test/goldens/chat-tasks.png
+/clients/flutter/test/goldens/workbench-feeds.png
+/clients/flutter/test/goldens/workbench-goals.png
+/clients/flutter/test/goldens/workbench-ideas.png
+/clients/flutter/test/goldens/workbench-nova.png
+/clients/flutter/test/goldens/workbench-profile.png
+/clients/flutter/test/goldens/workbench-todos.png
+
 # The website lives on its own branch; check it out here with `git worktree add website website`.
 /website/

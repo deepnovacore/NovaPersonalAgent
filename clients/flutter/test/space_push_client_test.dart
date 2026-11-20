@@ -16,6 +16,38 @@ class _ActualHttp extends HttpOverrides {}
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+  test('removed Space disables saved push without an active client', () async {
+    final disk = MemorySpacePersistence()
+      ..value = jsonEncode({
+        'enabled': true,
+        'handle': 'removed',
+        'credential': 'opaque',
+        'gateway_url': 'https://gateway.example',
+      });
+    final native = <String>[], requests = <String>[];
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(SpacePushClient.channel, (call) async {
+          native.add(call.method);
+          return null;
+        });
+    final push = SpacePushClient(
+      const SpaceRecord(id: 'removed', name: 'Removed', mode: SpaceMode.client),
+      null,
+      onWake: () async {},
+      persistence: disk,
+      installationPersistence: MemorySpacePersistence(),
+      gatewayUrl: 'https://gateway.example',
+      request: (gateway, method, path, credential, {body}) async {
+        requests.add('$method $path');
+        return {};
+      },
+    );
+    await push.disable();
+    expect(jsonDecode(disk.value!)['enabled'], false);
+    expect(native, contains('removeSpace'));
+    expect(requests, contains('DELETE /v1/registrations/removed'));
+    await push.dispose();
+  });
   test(
     'disable from another instance wins over a delayed permission grant',
     () async {

@@ -1,4 +1,5 @@
 import {refusalText} from './host-refusals.mjs'
+import {composerMode} from './composer-mode.mjs'
 
 export function hasDraftContent(state){
   return Boolean(state.draft||state.references?.length||state.source_todo)
@@ -50,6 +51,8 @@ export class PersonalController {
     this.confirmBuildSwitch=confirmBuildSwitch
     // Synchronous layout hook: the renderer must leave (or enter) the workbench layout before the native window changes size.
     this.presentationChanged=presentationChanged
+    this.workbenchPresented=false
+    this.orbVoiceBinding={conversation_id:'chat:main',voice_mode:'delegate'}
     Object.assign(this,{startRequests:new Map(),send,start,stop,applyPresentation,changed,presentationMode:'workbench',desiredPresentation:'workbench',presentationReady:!applyPresentation,presentationPending:false,presentationSequence:0,taskNotice:'',presentationRequests:new Map(),presentationInFlight:new Map(),connected:false,everConnected:false,capabilities:[],mode:'text',collapsed:false,snapshot:null,dictationId:null,dictationConversationId:null,pending:new Map(),drafts:new Map(),generation:0,inputInstance:null,captureConversationId:null,capturePending:false,voiceState:null,voiceNotice:''})
   }
   get selectedId(){return this.snapshot?.conversations?.selected_id??null}
@@ -126,13 +129,18 @@ export class PersonalController {
     const pending=this.changePresentation(mode,options).finally(()=>{if(this.presentationInFlight.get(mode)===pending)this.presentationInFlight.delete(mode)})
     this.presentationInFlight.set(mode,pending);return pending
   }
+  freezeOrbVoiceBinding(){
+    if(this.workbenchPresented&&this.presentationMode==='workbench'&&this.selectedId)this.orbVoiceBinding={conversation_id:this.selectedId,voice_mode:composerMode(this.selectedConversation,this.state())}
+  }
   async changePresentation(mode,{activate=true,request,reconcileOnly=false}={}){
     if(!['background','workbench','orb'].includes(mode))throw new Error('无效的显示模式')
     if(this.presentationPending&&mode!=='background')throw new Error('正在切换模式，请稍候')
     // A fresh return to the workbench retires the last handback notice; reconciling an earlier exit may post a new one.
     if(!request&&mode==='workbench'&&!this.presentationPending)this.taskNotice=''
     if(!request&&!this.presentationPending&&mode!=='background'){const outstanding=[...this.presentationRequests.values()];for(const prior of outstanding)if(prior.mode!==mode)await this.setPresentation(prior.mode,{activate:false,request:prior})}
-    request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID()}
+    if(mode!=='workbench')this.freezeOrbVoiceBinding()
+    request??=[...this.presentationRequests.values()].findLast(value=>value.mode===mode)??{mode,request_id:crypto.randomUUID(),...(mode!=='workbench'?{voice_binding:{...this.orbVoiceBinding}}:{})}
+    if(request.voice_binding)this.orbVoiceBinding={...request.voice_binding}
     this.presentationRequests.set(request.request_id,request)
     const sequence=++this.presentationSequence
     if(!reconcileOnly)this.desiredPresentation=mode;this.presentationPending=true;// Only a client that may hold a task has anything to hand back.
@@ -140,7 +148,7 @@ export class PersonalController {
     try{
       const local=mode==='background'?this.applyMode(mode,{activate:false}):null
       if(!this.connected){if(local)await local;else await this.applyMode(mode,{activate});this.presentationReady=false;return}
-      const [,result]=await Promise.all([local,this.command('presentation.set',{mode},{request_id:request.request_id})])
+      const [,result]=await Promise.all([local,this.command('presentation.set',{mode,...(mode==='orb'?request.voice_binding:{})},{request_id:request.request_id})])
       if(result?.mode!==mode)throw new Error('显示模式未确认，请重试')
       this.presentationRequests.delete(request.request_id)
       if(result.returned_task_ids?.length&&result.returned_task_ids.every(id=>Number.isSafeInteger(result.task_control_revisions?.[id])))this.taskNotice='已交还 Nova，未发送的草稿已保留'
@@ -153,6 +161,8 @@ export class PersonalController {
     finally{if(sequence===this.presentationSequence)this.presentationPending=false;this.changed()}
   }
   async applyMode(mode,{activate=false}={}){
+    if(!this.presentationPending&&mode!=='workbench')this.freezeOrbVoiceBinding()
+    if(mode==='workbench')this.workbenchPresented=true
     this.presentationMode=mode;this.collapsed=mode!=='workbench'
     // Publish before awaiting: main resizes the window as soon as the presentation IPC arrives, and that call may
     // stall or fail afterwards. The window keeps its new size on failure, so the collapsed state is not rolled back.
@@ -280,14 +290,14 @@ export class PersonalController {
   async startCapture(options){this.capturePending=true;try{await this.start(options)}finally{this.capturePending=false}}
   async voice({wake=true}={}){
     this.clearVoiceNotice()
-    const id=this.selectedId
+    const {conversation_id:id,voice_mode}=this.presentationMode==='orb'?this.orbVoiceBinding:{conversation_id:this.selectedId,voice_mode:composerMode(this.selectedConversation,this.state())}
     if(!this.presentationReady||this.presentationMode==='background')throw new Error('请先切换到工作台或悬浮球')
     if(!id||!this.connected)throw new Error('尚未选择会话')
     if(this.capturePending||this.voiceId||this.mode!=='text')throw new Error('请先结束当前语音或录音')
     const generation=++this.generation;this.mode='starting';this.captureConversationId=id;this.changed()
     let hostStarted=false
     try{
-      await this.command('conversations.voice',{id,enabled:true})
+      await this.command('conversations.voice',{id,enabled:true,voice_mode})
       hostStarted=true
       if(generation!==this.generation)return
       await this.startCapture({wake})

@@ -13,6 +13,8 @@ import {emptyContextDependencies} from '../src/personal-agent/context-dependenci
 import {realtimeCapabilities} from '../src/realtime/capabilities.js'
 import type {RealtimeProvider,HostContextItem} from '../src/realtime/protocol.js'
 import {RealtimeService} from '../src/realtime/service.js'
+import {FULL_MEMORY_TOOLS} from '../src/memory/tool-capabilities.js'
+import {SlowSim} from '../src/core/sims.js'
 
 for(const boundary of ['idle','playing','disconnect'] as const)test(`native conversation ${boundary}: capabilities, no context injection, and explicit fresh close`,{timeout:5000},async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-native-runtime-'))
@@ -51,6 +53,34 @@ for(const boundary of ['idle','playing','disconnect'] as const)test(`native conv
    }else await runtime.parkVoice?.()
    assert.ok(closes>0)
   }finally{await runtime.close()}
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+for(const owned of [false,true])test(`returning to workbench ${owned?'keeps owned':'stops implicit'} non-main orb audio`,{timeout:10000},async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-orb-audio-owner-')),pool=new SuggestionPool()
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool,evidence:()=>null})
+ let audio=0,clears=0,request=0
+ const command=(method:string,params:Record<string,unknown>)=>host.command({type:'personal.command',request_id:'audio-'+request++,method,params},{client_id:'desktop:local'}) as Promise<{ok:boolean}>
+ const provider:RealtimeProvider={capabilities:realtimeCapabilities.cascaded,connect:()=>Promise.resolve({epoch:1,provider_session_id:'orb-audio'}),sendAudio:()=>Promise.resolve(),injectHostItem:()=>Promise.resolve(),createResponse:()=>Promise.resolve(),cancelResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}
+ try{
+  await host.open();await command('conversations.create',{title:'Non-main voice'})
+  const source=host.conversationSnapshot().selected_id
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))},onAudioFrame:()=>{audio++},onAudioClear:()=>{clears++}}),()=>undefined)
+  assert.equal((await command('presentation.set',{mode:'orb',conversation_id:source,voice_mode:'chat'})).ok,true)
+  if(owned)assert.equal((await command('conversations.voice',{id:source,enabled:true,voice_mode:'chat'})).ok,true)
+  else{
+   const suggestion=pool.add({origin:'surrogate',kind:'notify',content:{summary:'Ready'},salience:40,expires_at:1e15})
+   host.routePersonalSuggestion(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+   for(let i=0;i<100&&!host.voiceService();i++)await new Promise(resolve=>setTimeout(resolve,10))
+  }
+  const service=host.voiceService() as RealtimeService;assert.ok(service)
+  const speak=async(id:string)=>{await service.handleEvent({kind:'response_started',session_epoch:1,response_id:id,origin:{kind:'unknown'}});await service.handleEvent({kind:'response_audio_delta',session_epoch:1,response_id:id,pcm:new Uint8Array(640)})}
+  await speak('before');assert.ok(audio>0)
+  const beforeAudio=audio,beforeClears=clears
+  assert.equal((await command('presentation.set',{mode:'workbench'})).ok,true)
+  assert.equal(clears>beforeClears,!owned,'only implicit playback is disconnected')
+  await service.handleEvent({kind:'response_audio_delta',session_epoch:1,response_id:'before',pcm:new Uint8Array(640)})
+  assert.equal(audio>beforeAudio,owned,'only the explicit voice owner keeps playing in workbench')
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 
@@ -121,6 +151,47 @@ for(const mode of ['plan','build'] as const)test(`${mode} voice fails closed whe
   await host.open();const conversation=createConversation(mode==='build'?'build':'chat','Unsupported');conversation.mode=mode==='plan'?'plan':'chat'
   const factory=conversationRuntimeFactory({host,memory:()=>undefined,settings:settingsSchema.parse({executors:[],camera_module_enabled:false,pipeline_mode:'integrated',integrated_provider:'personaplex'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})
   await assert.rejects(factory(conversation,()=>{ /* no renderer */ },'voice'),/voice_context_unavailable/);assert.equal(closed,true)
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+for(const [source,voiceMode] of [['chat','chat'],['plan','plan'],['chat','build'],['plan','delegate'],['chat','delegate']] as const)test(`orb ${voiceMode} voice from ${source} preserves its schema and invocation policy`,async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-orb-tools-'))
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ let schemas:readonly unknown[]=[]
+ const provider:RealtimeProvider={connect:options=>{schemas=options.tools;return Promise.resolve({epoch:1,provider_session_id:'orb-tools'})},sendAudio:()=>Promise.resolve(),injectHostItem:()=>Promise.resolve(),createResponse:()=>Promise.resolve(),cancelResponse:()=>Promise.resolve(),close:()=>Promise.resolve(),async *events(signal){if(!signal.aborted)await new Promise<void>(resolve=>signal.addEventListener('abort',()=>resolve(),{once:true}))}}
+ try{
+  await host.open()
+  await host.command({type:'personal.command',request_id:'orb',method:'presentation.set',params:{mode:'orb'}})
+  const conversation=createConversation('chat','Orb',null,'chat:main');conversation.mode=source
+  const descriptor={name:'sim',summary:'Simulation worker',ownedChannels:['slow_sim']},sim=new SlowSim()
+  const factory=conversationRuntimeFactory({host,memory:()=>undefined,memoryTools:FULL_MEMORY_TOOLS,executors:[{manifest:{...sim.manifest,model_visibility:'hidden'},dispatch:sim.dispatch.bind(sim)}],agentDescriptors:[descriptor],additionalAgentControllers:()=>[{descriptor,dispatch:()=>Promise.resolve({code:'accepted',accepted:true,detail:{}}),cancel:()=>Promise.resolve({code:'accepted',accepted:true,detail:{}})}],settings:settingsSchema.parse({executors:['fast_sim','slow_sim'],camera_module_enabled:false,cascade_llm_provider:'qwen',dashscope_api_key:'test'}),createVoiceProvider:()=>provider,searchTransport:{search:()=>Promise.reject(Error('unused'))}})
+  const runtime=await factory(conversation,()=>undefined,'voice',undefined,undefined,undefined,{voice_mode:voiceMode,...(voiceMode==='delegate'?{chat:false}:{})})
+  try{
+   const names=schemas.map(schema=>(schema as {function:{name:string}}).function.name)
+   const service=runtime.bridgeService as RealtimeService,signal=new AbortController().signal
+   await service.handleEvent({kind:'user_transcript_final',session_epoch:1,item_id:'orb-user',text:'Do the work'})
+   await service.handleEvent({kind:'response_started',session_epoch:1,response_id:'orb-response',origin:{kind:'user_item',item_id:'orb-user'}})
+   const invoke=async(name:string)=>{
+    await service.handleEvent({kind:'tool_call_ready',session_epoch:1,response_id:'orb-response',item_id:name,call_id:name,name,arguments:{}})
+    for(let i=0;i<100&&!service.toolCallAcceptances().some(call=>call.call_id===name);i++)await new Promise(resolve=>setTimeout(resolve,10))
+    const call=service.toolCallAcceptances().find(call=>call.call_id===name)
+    assert.ok(call,name);return call.acceptance
+   }
+   if(voiceMode==='delegate'){
+    for(const name of ['dispatch','cancel','confirm','task','fast_sim__set_light','memory__recall','memory__remember','memory__lookup'])assert.ok(names.includes(name),name)
+    const result=await runtime.toolBridge!.invoke('Set the office light to 50',{id:'light',name:'fast_sim__set_light',arguments:{room:'office',brightness:50}},signal) as {accepted?:boolean}
+    assert.equal(result.accepted,true,'executor op reaches the original asynchronous runtime')
+   }else if(voiceMode==='chat'){
+    for(const name of ['dispatch','task','fast_sim__set_light']){
+     assert.equal(names.includes(name),false,name)
+     assert.equal((await invoke(name)).code,'chat_tool_forbidden',name)
+    }
+   }else{
+    assert.deepEqual(names,[])
+    assert.equal((await invoke('task')).code,'workbench_voice_readonly')
+   }
+   assert.equal(host.tasks.list().length,0)
+  }finally{await runtime.close()}
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })
 

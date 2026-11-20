@@ -15,7 +15,7 @@ import type {DeviceAction} from '@midscene/core'
 import {COMPUTER_RESOURCE} from '../src/personal-agent/computer-use/contract.js'
 import type {startComputerBackend} from '../src/executors/computer-backend.js'
 
-async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resolve(true),settings:Partial<ComputerSessionOptions>={}){
+async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resolve(true),settings:Partial<ComputerSessionOptions>={},budgetMs=10000){
  const root=await mkdtemp(join(tmpdir(),'computer-session-'))
  const image='data:image/png;base64,'+(await sharp({create:{width:2560,height:1440,channels:3,background:'white'}}).png().toBuffer()).toString('base64')
  let target='window-one',closed=0,connected=0,cleanup=true,width=1024
@@ -31,7 +31,7 @@ async function fixture(approve:(name:string)=>Promise<boolean>=()=>Promise.resol
    windowTarget:()=>Promise.resolve({target,width,height:576}),releaseInput:()=>Promise.resolve(),expectEditor:editor=>{expectedEditors.push(editor)},
  }
  let observationId=''
- const session=new ComputerSession({signal:new AbortController().signal,config:{displayId:'1',lockRoot:root,maxSteps:10,budgetMs:1000,settleMs:0},
+ const session=new ComputerSession({signal:new AbortController().signal,config:{displayId:'1',lockRoot:root,maxSteps:10,budgetMs,settleMs:0},
   backend:(_display,_signal,_budget,_worker,_resources,_hold,window)=>{backendWindow=window;return Promise.resolve(backend)},foreground:()=>Promise.resolve({target,width,height:576}),approve:name=>{approvals.push(name);return approve(name)},acting:(name,point)=>{events.push('acting');acting.push(name);points.push(point)},...settings})
  return {session,delayWrite:(gate:Promise<void>)=>{writeGate=gate},backendWindow:()=>backendWindow,setWidth:(value:number)=>{width=value},observe:async()=>{const value=await session.observe();observationId=value.id;return value.image},action:(name:Parameters<ComputerSession['action']>[0],args:Record<string,unknown>)=>session.action(name,{observationId,...args}),writes,approvals,acting,events,points,afterWrite:(effect:()=>void)=>{afterWrite=effect},failWrite:(reason='cleanup_unknown')=>{writeFailure=reason},setTarget:(value:string)=>{target=value},setCleanup:(value:boolean)=>{cleanup=value},delayClose:(gate:Promise<void>)=>{closeGate=gate},connected:()=>connected,closed:()=>closed,
    expectedEditors,dispose:async()=>{await session.close().catch(()=>{ /* test asserts cleanup errors separately */ });releaseQuarantinedTaskResources([COMPUTER_RESOURCE]);await rm(root,{recursive:true,force:true})}}
@@ -170,8 +170,9 @@ test('geometry change during approval refuses input',async()=>{
  const f=await fixture(name=>{if(name==='Tap')f.setWidth(1000);return Promise.resolve(true)})
  try{await f.observe();await assert.rejects(f.action('computer_click',{x:10,y:10}),/screen_changed/);assert.equal(f.writes.length,0)}finally{await f.dispose()}
 })
-test('session wall clock cancels a pending consent without input',async()=>{
- const f=await fixture(()=>new Promise(()=>{ /* Consent never arrives. */ }))
+test('session wall clock cancels a pending consent without input',async t=>{
+ const keepAlive=setTimeout(()=>undefined,5000);t.after(()=>clearTimeout(keepAlive))
+ const f=await fixture(()=>new Promise(()=>{ /* Consent never arrives. */ }),{},100)
  try{await assert.rejects(f.observe(),/cancelled/);assert.equal(f.writes.length,0);assert.equal(f.connected(),0)}finally{await f.dispose()}
 })
 for(const mode of ['append','replace'] as const)test(`type ${mode} reaches driver unchanged`,async()=>{

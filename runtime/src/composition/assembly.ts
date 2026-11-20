@@ -506,7 +506,11 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),
       discoveryMemoryConsumer:()=>configuredDiscoveryConsumer(settings),
-      discover: observeOperation('proactivity',proactive.discover.bind(proactive)),
+      discover: observeOperation('proactivity',async (snapshot,signal)=>{
+        const {proposals,diagnostics}=await proactive.discoverDetailed(snapshot,signal)
+        try{options.telemetry?.record('discovery.candidates',{evidence_refs:snapshot.evidence_refs,snippet_refs:snapshot.retrieval?.snippets.map(row=>row.evidence_id)??[],memory_refs:snapshot.memory.map(row=>({entry_id:row.id,version:row.version})),daily_budget_remaining:snapshot.daily_budget_remaining??null,diagnostics:{...diagnostics},proposals})}catch{/* diagnostics must not change admission */}
+        return proposals
+      }),
       proposeGoals: observeOperation('proactivity',(input:GoalProposerInput,signal:AbortSignal)=>proposeGoals(supportGateway,routedSettings.support_model,input,signal)),
       prepareGoalCheckin: observeOperation('proactivity',(input:GoalCheckinInput,signal:AbortSignal)=>writeGoalCheckins(supportGateway,routedSettings.support_model,input,signal)),
       updateGoalProgress: observeOperation('proactivity',(input:GoalProgressUpdateInput,signal:AbortSignal)=>writeGoalProgress(supportGateway,routedSettings.support_model,input,signal)),

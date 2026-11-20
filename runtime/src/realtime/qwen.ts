@@ -688,6 +688,10 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
   }
 
   async createResponse(intent: HostResponseIntent, signal: AbortSignal): Promise<void> {
+    if (intent.kind === 'tool_result') {
+      await this.ensureResponse(signal)
+      return
+    }
     // DashScope's official qwen-audio-agent targets injected results with one response-local
     // instruction and disables tools for that response. Keeping that boundary per response avoids
     // letting the latest real user turn (for example, "确认") own a later host result.
@@ -734,7 +738,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
   }
 
   async ensureResponse(signal: AbortSignal): Promise<void> {
-    void signal
+    signal.throwIfAborted()
     // No response-local instruction or tool override: this is the provider finishing the existing
     // real user turn, and the confirmation function must remain available.
     await this.#sendJson({type: 'response.create', response: {modalities: ['audio', 'text']}})
@@ -1182,7 +1186,7 @@ export class QwenAudioRealtimeAdapter implements RealtimeProvider {
       session_epoch: epoch,
       kind: 'provider_error',
       code: isTruthy(rawParam) ? `${code}.${param}`.slice(0, 80) : code,
-      recoverable: code === 'response_idle_timeout',
+      recoverable: code === 'response_idle_timeout' || code === 'user_idle_timeout',
     }
   }
 

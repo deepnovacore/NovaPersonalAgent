@@ -207,7 +207,7 @@ test('discovery treats unusable proposals as silence instead of failing the call
  const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'Asia/Shanghai',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
  const discover=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discover(snapshot,new AbortController().signal)
  const base={kind:'question',summary:'Q',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
- assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,memory_refs:['entry-1']}]})),[])
+ assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,memory_refs:['entry-1']}]})),[base],'an invalid memory ref does not discard valid mail evidence')
  assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,summary:'x'.repeat(201)}]})),[])
  assert.deepEqual(await discover('not json at all'),[])
  assert.deepEqual(await discover(JSON.stringify({proposals:[{...base,extra:true}]})),[])
@@ -945,4 +945,46 @@ test('uncertainty that only describes what the source did not say is dropped', a
   assert.equal(coverageGapFree('消息中没有提及负责人。'), '')
   assert.equal(coverageGapFree('是否已完成迁移仍待确认。'), '是否已完成迁移仍待确认。')
   assert.equal(coverageGapFree(''), '')
+})
+
+test('discovery diagnostics distinguish invalid JSON, envelopes and individual proposal issues without text',async()=>{
+ const snapshot={user_scope:'local',local_date:'2026-09-11',weekday:'Friday',timezone:'UTC',memory:[],evidence_refs:['conversation:1'],recent_delivery:[]}
+ const run=(text:string)=>new GatewayProactivity({gateway:new ScriptedGateway([],text),model:'m',proactivityPreset:'balanced'}).discoverDetailed(snapshot,new AbortController().signal)
+ assert.deepEqual((await run('not json')).diagnostics,{raw_length:8,json_ok:false,proposal_count:null,resolved_memory_refs:0,dropped_memory_refs:0,rejections:[]})
+ const envelope=await run('{"proposals":"private text"}')
+ assert.equal(envelope.diagnostics.json_ok,true);assert.equal(envelope.diagnostics.proposal_count,null)
+ assert.deepEqual(envelope.diagnostics.rejections,[{index:null,issues:[{path:['proposals'],code:'invalid_type'}]}])
+ const base={kind:'question',summary:'Private invitation',why_now:'Now',evidence_refs:['conversation:1'],memory_refs:[]}
+ const text=JSON.stringify({proposals:[{...base,memory_refs:['wrong']},base]})
+ const result=await run(text)
+ assert.deepEqual(result.proposals,[base,base]);assert.equal(result.diagnostics.dropped_memory_refs,1);assert.equal(result.diagnostics.resolved_memory_refs,0);assert.equal(result.diagnostics.raw_length,text.length);assert.equal(result.diagnostics.proposal_count,2)
+ assert.deepEqual(result.diagnostics.rejections,[{index:0,issues:[{path:['memory_refs',0],code:'invalid_type'}]}])
+ assert.equal(JSON.stringify(result.diagnostics).includes('Private invitation'),false)
+})
+
+test('discovery prompt distinguishes invitation conflicts from contradictions and grounds countdowns in local time',async()=>{
+ const gateway=new ScriptedGateway([],'{"proposals":[]}'),proactive=new GatewayProactivity({gateway,model:'m',proactivityPreset:'balanced'})
+ const snapshot={user_scope:'local',local_date:'2026-11-14',local_time:'13:42',weekday:'Saturday',timezone:'Asia/Shanghai',memory:[],evidence_refs:[],recent_delivery:[]}
+ await proactive.discover(snapshot,new AbortController().signal)
+ const request=gateway.completions[0]!
+ assert.match(request.system,/contradictory facts about the same matter/)
+ assert.match(request.system,/new or rescheduled invitation.*clashes with an existing calendar plan.*moved-up reply deadline.*valid why-now/)
+ assert.match(request.system,/local_date, local_time and timezone/);assert.match(request.system,/never invent hour countdowns/)
+ assert.match(request.system,/memory_refs must contain objects \{entry_id,version\}, never bare strings/)
+ assert.match(request.system,/include a preference memory reference/)
+ assert.equal((JSON.parse(request.prompt) as {local_time:unknown}).local_time,'13:42')
+})
+
+test('discovery resolves exact snapshot memory IDs and drops bad refs individually without weakening proposal schema',async()=>{
+ const entry={id:'known',version:3,content:'Prefers small groups',kind:'preference' as const,origin:'stated' as const,source_refs:[],observed_at:'2026-11-14T00:00:00Z',recorded_at:'2026-11-14T00:00:00Z',topic:'social',status:'active' as const,corrected_to:null,confidence_note:null}
+ const snapshot={user_scope:'local',local_date:'2026-11-14',weekday:'Saturday',timezone:'UTC',memory:[entry,{...entry,id:'unversioned',version:null}],evidence_refs:['mail:1'],recent_delivery:[]}
+ const base={kind:'question',summary:'Reply?',why_now:'Deadline',evidence_refs:['mail:1'],memory_refs:['known','unknown',' known','unversioned',{entry_id:'known',version:3,extra:true},null,{entry_id:'known',version:3}]}
+ const gateway=new ScriptedGateway([],JSON.stringify({proposals:[base,{...base,evidence_refs:[],memory_refs:['unknown']},{...base,evidence_refs:[],memory_refs:['known']}]}))
+ const result=await new GatewayProactivity({gateway,model:'m',proactivityPreset:'balanced'}).discoverDetailed(snapshot,new AbortController().signal)
+ assert.equal(result.proposals.length,2)
+ assert.deepEqual(result.proposals[0]!.memory_refs,[{entry_id:'known',version:3},{entry_id:'known',version:3}])
+ assert.deepEqual(result.proposals[1]!.memory_refs,[{entry_id:'known',version:3}])
+ assert.equal(result.diagnostics.resolved_memory_refs,2);assert.equal(result.diagnostics.dropped_memory_refs,6)
+ const {proposalSchema}=await import('../src/personal-agent/contracts.js')
+ assert.equal(proposalSchema.safeParse(base).success,false,'strict external/admission contract is unchanged')
 })

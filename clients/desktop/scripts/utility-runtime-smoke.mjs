@@ -1,5 +1,5 @@
 import {createBackendControl, createBackendSupervisor, classifyBackendFailure, createBackendDiagnosticCollector, configWarnings, startupErrors} from '../src/main/backend-supervisor.mjs'
-import {describeMissingBlockingEnvironment, allowAcceptanceLoopback} from '@nova-personal-agent/runtime/desktop'
+import {describeHostBlockingEnvironment, allowAcceptanceLoopback} from '@nova-personal-agent/runtime/desktop'
 import {resetTrayUnreadForBackend} from '../src/main/tray-unread.mjs'
 import {acceptanceBackendSettings} from '../src/main/workbench-native-acceptance.mjs'
 import {preferredLanguage} from '../src/renderer/locale.mjs'
@@ -270,10 +270,12 @@ async function runCapabilityStatus() {
         DASHSCOPE_API_KEY: 'dummy-dashscope-key', QWEN_REALTIME_URL: `wss://127.0.0.1:${port}/qwen`,
         BLACKBOARD_PATH: resolve(root, 'blackboard.sqlite'), BLACKBOARD_OWNER_ID: 'utility-smoke',
         NODE_EXTRA_CA_CERTS: certificate}
-      const context = vm.createContext({readCapabilityDocument, describeMissingBlockingEnvironment, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
+      const context = vm.createContext({readCapabilityDocument, describeHostBlockingEnvironment, classifyBackendFailure, createBackendDiagnosticCollector, createBackendControl,
         createReadinessListener: options => createReadinessListener({...options, onTimeout: () => {
           readinessTimeouts++; trace('readiness timeout requests child cleanup'); options.onTimeout?.()
         }}), shutdownBackend, shutdownBackendBestEffort, watchBackendExit, waitForBackendReadiness, validateBootstrap, backendLaunchSpec, randomBytes, resolve, realpathSync, existsSync,
+        // This standalone capability fixture has no Host Space model configuration.
+        refreshSpaceModels: async () => {},
         chatGptFile: () => resolve(root, 'chatgpt-accounts.json'), refreshRuntimeUsage: () => {},
         acceptance: null, acceptanceBackendSettings, allowAcceptanceLoopback, preferredLanguage, configWarnings, startupErrors, searchProxyUrlFromRules,
         accessCredentials: action => action(), refreshCapabilityEditor: () => {}, feishuSetupOwner: {release: async () => {}},

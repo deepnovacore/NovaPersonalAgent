@@ -101,13 +101,12 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 
 | Platform | Download |
 | --- | --- |
-| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64-app.zip) |
-| Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [Portable ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
-| Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
+| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
+| Windows · x64 | [EXE (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-unsigned.exe) |
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
 | Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
-**Or install with npm** (Node.js 22.13+):
+**Or install the CLI with npm** (currently 0.4.1; Node.js 22.13+):
 
 ```bash
 npm install --global nova-personal-agent@latest
@@ -121,7 +120,7 @@ novapersonal doctor
 
 For coding tasks, install and sign in to the coding agent you choose (Codex by default).
 
-**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. Pin a version with `nova-personal-agent@1.0.0`. State files are versioned, so an older build may refuse a newer file: back up, then run `novapersonal reset-state` before downgrading.
+**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. Pin a version with `nova-personal-agent@0.4.1`. State files are versioned, so an older build may refuse a newer file: back up, then run `novapersonal reset-state` before downgrading.
 
 **Set up your Space.** A Host (your desktop or a headless server) keeps the runtime, keys and memory. Clients (another desktop, iOS, Android) reach it through an end-to-end encrypted relay or Tailscale; the relay only forwards ciphertext. A standalone Space runs locally with no relay. See the [Space setup guide](docs/en/space-host-client.md) and the [relay guide](relay/README.md).
 

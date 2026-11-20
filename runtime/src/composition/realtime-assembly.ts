@@ -405,7 +405,7 @@ export class RealtimeAssembly {
       pool: input.core.runtime.core.suggestions,
       evidence: ref => { try {const [channel,seq]=parseMemoryRef(ref);const item=input.core.runtime.memory.channels.get(channel)?.items.find(item=>item.seq===seq);if(!item)return null;const work=item.content.work_id??item.content.delegate_id;return {subject_key:typeof work==='string'?'task:'+work:ref,source:{type:typeof work==='string'?'task':'conversation',ref},...(typeof work==='string'?{task_ref:{work_id:work}}:{})}}catch{return null}},
       context:()=>{const view=compileContextView(input.core.runtime.memory,input.core.runtime.core.floor.state,input.core.runtime.clock.now(),{suggestions:input.core.runtime.core.suggestions.all(),triggerKind:'discovery_tick'});return {...view,channels:view.channels.slice(-8),affordances:view.affordances.slice(-8),in_flight:view.in_flight.slice(-8)}},
-      onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}})},
+      onTick: snapshot=>{input.core.runtime.post({kind:'discovery_tick',payload:{local_date:snapshot.local_date,weekday:snapshot.weekday,timezone:snapshot.timezone}},input.core.runtime.clock.now()+3)},
       evidenceRefs:()=>[...input.core.runtime.memory.channels.values()].flatMap(channel=>channel.items.slice(-4).map(item=>`${item.channel}:${item.seq}`)).slice(-16),
       ...input.core.personalAgentConfig?.models,
       ...(input.service.inputCapabilities.includes('text_input')?{act:async item=>input.service.submitText(`请帮我处理这条建议：${item.title}`)}:{}),

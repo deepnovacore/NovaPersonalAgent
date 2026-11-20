@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
@@ -17,6 +18,34 @@ import 'package:nova_mobile/space/space_storage.dart';
 import 'agent_core_test.dart' show MemoryPersistence;
 import 'local_life_test.dart' show MemoryLifePersistence;
 import 'scheduled_agent_runner_test.dart' show FixtureSettings;
+
+class _RevokingSourceStore extends SourceStore {
+  _RevokingSourceStore(super.persistence, {super.now});
+  String? revokeProvider;
+  Set<String>? receivingEvidence;
+  @override
+  List<Map<String, dynamic>> readAuthorizedEvidence(
+    String provider,
+    String purpose,
+  ) {
+    final rows = super.readAuthorizedEvidence(provider, purpose);
+    return provider == 'q' && receivingEvidence != null
+        ? rows
+              .where((row) => receivingEvidence!.contains(row['evidence_id']))
+              .toList()
+        : rows;
+  }
+
+  int checks = 0;
+  @override
+  void validateProcessing(String provider, String purpose, int expected) {
+    super.validateProcessing(provider, purpose, expected);
+    if (provider == revokeProvider && ++checks == 2) {
+      revokeProvider = null;
+      unawaited(grantProcessing(provider, purpose, false));
+    }
+  }
+}
 
 Map<String, dynamic> _emptyLife() => {
   'todos': <dynamic>[],
@@ -487,7 +516,7 @@ void main() {
       final now = DateTime.utc(2026, 11, 12);
       final older = DateTime.utc(2026, 11, 1, 8);
       final newer = DateTime.utc(2026, 11, 9, 8);
-      sources = SourceStore(MemoryLifePersistence(), now: () => now);
+      sources = _RevokingSourceStore(MemoryLifePersistence(), now: () => now);
       await sources.bind('self', 1);
       await sources.select('c', older.subtract(const Duration(days: 1)));
       await sources.ingestPage(
@@ -555,6 +584,65 @@ void main() {
       provider: provider,
       args: args,
     );
+
+    test(
+      'grant withdrawn during read return fences the next model round',
+      () async {
+        const recipient = 'https://model.invalid|fixture';
+        await sources.grantProcessing(recipient, 'profile', true);
+        final revoked = ValueNotifier<int>(0);
+        var revision = sources.processingRevision;
+        void accessChanged() {
+          if (sources.processingRevision != revision) {
+            revision = sources.processingRevision;
+            revoked.value++;
+          }
+        }
+
+        sources.addListener(accessChanged);
+        addTearDown(() {
+          sources.removeListener(accessChanged);
+          revoked.dispose();
+        });
+        (sources as _RevokingSourceStore).revokeProvider = recipient;
+        final (host, _, id, model) = await _delegate(
+          memory: memory,
+          rounds: [
+            [
+              ('profile_read', {'section': 'profile'}),
+            ],
+          ],
+          readProfile: (args) => read(args, provider: recipient),
+          profileAccessChanged: revoked,
+        );
+        await host.send(
+          id,
+          'Build my bio',
+          userAuthored: false,
+          approve: (_) async => true,
+        );
+        expect(
+          () => sources.readAuthorizedEvidence(recipient, 'profile'),
+          throwsStateError,
+        );
+        expect(model.prompts, hasLength(1));
+      },
+    );
+
+    test('receiving model only reads its authorized evidence subset', () async {
+      await sources.grantProcessing('q', 'profile', true);
+      (sources as _RevokingSourceStore).receivingEvidence = Set<String>.from(
+        published.firstWhere((row) => row['key'] == 'newer')['evidence_ids']
+            as List,
+      );
+      expect(sources.readAuthorizedEvidence('q', 'profile').length, 1);
+      final result = await read({'section': 'timeline'}, provider: 'q');
+      expect([for (final e in result['entries']) e['key']], ['newer']);
+      expect(
+        (await read({'section': 'profile'}, provider: 'q'))['entries'],
+        isEmpty,
+      );
+    });
 
     test('returns only the requested section, newest timeline first', () async {
       final about = await read({'section': 'profile'});

@@ -767,3 +767,30 @@ test('a question and a notification about the same matter in one window admit on
  const host=new PersonalAgentHost({...f.host.options,discover:()=>Promise.resolve([...same,other])})
  try{await host.open();await host.discover();assert.deepEqual(host.snapshot().feed.map(item=>item.title),['Check demo materials?','A different matter'])}finally{await host.close();await f.close()}
 })
+
+test('discovery reserves four authorized undated preferences among more than sixteen dated entries',async()=>{
+ const f=await fixture()
+ try{
+  f.entries.clear()
+  for(let i=0;i<20;i++)f.entries.set('dated'+i,{...entry('dated'+i),kind:'todo',life:{id:'dated'+i,version:1,status:'open',due:'2026-09-12',goal_id:null,idea_id:null,success_criteria:null}})
+  for(let i=0;i<5;i++)f.entries.set('preference'+i,{...entry('preference'+i),kind:'preference'})
+  f.entries.set('expired-preference',{...entry('expired-preference'),kind:'preference',status:'expired'})
+  const snapshot=await f.host.discoverySnapshot()
+  assert.equal(snapshot.memory.length,16);assert.equal(snapshot.memory.filter(row=>row.kind==='preference').length,4)
+  assert.equal(snapshot.memory.some(row=>row.id==='expired-preference'),false)
+  assert.equal(snapshot.memory.filter(row=>row.kind==='todo').length,12)
+  assert.match(snapshot.local_time!,/^\d{2}:\d{2}$/u)
+ }finally{await f.close()}
+})
+
+test('discovery preference reservation excludes entries not authorized for its configured consumer',async()=>{
+ const f=await fixture()
+ try{
+  f.entries.clear()
+  f.entries.set('allowed',{...entry('allowed'),kind:'preference',evidence_refs:['e:allowed']})
+  f.entries.set('denied',{...entry('denied'),kind:'preference',evidence_refs:['e:denied']})
+  Object.assign(f.host.options,{discoveryMemoryConsumer:()=> 'discovery'})
+  Object.assign(f.host.options.memory()!,{canReadConversationEvidence:(id:string,consumer:string)=>Promise.resolve(id==='e:allowed'&&consumer==='discovery')})
+  assert.deepEqual((await f.host.discoverySnapshot()).memory.map(row=>row.id),['allowed'])
+ }finally{await f.close()}
+})

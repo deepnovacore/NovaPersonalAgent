@@ -345,14 +345,14 @@ export class RealtimeRuntimeBridge {
       if (!schema || !validParams(call.arguments, schema) || typeof call.arguments.evidence_id !== 'string' || call.arguments.evidence_id.includes('\0')) return this.#refused(call, 'invalid_params')
       if (!origin || !trustedUserOrigin(this.#runtime.memory, origin)) return this.#refused(call, 'missing_origin_ref')
       const result = this.#retrieval ? await this.#retrieval.evidence(call.arguments.evidence_id, {...options,consumer:this.#conversationConsumer}) : {state: 'unavailable', evidence: null}
-      return this.#inlineToolResult(call, JSON.stringify(result), result.state, {})
+      return this.#inlineToolResult(call, JSON.stringify(result), result.state, {}, true)
     }
     const request = this.#memoryRecallRequest(call, options.originRef ?? null)
     if (!request.ok) return request.acceptance
     if (request.source === 'session') return this.#acceptMemoryRecall(call, options.originRef ?? null)
     if (this.#retrieval) {
       const result = await this.#retrieval.recall(request.query, {consumer:this.#conversationConsumer,scope: request.scope, limit: 8, ...(request.sourceFilter ? {sourceFilter:request.sourceFilter} : {}), ...(options.signal ? {signal: options.signal} : {})})
-      return this.#inlineToolResult(call, JSON.stringify(result), result.state, {hit_count: result.entries.length + result.snippets.length, degraded: result.degraded})
+      return this.#inlineToolResult(call, JSON.stringify(result), result.state, {hit_count: result.entries.length + result.snippets.length, degraded: result.degraded}, true)
     }
     if (request.source !== 'personal') return this.#refused(call, 'unsupported_tool')
     if (request.sourceFilter) return this.#refused(call, 'source_retrieval_unavailable')
@@ -537,8 +537,10 @@ export class RealtimeRuntimeBridge {
     content: string,
     code: string,
     telemetry: Readonly<Record<string, JsonValue>>,
+    contextRead = false,
   ): ToolAcceptance {
-    const hostItem = {...this.#toolOutputContent(call, content), recovery_eligible: true}
+    if(contextRead&&Buffer.byteLength(content)>32768)return this.#refused(call,'result_too_large')
+    const hostItem = {...this.#toolOutputContent(call, content), recovery_eligible: true,...(contextRead?{context_read:true as const}:{})}
     return acceptance({
       accepted: true,
       code,

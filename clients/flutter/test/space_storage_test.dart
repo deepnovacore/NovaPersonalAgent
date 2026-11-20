@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
@@ -6,6 +7,77 @@ import 'package:nova_mobile/space/space_storage.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
 
 void main() {
+  test('failed removal leaves the selected Space and disk untouched', () async {
+    final disk = _FailingPersistence();
+    const space = SpaceRecord(
+      id: 'keep',
+      name: 'Keep',
+      mode: SpaceMode.standalone,
+    );
+    disk.value = jsonEncode({
+      'selected': space.id,
+      'spaces': [space.toJson()],
+    });
+    final catalog = SpaceCatalog(persistence: disk);
+    await catalog.open();
+    await expectLater(catalog.removeSpace(space.id), throwsStateError);
+    expect(catalog.selectedId, space.id);
+    expect(catalog.spaces.single.id, space.id);
+    expect(catalog.retired, isEmpty);
+    expect(jsonDecode(disk.value!)['selected'], space.id);
+    catalog.dispose();
+  });
+  test('removal waits for an in-flight add to persist', () async {
+    final disk = _BlockingPersistence();
+    final catalog = SpaceCatalog(persistence: disk);
+    await catalog.open();
+    const space = SpaceRecord(
+      id: 'queued',
+      name: 'Queued',
+      mode: SpaceMode.standalone,
+    );
+    final adding = catalog.add(space);
+    await disk.started.future;
+    final removing = catalog.removeSpace(space.id);
+    expect(catalog.spaces, isEmpty);
+    disk.release.complete();
+    await adding;
+    expect((await removing).single.id, space.id);
+    final reopened = SpaceCatalog(persistence: disk);
+    await reopened.open();
+    expect(reopened.spaces, isEmpty);
+    expect(reopened.retired.single.id, space.id);
+    catalog.dispose();
+    reopened.dispose();
+  });
+  test('removing a client Space retires all its local bindings', () async {
+    final disk = MemorySpacePersistence();
+    SpaceRecord binding(String id, String remote) => SpaceRecord(
+      id: id,
+      name: id,
+      mode: SpaceMode.client,
+      remoteSpace: remote,
+      hostDevice: 'host',
+      hostSigningKey: {'x': 'x', 'y': 'y'},
+    );
+    disk.value = jsonEncode({
+      'selected': 'duplicate',
+      'spaces': [
+        binding('first', 's').toJson(),
+        binding('duplicate', 's').toJson(),
+        binding('other', 'other').toJson(),
+      ],
+    });
+    final catalog = SpaceCatalog(persistence: disk);
+    await catalog.open();
+    await catalog.removeSpace('first');
+    expect(catalog.selectedId, isNull);
+    expect(catalog.visibleSpaces.single.id, 'other');
+    expect(catalog.retired.map((v) => v.id), ['first', 'duplicate']);
+    expect(await catalog.removeSpace('first'), isEmpty);
+    await catalog.select('duplicate', ignoreMissing: true);
+    expect(catalog.selectedId, isNull);
+  });
   test(
     'one Host/phone binding is listed and new duplicates are refused; old records retire recoverably',
     () async {
@@ -138,4 +210,16 @@ class _FailingPersistence extends MemorySpacePersistence {
   @override
   Future<void> write(String value) async =>
       throw StateError('disk unavailable');
+}
+
+class _BlockingPersistence extends MemorySpacePersistence {
+  final started = Completer<void>(), release = Completer<void>();
+  @override
+  Future<void> write(String value) async {
+    if (!started.isCompleted) {
+      started.complete();
+      await release.future;
+    }
+    await super.write(value);
+  }
 }

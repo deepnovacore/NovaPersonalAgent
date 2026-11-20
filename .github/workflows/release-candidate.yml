@@ -6,7 +6,6 @@ on:
       release_version:
         description: Application version to validate
         required: true
-        default: 0.4.0
         type: string
       candidate_scope:
         description: Full release evidence or a Windows-only repair run
@@ -22,49 +21,32 @@ permissions:
 
 jobs:
   platform-candidate:
+    name: platform-candidate (${{ matrix.target }})
     env:
       NOVA_SMOKE_DIAGNOSTICS: ${{ github.workspace }}/smoke-diagnostics
     timeout-minutes: 90
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: macos-14
-            platform: darwin
-            target_id: darwin-arm64
-            package_script: package:mac:candidate
-            artifact_name: candidate-darwin-arm64
-          - os: windows-latest
-            platform: win32
-            target_id: win32-x64
-            package_script: package:win
-            artifact_name: candidate-win32-x64
-          - os: ubuntu-22.04
-            platform: linux
-            target_id: linux-x64
-            package_script: package:linux
-            artifact_name: candidate-linux-x64
-    runs-on: ${{ matrix.os }}
+        target: ${{ fromJSON(inputs.candidate_scope == 'windows' && '["win32-x64"]' || '["darwin-arm64","win32-x64","linux-x64"]') }}
+    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-15","win32-x64":"windows-latest","linux-x64":"ubuntu-22.04"}')[matrix.target] }}
     steps:
       - uses: actions/checkout@v4
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
       - uses: actions/setup-node@v4
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         with:
           node-version: "22"
           cache: npm
           cache-dependency-path: package-lock.json
       - name: Validate candidate version before building and naming artifacts
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
         run: node clients/desktop/scripts/check-release-version.mjs
       - run: npm install --global npm@11.6.0
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
       - run: npm ci
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
       - run: npm run check
         if: inputs.candidate_scope == 'full'
+        env:
+          NODE_OPTIONS: --max-old-space-size=4096
       - run: npm run test:runtime
         if: inputs.candidate_scope == 'full' && runner.os != 'Windows'
       # Full runtime regression runs on macOS/Linux; Windows keeps platform
@@ -72,10 +54,10 @@ jobs:
       - run: npm run test:runtime:win:platform
         if: runner.os == 'Windows'
       - name: Install Linux desktop test dependencies
-        if: matrix.platform == 'linux' && inputs.candidate_scope == 'full'
+        if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y xvfb libasound2 libgtk-3-0 libnss3 libgbm1 libsecret-1-0
       - name: Select Linux C++20 compiler
-        if: matrix.platform == 'linux' && inputs.candidate_scope == 'full'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get install -y g++-12
           echo "CXX=g++-12" >> "$GITHUB_ENV"
@@ -84,28 +66,27 @@ jobs:
       # npm may restore the Electron package without its platform binary from
       # cache. The pinned install script is idempotent and closes that gap.
       - run: node clients/desktop/node_modules/electron/install.js
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
       - run: npm run test:desktop
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
       - run: npm run test:server-cli
         if: inputs.candidate_scope == 'full'
       - run: npm run test:cli
         if: inputs.candidate_scope == 'full'
       - name: Build unsigned candidate bytes
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: npm run ${{ matrix.package_script }} --workspace @nova-personal-agent/desktop
+        env:
+          PACKAGE_SCRIPT: ${{ fromJSON('{"darwin-arm64":"package:mac:candidate","win32-x64":"package:win","linux-x64":"package:linux"}')[matrix.target] }}
+        shell: bash
+        run: npm run "$PACKAGE_SCRIPT" --workspace @nova-personal-agent/desktop
       - name: Verify installed application and backend
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
-        run: ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned
+        run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned
       - name: Archive macOS application with native tools
-        if: matrix.platform == 'darwin' && inputs.candidate_scope == 'full'
+        if: runner.os == 'macOS'
         shell: bash
         run: |
           mkdir -p candidate
           ditto -c -k --keepParent "clients/desktop/dist/mac-arm64/Nova Personal Agent.app" candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64-app.zip
           cp clients/desktop/dist/*.dmg candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64.dmg
       - name: Archive Windows application with native tools
-        if: matrix.platform == 'win32'
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force candidate
@@ -113,13 +94,13 @@ jobs:
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           Copy-Item clients/desktop/dist/*.exe candidate/nova-personal-agent-${{ inputs.release_version }}-windows-x64.exe
       - name: Verify macOS installer
-        if: matrix.platform == 'darwin' && inputs.candidate_scope == 'full'
+        if: runner.os == 'macOS'
         run: npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-macos-arm64.dmg"
       - name: Verify Windows installer
-        if: matrix.platform == 'win32'
+        if: runner.os == 'Windows'
         run: npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-windows-x64.exe"
       - name: Archive Linux desktop and headless packages
-        if: matrix.platform == 'linux' && inputs.candidate_scope == 'full'
+        if: runner.os == 'Linux'
         run: |
           mkdir -p candidate
           cp clients/desktop/dist/*.AppImage candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.AppImage
@@ -131,7 +112,6 @@ jobs:
           xvfb-run -a npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.AppImage"
           xvfb-run -a npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned --artifact "${{ github.workspace }}/candidate/nova-personal-agent-${{ inputs.release_version }}-linux-x64.deb"
       - name: Write CLI download checksums
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         shell: bash
         run: |
           cd candidate
@@ -139,7 +119,6 @@ jobs:
             if command -v sha256sum >/dev/null; then sha256sum "$artifact" > "$artifact.sha256"; else shasum -a 256 "$artifact" > "$artifact.sha256"; fi
           done
       - name: Verify npm CLI installation and candidate launch
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         shell: bash
         env:
           RELEASE_VERSION: ${{ inputs.release_version }}
@@ -147,16 +126,15 @@ jobs:
           mkdir -p candidate-cli
           npm pack ./cli --pack-destination candidate-cli
           npm install --prefix cli-smoke --ignore-scripts ./candidate-cli/nova-personal-agent-${{ inputs.release_version }}.tgz
-          ${{ matrix.platform == 'linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs cli-smoke/node_modules/nova-personal-agent candidate
+          ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs cli-smoke/node_modules/nova-personal-agent candidate
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
-          name: diagnostics-${{ matrix.target_id }}-${{ github.run_attempt }}
+          name: diagnostics-${{ matrix.target }}-${{ github.run_attempt }}
           path: smoke-diagnostics/*
           if-no-files-found: warn
       - uses: actions/upload-artifact@v4
-        if: inputs.candidate_scope == 'full' || matrix.platform == 'win32'
         with:
-          name: ${{ matrix.artifact_name }}
+          name: candidate-${{ matrix.target }}
           path: candidate/*
           if-no-files-found: error

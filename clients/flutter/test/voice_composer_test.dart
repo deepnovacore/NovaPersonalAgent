@@ -75,6 +75,52 @@ class _FailedModel extends ModelClient {
 }
 
 void main() {
+  for (final bridgeReady in [false, true]) {
+    testWidgets(
+      'delegated task cannot regenerate outside its bridge ($bridgeReady)',
+      (tester) async {
+        final store = ConversationStore(MemoryPersistence());
+        await store.open();
+        final origin = await store.ensureMain();
+        final chat = await store.delegateTask(
+          origin: origin,
+          task: 'task',
+          request: 'Task request',
+          language: 'zh',
+        );
+        await store.append(chat, {'role': 'user', 'content': 'Task request'});
+        await store.append(chat, {
+          'role': 'assistant',
+          'content': 'Task result',
+        });
+        final host = TopicHost(store);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: LocalChatPanel(
+                host: host,
+                conversationId: chat,
+                onTaskText: bridgeReady ? (_, _) async {} : null,
+              ),
+            ),
+          ),
+        );
+        final regenerate = find.byWidgetPredicate(
+          (widget) => widget is IconButton && widget.tooltip == '重新生成',
+        );
+        if (bridgeReady) {
+          expect(regenerate, findsNothing);
+        } else {
+          expect(regenerate, findsOneWidget);
+          expect(tester.widget<IconButton>(regenerate).onPressed, isNull);
+        }
+        expect(store.conversation(chat)['messages'], hasLength(2));
+        await tester.pumpWidget(const SizedBox());
+        host.dispose();
+      },
+    );
+  }
+
   testWidgets('task error banner belongs to the failed conversation only', (
     tester,
   ) async {

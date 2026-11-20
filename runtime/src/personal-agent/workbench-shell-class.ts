@@ -98,7 +98,7 @@ export function shellClasses(command:string,cwd:string|undefined,project:string)
         const word=words[0]!,base=word.text.replace(/^.*[\\/]/u,'').toLowerCase()
         if(!word.dynamic&&/^[A-Za-z_][A-Za-z0-9_]*=/u.test(word.text)||KEYWORDS.has(word.text))words.shift()
         else if(SKIPPED.has(base)){words=[];break}
-        else if(WRAPPERS.has(base)){words.shift();while(words[0]&&words[0].text.startsWith('-'))words.shift()}
+        else if(WRAPPERS.has(base)){words.shift();while(words[0]?.text.startsWith('-'))words.shift()}
         else break
       }
       const name=words[0]

@@ -238,6 +238,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   bool recordingCompatible = false;
   bool _disposed = false, _userSpeaking = false, _hostResponsePending = false;
   String? conversationId, error, cleanupError;
+  bool microphoneSilent = false;
   String _language = 'zh';
   String transcript = '', reply = '';
   String _captionText = '';
@@ -384,6 +385,7 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
     connecting = true;
     _providerInvalidation = null;
     error = null;
+    microphoneSilent = false;
     cleanupError = null;
     conversationId = conversation;
     _language = language == 'zh' ? 'zh' : 'en';
@@ -881,6 +883,17 @@ class PhoneVoiceSession extends ChangeNotifier with WidgetsBindingObserver {
   }
 
   void _audioControl(Map<String, dynamic> event) {
+    if (event['type'] == 'microphone.silent' ||
+        event['type'] == 'microphone.recovered') {
+      if (muted) return;
+      final silent = event['type'] == 'microphone.silent';
+      if (microphoneSilent != silent) {
+        microphoneSilent = silent;
+        debugPrint('[NovaVoice] ${event['type']}');
+        _changed();
+      }
+      return;
+    }
     if (event['type'] == 'speech.onset') {
       _interruptNow();
       return;

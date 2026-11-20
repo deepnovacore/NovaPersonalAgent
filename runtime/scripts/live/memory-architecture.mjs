@@ -4,7 +4,7 @@ import {tmpdir} from 'node:os'
 import {join,resolve,dirname} from 'node:path'
 import {parseArgs} from 'node:util'
 import {createHash} from 'node:crypto'
-import {loadSettings,resolveModelApiKey} from '../../dist/src/config/config.js'
+import {loadSettings,resolveMemoryExtractionConnection} from '../../dist/src/config/config.js'
 import {OpenAIModelGateway} from '../../dist/src/model/model-gateway.js'
 import {RealClock} from '../../dist/src/core/clock.js'
 import {MemoryLedgerClient} from '../../dist/src/memory-ledger/store-client.js'
@@ -19,8 +19,8 @@ const path=join(directory,'synthetic.sqlite'),output=resolve(process.env.NOVA_LI
 const report={version:1,module:'memory-'+values.module,layer:'model-runtime',synthetic:true,started_at:new Date().toISOString(),status:'running',coverage:['Temporary synthetic SQLite/Markdown/Git','Real configured model','No GUI, physical voice, personal data, connectors or release acceptance'],checks:[],turns:[],calls:[],snapshots:[],data_directory:directory}
 const persist=async()=>{await mkdir(dirname(output),{recursive:true,mode:0o700});await writeFile(output,JSON.stringify(report,null,2)+'\n',{mode:0o600})}
 const pass=async name=>{report.checks.push(name);console.log('PASS',name);await persist()}
-let client,memory,settings,fingerprint,gateway
-const open=async daily=>{client=new MemoryLedgerClient(path);memory=new SubstrateMemoryResource({client,userId:'synthetic-architecture',gateway,model:settings.fast_model,extractionFingerprint:fingerprint,inputConsent:true,conversationProviders:[fingerprint],consolidation:{enabled:daily}});await memory.open();await memory.flush()}
+let client,memory,connection,fingerprint,gateway
+const open=async daily=>{client=new MemoryLedgerClient(path);memory=new SubstrateMemoryResource({client,userId:'synthetic-architecture',gateway,model:connection.model,extractionFingerprint:fingerprint,inputConsent:true,conversationProviders:[fingerprint],consolidation:{enabled:daily}});await memory.open();await memory.flush()}
 const restart=async daily=>{await memory.close();await open(daily)}
 const snapshot=async label=>{const entries=(await memory.list()).entries;report.snapshots.push({label,entries,rows:await client.memory('list',{include_history:true}),reading:(await memory.prepareResponseAdaptation(fingerprint)).memoryContext});await persist();return entries}
 const remember=async(id,text)=>{report.turns.push({id,text});await memory.remember({sourceId:id,sessionId:'synthetic',sequence:report.turns.length,text,occurredAt:new Date().toISOString(),confirmed:true});await memory.flush()}
@@ -66,7 +66,7 @@ async function reading(){
   const adaptation=await memory.prepareResponseAdaptation(fingerprint)
   assert.ok(adaptation.memoryContext.text.includes('Use memory__recall'));assert.ok(adaptation.memoryContext.voice.length<=4000)
   const recalled=await retrieval.recall('饮食偏好',{consumer:fingerprint});assert.equal(recalled.state,'ok');assert.ok(recalled.entries.some(row=>row.entry_id===id))
-  const response=await gateway.complete({model:settings.fast_model,system:'这是合成记忆验收。只根据给定最新资料判断吃辣偏好，none=不吃辣，small=可吃一点辣。返回JSON {spicy:"none"|"small",entry_id:string}，entry_id必须逐字复制recalled数组中的entry_id字段，不是reference字段，不得追加@revision。不得编造。',prompt:JSON.stringify({voice:adaptation.memoryContext.voice,recalled:recalled.entries}),jsonSchema:{type:'object',properties:{spicy:{type:'string',enum:['none','small']},entry_id:{type:'string',enum:recalled.entries.map(row=>row.entry_id)}},required:['spicy','entry_id'],additionalProperties:false},signal:AbortSignal.timeout(30000)})
+  const response=await gateway.complete({model:connection.model,system:'这是合成记忆验收。只根据给定最新资料判断吃辣偏好，none=不吃辣，small=可吃一点辣。返回JSON {spicy:"none"|"small",entry_id:string}，entry_id必须逐字复制recalled数组中的entry_id字段，不是reference字段，不得追加@revision。不得编造。',prompt:JSON.stringify({voice:adaptation.memoryContext.voice,recalled:recalled.entries}),jsonSchema:{type:'object',properties:{spicy:{type:'string',enum:['none','small']},entry_id:{type:'string',enum:recalled.entries.map(row=>row.entry_id)}},required:['spicy','entry_id'],additionalProperties:false},signal:AbortSignal.timeout(30000)})
   const result=JSON.parse(response.text);assert.equal(result.spicy,expected);assert.equal(result.entry_id,id);return recalled
  }
  await answer('none');await pass('real model reads current authorized text recall and bounded voice facts')
@@ -79,13 +79,13 @@ async function reading(){
  await snapshot('revoked')
 }
 try{
- await persist();settings=loadSettings();const key=resolveModelApiKey(settings)
- if(!key){report.status='blocked';report.reason='missing_model_credential';process.exitCode=2}
+ await persist();connection=resolveMemoryExtractionConnection(loadSettings())
+ if(connection.missing){report.status='blocked';report.reason='missing_model_credential';process.exitCode=2}
  else{
-  report.model=settings.fast_model
-  const model=new OpenAIModelGateway({baseUrl:settings.model_base_url,apiKey:key,clock:new RealClock(),metrics:{record(){}}})
+  report.model=connection.model
+  const model=new OpenAIModelGateway({baseUrl:connection.baseUrl,apiKey:connection.apiKey,clock:new RealClock(),metrics:{record(){}}})
   gateway={stream:request=>model.stream(request),async complete(request){const start=Date.now();try{const response=await model.complete(request);report.calls.push({input:JSON.parse(request.prompt),output:response.text,elapsed_ms:Date.now()-start});await persist();return response}catch(error){report.calls.push({elapsed_ms:Date.now()-start,error:error.name});await persist();throw error}}}
-  fingerprint=createHash('sha256').update(settings.model_base_url+'\n'+settings.fast_model).digest('hex')
+  fingerprint=createHash('sha256').update(connection.baseUrl+'\n'+connection.model).digest('hex')
   await ({architecture,daily,reading})[values.module]();report.status='passed'
  }
 }catch(error){report.status='failed';report.failure=error instanceof assert.AssertionError?error.message:error.name;process.exitCode=1;console.error('FAIL',report.failure)}finally{

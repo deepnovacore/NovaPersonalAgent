@@ -242,6 +242,8 @@ export class ToolContinuations {
    * preemption means something urgent is about to interrupt, so starting a turn now would produce one
    * that is immediately cut off.
    */
+  #lastBlockedResponse: string | null = null
+
   #continuationRequestIsBlocked(): boolean {
     return this.#ports.host.rendererPaused
       || this.session.floor.state === 'user_speaking'
@@ -311,6 +313,7 @@ export class ToolContinuations {
         const state = this.#toolCallState(key)
         if (state === undefined) continue
         if (state.output === 'pending') {
+          this.#ports.telemetry?.record('tool.continuation', {response_id:batch.provider_response_id,call_id:state.acceptance.host_item.call_id,stage:'injecting'})
           await this.session.injectToolOutput(state.acceptance.host_item)
           state.output = 'confirmed'
         }
@@ -331,7 +334,12 @@ export class ToolContinuations {
         this.#continuationFifo.shift()
         continue
       }
-      if (this.#continuationRequestIsBlocked()) return
+      if (this.#continuationRequestIsBlocked()) {
+        if (this.#lastBlockedResponse !== batch.provider_response_id) this.#ports.telemetry?.record('tool.continuation', {response_id:batch.provider_response_id,stage:'blocked',renderer_paused:this.#ports.host.rendererPaused,floor:this.session.floor.state,preempt:this.#ports.host.hasEligiblePreempt()})
+        this.#lastBlockedResponse = batch.provider_response_id
+        return
+      }
+      this.#lastBlockedResponse = null
 
       if(this.#ports.validateScopedContext&&!await this.#ports.validateScopedContext()){
         this.#discardScopedBatch(batch);this.#continuationFifo.shift();continue
@@ -339,6 +347,7 @@ export class ToolContinuations {
       const requestResult = await this.session.requestToolContinuation(intents, {
         originSpoken: this.#batchOriginWasDelivered(batch),
       })
+      this.#ports.telemetry?.record('tool.continuation', {response_id:batch.provider_response_id,stage:requestResult})
       // Retryable means the provider could not take it *now*: the batch keeps its place and the next
       // pass tries again. Rejected means it never will.
       if (requestResult === 'retryable') return
@@ -1154,6 +1163,7 @@ export class ToolContinuations {
       this.#ports.telemetry?.record('memory.recall', input.state.acceptance.telemetry)
     }
     const batch = this.#continuationBatches.get(callKey(input.event.session_epoch, input.providerResponseId))
+    this.#ports.telemetry?.record('tool.continuation', {response_id:input.providerResponseId,stage:'recall_resolved',phase:batch?.phase??'missing',renderer_paused:this.#ports.host.rendererPaused,floor:this.session.floor.state})
     if (superseded && batch !== undefined) {
       batch.origin_status = 'cancelled'
       batch.phase = 'ready'

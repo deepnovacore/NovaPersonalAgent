@@ -21,7 +21,8 @@ flutter build ios --debug --no-codesign --config-only
 # --config-only already resolves SwiftPM and installs any CocoaPods fallback.
 # Confirm Flutter emitted the expected relative setting before invoking Xcode.
 grep -qx 'FLUTTER_BUILD_DIR=.build' ios/Flutter/Generated.xcconfig
-python3 tool/linux/ios/build_runtime.py --output-root "$NOVA_LINUX_ROOT" --sdk iphoneos --ci-runner-temp
+python3 tool/linux/ios/build_runtime.py --output-root "$NOVA_LINUX_ROOT" --sdk iphoneos --ci-runner-temp \
+  --use-baked-documents
 xcodebuild build -workspace ios/Runner.xcworkspace -scheme Runner \
   -configuration Debug -sdk iphoneos -destination 'generic/platform=iOS' \
   -derivedDataPath "$NOVA_CI_ROOT/derived" \

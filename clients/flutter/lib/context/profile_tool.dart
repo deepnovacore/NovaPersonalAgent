@@ -58,6 +58,11 @@ Future<Map<String, dynamic>> readProfileForModel({
   final available = Set<String>.from(
     value['available_evidence_ids'] as List? ?? const [],
   );
+  available.retainAll(
+    sources
+        .readAuthorizedEvidence(provider, 'profile')
+        .map((row) => row['evidence_id'] as String),
+  );
   final section = args['section'] as String;
   final rows = [
     for (final entry in (value['entries'] as List).whereType<Map>())

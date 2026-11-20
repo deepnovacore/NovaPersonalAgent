@@ -6,7 +6,8 @@ import {join} from 'node:path'
 import {ensureBuiltInSkills,listSkills,skillsRoot} from '../src/main/skills-dir.mjs'
 
 test('skills live under ~/.nova-personal-agent/skills',()=>{
- assert.equal(skillsRoot('/home/u'),'/home/u/.nova-personal-agent/skills')
+ const home = join(tmpdir(), 'test-user')
+ assert.equal(skillsRoot(home), join(home, '.nova-personal-agent', 'skills'))
 })
 test('the first run seeds Computer Use and never overwrites an edited SKILL.md',async()=>{
  const root=join(await mkdtemp(join(tmpdir(),'skills-')),'skills')

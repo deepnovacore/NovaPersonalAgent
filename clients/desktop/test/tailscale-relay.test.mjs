@@ -22,7 +22,6 @@ test('never replaces another Serve or Funnel handler, including foreground sessi
 })
 async function harness(t, overrides={}) {
   const root=await mkdtemp(join(tmpdir(),'nova-tailscale-'))
-  t.after(()=>rm(root,{recursive:true,force:true}))
   const calls=[], servers=[]
   const owner=createTailscaleRelay({directory:()=>join(root,'relay'),
     run:async args=>{calls.push(args);return args[0]==='status'?status:{}},
@@ -33,7 +32,7 @@ async function harness(t, overrides={}) {
     }}),
     serve:async options=>{calls.push(['serve',options]);return {alive:()=>true,close:async()=>calls.push(['stop'])}},
     ...overrides})
-  t.after(()=>owner.close())
+  t.after(async()=>{try{await owner.close()}finally{await rm(root,{recursive:true,force:true})}})
   return {root,owner,calls,servers}
 }
 test('automatic credentials stay in memory; repeated starts share one loopback server and persist only the origin',async t=>{

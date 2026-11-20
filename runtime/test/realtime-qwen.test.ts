@@ -407,6 +407,18 @@ test('a host fact uses the official user-role activation shape and keeps host pr
   }
 })
 
+test('a tool result continues the user request with tools available', async () => {
+  const scripted = scriptedSocket([...handshake])
+  const adapter = adapterFor(scripted)
+  await adapter.connect({tools: [], signal: new AbortController().signal})
+  try {
+    await adapter.createResponse({kind:'tool_result',item:{kind:'tool_output',host_item_id:'recall-result',event_id:'recall-result',content:'Invitation found',call_id:'recall-call'},task_summary:null,origin_spoken:false},new AbortController().signal)
+    const response=scripted.sent.at(-1)!.response as Record<string,unknown>
+    assert.notEqual(response.tool_choice,'none','retrieval must preserve tools for the next authorized step')
+    assert.equal(response.instructions,undefined,'ordinary continuation keeps the user request and session instructions')
+  } finally { await adapter.close() }
+})
+
 test('a host response disables tools and targets only the injected fact', async () => {
   const scripted = scriptedSocket([...handshake])
   const adapter = adapterFor(scripted)
@@ -1018,6 +1030,7 @@ test('provider error codes are sanitized, bounded, and param-qualified', async (
     readonly recoverable: boolean
   }[] = [
     {error: {code: 'response_idle_timeout'}, code: 'response_idle_timeout', recoverable: true},
+    {error: {code: 'user_idle_timeout'}, code: 'user_idle_timeout', recoverable: true},
     {
       error: {code: 'rate limit/exceeded', param: 'session.update'},
       code: 'rate_limit_exceeded.session.update',

@@ -193,7 +193,15 @@ test('profile shows warmup status, icon work cards and read-only interest tags',
   assert.equal(p.host.querySelector('.profile-work-icon svg')?.getAttribute('aria-hidden'),'true')
   assert.equal(p.host.querySelector('.profile-interests h4')?.textContent,'关注')
   assert.deepEqual([...p.host.querySelectorAll('.profile-interests .interest-tag')].map(node=>node.textContent),['摄影','城市漫步'])
-  assert.equal(p.host.querySelector('.profile-interests input, .profile-interests textarea, .profile-interests button'),null)
+  assert.equal(p.host.querySelectorAll('.profile-interests input, .profile-interests textarea').length,0)
+  const interest=p.host.querySelector<HTMLButtonElement>('.interest-tag')!
+  assert.equal(interest.getAttribute('aria-expanded'),'false')
+  await act(async()=>{interest.click()})
+  assert.equal(interest.getAttribute('aria-expanded'),'true')
+  assert.equal(p.host.querySelector('.interest-detail')?.textContent,'摄影')
+  await act(async()=>{interest.click()})
+  assert.equal(p.host.querySelectorAll('.interest-detail').length,0)
+  assert.deepEqual(p.calls,[],'opening an interest only reads its details')
   assert.equal(p.host.querySelector('.soul-card'),null)
   assert.equal(p.host.querySelector('[aria-label="资讯兴趣"]'),null)
  }finally{await p.close()}

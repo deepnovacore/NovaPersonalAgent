@@ -3696,7 +3696,7 @@ test('knowledge-only composition opens canonical originals without enabling pers
 for(const [recipient,scenario] of [['provider-a','immediate'],['provider-b','immediate'],['provider-a','valid'],['provider-a','revoked'],['provider-a','receiver'],['provider-a','reconnect'],['provider-a','shutdown']] as const)test(`primary nonpooled personal delivery authorizes actual receiving provider (${recipient}, ${scenario})`,async t=>{
  const directory=await realpath(await mkdtemp(join(tmpdir(),'nova-primary-recipient-'))),core=realCore(),provider=new RecordingProgressProvider()
  const memory={open:()=>Promise.resolve(),close:()=>Promise.resolve(),canReadConversationEvidence:(_ref:string,consumer:string)=>Promise.resolve(consumer==='provider-a')} as unknown as PersonalMemoryResource
- const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:core.runtime.core.suggestions,evidence:()=>null,now:()=>new Date('2026-11-02T12:00:00Z')})
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:core.runtime.core.suggestions,evidence:()=>null,now:()=>new Date(2026,10,2,12)})
  let selected:Parameters<typeof core.runtime.bindSuggestionSelected>[0]|undefined
  t.mock.method(core.runtime,'bindSuggestionSelected',(observer:Parameters<typeof core.runtime.bindSuggestionSelected>[0])=>{selected=observer;return ()=>{/* isolated binding */}})
  const realtime=buildRealtimeAssembly({core,provider,sharedPersonal:{host,memory},memoryConsumerFingerprint:recipient,onDiagnostic:()=>undefined})

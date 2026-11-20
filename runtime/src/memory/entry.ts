@@ -26,6 +26,8 @@ export const MemoryEntrySchema = z.object({
   life:LifeMemorySchema.optional(),
   sources:z.array(sourceTagSchema).max(256).optional(),
   editable:z.boolean().optional(),
+  /** Ledger authority; absent for providers that cannot distinguish automatic merges from corrections. */
+  written_by:z.enum(['merge','user_correction']).optional(),
   commitment:z.object({direction:z.enum(['owed_by_me','owed_to_me']),due:z.iso.datetime({offset:true}).nullable(),status:z.enum(['open','done','dropped']),counterparty:z.string().optional()}).strict().optional(), origin: z.enum(['stated', 'inferred']),
   source_refs: z.array(MemorySourceRefSchema).max(256),
   evidence_refs: z.array(text(600)).max(256).optional(),

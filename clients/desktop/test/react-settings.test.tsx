@@ -23,7 +23,7 @@ test('merged React brief form refuses a brief inside quiet hours before saving',
  const calls:string[]=[];const b=bridge(base({focusCategory:'diary'}));
  b.api.personalCommand=async(method:string)=>{calls.push(method);return {settings:{briefing_outlook_enabled:true,briefing_outlook_time:'08:30',briefing_weekdays:[1],quiet_start:'22:00',quiet_end:'09:00'},capabilities:{discovery:true}}};
  const v=render(<SettingsApp bridge={b.bridge}/>);
- await waitFor(()=>assert.equal((v.getByRole('button',{name:'保存简报设置'}) as HTMLButtonElement).disabled,false));
+ await waitFor(()=>assert.equal(v.container.querySelector<HTMLInputElement>('[aria-label="免打扰结束"]')?.value,'09:00'));
  fireEvent.click(v.getByRole('button',{name:'保存简报设置'}));
  await waitFor(()=>assert.ok(v.getByText('简报时间在免打扰时段内，不会发送。请调整简报时间或免打扰时段。')));
  assert.equal(calls.includes('discovery.configure'),false);

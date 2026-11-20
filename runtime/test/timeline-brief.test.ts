@@ -1,3 +1,4 @@
+import type {TestContext} from 'node:test'
 import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath,readFile,writeFile} from 'node:fs/promises'
@@ -570,7 +571,7 @@ test('a quick source recheck does not flip cards to unavailable, so their button
  }finally{t.mock.timers.reset();await brief.close();await rm(dir,{recursive:true,force:true})}
 })
 
-const batchFixture=async(t:import('node:test').TestContext,body:(brief:TimelineBrief,more:(n:number)=>TimelineInput[],calls:()=>number)=>void)=>{
+const batchFixture=async(t:TestContext,body:(brief:TimelineBrief,more:(n:number)=>TimelineInput[],calls:()=>number)=>void)=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'timeline-batch-'));let calls=0
  const brief=new TimelineBrief(join(dir,'timeline.json'),()=>{calls++;return Promise.resolve(reply)},()=>undefined)
  try{

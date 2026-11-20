@@ -11,6 +11,13 @@
   <img src="../../assets/architecture/system-overview.zh-CN.light.svg" alt="Nova Personal Agent 系统与 Monorepo 架构" width="100%">
 </picture>
 
+## 系统与 Monorepo 全景
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/system-overview.zh-CN.dark.svg">
+  <img src="../../assets/architecture/system-overview.zh-CN.light.svg" alt="Nova Personal Agent 系统与 Monorepo 架构" width="100%">
+</picture>
+
 ## Workbench 与上下文
 
 时间线、想法、目标、资讯、任务和「个人资料」与语音、文字对话共享一个窗口。你可以切成悬浮球，或进入隐藏窗口的后台模式：桌面麦克风关闭，任务继续运行。

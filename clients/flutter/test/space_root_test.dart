@@ -60,6 +60,56 @@ void main() {
         );
   });
   tearDown(() => SpaceStorage.active = null);
+  testWidgets('Space deletion requires confirmation and survives reopening', (
+    tester,
+  ) async {
+    final disk = MemorySpacePersistence();
+    final catalog = SpaceCatalog(persistence: disk);
+    const space = SpaceRecord(
+      id: 'delete-me',
+      name: '测试 Space',
+      mode: SpaceMode.standalone,
+    );
+    await catalog.open();
+    await catalog.add(space);
+    await catalog.select(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: SpaceRoot(
+          catalog: catalog,
+          standaloneBuilder: (_) => const SizedBox(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    Future<void> openConfirmation() async {
+      await tester.tap(find.byTooltip('管理 Space'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('删除 Space'));
+      await tester.pumpAndSettle();
+    }
+
+    await openConfirmation();
+    await tester.tap(find.text('取消'));
+    await tester.pumpAndSettle();
+    expect(find.text(space.name), findsOneWidget);
+
+    await openConfirmation();
+    await tester.tap(find.text('删除'));
+    await tester.pumpAndSettle();
+    expect(find.text(space.name), findsNothing);
+    expect(find.text('新建 Space'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox());
+    catalog.dispose();
+
+    final reopened = SpaceCatalog(persistence: disk);
+    await reopened.open();
+    expect(reopened.spaces, isEmpty);
+    expect(reopened.retired.single.id, space.id);
+    reopened.dispose();
+  });
+
   testWidgets('Space chooser and creation use the selected language only', (
     tester,
   ) async {

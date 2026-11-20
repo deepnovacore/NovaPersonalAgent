@@ -170,6 +170,59 @@ The owner confirmed the desktop display name as Nova Personal Agent (NPA), the m
 | `clients/desktop/resources/icon-source/512x512.png` | `9f193cf98e4c9381eada1e49d71f3282be8e240a1647a1539756e260adc0051d` |
 | `clients/desktop/resources/icon-source/64x64.png` | `9a5da61f89f89a68a39ba7196d0a68438ea3c832ac5ee12532303a95492fcd6e` |
 
+## Public 1.0 documentation media
+
+The owner approved the exact media linked by the release documentation, including the film and gallery sections it links to, on 2026-11-19. Identical copies are listed alongside their source files.
+
+| File | SHA-256 |
+| --- | --- |
+| `assets/gallery/stills/iphone-feed.webp` | `ad49f0e5e69287254add58ee26e104d6169c89f389bf7f988fc3ac019ddf1b91` |
+| `assets/gallery/stills/iphone-morning.webp` | `dd63c33a06af139e72969e3127849c296957b6675b806bf3e7905421c04b77e0` |
+| `assets/gallery/stills/pc-build-receipt.webp` | `7f1224ca92329c53812fba0471659f08fad6fec5f8f4665b405320cbc6203fc2` |
+| `assets/gallery/stills/pc-computer-use.webp` | `afd07f0c7f79fd0fb5690da98311bb000f3bf48e17808538d839f5a9a6611e8e` |
+| `assets/gallery/stills/pc-draft-unsent.webp` | `44afb1013c87757af6cfd3c409fb0996c18aa9c02f47344aaea4e18744213ad0` |
+| `assets/gallery/stills/pc-morning-brief.webp` | `812f736d6a2235cafe25f1df9e3790317abb140152b6873f20832fb996ea1272` |
+| `assets/gallery/stills/pc-proactive-invite.webp` | `cc9a85f230379a1d85d7e76207795543cee25d04ff0af254dd9688e02dfe4928` |
+| `assets/gallery/stills/pc-timeline-cited.webp` | `cf149898bbb72e4408e6839879611b0510d466c681875201df913e17c968776e` |
+| `assets/gallery/stills/phone-mobile-result.webp` | `232d5570f0db7019627518319b4970946a4d6ce39d4998dfd4e165bf825d65eb` |
+| `assets/gallery/stills/phone-site-dark.webp` | `0da4696d031e13c5abec3ee8dc1ec618f41233e3ac686e76bd65e1fb88eb4edb` |
+| `assets/gallery/stills/phone-site-file.webp` | `643b831fa33fffdeaa2a9ab343493e98e5c298836c78d5b29b6bc30399c57e7e` |
+| `assets/gallery/stills/phone-site-result.webp` | `192f49e3675c11c7f5f98d7f88a881c21aadc6b618f95df3b9186c9166cf6eaa` |
+| `assets/gallery/stills/phone-voice-site.webp` | `a5299cd7362a917a9a2154ca72b2b4f31da2daeaa824f8b1fd79796b32c6bfbe` |
+| `website` branch `public/media/clips/ask-first.mp4` | `42921959a9e9475d5724541d5bb5c29bb6122f773731187878f2923c0c841911` |
+| `website` branch `public/media/clips/ask-first.webp` | `ada51bcae9cd0f178e4b55034859d8df51d647b4f91c8e59abc06e07c1290973` |
+| `website` branch `public/media/clips/computer-use.mp4` | `28b45eef8dba7d62499dd8046051acd7233bd625a9ed0990d60a913e0c44e8ef` |
+| `website` branch `public/media/clips/computer-use.webp` | `a910416ceba090497ea800b1237a1174dd008ef8f8ddf263ef999c90f87d7380` |
+| `website` branch `public/media/clips/handoff-iphone.mp4` | `1503d710f2b4b20aedc518cecddc6e1ad4c8aff192b1f776f2596c9eb8b1f7d0` |
+| `website` branch `public/media/clips/handoff-iphone.webp` | `53cae162bed337329ce0bc7bb5f29fbaf5455e7009018d496620609a19646b6f` |
+| `website` branch `public/media/clips/handoff-mac.mp4` | `eb657bce266f656d334f971cfacec3163094f97a64ec875b2857127dfa696918` |
+| `website` branch `public/media/clips/handoff-mac.webp` | `d06fb8733d52fb4309277ee88cfbd8fc75270c63a34ddc7bb1ecb4d133fbf9f2` |
+| `website` branch `public/media/clips/mobile-use.mp4` | `09f8f2330589cbc9f26fd02be441daa0d6522e4c468c9efc149a60581a7aaf3b` |
+| `website` branch `public/media/clips/mobile-use.webp` | `2345e590b4afbaa62237b9f1b23ae018531d181dda0cf88bccc314bb65ec0d35` |
+| `website` branch `public/media/clips/morning-brief.mp4` | `6d610f10011d00e681f1a4099e73d4896fdbd0d7c7e19f29b01f0685107222c3` |
+| `website` branch `public/media/clips/morning-brief.webp` | `7ab05c0d7eb9f4925bcb949d78499f1ee3441c8528253e8290f6086f26300084` |
+| `website` branch `public/media/clips/phone-docx.mp4` | `da7b32057a68bd96c0a6ba5d9a4bffcdcb9d7027ba518b2a7d366ad7bd55720d` |
+| `website` branch `public/media/clips/phone-docx.webp` | `fefc26588ea84573e732dac0ca552ac342626b3cbbede4bb6498b94a974c451d` |
+| `website` branch `public/media/clips/phone-site.mp4` | `303113355d9aaa82b53fc7ff997c5972d9b2233e181bf6b8df4e18a7df0838ba` |
+| `website` branch `public/media/clips/phone-site.webp` | `9258db9fa56937d82b0bcee9a5d4807ee548b7f78dde3a11c074be50eb5d7584` |
+| `website` branch `public/media/clips/proactive-draft.mp4` | `3dbc63d9421c6aee425d50b33c1c83b597dcf001deb2ace862086895c18916ff` |
+| `website` branch `public/media/clips/proactive-draft.webp` | `aa8fac099a7a207edefc9c81224dccfe16fdb5e7c6ee47cd148768af4dd4c93f` |
+| `website` branch `public/media/film/nova-launch-720p.mp4` | `3e225c67494f91cafbaf884487eaad6c0148a334737e321444045975b860c8e1` |
+| `website` branch `public/media/film/nova-launch-720p.webp` | `f667dc93f6a772801c4be4f73b460f9ad117cea70d687dbb6dea6c1a9d281791` |
+| `website` branch `public/media/gallery/iphone-feed.webp` | `ad49f0e5e69287254add58ee26e104d6169c89f389bf7f988fc3ac019ddf1b91` |
+| `website` branch `public/media/gallery/iphone-morning.webp` | `dd63c33a06af139e72969e3127849c296957b6675b806bf3e7905421c04b77e0` |
+| `website` branch `public/media/gallery/pc-build-receipt.webp` | `7f1224ca92329c53812fba0471659f08fad6fec5f8f4665b405320cbc6203fc2` |
+| `website` branch `public/media/gallery/pc-computer-use.webp` | `afd07f0c7f79fd0fb5690da98311bb000f3bf48e17808538d839f5a9a6611e8e` |
+| `website` branch `public/media/gallery/pc-draft-unsent.webp` | `44afb1013c87757af6cfd3c409fb0996c18aa9c02f47344aaea4e18744213ad0` |
+| `website` branch `public/media/gallery/pc-morning-brief.webp` | `812f736d6a2235cafe25f1df9e3790317abb140152b6873f20832fb996ea1272` |
+| `website` branch `public/media/gallery/pc-proactive-invite.webp` | `cc9a85f230379a1d85d7e76207795543cee25d04ff0af254dd9688e02dfe4928` |
+| `website` branch `public/media/gallery/pc-timeline-cited.webp` | `cf149898bbb72e4408e6839879611b0510d466c681875201df913e17c968776e` |
+| `website` branch `public/media/gallery/phone-mobile-result.webp` | `232d5570f0db7019627518319b4970946a4d6ce39d4998dfd4e165bf825d65eb` |
+| `website` branch `public/media/gallery/phone-site-dark.webp` | `0da4696d031e13c5abec3ee8dc1ec618f41233e3ac686e76bd65e1fb88eb4edb` |
+| `website` branch `public/media/gallery/phone-site-file.webp` | `643b831fa33fffdeaa2a9ab343493e98e5c298836c78d5b29b6bc30399c57e7e` |
+| `website` branch `public/media/gallery/phone-site-result.webp` | `192f49e3675c11c7f5f98d7f88a881c21aadc6b618f95df3b9186c9166cf6eaa` |
+| `website` branch `public/media/gallery/phone-voice-site.webp` | `a5299cd7362a917a9a2154ca72b2b4f31da2daeaa824f8b1fd79796b32c6bfbe` |
+
 ## Website homepage media (2026-11-19)
 
 On 2026-11-19 the project owner approved the v4 launch film (which shows the Nova beaver avatar) for the public website. The beaver avatar on the homepage is a byte-identical copy of the `nova_orb_avatar.png` approved on 2026-10-19, so that approval covers it without a new derivative. The poster is a single frame of the approved film (the title card at 13.2 s, no character media), and the voice clip is cut from the film's own evening track (`films/product-v4/public/voice/v_r05.wav`, 2.91–15.51 s) with the same voices the film carries.

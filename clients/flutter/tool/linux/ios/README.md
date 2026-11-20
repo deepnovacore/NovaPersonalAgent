@@ -31,7 +31,7 @@ Development verification on 2026-10-19: full unsigned iOS Debug app build succee
 
 `.github/workflows/flutter-ios.yml` builds the Flutter `Runner` scheme and embedded
 `NovaNotificationService` on a disposable macOS 15 ARM64 runner with Flutter
-3.47.7, the project's SwiftPM integration (CocoaPods fallback when needed) and
+3.44.6, the project's SwiftPM integration (CocoaPods fallback when needed) and
 the real pinned iSH/Alpine runtime. It checks the resulting
 main executable, NSE executable, Flutter assets and fakefs payload. This is an
 unsigned device build, not an APNs delivery or physical-device acceptance test.

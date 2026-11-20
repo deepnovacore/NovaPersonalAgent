@@ -1,3 +1,4 @@
+import type {MemoryEntry} from '../src/memory/entry.js'
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {mkdtemp,realpath,rm} from 'node:fs/promises'
@@ -323,6 +324,7 @@ for(const mode of ['text','voice'] as const)for(const action of ['revoke','cance
 for(const backend of ['none','ledger'] as const)test(`unchanged PCM chunks reuse compact authorization and app mutation fences the next frame (${backend})`,{timeout:30000},async t=>{
  const f=await fixture(backend),host=f.host
  let frames=0
+ const voiceNotices:string[]=[]
  let other:SubstrateMemoryResource|undefined
  const create=captureProvider(async function*(){await Promise.resolve();throw Error('no response expected')})
  try{
@@ -334,7 +336,7 @@ for(const backend of ['none','ledger'] as const)test(`unchanged PCM chunks reuse
   await store.write(state);await host.open()
   const originalAuthorize=host.contextDependenciesAuthorized.bind(host)
   const historyPass=t.mock.method(host,'productConversation',host.productConversation.bind(host)),dependencyPass=t.mock.method(host,'contextDependenciesAuthorized',originalAuthorize)
-  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createVoiceProvider:options=>{const value=create(options);value.sendAudio=()=>{frames++;return Promise.resolve()};return value}}),()=>{/* local */})
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createVoiceProvider:options=>{const value=create(options);value.sendAudio=()=>{frames++;return Promise.resolve()};return value}}),frame=>{if(frame.type==='conversation.notice')voiceNotices.push(String(frame.code))})
   const ack=await host.command({type:'personal.command',request_id:'voice',method:'conversations.voice',params:{id:'chat:main',enabled:true}}) as {ok:boolean}
   assert.equal(ack.ok,true)
   await host.sendConversationAudio('chat:main',new Uint8Array(320))
@@ -360,7 +362,53 @@ for(const backend of ['none','ledger'] as const)test(`unchanged PCM chunks reuse
   }
   await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array(320)),/context_authorization_changed/)
   assert.equal(frames,before+20,'not one frame is forwarded after cross-client or mid-check source revocation')
+  assert.deepEqual(voiceNotices,['voice_provider_failed'],'source refusal must not silently discard microphone frames')
+  await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array(320)),/context_authorization_changed/)
+  assert.deepEqual(voiceNotices,['voice_provider_failed'],'one notice per failed voice runtime')
  }finally{await other?.close();await host.close();await f.close()}
+})
+
+for(const revokeDuringChurn of [false,true])test(`revision churn defers audio without losing voice ownership (revocation: ${revokeDuringChurn})`,{timeout:30000},async t=>{
+ const f=await fixture('none'),host=f.host
+ let frames=0
+ const voiceNotices:string[]=[]
+ const create=captureProvider(async function*(){await Promise.resolve();throw Error('no response expected')})
+ try{
+  await host.life.mutate({op:'create',kind:'todo',title:'Churn source'},'source')
+  const row=host.life.snapshot().todos[0]!
+  await host.close()
+  const store=new PersonalStore(f.path),state=await store.read()
+  state.conversations.items[0]!.messages=[{id:'user',conversation_id:'chat:main',role:'user',text:'Earlier question',created_at:new Date().toISOString()},{id:'answer',conversation_id:'chat:main',role:'assistant',text:'Earlier answer',reply_to:'user',context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:new Date().toISOString()}]
+  await store.write(state);await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>f.memory,gateway,settings:settings('b'),createVoiceProvider:options=>{const value=create(options);value.sendAudio=()=>{frames++;return Promise.resolve()};return value}}),frame=>{if(frame.type==='conversation.notice')voiceNotices.push(String(frame.code))})
+  const ack=await host.command({type:'personal.command',request_id:'voice',method:'conversations.voice',params:{id:'chat:main',enabled:true}}) as {ok:boolean}
+  assert.equal(ack.ok,true)
+  await host.sendConversationAudio('chat:main',new Uint8Array(320))
+  const before=frames
+  let revision=0
+  const reads=t.mock.method(host,'contextAuthorizationRevision',async()=>{
+   revision++
+   if(revokeDuringChurn&&revision===4)await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Revoked at final revision read'},'change')
+   return `churn-${revision}`
+  })
+  if(revokeDuringChurn){
+   await host.sendConversationAudio('chat:main',new Uint8Array(320))
+   assert.equal(frames,before,'the mismatched authorization result cannot forward PCM after revocation')
+   await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array(320)),/context_authorization_changed/)
+   assert.deepEqual(voiceNotices,['voice_provider_failed'])
+  }else{
+   for(let i=0;i<5;i++)await host.sendConversationAudio('chat:main',new Uint8Array(320))
+   assert.equal(frames,before,'unstable authority defers only the current audio chunks')
+   assert.deepEqual(voiceNotices,[],'revision churn alone does not stop voice')
+   reads.mock.restore()
+   await host.sendConversationAudio('chat:main',new Uint8Array(320))
+   assert.equal(frames,before+1,'audio resumes when authorization stabilizes')
+   await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed source'},'change')
+   await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array(320)),/context_authorization_changed/)
+   assert.equal(frames,before+1)
+   assert.deepEqual(voiceNotices,['voice_provider_failed'])
+  }
+ }finally{await host.close();await f.close()}
 })
 
 for(const revoked of [false,true])test(`scoped queued personal suggestion reauthorizes at actual provider injection (${revoked?'revoked':'valid'})`,{timeout:10000},async()=>{
@@ -416,4 +464,45 @@ test('revoked retained Plan association does not block an independent Chat model
   assert.ok(host.conversationSnapshot().messages.some(message=>message.text===secret),'source report remains locally visible')
   assert.equal((await host.workbench.plan(plan.id,plan.version)).content,body)
  }finally{await host.close();await f.close()}
+})
+
+for(const change of ['merge','changed_merge','forgotten','consent','correction'] as const)test(`unchanged PCM chunks after spoken memory reminder (${change})`,{timeout:30000},async()=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-memory-voice-'))
+ let at='2026-11-02T12:00:00Z'
+ let allowed=true,frames=0
+ let runtime:ConversationRuntime|undefined
+ const notices:string[]=[],injected:HostContextItem[]=[]
+ const entry:MemoryEntry={id:'preference',version:1,kind:'preference',content:'Prefer declining politely',origin:'inferred',status:'active',source_refs:[{type:'conversation',ref:'conversation:1',observed_at:at}],evidence_refs:['conversation:1'],observed_at:at,recorded_at:at,topic:'reply',corrected_to:null,confidence_note:null}
+ const memory:PersonalMemoryResource={productSurfaces:true,open:()=>Promise.resolve(),close:()=>Promise.resolve(),recall:()=>Promise.resolve({source:'personal',state:'empty',scope:'recent',hits:[],degraded:false}),get:()=>Promise.resolve(entry),list:()=>Promise.resolve({entries:[entry],cursor:null}),canProcessEvidence:()=>Promise.resolve(allowed),canReadConversationEvidence:()=>Promise.resolve(allowed)}
+ const host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>memory,pool:new SuggestionPool(),now:()=>new Date(at),evidenceRefs:()=>['conversation:1'],evidence:ref=>allowed?{subject_key:ref,source:{type:'conversation',ref}}:null})
+ const create=captureProvider(async function*(){await Promise.resolve();yield {kind:'response_started',response_id:'reminder'};yield {kind:'text_delta',text:'Reply to invitation?'};yield {kind:'response_completed',response_id:'reminder'}},[],injected)
+ try{
+  await host.open()
+  assert.equal(await host.admit({kind:'question',summary:'Reply to invitation?',why_now:'Reply due',evidence_refs:['conversation:1'],memory_refs:[{entry_id:entry.id,version:1}]},await host.discoverySnapshot()),'admitted')
+  const feed=host.snapshot().feed[0]!
+  const factory=conversationRuntimeFactory({host,memory:()=>memory,gateway,settings:settings(),createVoiceProvider:options=>{const value=create(options);value.sendAudio=()=>{frames++;return Promise.resolve()};return value}})
+  host.setConversationRuntime(async(...args)=>{runtime=await factory(...args);return runtime},frame=>{if(frame.type==='conversation.notice')notices.push(String(frame.code))})
+  await host.command({type:'personal.command',request_id:'voice',method:'conversations.voice',params:{id:'chat:main',enabled:true}})
+  assert.ok(runtime)
+  const suggestion=host.options.pool.add({origin:'surrogate',kind:'notify',content:{summary:feed.title,personal_feed_id:feed.id}})
+  runtime.deliverSuggestion!(suggestion,{kind:'suggestion_selected',priority:40,routing_class:'ambient',origin:null,selected_suggestion:suggestion.id})
+  await eventually(()=>injected.some(item=>item.content.includes(feed.title)))
+  await host.spoken(suggestion.id)
+  at='2026-11-02T12:00:01Z'
+  entry.version=2
+  entry.written_by=change==='correction'?'user_correction':'merge'
+  if(change==='changed_merge')entry.content='Prefer accepting invitations'
+  if(change==='forgotten')entry.status='forgotten'
+  if(change==='consent')allowed=false
+  await host.revalidate()
+  if(change==='merge'){
+   await host.sendConversationAudio('chat:main',new Uint8Array(320))
+   await host.sendConversationAudio('chat:main',new Uint8Array(320))
+   assert.equal(frames,2);assert.deepEqual(notices,[])
+   assert.equal(host.snapshot().feed[0]!.lifecycle,'active')
+  }else{
+   await assert.rejects(host.sendConversationAudio('chat:main',new Uint8Array(320)),/context_authorization_changed/)
+   assert.equal(frames,0);assert.deepEqual(notices,['voice_provider_failed'])
+  }
+ }finally{await host.close();await rm(directory,{recursive:true,force:true})}
 })

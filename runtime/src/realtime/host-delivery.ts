@@ -355,11 +355,13 @@ export class HostDelivery {
   }
 
   resumeAfterConversationClear(): void {
+    if (this.#rendererHostDeliveryPaused) this.#ports.telemetry?.record('delivery.renderer_resumed', {via:'conversation_clear'})
     this.#rendererHostDeliveryPaused = false
     this.#rendererHostDeliveryBoundary = null
   }
 
   pauseForConversationClear(): void {
+    this.#ports.telemetry?.record('delivery.renderer_paused', {resume:false,via:'conversation_clear'})
     this.#rendererHostDeliveryPaused = true
     this.#rendererHostDeliveryBoundary = {}
     this.#preemptiveAlertToken += 1
@@ -1242,6 +1244,7 @@ export class HostDelivery {
     const boundary = {}
     this.#rendererHostDeliveryBoundary = boundary
     this.#rendererHostDeliveryPaused = true
+    this.#ports.telemetry?.record('delivery.renderer_paused', {resume:options.resumeDelivery === true})
     try {
       const releasedUserHold = this.session.releaseRendererUserHold()
       const generation = this.session.currentGeneration
@@ -1262,6 +1265,7 @@ export class HostDelivery {
         && this.#rendererHostDeliveryBoundary === boundary
       ) {
         this.#rendererHostDeliveryPaused = false
+        this.#ports.telemetry?.record('delivery.renderer_resumed', {via:'playback_boundary'})
         this.#ports.wake()
       }
     }

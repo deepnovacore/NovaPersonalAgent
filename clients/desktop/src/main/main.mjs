@@ -818,10 +818,12 @@ async function verifySettingsRenderer() {
     const general = document.querySelector('#category-general')
     const usage = document.querySelector('#category-usage')
     if (!general || !usage) return false
-    usage.click()
+    // React commits category changes after the click handler returns.
+    const select = async button => { button.click(); await new Promise(resolve => setTimeout(resolve, 0)) }
+    await select(usage)
     const switched = usage.getAttribute('aria-current') === 'true'
       && document.querySelector('#language-section').hidden
-    general.click()
+    await select(general)
     return switched && general.getAttribute('aria-current') === 'true'
       && !document.querySelector('#language-section').hidden
   })()`)

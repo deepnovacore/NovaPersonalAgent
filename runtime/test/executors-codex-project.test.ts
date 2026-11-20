@@ -685,6 +685,10 @@ test('active Session view publishes before transport run and republishes rollbac
     await assert.rejects(run(value, 'rollback construction', {session: 'new', title: 'Second'}), /construction failed/u)
     assert.equal(value.adapter.publicProjectView(false).session_title, 'First')
     assert.deepEqual(views.slice(-2).map(view => view.session_title), ['Second', 'First'])
+
+    value.factory.createFailure = null
+    const retried = await settleWithin('retry after transport construction failure', run(value, 'retry same project'))
+    assert.equal(retried.outcome, 'ok')
   } finally {
     await value.adapter.close()
     await rm(value.root, {recursive: true, force: true})
