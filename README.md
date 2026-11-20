@@ -7,19 +7,19 @@
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
 [![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/deepnovacore/NovaPersonalAgent?label=release)](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+[![License](https://img.shields.io/badge/License-GPL-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/deepnovacore/NovaPersonalAgent?label=Release)](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](package.json)
-[![npm downloads](https://img.shields.io/npm/d18m/nova-personal-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-personal-agent)
-[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
-[![Film](https://img.shields.io/badge/Watch-the%20film-2f6fde.svg)](https://deepnovacore.github.io/NovaPersonalAgent/#film)
+[![NPM](https://img.shields.io/npm/d18m/nova-personal-agent?logo=npm&label=NPM)](https://npm-stat.com/charts.html?package=nova-personal-agent)
+[![Website](https://img.shields.io/badge/Website-Visit-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
+[![YouTube](https://img.shields.io/badge/YouTube-Watch%20the%20film-FF0000?logo=youtube&logoColor=white)](https://youtu.be/3qyZupBgOEs)
 
 **Nova Personal Agent (NPA) is a voice-first and local-first open-source personal agent. It talks while it works, understands you over time, runs locally and freely on your own devices (mobile-native and pc-native, no cloud computer required).**
 
 
 Nova thinks ahead before you ask, keeps talking while it works, picks up on your phone where your computer left off, and gets to know you better with every conversation. It remembers you, understands the moment, then acts for you on your computer and phone, asking before anything consequential and keeping your data on devices you own.
 
-**[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://deepnovacore.github.io/NovaPersonalAgent/#film)**
+**[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://youtu.be/3qyZupBgOEs)**
 
 [Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [What Nova does](#21-what-nova-does) · [Gallery](#22-gallery) · [Roadmap](#5-roadmap)
 
@@ -27,7 +27,7 @@ Nova thinks ahead before you ask, keeps talking while it works, picks up on your
 
 ---
 
-https://github.com/user-attachments/assets/daaa20e3-2abb-4ed3-8db5-2278375bca3b
+https://github.com/user-attachments/assets/3ff871c7-fd80-4470-9c78-5b96350b4ddf
 
 <sub>Product film, recorded on persona accounts. More stills in the [gallery](#22-gallery); clips on the [website](https://deepnovacore.github.io/NovaPersonalAgent/#gallery).</sub>
 
@@ -104,8 +104,8 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 | macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64-app.zip) |
 | Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [Portable ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
 | Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
-
-**Mobile (NovaCore):** <!-- TODO(v1.0.0): fill in the TestFlight invitation and Android APK links before release --> iOS TestFlight and Android APK links will be posted on the release page.
+| iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
+| Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
 **Or install with npm** (Node.js 22.13+):
 

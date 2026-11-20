@@ -7,12 +7,12 @@
 <a href="README.md"><ins>English</ins></a> | <a href="README.zh-CN.md"><ins>简体中文</ins></a>
 
 [![CI](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml/badge.svg)](https://github.com/deepnovacore/NovaPersonalAgent/actions/workflows/ci.yml)
-[![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/deepnovacore/NovaPersonalAgent?label=release)](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+[![License](https://img.shields.io/badge/License-GPL-blue.svg)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/deepnovacore/NovaPersonalAgent?label=Release)](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](package.json)
-[![npm downloads](https://img.shields.io/npm/d18m/nova-personal-agent?logo=npm&label=npm%20downloads)](https://npm-stat.com/charts.html?package=nova-personal-agent)
-[![Website](https://img.shields.io/badge/Website-GitHub%20Pages-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
-[![Film](https://img.shields.io/badge/观看-宣传片-2f6fde.svg)](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)
+[![NPM](https://img.shields.io/npm/d18m/nova-personal-agent?logo=npm&label=NPM)](https://npm-stat.com/charts.html?package=nova-personal-agent)
+[![Website](https://img.shields.io/badge/Website-Visit-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
+[![YouTube](https://img.shields.io/badge/YouTube-观看宣传片-FF0000?logo=youtube&logoColor=white)](https://youtu.be/YHziCK_cKbQ)
 
 **语音优先、本地优先的开源个人 Agent：边干活边聊天，越聊越懂你，数据留在你的设备上。**
 
@@ -20,7 +20,7 @@
 
 不用你问，Nova 先想到；边聊天，边干活；电脑聊一半，手机接着聊；越聊越懂你。它记得你、懂当下，再替你在电脑和手机上动手：要紧的事先问你，数据只留在你自己的设备上。
 
-**[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://deepnovacore.github.io/NovaPersonalAgent/zh/#film)**
+**[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://youtu.be/YHziCK_cKbQ)**
 
 [快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [Nova 能做什么](#21-nova-能做什么) · [画廊](#22-画廊) · [路线图](#5-路线图)
 
@@ -28,7 +28,7 @@
 
 ---
 
-https://github.com/user-attachments/assets/daaa20e3-2abb-4ed3-8db5-2278375bca3b
+https://github.com/user-attachments/assets/1703960b-022f-4eab-90ef-c4c3fdd1c221
 
 <sub>产品宣传片，使用人设账号录制。更多截图见[画廊](#22-画廊)，短片见[官网](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)。</sub>
 
@@ -105,8 +105,8 @@ https://github.com/user-attachments/assets/daaa20e3-2abb-4ed3-8db5-2278375bca3b
 | macOS · Apple Silicon（arm64） | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) · [ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64-app.zip) |
 | Windows · x64 | [EXE](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) · [便携版 ZIP](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64-portable.zip) |
 | Linux · Ubuntu 22.04+ x64 | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [DEB](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) |
-
-**手机端（NovaCore）：**<!-- TODO(v1.0.0): 发布前补充 TestFlight 邀请与 Android APK 链接 -->iOS TestFlight 与 Android APK 链接会发布在 Release 页面。
+| iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
+| Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
 **也可以用 npm 安装**（需要 Node.js 22.13+）：
 
