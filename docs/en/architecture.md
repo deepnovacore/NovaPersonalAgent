@@ -11,13 +11,6 @@ Nova connects conversation, authorized context and background execution. The Wor
   <img src="../../assets/architecture/system-overview.en.light.svg" alt="Nova Personal Agent System & Monorepo Architecture" width="100%">
 </picture>
 
-## System & Monorepo Overview
-
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="../../assets/architecture/system-overview.en.dark.svg">
-  <img src="../../assets/architecture/system-overview.en.light.svg" alt="Nova Personal Agent System & Monorepo Architecture" width="100%">
-</picture>
-
 ## Workbench and context
 
 Timeline, Ideas, Goals, Feeds, Tasks and Profile share one window with voice and text conversation. You can switch to the orb or hide the window in background mode: the desktop microphone turns off while tasks keep running.

@@ -778,16 +778,3 @@ test('memory_unsupported remains an invoke-time defence for legacy offered expli
     assert.equal(result.code, 'memory_unsupported')
   }
 })
-
-test('memory_unsupported remains an invoke-time defence for legacy offered explicit tools', async () => {
-  const memory = new Memory(), clock = new VirtualClock()
-  const origin = `conversation:${memory.append('conversation', {ts: 0, trust: 'trusted_user', priority: 100, content: {role: 'user', text: 'remember this'}}).seq}`
-  const runtime = new ScriptedRuntime(clock, memory, new Map(), {ingest_refs: [origin]})
-  const resource: PersonalMemoryResource = {open: () => Promise.resolve(), close: () => Promise.resolve(), recall: () => Promise.resolve({source: 'personal', state: 'empty', scope: 'any', hits: [], degraded: false})}
-  const bridge = new RealtimeRuntimeBridge({runtime, tools: compileToolSchema([], {includeExplicitMemory: true}), explicitMemory: () => resource, idFactory: () => 'unsupported'})
-  const acceptedOrigin = await bridge.acceptUserTranscript('remember this')
-  for (const name of ['memory__remember', 'memory__lookup']) {
-    const result = await bridge.acceptToolCall({kind: 'tool_call_ready', name, call_id: name, item_id: name, response_id: 'reply', session_epoch: 1, arguments: {}}, {originRef: acceptedOrigin})
-    assert.equal(result.code, 'memory_unsupported')
-  }
-})
