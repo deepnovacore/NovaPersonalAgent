@@ -182,3 +182,8 @@ typed terminal handoff.
 
 See [SECURITY.md](SECURITY.md). Never include credentials, recordings, or private runtime logs in a
 public issue or pull request.
+
+The website and documentation site live on the `website` branch, not here. It builds from
+these `docs/` and `assets/` directories, so to work on it check it out inside this repository
+with `git worktree add website website` (`/website/` is ignored). Keep tracked files under
+1.5 MB (`node scripts/check-file-size.mjs`); site media belongs on the `website` branch.

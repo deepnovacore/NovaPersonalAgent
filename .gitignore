@@ -112,3 +112,6 @@ references/
 
 # Per-task scratch, local review logs and generated integration fixtures
 /work/
+
+# The website lives on its own branch; check it out here with `git worktree add website website`.
+/website/

@@ -169,3 +169,33 @@ The owner confirmed the desktop display name as Nova Personal Agent (NPA), the m
 | `clients/desktop/resources/icon-source/48x48.png` | `f31b4cc0dd5f94b843c998d86c1ace0e5b65d33412ae899cc39c3f576e52cb67` |
 | `clients/desktop/resources/icon-source/512x512.png` | `9f193cf98e4c9381eada1e49d71f3282be8e240a1647a1539756e260adc0051d` |
 | `clients/desktop/resources/icon-source/64x64.png` | `9a5da61f89f89a68a39ba7196d0a68438ea3c832ac5ee12532303a95492fcd6e` |
+
+## Website homepage media (2026-11-19)
+
+On 2026-11-19 the project owner approved the v4 launch film (which shows the Nova beaver avatar) for the public website. The beaver avatar on the homepage is a byte-identical copy of the `nova_orb_avatar.png` approved on 2026-10-19, so that approval covers it without a new derivative. The poster is a single frame of the approved film (the title card at 13.2 s, no character media), and the voice clip is cut from the film's own evening track (`films/product-v4/public/voice/v_r05.wav`, 2.91–15.51 s) with the same voices the film carries.
+
+| File | SHA-256 |
+| --- | --- |
+| `website` branch `public/brand/beaver.png` (identical copy of `nova_orb_avatar.png`) | `77fce72aae44c5da545f146c5a1162a05ccf13ed606f0c248e417400354fd1cf` |
+| `website` branch `public/media/film/nova-launch-720p.mp4` (v4 launch film, 720p) | `933de2dfb08f5868ba677419b0bb09260b5bea14aa1c0b59bcf173b64cf88d67` |
+| `website` branch `public/media/film/nova-launch-720p.webp` (poster frame) | `69abad842279e419131cdf02bfb326fda41ade2b4b78987b319ff921586f0a71` |
+| `website` branch `public/media/voice/interrupt.zh.mp3` (evening interruption, 12.6 s) | `3778adb4e3cba312711efa2eaa244c298a94747c3f9501dd50148b14af6f4577` |
+
+## Website feature media (2026-11-19)
+
+On 2026-11-19 the project owner approved these recordings for the public website's feature sections: the R01 Timeline and Profile stills, the R02 and R03 desktop recordings (Timeline → discuss, Timeline → Build), and the three edited phone clips from `nova-v1-launch-work/films/phone-clips/out/`. All use the persona test account. The R03 completion receipt shows the recording machine's local file path; the owner reviewed it and chose not to blur it. No pairing QR codes, fingerprints, AI-generated user avatars or unblurred R04 footage are included.
+
+| File | Source | SHA-256 |
+| --- | --- | --- |
+| `website` branch `public/media/clips/timeline-discuss.mp4` | R02 `video/02-chat.mp4`, 1600 wide, no audio | `66f30e4b01a55bd4cfb9b61ee70dc38b6a538d35ff64b5d53300dc24d65f3088` |
+| `website` branch `public/media/clips/timeline-discuss.webp` | poster frame | `8846dfacd768b7b13f9fcabef64d2ec7e606cac5de85f34e6e0c5709fab47022` |
+| `website` branch `public/media/clips/timeline-build.mp4` | R03 `video/03-build.mp4`, 3× speed, no audio | `ec9d9b94c6aac39b72de578421db2e80e5b47682f1f162e24d0a4340f1df9f4e` |
+| `website` branch `public/media/clips/timeline-build.webp` | poster frame | `5bf6bd722c9776ffdb9ccfeaf6671c0f83ddc8385564096cdfb359a4d4f1ea80` |
+| `website` branch `public/media/clips/phone-paper.mp4` | `Nova-手机-论文.mp4`, 540×960 | `63ab132e069a7644aaf5d41df037d1cae0ab79b97325752a33b21abfe5bb75e2` |
+| `website` branch `public/media/clips/phone-paper.webp` | poster frame | `c2e96e835388d2d032195e9cbf19c93840a6cf40299ba21680e22926702601c8` |
+| `website` branch `public/media/clips/phone-lunch.mp4` | `Nova-手机-外卖.mp4`, 540×960 | `4ae857f7ec83d70634bc3105560f65a97720225de8ae854abdb7a499cf16ea46` |
+| `website` branch `public/media/clips/phone-lunch.webp` | poster frame | `44adb69cb8b7aceffd608349e273000da9ecc2573713da2141e96ed84ee5da00` |
+| `website` branch `public/media/clips/phone-site-v2.mp4` | `Nova-手机-个人网站.v2.mp4`, 540×960 | `fa16fde4d3df8317f5a11e05dc5e1ddfe9943515db82c8fd6464db19f1772800` |
+| `website` branch `public/media/clips/phone-site-v2.webp` | poster frame | `be662c3768272aa7aadef9a34ae4ee9e2efc3d295d27fdf87d519c841853dddf` |
+| `website` branch `public/media/gallery/pc-timeline.webp` | R01 `desktop/stills/lin-timeline-top` | `b4bf4422b1d62e0b7c20bbf6bed7169e672ac4219cb3bf07812a94800a97893c` |
+| `website` branch `public/media/gallery/pc-profile.webp` | R01 `desktop/stills/lin-profile-top` | `b6fdb97d2a9102efae9af93216049307220fe9c7980417df5bc6b750efc421e7` |

@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "note": "Single source for README and website. Stills live in assets/gallery/stills; clips and the film live only in website/public/media/{clips,film} to keep the repo lean. All footage is real recording of persona accounts.",
+  "note": "Single source for README and website. Stills live in assets/gallery/stills; clips and the film live only on the `website` branch under public/media/{clips,film} to keep the code branches lean. All footage is real recording of persona accounts.",
   "features": [
     {
       "id": "computer-use",

@@ -1,32 +1,39 @@
 name: Website
+# main's copy: rebuild when the docs or assets the site reads change.
 on:
   push:
-    branches: [main, v0.2.0dev, v0.3.0dev, v0.4.0dev, v1.0.0dev]
-    paths: ['website/**', 'docs/en/**', 'docs/zh-CN/**', 'assets/**', '.github/workflows/website.yml']
-  pull_request:
-    branches: [main, v0.2.0dev, v0.3.0dev, v0.4.0dev, v1.0.0dev]
-    paths: ['website/**', 'docs/en/**', 'docs/zh-CN/**', 'assets/**', '.github/workflows/website.yml']
+    branches: [main]
+    paths: ['docs/en/**', 'docs/zh-CN/**', 'assets/**', '.github/workflows/website.yml']
   workflow_dispatch:
 
 permissions:
   contents: read
 concurrency:
-  group: website-${{ github.ref }}
+  group: website-${{ github.event_name == 'pull_request' && github.ref || 'deploy' }}
   cancel-in-progress: true
 
 env:
   NEXT_PUBLIC_BASE_PATH: /${{ github.event.repository.name }}
   NEXT_TELEMETRY_DISABLED: '1'
 
+# The site lives on the `website` branch but reads ../docs and ../assets from
+# `main`, so the build checks out main at the root and the site into website/.
+# main and website each carry this file; only the `on:` block differs.
 jobs:
   build:
-    if: github.repository == 'deepnovacore/NovaPersonalAgent' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/v0.2.0dev' || github.ref == 'refs/heads/v0.3.0dev' || github.ref == 'refs/heads/v0.4.0dev' || github.ref == 'refs/heads/v1.0.0dev' || github.event_name == 'pull_request')
+    if: github.repository == 'deepnovacore/NovaPersonalAgent'
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: website
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event_name == 'pull_request' && github.ref || 'website' }}
+          path: website
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
@@ -39,7 +46,7 @@ jobs:
         with:
           path: website/out
   deploy:
-    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     permissions:
