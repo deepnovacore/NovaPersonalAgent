@@ -1,5 +1,6 @@
 import Foundation
 import Flutter
+import UIKit
 
 final class DataTask: URLSessionDataTask, @unchecked Sendable {
   let number: Int
@@ -344,6 +345,96 @@ precondition(overlapDelivered == 1)
 RunLoop.main.run(until: Date().addingTimeInterval(0.07))
 precondition(FlutterMethodChannel.events.count == oldEvents)
 retired()
+// Foreground streaming: live deltas on an ephemeral session, relayed once to the
+// background session when iOS ends the app's background time.
+let app = UIApplication.shared
+app.applicationState = .active
+func liveTasks() -> [String: URLSessionTask] { Mirror(reflecting: transport).children.first { $0.label == "tasks" }!.value as! [String: URLSessionTask] }
+/// Replace the real (unreachable) task with a scripted double sharing its identity.
+func scripted(_ requestID: String) -> DataTask {
+  let real = liveTasks()[requestID]!
+  real.cancel()
+  let fake = DataTask(real.taskIdentifier, "one", requestID, stream: true)
+  fake.taskDescription = real.taskDescription
+  return fake
+}
+func liveStream(_ requestID: String, _ completion: @escaping (Result<[String: Any], Error>) -> Void) -> DataTask {
+  let reservation = try! transport.reserve(id: requestID)
+  transport.request(id: requestID, reservation: reservation, configuration: config, body: ["stream": true], completion: completion)
+  return scripted(requestID)
+}
+func message(_ result: Result<[String: Any], Error>) -> [String: Any] {
+  guard case .success(let value) = result else { preconditionFailure("stream result lost: \(result)") }
+  return (value["choices"] as! [[String: Any]])[0]["message"] as! [String: Any]
+}
+func sse(_ text: String) -> Data { Data(text.utf8) }
+// Relay: one completion, from the successor, carrying no stale reasoning.
+var relayResults = 0
+let relayID = UUID().uuidString
+let foregroundTask = liveStream(relayID) { result in
+  let value = message(result)
+  precondition(value["content"] as? String == "second")
+  precondition(value["reasoning_content"] as? String == "", "discarded reasoning survived the relay")
+  relayResults += 1
+}
+precondition(foregroundTask.taskDescription!.hasSuffix("/foreground") && app.handlers.count == 1)
+transport.urlSession(session, dataTask: foregroundTask, didReceive: sse("data: {\"choices\":[{\"delta\":{\"reasoning_content\":\"first\"}}]}\n\n"))
+app.expireAll()
+precondition(app.handlers.isEmpty, "relay left the background task running")
+let successor = scripted(relayID)
+precondition(!successor.taskDescription!.hasSuffix("/foreground") && files.owns(fileID(successor)))
+transport.urlSession(session, dataTask: foregroundTask, didReceive: sse("data: {\"choices\":[{\"delta\":{\"content\":\"stale\"}}]}\n\ndata: [DONE]\n\n"))
+precondition(relayResults == 0 && files.owns(fileID(successor)))
+transport.urlSession(session, dataTask: successor, didReceive: sse("data: {\"choices\":[{\"delta\":{\"content\":\"second\"}}]}\n\ndata: [DONE]\n\n"))
+complete(successor)
+precondition(relayResults == 1); absent(successor)
+// A finished stream completes locally on expiration instead of re-sending.
+var finishedResults = 0
+let finishedID = UUID().uuidString
+let finished = liveStream(finishedID) { result in
+  precondition(message(result)["content"] as? String == "done"); finishedResults += 1
+}
+transport.urlSession(session, dataTask: finished, didReceive: sse("data: {\"choices\":[{\"delta\":{\"content\":\"done\"}}]}\n\ndata: [DONE]\n\n"))
+app.expireAll()
+precondition(finishedResults == 1 && liveTasks()[finishedID] == nil && app.handlers.isEmpty)
+complete(finished); absent(finished)
+precondition(finishedResults == 1)
+// Cancellation ends the assertion; a later expiration cannot resurrect the request.
+var cancelledResults = 0
+let cancelledID = UUID().uuidString
+let cancelledStream = liveStream(cancelledID) { result in
+  guard case .failure(let error) = result, (error as? LocalAgentError)?.code == "cancelled" else { preconditionFailure("cancelled stream delivered") }
+  cancelledResults += 1
+}
+transport.cancel(cancelledID)
+precondition(cancelledResults == 1 && app.handlers.isEmpty)
+app.expireAll(); complete(cancelledStream); absent(cancelledStream)
+precondition(cancelledResults == 1)
+// A Space switch before expiration fails the request instead of re-sending it.
+var switchedResults = 0
+let spaceSwitchID = UUID().uuidString
+let switchedStream = liveStream(spaceSwitchID) { result in
+  guard case .failure = result else { preconditionFailure("switched Space relayed") }
+  switchedResults += 1
+}
+NovaSpaceScope.selected = .init(id: "two", mode: "standalone")
+app.expireAll()
+NovaSpaceScope.selected = .init(id: "one", mode: "standalone")
+precondition(switchedResults == 1 && app.handlers.isEmpty)
+precondition(liveTasks()[spaceSwitchID].map { !$0.taskDescription!.hasSuffix("/foreground") } != true, "switched Space relayed")
+complete(switchedStream); absent(switchedStream)
+// Without a background-time assertion the request starts on the background session.
+app.grantsBackgroundTime = false
+let deniedID = UUID().uuidString
+var deniedResults = 0
+let denied = liveStream(deniedID) { _ in deniedResults += 1 }
+precondition(!denied.taskDescription!.hasSuffix("/foreground") && app.handlers.isEmpty)
+transport.cancel(deniedID); complete(denied); absent(denied)
+precondition(deniedResults == 1)
+app.grantsBackgroundTime = true
+app.applicationState = .background
+retired()
+print("PASS foreground streaming relay, local finish, cancel, Space switch and denied assertion")
 try checkModelTransferAuthority(root)
 // A late completion after the entire Space was removed must not recreate it.
 let removed = try restored(); receive(removed)

@@ -3,6 +3,10 @@ import Foundation
 import UIKit
 
 /// File-backed background POSTs survive Flutter suspension; no Live Activity.
+/// Background sessions deliver bytes in batches through nsurlsessiond, so a
+/// streaming request started while the app is active runs on an ephemeral
+/// session for live deltas. If iOS ends the app's background time before the
+/// stream finishes, the same request file is relayed to the background session.
 final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTaskDelegate {
   static let shared = NativeModelTransfer()
   static let sessionID = "com.nova.novaMobile.model-transfer.v1"
@@ -20,10 +24,19 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     var responses = false
     var deltas = [[String: Any]]()
     var flushScheduled = false
+    /// Relayed requests restart on the background session; their deltas would
+    /// repeat what Flutter already showed, so only the final response is sent.
+    var quiet = false
+    var request: URLRequest?
+    var file: URL?
+    var taskDescription: String?
+    var backgroundTask = UIBackgroundTaskIdentifier.invalid
     var completion: ((Result<[String: Any], Error>) -> Void)?
     init(id: String, spaceId: String?, token: String? = nil, authorityGeneration: String? = nil, completion: ((Result<[String: Any], Error>) -> Void)? = nil) { self.id = id; self.spaceId = spaceId; self.token = token; self.authorityGeneration = authorityGeneration; self.completion = completion }
   }
-  private var pending: [Int: Pending] = [:]
+  private var pending: [String: Pending] = [:]
+  /// Foreground tasks cancelled by a relay; their callbacks are ignored.
+  private var relayed = Set<String>()
   private var tasks: [String: URLSessionTask] = [:]
   private struct Reservation {
     let token: String, storageKey: String, authorityGeneration: String, generation: UUID
@@ -72,6 +85,30 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCredentialStorage = nil; config.urlCache = nil
     return URLSession(configuration: config, delegate: self, delegateQueue: .main)
   }()
+  private lazy var foregroundSession: URLSession = {
+    let config = URLSessionConfiguration.ephemeral
+    config.waitsForConnectivity = false
+    config.timeoutIntervalForRequest = 180; config.timeoutIntervalForResource = 600
+    config.httpShouldSetCookies = false; config.httpCookieStorage = nil; config.urlCredentialStorage = nil; config.urlCache = nil
+    return URLSession(configuration: config, delegate: self, delegateQueue: .main)
+  }()
+  static let foregroundMarker = "/foreground"
+  /// Task identifiers are only unique within one session.
+  static func taskKey(description: String?, identifier: Int) -> String {
+    (description?.hasSuffix(foregroundMarker) == true ? "f" : "b") + String(identifier)
+  }
+  static func streams(_ description: String?) -> Bool {
+    description?.components(separatedBy: "/").contains("stream") == true
+  }
+  /// A relayed generation must also replace reasoning shown by the discarded one,
+  /// so its final message always carries `reasoning_content`.
+  static func replacingReasoning(_ response: [String: Any]) -> [String: Any] {
+    guard var choices = response["choices"] as? [[String: Any]], var message = choices.first?["message"] as? [String: Any] else { return response }
+    if !(message["reasoning_content"] is String) { message["reasoning_content"] = "" }
+    choices[0]["message"] = message
+    var copy = response; copy["choices"] = choices; return copy
+  }
+  private func key(_ task: URLSessionTask) -> String { Self.taskKey(description: task.taskDescription, identifier: task.taskIdentifier) }
   private func authority() throws -> ModelTransferAuthority {
     if let authorityStore { return authorityStore }
     let store = ModelTransferAuthority(controlDirectory: try NovaSpaceScope.modelTransferControlDirectory())
@@ -163,16 +200,57 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
       var request = URLRequest(url: configuration.requestURL)
       request.httpMethod = "POST"; request.setValue("Bearer \(configuration.key)", forHTTPHeaderField: "Authorization")
       request.setValue("application/json", forHTTPHeaderField: "Content-Type"); request.setValue(body["stream"] as? Bool == true ? "text/event-stream" : "application/json", forHTTPHeaderField: "Accept")
-      let task = session.uploadTask(with: request, fromFile: file); task.taskDescription = "scope=" + spaceId + "/" + id + "/token=" + token + "/authority=" + epoch + (configuration.isResponses ? "/responses" : "") + (body["stream"] as? Bool == true ? "/stream" : "")
+      let streaming = body["stream"] as? Bool == true
+      let description = "scope=" + spaceId + "/" + id + "/token=" + token + "/authority=" + epoch + (configuration.isResponses ? "/responses" : "") + (streaming ? "/stream" : "")
       let value = Pending(id: id, spaceId: spaceId, token: token, authorityGeneration: epoch, completion: completion)
       value.responses = configuration.isResponses
-      if body["stream"] as? Bool == true { value.parser = parser(for: value) }
-      pending[task.taskIdentifier] = value; tasks[id] = task
+      if streaming { value.parser = parser(for: value) }
+      var foreground = false
+      if streaming && UIApplication.shared.applicationState == .active {
+        value.request = request; value.file = file; value.taskDescription = description
+        // Strong capture: the handler must always end this background task.
+        value.backgroundTask = UIApplication.shared.beginBackgroundTask(withName: "Nova model stream") { [weak self] in
+          if let self { self.relay(value) } else { UIApplication.shared.endBackgroundTask(value.backgroundTask) }
+        }
+        // Without an assertion there is no relay point, so start on the background session.
+        foreground = value.backgroundTask != .invalid
+      }
+      let task = (foreground ? foregroundSession : session).uploadTask(with: request, fromFile: file)
+      task.taskDescription = description + (foreground ? Self.foregroundMarker : "")
+      pending[key(task)] = value; tasks[id] = task
       NovaBackgroundExecution.modelTransferStarted(value.fileID); task.resume()
     } catch {
       if let spaceId = admittedSpace { try? revoke(.file(spaceId: spaceId, fileID: id + "." + token)) }
       completion(.failure(error))
     }
+  }
+  /// Called by the expiration handler just before iOS suspends the app.
+  private func relay(_ value: Pending) {
+    defer { endBackgroundTask(value) }
+    guard let current = tasks[value.id], pending[key(current)] === value, !value.terminal, !value.cancelled,
+      let request = value.request, let file = value.file, let description = value.taskDescription else { return }
+    // A revoked or switched Space must never send the request a second time.
+    guard owns(value), sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()) else { cancelTask(current, value); return }
+    // The terminal SSE event already arrived: finish now instead of paying twice.
+    if let parser = value.parser, parser.finished {
+      flush(value); NovaBackgroundExecution.modelTransferFinished(value.fileID)
+      let response = parser.response()
+      relayed.insert(key(current)); current.cancel()
+      finish(value, current, .success(response)); return
+    }
+    let next = Pending(id: value.id, spaceId: value.spaceId, token: value.token, authorityGeneration: value.authorityGeneration, completion: value.completion)
+    value.completion = nil
+    next.responses = value.responses; next.quiet = true
+    if value.parser != nil { next.parser = parser(for: next) }
+    let task = session.uploadTask(with: request, fromFile: file); task.taskDescription = description
+    pending.removeValue(forKey: key(current)); relayed.insert(key(current))
+    pending[key(task)] = next; tasks[value.id] = task
+    current.cancel(); task.resume()
+  }
+  private func endBackgroundTask(_ value: Pending) {
+    guard value.backgroundTask != .invalid else { return }
+    let task = value.backgroundTask; value.backgroundTask = .invalid
+    UIApplication.shared.endBackgroundTask(task)
   }
   private func files(_ spaceId: String) throws -> ModelTransferFiles {
     // Cleanup must never create a removed Space or transfer directory.
@@ -191,15 +269,15 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     }
     revocations.remove(revocation)
   }
-  private func retire(_ taskID: Int, _ value: Pending) throws {
+  private func retire(_ taskKey: String, _ value: Pending) throws {
     guard value.terminal else { return }
     if let spaceId = value.spaceId { try revoke(.file(spaceId: spaceId, fileID: value.fileID)) }
-    pending.removeValue(forKey: taskID)
-    if tasks[value.id]?.taskIdentifier == taskID { tasks.removeValue(forKey: value.id) }
+    pending.removeValue(forKey: taskKey)
+    if tasks[value.id].map(key) == taskKey { tasks.removeValue(forKey: value.id) }
   }
   private func retryCleanup() throws {
     for revocation in revocations { try? revoke(revocation) }
-    for (taskID, value) in pending where value.terminal { try? retire(taskID, value) }
+    for (taskKey, value) in pending where value.terminal { try? retire(taskKey, value) }
     guard revocations.isEmpty, !pending.values.contains(where: { $0.terminal }) else { throw LocalAgentError("model_cleanup_pending") }
   }
   @discardableResult func cancel(_ id: String, reservation token: String? = nil) -> Bool {
@@ -207,7 +285,7 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     let reserved = reservations[id] != nil && (token == nil || reservations[id]?.token == token)
     if reserved { reservations.removeValue(forKey: id) }
     if reserved && tasks[id] == nil { return true }
-    if let task = tasks[id], let value = pending[task.taskIdentifier], token == nil || value.token == token {
+    if let task = tasks[id], let value = pending[key(task)], token == nil || value.token == token {
       return cancelTask(task, value)
     }
     // Revoke the exact restored incarnation before its delegate is recovered.
@@ -236,6 +314,7 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
   }
   @discardableResult private func cancelTask(_ task: URLSessionTask, _ value: Pending) -> Bool {
     value.cancelled = true; value.data.removeAll(); value.deltas.removeAll(); value.parser = nil
+    endBackgroundTask(value)
     var revoked = true
     if let spaceId = value.spaceId {
       do { try revoke(.file(spaceId: spaceId, fileID: value.fileID)) }
@@ -299,7 +378,7 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     return (try? files(spaceId).owns(value.fileID)) == true
   }
   private func entry(_ task: URLSessionTask) -> Pending {
-    if let value = pending[task.taskIdentifier] { return value }
+    if let value = pending[key(task)] { return value }
     let parts = task.taskDescription?.components(separatedBy:"/") ?? []
     let scoped = parts.first?.hasPrefix("scope=") == true
     let spaceId = scoped ? String(parts[0].dropFirst(6)) : nil
@@ -309,7 +388,7 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     let token = rawToken.flatMap { UUID(uuidString: $0) != nil ? $0 : nil }
     let epoch = parts.first { $0.hasPrefix("authority=") }.map { String($0.dropFirst(10)) }
     let value = Pending(id: id, spaceId: spaceId, token: token, authorityGeneration: epoch)
-    if let current = tasks[id], current.taskIdentifier != task.taskIdentifier { value.cancelled = true }
+    if let current = tasks[id], key(current) != key(task) { value.cancelled = true }
     if token == nil || epoch == nil {
       value.cancelled = true; value.failure = "model_transfer_interrupted"
     }
@@ -318,7 +397,7 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     if !owns(value) || (NovaSpaceScope.selected != nil && !sameSpace(spaceId, try? NovaSpaceScope.standaloneID())) { value.cancelled = true; task.cancel() }
     if tasks[id] == nil { tasks[id] = task }
     value.responses = task.taskDescription?.contains("/responses") == true
-    if task.taskDescription?.hasSuffix("/stream") == true { value.parser = parser(for: value) }; pending[task.taskIdentifier] = value; return value
+    if Self.streams(task.taskDescription) { value.parser = parser(for: value) }; pending[key(task)] = value; return value
   }
   private func parser(for value: Pending) -> ModelStreamParser {
     ModelStreamParser(responses:value.responses) { [weak self, weak value] delta in
@@ -332,11 +411,12 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
   }
   private func flush(_ value: Pending) {
     value.flushScheduled = false
-    guard let token = value.token, owns(value), sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()), !value.deltas.isEmpty else { value.deltas.removeAll(); return }
+    guard !value.quiet, let token = value.token, owns(value), sameSpace(value.spaceId, try? NovaSpaceScope.standaloneID()), !value.deltas.isEmpty else { value.deltas.removeAll(); return }
     let deltas = value.deltas; value.deltas.removeAll(keepingCapacity:true)
     channel?.invokeMethod("deltas", arguments:["id":value.id,"reservation":token,"deltas":deltas])
   }
   func urlSession(_ session: URLSession, dataTask: URLSessionDataTask, didReceive data: Data) {
+    if relayed.contains(key(dataTask)) { return }
     let value = entry(dataTask)
     guard owns(value) else { cancelTask(dataTask, value); return }
     if let parser = value.parser, dataTask.response?.mimeType == "text/event-stream" {
@@ -347,11 +427,23 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
     guard value.data.count + data.count <= 2 * 1024 * 1024 else { value.failure = "model_response_too_large"; dataTask.cancel(); return }
     value.data.append(data)
   }
+  private func finish(_ value: Pending, _ task: URLSessionTask, _ result: Result<[String: Any], Error>) {
+    let completion = value.completion; value.completion = nil
+    value.terminal = true; value.cancelled = true
+    value.data.removeAll(); value.deltas.removeAll(); value.parser = nil
+    // Failed cleanup retains the cancelled terminal entry and blocks new
+    // admissions. Successful cleanup retires all per-request cancellation state.
+    try? retire(key(task), value)
+    completion?(result)
+  }
   func urlSession(_ session: URLSession, task: URLSessionTask, didCompleteWithError error: Error?) {
+    // The relayed successor owns the request file, completion and lease.
+    if relayed.remove(key(task)) != nil { return }
     let value = entry(task)
+    endBackgroundTask(value)
     // Deliver already-parsed thinking even when the same batch ends in an error.
     flush(value)
-    if tasks[value.id]?.taskIdentifier == task.taskIdentifier { NovaBackgroundExecution.modelTransferFinished(value.fileID) }
+    if tasks[value.id].map(key) == key(task) { NovaBackgroundExecution.modelTransferFinished(value.fileID) }
     let result: Result<[String: Any], Error>
     do {
       if let failure = value.failure { throw LocalAgentError(failure) }
@@ -368,19 +460,13 @@ final class NativeModelTransfer: NSObject, URLSessionDataDelegate, URLSessionTas
       guard http.statusCode == 200 else { throw LocalAgentError("model_http_\(http.statusCode)") }
       if let parser = value.parser, task.response?.mimeType == "text/event-stream" {
         guard parser.finished else { throw LocalAgentError("model_stream_interrupted") }
-        result = .success(parser.response())
+        result = .success(value.quiet ? Self.replacingReasoning(parser.response()) : parser.response())
       } else {
       guard let object = try JSONSerialization.jsonObject(with: value.data) as? [String: Any], (object["error"] == nil || object["error"] is NSNull) else { throw LocalAgentError("invalid_model_response") }
       result = .success(object)
       }
     } catch { result = .failure((error as? LocalAgentError) ?? LocalAgentError("invalid_model_response")) }
-    let completion = value.completion; value.completion = nil
-    value.terminal = true; value.cancelled = true
-    value.data.removeAll(); value.deltas.removeAll(); value.parser = nil
-    // Failed cleanup retains the cancelled terminal entry and blocks new
-    // admissions. Successful cleanup retires all per-request cancellation state.
-    try? retire(task.taskIdentifier, value)
-    completion?(result)
+    finish(value, task, result)
     // No orphan result is persisted: there is no reader/replay consumer. A
     // suspended live turn still receives its completion; a terminated one does not.
   }
