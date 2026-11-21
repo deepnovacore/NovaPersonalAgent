@@ -4,7 +4,7 @@ Nova 在本机负责麦克风采集、端点检测、会话状态、工具授权
 
 ## 启动参考实现
 
-当前参考启动器支持 Linux + NVIDIA CUDA，使用 faster-whisper、vLLM 和 Breeze TTS，默认分配两个 GPU。将来 Mac 上的实现可以提供相同协议，无须改动 Nova 会话管线；本启动器尚不安装 Mac 推理引擎。
+当前参考启动器支持 Linux + NVIDIA CUDA，使用 faster-whisper、vLLM 和 Breeze TTS，默认分配两个 GPU。在 Apple Silicon Mac 上，可按[用 Docker 启动 Mac 本地语音推理服务](mac-local-voice.md)部署。
 
 在 GPU 机器上将 `serving/profile.4090.example.json` 复制为私有 `serving/machine.local.json`，按需修改 GPU 编号、端口和存储路径，在仓库根目录执行：
 

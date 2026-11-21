@@ -4,7 +4,7 @@ Nova keeps microphone capture, endpointing, conversation state, tool authorizati
 
 ## Start the reference implementation
 
-The reference launcher currently targets Linux with NVIDIA CUDA: faster-whisper, vLLM and Breeze TTS. It uses two GPUs by default. A future Mac implementation can expose the same protocols without changing Nova's conversation pipeline; this launcher does not install Mac inference engines.
+The reference launcher currently targets Linux with NVIDIA CUDA: faster-whisper, vLLM and Breeze TTS. It uses two GPUs by default. On an Apple Silicon Mac, deploy with [Run the Mac Local Voice Stack with Docker](mac-local-voice.md).
 
 On the GPU machine, copy `serving/profile.4090.example.json` to a private `serving/machine.local.json`, edit GPU indices, ports and storage paths, then run from the repository root:
 

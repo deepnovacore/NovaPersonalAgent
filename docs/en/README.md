@@ -82,6 +82,7 @@
       <ul>
         <li><a href="global-providers.md"><strong>OpenAI &amp; Gemini Providers</strong></a> — Realtime &amp; cascaded global model setup.</li>
         <li><a href="deployment/self-hosted-voice.md"><strong>Self-Hosted Voice</strong></a> — Run Whisper ASR, vLLM, and Breeze TTS on your GPU.</li>
+        <li><a href="deployment/mac-local-voice.md"><strong>Mac Local Voice Stack</strong></a> — Run ASR, LLM and TTS on an Apple Silicon Mac with one Docker command.</li>
         <li><a href="settings.md"><strong>Desktop Settings</strong></a> — Save vs. restart boundaries and UI controls.</li>
         <li><a href="configuration.md"><strong>Core Configuration</strong></a> — Environment variables and capability registry.</li>
       </ul>

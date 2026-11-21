@@ -61,7 +61,7 @@ Your context informs the conversation; the front brain coordinates work with the
 - **Memory.** A source-backed Timeline and Profile grow as you talk; every memory can be traced, edited or forgotten.
 - **Interactive.** Keep talking while work runs in the background.
 - **Voice-first.** Full-duplex voice: a front brain that talks and a back brain that works.
-- **Local-first.** Your Space lives on a Host you control; devices sync through an end-to-end encrypted relay or Tailscale.
+- **Local-first.** Your Space lives on a Host you control; devices sync through an end-to-end encrypted relay or Tailscale. Voice can stay local too: one Docker command runs ASR, LLM and TTS on your Mac ([guide](docs/en/deployment/mac-local-voice.md)).
 
 [How Nova works](docs/en/architecture.md) · [Task controls](docs/en/tasks.md) · [Executors](docs/en/executors/overview.md) · [Source permissions](docs/en/sources-and-connectors.md)
 
@@ -161,7 +161,7 @@ The client includes microphone, camera, sound, settings and external MCP control
 | Layer | Providers |
 |---|---|
 | Integrated voice | Qwen realtime, OpenAI realtime, Gemini Live, StepFun (preview) |
-| Cascaded ASR / TTS | Volcengine Speech, Gemini, self-hosted (reference: Whisper / Breeze) |
+| Cascaded ASR / TTS | Volcengine Speech, Gemini, self-hosted (reference: Whisper / Breeze); [Mac local stack (Docker)](docs/en/deployment/mac-local-voice.md) |
 | Cascaded LLM | DeepSeek, Qwen / DashScope, Volcengine Ark, OpenAI, Gemini, self-hosted |
 | Vision | Qwen-VL family, Doubao Seed |
 | Coding agent | Codex, OpenCode, CodeBuddy, Pi, DeepSeek Harness |
@@ -186,7 +186,7 @@ Models, credentials and per-provider limits: [support matrix](docs/en/support-ma
 
 - [x] **v0.4.0 — Ongoing context and specialist agents.** Persistent home and Timeline, scheduled tasks, incremental Profile updates and multiple coding backends. GUI/device execution remains experimental.
 - [x] **v1.0.0 — Voice-first, local-first.** Space / Host / Client, a unified mobile companion, the rebuilt Workbench, more executors and an auditable memory ledger.
-- [ ] **Next.** Broader platform acceptance (Windows, Linux and Android recordings), a packaged local voice stack, and deeper mobile use.
+- [ ] **Next.** Broader platform acceptance (Windows, Linux and Android recordings), the local voice stack beyond macOS, and deeper mobile use.
 
 Development integrations are not release guarantees. Features ship after their supported configurations pass acceptance.
 

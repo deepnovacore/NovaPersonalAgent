@@ -82,6 +82,7 @@
       <ul>
         <li><a href="global-providers.md"><strong>OpenAI 与 Gemini 服务商</strong></a> — 海外实时与级联语音接入说明。</li>
         <li><a href="deployment/self-hosted-voice.md"><strong>自托管语音</strong></a> — 在自有 GPU 上运行 Whisper ASR、vLLM 与 Breeze TTS。</li>
+        <li><a href="deployment/mac-local-voice.md"><strong>Mac 本地语音推理</strong></a> — 一条 Docker 命令在 Apple Silicon Mac 上跑起 ASR、LLM 与 TTS。</li>
         <li><a href="settings.md"><strong>桌面设置</strong></a> — 保存与重启生效边界及界面选项。</li>
         <li><a href="configuration.md"><strong>核心配置</strong></a> — 环境变量与能力注册表。</li>
       </ul>

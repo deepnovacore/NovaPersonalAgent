@@ -1,0 +1,18 @@
+{
+  "schema": "nova.voice-preset",
+  "version": 1,
+  "name": "Mac 本地语音",
+  "asr": {
+    "provider": "self-hosted",
+    "url": "ws://127.0.0.1:18134/v1/audio/stream"
+  },
+  "llm": {
+    "provider": "self-hosted",
+    "baseUrl": "http://127.0.0.1:18134/v1",
+    "model": "openbmb/minicpm-v4.7:1b"
+  },
+  "tts": {
+    "provider": "self-hosted",
+    "url": "http://127.0.0.1:18134/v1/audio/speech"
+  }
+}

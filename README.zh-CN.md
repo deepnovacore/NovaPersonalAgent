@@ -62,7 +62,7 @@ https://github.com/user-attachments/assets/1703960b-022f-4eab-90ef-c4c3fdd1c221
 - **记忆。** 有出处的 Timeline 与画像随对话生长，每条记忆都可追溯、编辑或遗忘。
 - **可交互。** 后台干活，前台照常聊。
 - **语音优先。** 全双工语音：前脑负责说，后脑负责做。
-- **本地优先。** Space 住在你掌控的 Host 上，设备通过端到端加密的 relay 或 Tailscale 同步。
+- **本地优先。** Space 住在你掌控的 Host 上，设备通过端到端加密的 relay 或 Tailscale 同步。语音管线也能留在本机：一条 Docker 命令在 Mac 上跑起 ASR、LLM 和 TTS（[部署说明](docs/zh-CN/deployment/mac-local-voice.md)）。
 
 [工作原理](docs/zh-CN/architecture.md) · [任务控制](docs/zh-CN/tasks.md) · [执行器](docs/zh-CN/executors/overview.md) · [资料授权](docs/zh-CN/sources-and-connectors.md)
 
@@ -165,7 +165,7 @@ node runtime/dist/src/cli.js demo all
 | 层 | 可选服务 |
 |---|---|
 | 集成语音 | Qwen realtime、OpenAI realtime、Gemini Live、StepFun（预览） |
-| 级联 ASR / TTS | 火山语音、Gemini、自托管（参考实现：Whisper / Breeze） |
+| 级联 ASR / TTS | 火山语音、Gemini、自托管（参考实现：Whisper / Breeze）；[Mac 本地推理栈（Docker）](docs/zh-CN/deployment/mac-local-voice.md) |
 | 级联 LLM | DeepSeek、Qwen / DashScope、火山方舟、OpenAI、Gemini、自托管 |
 | 视觉 | Qwen-VL 系列、Doubao Seed |
 | 编码 Agent | Codex、OpenCode、CodeBuddy、Pi、DeepSeek Harness |
@@ -190,7 +190,7 @@ node runtime/dist/src/cli.js demo all
 
 - [x] **v0.4.0 — 持续上下文与专长 Agent。** 持续主会话与 Timeline、定时任务、增量画像及多编码后端；GUI/设备执行继续作为实验能力。
 - [x] **v1.0.0 — 语音优先，本地优先。** Space / Host / Client、统一的手机伙伴应用、重做的 Workbench、更多执行器与可审计的记忆账本。
-- [ ] **下一步。** 扩大平台验收（Windows、Linux、Android 录屏）、打包本地语音栈，并深化手机操作。
+- [ ] **下一步。** 扩大平台验收（Windows、Linux、Android 录屏）、把本地语音栈扩展到 macOS 以外，并深化手机操作。
 
 未列入发布说明的接入不等于正式版支持；各项能力完成对应配置的验收后再发布。
 
