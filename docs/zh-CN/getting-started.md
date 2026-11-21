@@ -22,10 +22,10 @@ Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编�
 
 ```bash
 npm install --global nova-personal-agent@latest
-novapersonal
+npa
 ```
 
-升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
+命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
 
 Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
 

@@ -6,6 +6,6 @@ try {
   process.exitCode = await main(process.argv.slice(2))
 } catch (error) {
   const message = error instanceof Error ? error.message : 'unknown failure'
-  process.stderr.write(`novapersonal: ${message}\n`)
+  process.stderr.write(`npa: ${message}\n`)
   process.exitCode = 1
 }

@@ -4,6 +4,7 @@
   "description": "Install and launch the Nova Personal Agent desktop client from the command line.",
   "type": "module",
   "bin": {
+    "npa": "./bin/novapersonal.mjs",
     "novapersonal": "./bin/novapersonal.mjs",
     "novaaudio": "./bin/novapersonal.mjs"
   },

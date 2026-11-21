@@ -1,16 +1,16 @@
 import { ensureDesktop, inspectDoctor, launchDesktop, resetPersonalState } from './runtime.mjs'
 import { PRODUCT_VERSION } from './target.mjs'
 
-export const HELP_TEXT = `Usage: novapersonal [start|config|doctor|reset-state|--version|--help]
+export const HELP_TEXT = `Usage: npa [start|config|doctor|reset-state|--version|--help]
 
-  novapersonal          Install if needed and launch Nova Personal Agent
-  novapersonal start    Install if needed and launch Nova Personal Agent
-  novapersonal config   Open the desktop settings window
-  novapersonal doctor   Inspect local installation and configuration status
-  novapersonal doctor --online
-                     Also test voice keys set in the environment against their provider
-  novapersonal reset-state
-                     Move an unreadable personal state aside (quit Nova first); prints both paths`
+  npa                  Install if needed and launch Nova Personal Agent
+  npa start            Install if needed and launch Nova Personal Agent
+  npa config           Open the desktop settings window
+  npa doctor           Inspect local installation and configuration status
+  npa doctor --online  Also test voice keys set in the environment against their provider
+  npa reset-state      Move an unreadable personal state aside (quit Nova first); prints both paths
+
+novapersonal and novaaudio remain aliases of npa.`
 
 const VOICE_KEY_SOURCES = Object.freeze({settings: 'saved in settings', environment: 'set in environment', missing: 'missing'})
 const VOICE_KEY_PROBES = Object.freeze({ok: 'valid', rejected: 'rejected by provider', network: 'could not reach provider', deferred: 'checked on first connection'})
@@ -53,8 +53,8 @@ export async function main(argv, {
       for (const key of report.voice.keys) stdout.write(`  ${key.name}: ${VOICE_KEY_SOURCES[key.source ?? 'missing']}${key.probe ? ` (${VOICE_KEY_PROBES[key.probe] ?? key.probe})` : ''}\n`)
       if (online && report.voice.keys.some(key => key.source === 'settings')) stdout.write('  Saved keys are encrypted; test them in the desktop setup window.\n')
       if (missingVoiceKeys.length > 0) stdout.write(report.voice.pipeline === 'integrated'
-        ? 'First run: start `novapersonal` and paste a DashScope API Key into the setup window that opens.\n'
-        : 'First run: start `novapersonal` and fill in the missing keys in the setup window that opens.\n')
+        ? 'First run: start `npa` and paste a DashScope API Key into the setup window that opens.\n'
+        : 'First run: start `npa` and fill in the missing keys in the setup window that opens.\n')
     }
     if (report.capabilities !== undefined) {
       const status = report.capabilities

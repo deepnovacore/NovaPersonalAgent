@@ -103,7 +103,7 @@ async function retryReleaseDownload(download) {
         'UND_ERR_BODY_TIMEOUT', 'ECONNRESET', 'ECONNREFUSED', 'ETIMEDOUT',
         'EAI_AGAIN', 'ENETUNREACH'].includes(code)) throw error
       if (attempt === 3) throw new Error(
-        'release download failed after 3 attempts: connection interrupted. Check access to GitHub release downloads and retry `novapersonal`.',
+        'release download failed after 3 attempts: connection interrupted. Check access to GitHub release downloads and retry `npa`.',
         {cause: error},
       )
       await wait(250 * attempt)

@@ -18,7 +18,7 @@ The default Qwen realtime pipeline needs one key:
 DASHSCOPE_API_KEY=your-dashscope-key
 ```
 
-Only the selected voice pipeline's keys are required. Search, camera watch, memory and knowledge turn off when their key is missing, and Settings and `novapersonal doctor` name the key each one needs. Search uses Tavily when `TAVILY_API_KEY` is set and Bailian MCP search otherwise. Desktop cascaded mode defaults to Volcengine recognition, DeepSeek and Volcengine synthesis, requiring `DOUBAO_BIGMODEL_API_KEY` and `DEEPSEEK_API_KEY`. Keep `DASHSCOPE_API_KEY` for supporting models such as personal-memory processing.
+Only the selected voice pipeline's keys are required. Search, camera watch, memory and knowledge turn off when their key is missing, and Settings and `npa doctor` name the key each one needs. Search uses Tavily when `TAVILY_API_KEY` is set and Bailian MCP search otherwise. Desktop cascaded mode defaults to Volcengine recognition, DeepSeek and Volcengine synthesis, requiring `DOUBAO_BIGMODEL_API_KEY` and `DEEPSEEK_API_KEY`. Keep `DASHSCOPE_API_KEY` for supporting models such as personal-memory processing.
 
 Direct runtime launches use DeepSeek for the cascaded LLM unless `CASCADE_LLM_PROVIDER` selects another provider.
 

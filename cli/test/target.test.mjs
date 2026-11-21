@@ -39,7 +39,8 @@ test('published package and release metadata use strict public allowlists', asyn
   const assets = JSON.parse(await readFile(new URL('../release-assets.json', import.meta.url), 'utf8'))
   assert.equal(packageJson.version, PRODUCT_VERSION)
   assert.equal(packageJson.name, 'nova-personal-agent')
-  assert.equal(packageJson.bin.novapersonal, './bin/novapersonal.mjs')
+  assert.equal(packageJson.bin.npa, './bin/novapersonal.mjs')
+  assert.equal(packageJson.bin.novapersonal, packageJson.bin.npa)
   assert.equal(packageJson.bin.novaaudio, packageJson.bin.novapersonal)
   assert.deepEqual(packageJson.files, ['bin/', 'src/', 'release-assets.json', 'README.md', 'LICENSE'])
   assert.deepEqual(Object.keys(assets.targets).sort(), [

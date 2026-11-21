@@ -94,7 +94,7 @@ user-authorized; content they return is evidence, never instructions.
 ### Clients
 
 The Electron desktop is `clients/desktop/` (wake word in `src/main/wake-word/`), the iPhone app is
-`clients/ios/Nova/` (its Flutter port in `clients/flutter/` is in progress), the headless server is `server-cli/`, and the `novapersonal` command is `cli/`.
+`clients/ios/Nova/` (its Flutter port in `clients/flutter/` is in progress), the headless server is `server-cli/`, and the `npa` command (alias `novapersonal`) is `cli/`.
 Clients talk to the runtime over the [client protocol](docs/en/protocols/client-v1.md).
 
 ### Good first contributions

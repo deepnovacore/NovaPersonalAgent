@@ -21,7 +21,7 @@
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://youtu.be/YHziCK_cKbQ)**
 
-[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [Nova 能做什么](#21-nova-能做什么) · [画廊](#22-画廊) · [路线图](#5-路线图)
+[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [画廊](#22-画廊) · [macOS](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) | [Android](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) | [iOS](https://testflight.apple.com/join/eQrtvXYJ)
 
 </div>
 
@@ -105,17 +105,17 @@ https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
 | Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
-**也可以用 npm 安装命令行版**（目前为 0.4.1，需要 Node.js 22.13+）：
+**也可以用 npm 安装命令行版**（1.0.0，需要 Node.js 22.13+）。命令为 `npa`，`novapersonal` 仍可用：
 
 ```bash
 # 全局安装
 npm install --global nova-personal-agent@latest
 # 启动客户端；语音功能需在设置中配置服务商
-novapersonal
+npa
 # 打开设置面板
-novapersonal config
+npa config
 # 查看当前语音管线需要哪些密钥；加 --online 在线验证
-novapersonal doctor
+npa doctor
 ```
 
 编码任务需要先安装并登录你选用的编码 Agent（默认 Codex）。

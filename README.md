@@ -21,7 +21,7 @@ Nova thinks ahead before you ask, keeps talking while it works, picks up on your
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://youtu.be/3qyZupBgOEs)**
 
-[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [What Nova does](#21-what-nova-does) · [Gallery](#22-gallery) · [Roadmap](#5-roadmap)
+[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Gallery](#22-gallery) · [macOS](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) | [Android](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) | [iOS](https://testflight.apple.com/join/eQrtvXYJ)
 
 </div>
 
@@ -105,21 +105,21 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
 | Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
-**Or install the CLI with npm** (currently 0.4.1; Node.js 22.13+):
+**Or install the CLI with npm** (1.0.0; Node.js 22.13+). The command is `npa`; `novapersonal` still works:
 
 ```bash
 npm install --global nova-personal-agent@latest
 # open the shipped app; configure a provider to enable voice
-novapersonal
+npa
 # open the settings panel in the app
-novapersonal config
+npa config
 # list the keys your voice pipeline needs; --online tests them
-novapersonal doctor
+npa doctor
 ```
 
 For coding tasks, install and sign in to the coding agent you choose (Codex by default).
 
-**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. Pin a version with `nova-personal-agent@0.4.1`. State files are versioned, so an older build may refuse a newer file: back up, then run `novapersonal reset-state` before downgrading.
+**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. Pin a version with `nova-personal-agent@1.0.0`. State files are versioned, so an older build may refuse a newer file: back up, then run `npa reset-state` before downgrading.
 
 **Set up your Space.** A Host (your desktop or a headless server) keeps the runtime, keys and memory. Clients (another desktop, iOS, Android) reach it through an end-to-end encrypted relay or Tailscale; the relay only forwards ciphertext. A standalone Space runs locally with no relay. See the [Space setup guide](docs/en/space-host-client.md) and the [relay guide](relay/README.md).
 

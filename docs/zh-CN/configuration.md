@@ -18,7 +18,7 @@ Codex 认证继续支持已有登录和 Nova 中配置的 API Key。共享本机
 DASHSCOPE_API_KEY=你的百炼密钥
 ```
 
-只有所选语音管线的密钥是必填的。搜索、摄像头监控、记忆和知识库缺少密钥时自动关闭，设置页和 `novapersonal doctor` 会写明各自需要的密钥。配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用百炼 MCP 搜索。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
+只有所选语音管线的密钥是必填的。搜索、摄像头监控、记忆和知识库缺少密钥时自动关闭，设置页和 `npa doctor` 会写明各自需要的密钥。配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用百炼 MCP 搜索。桌面切换级联模式时，默认使用火山识别、DeepSeek 和火山合成，需要 `DOUBAO_BIGMODEL_API_KEY`、`DEEPSEEK_API_KEY`。个人记忆等辅助模型仍使用百炼，保留 `DASHSCOPE_API_KEY`。
 
 选择 Qwen Audio 3.1 时使用 `qwen-audio-3.1-realtime-plus` 和配套音色 `longanqian_v3.1`。StepAudio 3 为预览接入，尚待真实环境验收。选择 StepAudio 3 时，`STEPFUN_API_KEY` 同时用于实时语音和默认辅助对话、视觉模型 Step 3.7 Flash。本地记忆嵌入仍需单独配置嵌入服务；不使用本地记忆时可关闭它。每个供应商使用自己的模型地址：`DASHSCOPE_MODEL_BASE_URL`、`DEEPSEEK_MODEL_BASE_URL`、`OPENAI_MODEL_BASE_URL`、`GEMINI_MODEL_BASE_URL` 和 `STEPFUN_MODEL_BASE_URL`；方舟沿用专属的 `VOLCENGINE_ARK_BASE_URL`。这些地址只作用于文本、视觉和辅助模型通道；实时音频仍使用各供应商的 `*_REALTIME_URL`，嵌入使用独立的 `EMBEDDING_BASE_URL`/`EMBEDDING_API_KEY`。已移除的通用 `MODEL_BASE_URL`/`MODEL_API_KEY` 不再作用于任何供应商。兼容网关使用 `OPENAI_COMPATIBLE_BASE_URL`/`OPENAI_COMPATIBLE_API_KEY`，自托管服务使用 `SELF_HOSTED_LLM_BASE_URL`/`SELF_HOSTED_LLM_API_KEY`。
 
