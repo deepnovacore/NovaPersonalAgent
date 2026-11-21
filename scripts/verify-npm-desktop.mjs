@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import {mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
+import {access, mkdir, mkdtemp, readFile, rm, writeFile} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {basename, dirname, join, resolve} from 'node:path'
 import {pathToFileURL} from 'node:url'
@@ -17,7 +17,9 @@ const fetchImpl = process.argv[3]
 const home = await mkdtemp(join(tmpdir(), 'nova-npm-acceptance-'))
 try {
   const {executable} = await ensureDesktop({home, fetchImpl})
-  await verifyRelease({unsigned: true, ...(process.platform === 'linux'
+  // Install-only mode checks download, checksum and extraction without launching the app.
+  if (process.env.NOVA_NPM_SMOKE_INSTALL_ONLY === '1') await access(executable)
+  else await verifyRelease({unsigned: true, ...(process.platform === 'linux'
     ? {artifact: executable}
     : {app: process.platform === 'darwin' ? resolve(dirname(executable), '../..') : dirname(executable)})})
 } catch (error) {
