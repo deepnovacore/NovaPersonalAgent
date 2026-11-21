@@ -57,12 +57,13 @@ jobs:
                   old_version, new_version = old.pop('version'), new.pop('version')
                   a, b = list(map(int, old_version.split('.'))), list(map(int, new_version.split('.')))
                   assert b == [a[0], a[1], a[2] + 1], 'Expected one documentation patch increment'
-                  old.pop('homepage', None)
-                  new.pop('homepage', None)
+                  for key in ('homepage', 'keywords'):
+                      old.pop(key, None)
+                      new.pop(key, None)
                   assert old == new, 'Non-documentation package metadata changed'
               else:
                   assert (before/name).read_bytes() == (after/name).read_bytes(), f'Executable payload changed: {name}'
-          print('Only README, homepage and patch version differ from npm latest')
+          print('Only README, homepage, keywords and patch version differ from npm latest')
           PY
           npm install --prefix smoke --ignore-scripts ./candidate/*.tgz
           test "$(smoke/node_modules/.bin/novapersonal --version)" = "$(node --input-type=module -e "import {PRODUCT_VERSION} from './cli/src/target.mjs'; console.log(PRODUCT_VERSION)")"

@@ -9,7 +9,7 @@ npm install --global nova-personal-agent
 npa
 ```
 
-![Nova Personal Agent architecture: devices, Space, conversation, task coordination and specialist executors](https://raw.githubusercontent.com/deepnovacore/NovaPersonalAgent/main/assets/architecture/nova-personal-agent.en.webp)
+![Nova Personal Agent: context, memory, interaction and execution around Nova, inside a local-first device boundary with optional cloud models and an end-to-end encrypted relay](https://raw.githubusercontent.com/deepnovacore/NovaPersonalAgent/main/assets/architecture/nova-overview.en.webp)
 
 ## Why Nova
 

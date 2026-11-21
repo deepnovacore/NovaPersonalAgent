@@ -34,11 +34,18 @@
     "url": "https://github.com/deepnovacore/NovaPersonalAgent/issues"
   },
   "keywords": [
-    "nova",
-    "audio",
-    "voice",
-    "agent",
-    "codex"
+    "personal-agent",
+    "voice-assistant",
+    "ai-agent",
+    "local-first",
+    "voice-first",
+    "desktop-app",
+    "computer-use",
+    "mobile-use",
+    "memory",
+    "mcp",
+    "codex",
+    "cli"
   ],
   "license": "GPL-3.0-or-later"
 }
