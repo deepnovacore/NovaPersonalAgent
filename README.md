@@ -14,10 +14,10 @@
 [![Website](https://img.shields.io/badge/Website-Visit-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-Watch%20the%20film-FF0000?logo=youtube&logoColor=white)](https://youtu.be/3qyZupBgOEs)
 
-**Nova Personal Agent (NPA) is a voice-first and local-first open-source personal agent. It talks while it works, understands you over time, runs locally and freely on your own devices (mobile-native and pc-native, no cloud computer required).**
+**Nova Personal Agent (NPA) is a voice-first and local-first open-source personal agent. It talks while it works, understands you over time, runs locally and freely (mobile-native and pc-native, no cloud computer required).**
 
 
-Nova thinks ahead before you ask, keeps talking while it works, picks up on your phone where your computer left off, and gets to know you better with every conversation. It remembers you, understands the moment, then acts for you on your computer and phone, asking before anything consequential and keeping your data on devices you own.
+Nova thinks ahead before you ask, keeps talking while it works, picks up on your phone where your computer left off, and gets to know you better with every conversation. It remembers you, understands the moment, then acts for you on any device. 
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://youtu.be/3qyZupBgOEs)**
 
@@ -27,13 +27,13 @@ Nova thinks ahead before you ask, keeps talking while it works, picks up on your
 
 ---
 
-https://github.com/user-attachments/assets/3ff871c7-fd80-4470-9c78-5b96350b4ddf
+https://github.com/user-attachments/assets/3a4bfcee-dcb4-4b12-b03c-cdb0133bffa0
 
 <sub>Product film, recorded on persona accounts. More stills in the [gallery](#22-gallery); clips on the [website](https://deepnovacore.github.io/NovaPersonalAgent/#gallery).</sub>
 
 ## News
 
-- **2026-11 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **Talks while it works, understands you over time, stays on your devices:** Space / Host / Client with end-to-end encrypted sync, a unified iOS and Android companion, a rebuilt Workbench, more executors (coding, computer use, supervised mobile use) and an auditable memory ledger. [Release notes](docs/releases/v1.0.0.md).
+- **2026-11 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **Talks while it works, understands you over time, stays on your devices:** Space / Host / Client with end-to-end encrypted sync, a unified iOS and Android companion, a rebuilt Workbench, more executors (coding, computer use, supervised mobile use). [Release notes](docs/releases/v1.0.0.md).
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** GUI-use across browser, computer and phone (experimental), Scheduled Agent Tasks, and a full Timeline for context, evidence and task results.
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **Your personal agent:** Todos, Ideas, Goals, Feeds and Profile, with source-backed memory and evidence-checked tasks.
 - **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.0)** — **Voice, your way:** configurable ASR / LLM / TTS, personal memory, MCP and an iPhone companion.
@@ -59,7 +59,6 @@ Your context informs the conversation; the front brain coordinates work with the
 
 - **Proactive.** Nova chooses what matters and when to speak, and drafts instead of sending.
 - **Memory.** A source-backed Timeline and Profile grow as you talk; every memory can be traced, edited or forgotten.
-- **Interactive.** Keep talking while work runs in the background.
 - **Voice-first.** Full-duplex voice: a front brain that talks and a back brain that works.
 - **Local-first.** Your Space lives on a Host you control; devices sync through an end-to-end encrypted relay or Tailscale. Voice can stay local too: one Docker command runs ASR, LLM and TTS on your Mac ([guide](docs/en/deployment/mac-local-voice.md)).
 

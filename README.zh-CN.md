@@ -14,11 +14,10 @@
 [![Website](https://img.shields.io/badge/Website-Visit-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
 [![YouTube](https://img.shields.io/badge/YouTube-观看宣传片-FF0000?logo=youtube&logoColor=white)](https://youtu.be/YHziCK_cKbQ)
 
-**语音优先、本地优先的开源个人 Agent：边干活边聊天，越聊越懂你，数据留在你的设备上。**
+**能打电话、边干活边聊天的端侧开源个人助理。越聊越懂你，你的伙伴，你的助手。**
 
-桌面应用名为 **Nova Personal Agent（NPA）**；Android 和 iOS 应用名为 **NovaCore**。
 
-不用你问，Nova 先想到；边聊天，边干活；电脑聊一半，手机接着聊；越聊越懂你。它记得你、懂当下，再替你在电脑和手机上动手：要紧的事先问你，数据只留在你自己的设备上。
+**实时交互**（前后脑架构），边干活边聊天；**端侧闭环**，手机原生执行任务，手机原生快慢脑；支持多设备 Tailscale 直连，无需云电脑。多连接器，生成时间线、画像、待办。越聊越懂你，**主动但克制**，
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://youtu.be/YHziCK_cKbQ)**
 
@@ -28,13 +27,13 @@
 
 ---
 
-https://github.com/user-attachments/assets/1703960b-022f-4eab-90ef-c4c3fdd1c221
+https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 
-<sub>产品宣传片，使用人设账号录制。更多截图见[画廊](#22-画廊)，短片见[官网](https://deepnovacore.github.io/NovaPersonalAgent/zh/#gallery)。</sub>
+
 
 ## News
 
-- **2026-11 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **边干活边聊天，越聊越懂你，数据留在你的设备上：** Space / Host / Client 与端到端加密同步、统一的 iOS / Android 伙伴应用、重做的 Workbench、更多执行器（编码、电脑操作、受监督的手机操作）以及可审计的记忆账本。[发布说明](docs/releases/v1.0.0.md)。
+- **2026-11-19 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **端侧原生闭环，边干活边聊天，越聊越懂你：** 支持单设备多空间、手机电脑互联、手机原生任务执行、重写 Workbench、加入更多执行器（coding, computer-use、mobile-use）以及可审计的记忆账本。[发布说明](docs/releases/v1.0.0.md)。
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 浏览器、电脑与手机的 GUI-use（实验能力）、定时 Agent 任务，以及保留上下文、证据和任务结果的完整 Timeline。
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **你的个人 Agent：** 待办、想法、目标、资讯和 Profile，配合有出处的记忆与按证据核验的任务。
 - **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.0)** — **按你的方式对话：** 可配置 ASR / LLM / TTS、个人记忆、MCP 与 iPhone 客户端。
@@ -56,13 +55,12 @@ https://github.com/user-attachments/assets/1703960b-022f-4eab-90ef-c4c3fdd1c221
   <img src="assets/architecture/nova-overview.zh-CN.light.svg" alt="Nova 架构：设备、Space、对话、任务协调与专长执行器" width="100%">
 </picture>
 
-你的上下文帮助 Nova 理解需求，前脑通过对话协调后脑执行。结果按证据核对，提醒在合适时机开口。
+你的上下文帮助 Nova 理解需求，前脑通过对话协调后脑执行。Nova 主动但克制，只在值得开口的时候开口。
 
 - **主动。** Nova 判断什么值得说、何时开口，只起草，不替你发。
-- **记忆。** 有出处的 Timeline 与画像随对话生长，每条记忆都可追溯、编辑或遗忘。
-- **可交互。** 后台干活，前台照常聊。
+- **记忆。** 结构化的个人长期记忆，记得你的偏好，每天写日记，每条记忆都可追溯、编辑或遗忘。
 - **语音优先。** 全双工语音：前脑负责说，后脑负责做。
-- **本地优先。** Space 住在你掌控的 Host 上，设备通过端到端加密的 relay 或 Tailscale 同步。语音管线也能留在本机：一条 Docker 命令在 Mac 上跑起 ASR、LLM 和 TTS（[部署说明](docs/zh-CN/deployment/mac-local-voice.md)）。
+- **本地优先。** 手机原生可跑（事件抽取、任务执行、快慢脑），设备通过端到端加密中转（如 Tailscale）同步。语音管线也能留在本机：一条 Docker 命令在 Mac 上跑起 ASR、LLM 和 TTS（[部署说明](docs/zh-CN/deployment/mac-local-voice.md)）。
 
 [工作原理](docs/zh-CN/architecture.md) · [任务控制](docs/zh-CN/tasks.md) · [执行器](docs/zh-CN/executors/overview.md) · [资料授权](docs/zh-CN/sources-and-connectors.md)
 
@@ -121,8 +119,6 @@ novapersonal doctor
 ```
 
 编码任务需要先安装并登录你选用的编码 Agent（默认 Codex）。
-
-**升级。** 退出 Nova，重新运行上面的安装命令，设置与数据都会保留。如需固定版本，使用 `nova-personal-agent@0.4.1`。状态文件带版本号，旧版本可能拒绝读取新文件；降级前请先备份，再运行 `novapersonal reset-state`。
 
 **配置你的 Space。** Host（你的桌面电脑或无头服务器）保存 runtime、密钥和记忆；Client（另一台电脑、iOS、Android）通过端到端加密的 relay 或 Tailscale 连接 Host，relay 只转发密文。独立 Space 在本机运行，无需 relay。详见 [Space 设置指南](docs/zh-CN/space-host-client.md)与 [relay 部署说明](relay/README.md)。
 
