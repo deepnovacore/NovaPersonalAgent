@@ -11,13 +11,13 @@
 [![Release](https://img.shields.io/github/v/release/deepnovacore/NovaPersonalAgent?label=Release)](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](package.json)
 [![NPM](https://img.shields.io/npm/d18m/nova-personal-agent?logo=npm&label=NPM)](https://npm-stat.com/charts.html?package=nova-personal-agent)
-[![Website](https://img.shields.io/badge/Website-Visit-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
-[![YouTube](https://img.shields.io/badge/YouTube-观看宣传片-FF0000?logo=youtube&logoColor=white)](https://youtu.be/YHziCK_cKbQ)
+[![Website](https://img.shields.io/badge/Website-项目主页-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
+[![YouTube](https://img.shields.io/badge/YouTube-宣传片-FF0000?logo=youtube&logoColor=white)](https://youtu.be/YHziCK_cKbQ)
 
 **能打电话、边干活边聊天的端侧开源个人助理。越聊越懂你，你的伙伴，你的助手。**
 
 
-**实时交互**（前后脑架构），边干活边聊天；**端侧闭环**，手机原生执行任务，手机原生快慢脑；支持多设备 Tailscale 直连，无需云电脑。多连接器，生成时间线、画像、待办。越聊越懂你，**主动但克制**，
+**实时交互**（前后脑架构），边干活边聊天；**端侧闭环**，手机原生执行任务，手机原生快慢脑；支持多设备 Tailscale 直连，无需云电脑。多连接器，生成时间线、画像、待办。越聊越懂你，**主动但克制。**
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://youtu.be/YHziCK_cKbQ)**
 
@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 
 ## News
 
-- **2026-11-19 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **端侧原生闭环，边干活边聊天，越聊越懂你：** 支持单设备多空间、手机电脑互联、手机原生任务执行、重写 Workbench、加入更多执行器（coding, computer-use、mobile-use）以及可审计的记忆账本。[发布说明](docs/releases/v1.0.0.md)。
+- **2026-11-19 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **端侧原生闭环，边干活边聊天，越聊越懂你：** 支持单设备多空间、手机电脑互联、手机原生任务执行、重写 Workbench、加入更多执行器（coding, computer-use、mobile-use）[发布说明](docs/releases/v1.0.0.md)。
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 浏览器、电脑与手机的 GUI-use（实验能力）、定时 Agent 任务，以及保留上下文、证据和任务结果的完整 Timeline。
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **你的个人 Agent：** 待办、想法、目标、资讯和 Profile，配合有出处的记忆与按证据核验的任务。
 - **2026-09-21 · [v0.2.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.2.0)** — **按你的方式对话：** 可配置 ASR / LLM / TTS、个人记忆、MCP 与 iPhone 客户端。

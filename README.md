@@ -11,8 +11,8 @@
 [![Release](https://img.shields.io/github/v/release/deepnovacore/NovaPersonalAgent?label=Release)](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](package.json)
 [![NPM](https://img.shields.io/npm/d18m/nova-personal-agent?logo=npm&label=NPM)](https://npm-stat.com/charts.html?package=nova-personal-agent)
-[![Website](https://img.shields.io/badge/Website-Visit-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
-[![YouTube](https://img.shields.io/badge/YouTube-Watch%20the%20film-FF0000?logo=youtube&logoColor=white)](https://youtu.be/3qyZupBgOEs)
+[![Website](https://img.shields.io/badge/Website-Project-222222?logo=github)](https://deepnovacore.github.io/NovaPersonalAgent/)
+[![YouTube](https://img.shields.io/badge/YouTube-Video-FF0000?logo=youtube&logoColor=white)](https://youtu.be/3qyZupBgOEs)
 
 **Nova Personal Agent (NPA) is a voice-first and local-first open-source personal agent. It talks while it works, understands you over time, runs locally and freely (mobile-native and pc-native, no cloud computer required).**
 
