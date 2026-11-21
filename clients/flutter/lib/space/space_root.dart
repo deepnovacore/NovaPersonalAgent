@@ -701,8 +701,8 @@ class _CreateSpaceState extends State<_CreateSpace> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(t('创建 Space', 'Create a Space'))),
+  Widget build(BuildContext context) => NovaPage(
+    title: t('创建 Space', 'Create a Space'),
     body: ListView(
       padding: const EdgeInsets.all(24),
       children: [

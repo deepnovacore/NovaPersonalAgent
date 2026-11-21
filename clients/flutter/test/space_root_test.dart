@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 import 'package:nova_mobile/space/native_scope.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/space/space_root.dart';
+import 'package:nova_mobile/ui/theme.dart';
 import 'package:nova_mobile/space/space_storage.dart';
 import 'package:nova_mobile/space/space_crypto.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
@@ -219,6 +220,32 @@ void main() {
       );
     }
   }
+  testWidgets(
+    'Create Space page paints an opaque background over the transparent theme',
+    (tester) async {
+      // The app theme leaves scaffolds transparent; a pushed page without its
+      // own background lets the Space list show through the iOS slide.
+      final catalog = SlowCatalog();
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: novaTheme(),
+          home: SpaceRoot(
+            catalog: catalog,
+            standaloneBuilder: (_) => const Text('Local'),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('新建 Space'));
+      await tester.pumpAndSettle();
+      final page = tester.widget<Scaffold>(
+        find
+            .ancestor(of: find.text('创建 Space'), matching: find.byType(Scaffold))
+            .first,
+      );
+      expect(page.backgroundColor?.a, 1);
+    },
+  );
   testWidgets(
     'Space creation ignores a second tap while persistence is pending',
     (tester) async {
