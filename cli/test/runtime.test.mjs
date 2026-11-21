@@ -87,7 +87,7 @@ test('checksum failure leaves no runnable installation', async () => {
     /checksum mismatch/u,
   )
   const root = join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64')
-  await assert.rejects(readFile(join(root, 'Nova Personal Agent Desktop.exe')))
+  await assert.rejects(readFile(join(root, 'Nova Personal Agent.exe')))
 })
 
 test('a failed replacement preserves an existing cache directory', async () => {
@@ -141,7 +141,7 @@ test('an interrupted download leaves no partial executable', async () => {
     ensureDesktop({...TARGET_OPTIONS, home, fetchImpl, extractImpl: extractFixture}),
     /connection lost/u,
   )
-  const executable = join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64/Nova Personal Agent Desktop.exe')
+  const executable = join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64/Nova Personal Agent.exe')
   await assert.rejects(readFile(executable))
 })
 

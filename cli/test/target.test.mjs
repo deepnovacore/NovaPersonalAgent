@@ -14,7 +14,7 @@ import {
 test('public version and target matrix are stable', () => {
   assert.equal(PRODUCT_VERSION, '1.0.0')
   assert.equal(resolveTarget('darwin', 'arm64').artifact, 'nova-personal-agent-1.0.0-macos-arm64-app.zip')
-  assert.equal(resolveTarget('win32', 'x64').executable, 'Nova Personal Agent Desktop.exe')
+  assert.equal(resolveTarget('win32', 'x64').executable, 'Nova Personal Agent.exe')
   assert.throws(() => resolveTarget('darwin', 'x64'), /unsupported platform/u)
   assert.equal(resolveTarget('linux', 'x64').archive, 'file')
   assert.equal(resolveTarget('linux', 'x64').artifact, 'nova-personal-agent-1.0.0-linux-x64.AppImage')
@@ -43,6 +43,11 @@ test('published package and release metadata use strict public allowlists', asyn
   assert.equal(packageJson.bin.novapersonal, packageJson.bin.npa)
   assert.equal(packageJson.bin.novaaudio, packageJson.bin.novapersonal)
   assert.deepEqual(packageJson.files, ['bin/', 'src/', 'release-assets.json', 'README.md', 'LICENSE'])
+  const builder = await readFile(new URL('../../clients/desktop/electron-builder.yml', import.meta.url), 'utf8')
+  const productName = builder.match(/^productName: (.+)$/mu)?.[1]
+  assert.ok(productName, 'electron-builder productName')
+  assert.equal(assets.targets['darwin-arm64'].executable, `${productName}.app/Contents/MacOS/${productName}`)
+  assert.equal(assets.targets['win32-x64'].executable, `${productName}.exe`)
   assert.deepEqual(Object.keys(assets.targets).sort(), [
     'darwin-arm64', 'linux-x64', 'win32-x64',
   ])
@@ -57,7 +62,9 @@ test('v0.4 targets use the new brand while published v0.3 downloads retain their
   assert.equal(resolveTarget('darwin', 'arm64', '0.3.1').artifact, 'nova-audio-agent-0.3.1-macos-arm64-app.zip')
   assert.equal(releaseBaseUrl('0.3.1'), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v0.3.1')
   assert.equal(resolveTarget('darwin', 'arm64', '1.0.0').artifact, 'nova-personal-agent-1.0.0-macos-arm64-app.zip')
-  assert.equal(resolveTarget('win32', 'x64', '1.0.0-preview.1').executable, 'Nova Personal Agent Desktop.exe')
+  assert.equal(resolveTarget('win32', 'x64', '1.0.0-preview.1').executable, 'Nova Personal Agent.exe')
+  assert.equal(resolveTarget('win32', 'x64', '0.4.1').executable, 'Nova Personal Agent Desktop.exe')
+  assert.equal(resolveTarget('darwin', 'arm64', '0.4.1').executable, 'Nova Personal Agent Desktop.app/Contents/MacOS/Nova Personal Agent Desktop')
   assert.equal(resolveTarget('linux', 'x64', '1.0.0').artifact, 'nova-personal-agent-1.0.0-linux-x64.AppImage')
   assert.equal(releaseBaseUrl('1.0.0'), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0')
 })

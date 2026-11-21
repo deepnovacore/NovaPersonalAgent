@@ -8,7 +8,8 @@ export function resolveTarget(platform = process.platform, arch = process.arch, 
   // Published releases retain their original asset and executable names.
   const legacy = /^0\.[0-3]\./u.test(version)
   const prefix = legacy ? 'nova-audio-agent' : 'nova-personal-agent'
-  const desktop = legacy ? 'Nova Audio Agent Desktop' : 'Nova Personal Agent Desktop'
+  // 0.4 shipped as "Nova Personal Agent Desktop"; 1.0 renamed the bundle to the product name.
+  const desktop = legacy ? 'Nova Audio Agent Desktop' : /^0\./u.test(version) ? 'Nova Personal Agent Desktop' : 'Nova Personal Agent'
   const definitions = {
     'linux-x64': {artifact: `${prefix}-${version}-linux-x64.AppImage`, executable: `${prefix}.AppImage`, archive: 'file'},
     'darwin-arm64': {artifact: `${prefix}-${version}-macos-arm64-app.zip`, executable: `${desktop}.app/Contents/MacOS/${desktop}`, archive: 'zip'},
