@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math' show max;
 import 'package:flutter/widgets.dart';
 import 'client_state.dart';
 import 'mobile_tools.dart';
@@ -86,7 +87,10 @@ class SpaceClientController with WidgetsBindingObserver {
     WidgetsBinding.instance.addObserver(this);
     _subscription = transport.events.listen(
       (event) {
-        unawaited(_stream(event));
+        // Live envelopes are handled one at a time, in arrival order.
+        final run = _streamTail.then((_) => _stream(event));
+        _streamTail = run;
+        unawaited(run);
       },
       onError: (Object error) {
         state.markFailure('$error');
@@ -110,8 +114,14 @@ class SpaceClientController with WidgetsBindingObserver {
     if (foreground) unawaited(sync());
   }
 
+  Future<void> _streamTail = Future.value();
+
   Future<void> _stream(Map<String, dynamic> envelope) async {
     try {
+      // The channel is covered by the Host signature; enforce it at ingress.
+      if (envelope['chan'] != 'stream') {
+        throw StateError('invalid_envelope_channel');
+      }
       final payload = await transport.crypto.openEnvelope(envelope);
       if (payload != null && !_disposed) {
         state.markOk();
@@ -213,11 +223,30 @@ class SpaceClientController with WidgetsBindingObserver {
           });
           page = await transport.pull(state.cursor);
         }
+        var rewind = false;
         for (final raw in page['messages'] as List) {
           final item = raw as Map;
-          final payload = await transport.crypto.openEnvelope(
-            Map<String, dynamic>.from(item['envelope'] as Map),
-          );
+          // Items at or before the cursor are relay replays; never reapply.
+          if ((item['seq'] as int) <= state.cursor) continue;
+          final envelope = Map<String, dynamic>.from(item['envelope'] as Map);
+          Map<String, dynamic>? payload;
+          // The channel is covered by the Host signature: a stream envelope
+          // replayed into the mailbox is skipped, never applied.
+          if (envelope['chan'] == 'mailbox') {
+            try {
+              payload = await transport.crypto.openEnvelope(envelope);
+            } on SpaceInvalidKeyDelivery catch (error) {
+              // Host-signed but unusable: permanent, so skip it.
+              debugPrint('[Space] skipped key delivery ${item['seq']}: $error');
+            } on StateError catch (error) {
+              if (error.message != 'waiting_for_host_key' ||
+                  !await _recoverKey(item['seq'] as int, envelope)) {
+                rethrow;
+              }
+              rewind = true;
+              break;
+            }
+          }
           if (_disposed) return;
           if (payload?['type'] == 'push.key') {
             if (bindingCleanup) {
@@ -240,6 +269,7 @@ class SpaceClientController with WidgetsBindingObserver {
             });
           }
         }
+        if (rewind) continue;
         // Empty reads at a retention floor still need an ACK after durability.
         if ((page['nextCursor'] as int) > state.cursor) {
           await state.transaction(() async {
@@ -251,7 +281,7 @@ class SpaceClientController with WidgetsBindingObserver {
         more = page['hasMore'] == true;
       }
       if (_disposed) return;
-      if (transport.crypto.keys.containsKey(transport.crypto.epoch)) {
+      if (transport.crypto.canSeal) {
         if (state.snapshot.isEmpty &&
             !state.pending.any((p) => p['kind'] == 'snapshot.request')) {
           await state.enqueue('snapshot.request', {});
@@ -285,7 +315,16 @@ class SpaceClientController with WidgetsBindingObserver {
             });
           }
           // Exact signed ciphertext is durable before send. Retries reuse it.
-          await transport.send(envelope!);
+          // send() re-checks sealability just before writing; if rotation
+          // evidence arrived, nothing is sent and the intent stays queued to
+          // be re-sealed once the new key is installed.
+          if (!transport.crypto.canSeal) break;
+          try {
+            await transport.send(envelope!);
+          } on RelayFailure catch (error) {
+            if (error.code != SpaceRelayTransport.sendAborted) rethrow;
+            break;
+          }
         }
       }
       state.error = null;
@@ -295,6 +334,156 @@ class SpaceClientController with WidgetsBindingObserver {
       if (!presenceConfirmed) state.hostOnline = false;
     }
     if (!_disposed) state.changed();
+  }
+
+  /// Read-ahead keeps at most this many newer-epoch key deliveries.
+  static const maxKeyCandidates = 8;
+
+  @visibleForTesting
+  int get keyCandidateCount => _scan?.candidates.length ?? 0;
+
+  /// Bounded read-ahead progress, kept apart from the durable cursor so that
+  /// successive syncs continue scanning instead of starting over.
+  ({
+    int blockedSeq,
+    int blockedEpoch,
+    int scanned,
+    List<Map<String, dynamic>> candidates,
+  })?
+  _scan;
+
+  /// Content at [blocked] cannot be opened because its key has not been
+  /// installed. After a Host epoch rotation the Host may queue content for the
+  /// new epoch ahead of this device's key delivery, so read ahead (without
+  /// ACK) for that Host-signed delivery.
+  ///
+  /// A delivery for exactly the blocked epoch is installed as soon as it is
+  /// found; Host epochs only grow in mailbox order, so nothing decryptable is
+  /// skipped. A newer delivery is a "jump": it is used only once the scan
+  /// reaches the end of the mailbox without the exact one, because the
+  /// blocked content can then never be decrypted. Before a jump installs, a
+  /// fresh snapshot.request is queued durably, so a crash cannot ACK skipped
+  /// content without a resync. Snapshots restore projections and receipts
+  /// (pending intents are resent and the Host replays their receipts), but
+  /// not skipped `mobile.action` (they expire on the Host) or `push.key` (the
+  /// Host sends it once per push.register and does not resend it on
+  /// reconnect; notifications stay unkeyed until push re-registers).
+  ///
+  /// Candidates are used only after their Host signature verifies (and each
+  /// verified newer epoch is recorded durably as rotation evidence), so a
+  /// forged envelope cannot shadow a genuine delivery. Candidates are tried
+  /// smallest epoch first, so messages of intermediate epochs still replay.
+  /// A verified delivery whose key material is unusable is permanent: it is
+  /// logged and dropped. Storage errors propagate and keep the scan state,
+  /// so the next sync retries. The scan cursor never moves backwards, and the
+  /// candidate list is bounded (one per epoch, at most [maxKeyCandidates]).
+  /// Returns
+  /// true when a key was installed and the page must be reread.
+  Future<bool> _recoverKey(int blockedSeq, Map<String, dynamic> blocked) async {
+    final crypto = transport.crypto;
+    final blockedEpoch = blocked['epoch'] as int;
+    var scan = _scan;
+    if (scan == null ||
+        scan.blockedSeq != blockedSeq ||
+        scan.blockedEpoch != blockedEpoch) {
+      scan = (
+        blockedSeq: blockedSeq,
+        blockedEpoch: blockedEpoch,
+        scanned: blockedSeq,
+        candidates: const [],
+      );
+    }
+    final start = crypto.epoch;
+    bool installed() =>
+        crypto.epoch != start || crypto.keys.containsKey(blockedEpoch);
+    // Opens a verified delivery; false when its key material is unusable.
+    Future<bool> usable(Map<String, dynamic> envelope) async {
+      try {
+        await crypto.openEnvelope(envelope);
+        return true;
+      } on SpaceInvalidKeyDelivery catch (error) {
+        debugPrint('[Space] dropped key delivery ${envelope['epoch']}: $error');
+        return false;
+      }
+    }
+
+    var reachedEnd = false;
+    for (var pages = 0; pages < 64 && !_disposed; pages++) {
+      final page = await transport.pull(scan!.scanned);
+      var scanned = scan.scanned;
+      final candidates = [...scan.candidates];
+      for (final raw in page['messages'] as List) {
+        final item = raw as Map;
+        final seq = item['seq'] as int;
+        // A relay replaying older items cannot move the scan backwards.
+        if (seq <= scanned) continue;
+        final envelope = Map<String, dynamic>.from(item['envelope'] as Map);
+        final epoch = envelope['epoch'];
+        if (envelope['chan'] == 'mailbox' &&
+            epoch is int &&
+            epoch >= blockedEpoch &&
+            SpaceCrypto.isKeyDelivery(envelope) &&
+            await crypto.verifyAndObserve(envelope)) {
+          if (epoch == blockedEpoch) {
+            if (await usable(envelope) && installed()) {
+              _scan = null;
+              return true;
+            }
+          } else if (!candidates.any((c) => c['epoch'] == epoch)) {
+            // One candidate per epoch; a replayed delivery adds nothing.
+            candidates.add(envelope);
+          }
+        }
+        scanned = seq;
+      }
+      scanned = max(scanned, page['nextCursor'] as int);
+      // Smallest epochs are preferred, so the highest beyond the cap go.
+      candidates.sort((a, b) => (a['epoch'] as int) - (b['epoch'] as int));
+      if (candidates.length > maxKeyCandidates) {
+        candidates.removeRange(maxKeyCandidates, candidates.length);
+      }
+      _scan = scan = (
+        blockedSeq: blockedSeq,
+        blockedEpoch: blockedEpoch,
+        scanned: scanned,
+        candidates: candidates,
+      );
+      if (page['hasMore'] != true) {
+        reachedEnd = true;
+        break;
+      }
+    }
+    if (!reachedEnd || scan!.candidates.isEmpty) return false;
+    // A resync is durable before the jump is installed. Its op_id is derived
+    // from this blocked position, so it is new for this jump (an older
+    // request may already have been answered) yet retries and reopens reuse
+    // it. It cannot be sent while sealing is blocked.
+    await state.enqueue(
+      'snapshot.request',
+      {},
+      operationId:
+          'resync-${transport.crypto.space.id}-$blockedEpoch-$blockedSeq',
+    );
+    final scanned = scan.scanned;
+    final remaining = [...scan.candidates];
+    void keep() => _scan = (
+      blockedSeq: blockedSeq,
+      blockedEpoch: blockedEpoch,
+      scanned: scanned,
+      candidates: [...remaining],
+    );
+    keep();
+    while (remaining.isNotEmpty) {
+      // Storage errors propagate here and leave this candidate cached.
+      final ok = await usable(remaining.first);
+      remaining.removeAt(0);
+      keep();
+      if (ok && installed()) {
+        _scan = null;
+        return true;
+      }
+    }
+    return false;
   }
 
   /// Manual retry from the reconnect page.
@@ -343,6 +532,14 @@ class SpaceClientController with WidgetsBindingObserver {
       await transport.send(envelope); // No durable offline queue or retry.
       state.markOk();
       await state.markChat(id, 'sent');
+    } on RelayFailure catch (error) {
+      // Nothing was written: the turn failed and a retry is sealed afresh.
+      if (error.code == SpaceRelayTransport.sendAborted) {
+        await state.markChat(id, 'failed', error: error.code);
+      } else {
+        await state.markChat(id, 'unknown', error: 'send_outcome_unknown');
+      }
+      rethrow;
     } catch (_) {
       await state.markChat(id, 'unknown', error: 'send_outcome_unknown');
       rethrow;
@@ -379,6 +576,8 @@ class SpaceClientController with WidgetsBindingObserver {
     _timer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     await _subscription?.cancel();
+    // Let an in-flight live envelope finish before the transport closes.
+    await _streamTail;
     await push?.dispose();
     await transport.dispose();
     await _pumping;

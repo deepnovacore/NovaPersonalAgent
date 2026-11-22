@@ -62,7 +62,7 @@ Future<SpaceConnectionStatus> probeSpaceConnection(
   }
 }
 
-/// Login may advance an epoch; a presence check must not alter saved keys.
+/// Defence in depth: a presence check must never alter saved keys.
 class _ProbeSecrets implements SpacePersistence {
   _ProbeSecrets(this.value);
   final String? value;
