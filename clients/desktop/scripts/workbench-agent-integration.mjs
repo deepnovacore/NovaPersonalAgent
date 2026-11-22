@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict'
 import {app,BrowserWindow,ipcMain,net,protocol} from 'electron'
-import {mkdir,readFile,writeFile,realpath,stat} from 'node:fs/promises'
+import {cp,mkdir,readFile,writeFile,realpath,stat} from 'node:fs/promises'
 import {resolve,join,sep} from 'node:path'
 import {pathToFileURL} from 'node:url'
 import {registerAppScheme} from '../src/main/app-protocol.mjs'
+import {build} from 'esbuild'
+import {buildRenderer} from './build-renderer.mjs'
 import {prepareWorkbenchTestResources} from './workbench-test-resources.mjs'
 
 // The caller must select an output directory. No build or Electron cache may fall back to the checkout.
@@ -66,6 +68,7 @@ const plain={runTurn:async()=>({assistant:'Chat'}),close:async()=>{},toolBridge:
 function send(frame){if(window&&!window.isDestroyed())window.webContents.send('acceptance:frame',frame)}
 const delay=()=>new Promise(resolveWait=>setTimeout(resolveWait,25))
 async function until(read,predicate,label){const deadline=Date.now()+15000;while(Date.now()<deadline){const value=await read();if(predicate(value))return value;await delay()}throw Error('Acceptance timeout: '+label+'; '+JSON.stringify(await state()))}
+const setControlled="((node,value,type)=>{Object.getOwnPropertyDescriptor(Object.getPrototypeOf(node),'value').set.call(node,value);node.dispatchEvent(new Event(type,{bubbles:true}))})"
 const evaluate=async source=>{try{return await window.webContents.executeJavaScript(source)}catch(error){throw Error('Renderer operation '+source.slice(0,200)+': '+error.message)}}
 async function capture(name){
  await evaluate('new Promise(resolve=>requestAnimationFrame(()=>requestAnimationFrame(resolve)))')
@@ -80,7 +83,7 @@ const click=async label=>{
 }
 const openBuild=async id=>{
  await evaluate('document.querySelector("#workspace-tab-tasks").click()')
- if(await evaluate('Boolean(document.querySelector(".workbench-plan-preview"))'))await click('← 返回任务列表')
+ if(await evaluate('Boolean(document.querySelector(".workbench-plan-preview"))'))await click('返回任务列表')
  const selector='.conversation-task[data-conversation-id="'+id+'"]'
  await until(()=>evaluate(`Boolean(document.querySelector(${JSON.stringify(selector)}))`),Boolean,'Build conversation in task list')
  await evaluate(`document.querySelector(${JSON.stringify(selector)}).click()`)
@@ -105,9 +108,16 @@ const deadline=setTimeout(()=>{console.error('Workbench acceptance deadline expi
 async function run(){
 try{
  await app.whenReady()
+ // The acceptance page mounts the shipped React workbench: build the real renderer assets and bundle the harness beside them.
+ const served=join(root,'renderer')
+ await buildRenderer({outputRoot:served})
+ await mkdir(join(served,'scripts'),{recursive:true})
+ await build({absWorkingDir:desktop,entryPoints:[resolve(desktop,'scripts/workbench-agent-integration-renderer.mjs')],outdir:join(served,'scripts'),bundle:true,format:'esm',platform:'browser',target:'chrome140',jsx:'automatic',outExtension:{'.js':'.mjs'},loader:{'.mp4':'file','.png':'file','.woff2':'file'},define:{'process.env.NODE_ENV':'"production"'},logLevel:'warning'})
+ await cp(resolve(desktop,'scripts/workbench-agent-integration.html'),join(served,'scripts/workbench-agent-integration.html'))
+ const servedReal=await realpath(served)
  protocol.handle('nova',request=>{
-  const path=resolve(desktop,'.'+decodeURIComponent(new URL(request.url).pathname))
-  if(!path.startsWith(desktop+sep)||!(/\.(?:html|mjs|css|mp4)$/.test(path)))return new Response('Forbidden',{status:403})
+  const path=resolve(servedReal,'.'+decodeURIComponent(new URL(request.url).pathname))
+  if(!path.startsWith(servedReal+sep)||!(/\.(?:html|mjs|css|mp4|woff2|png)$/.test(path)))return new Response('Forbidden',{status:403})
   return net.fetch(pathToFileURL(path).href)
  })
  await writeFile(join(project,'seed.txt'),'\ufeffhello\r\nkeep\r\n')
@@ -130,12 +140,12 @@ try{
  await window.loadURL('nova://orb/scripts/workbench-agent-integration.html')
  await until(state,value=>value?.selected==='chat:main','initial Chat')
  await choose('plan');await until(state,value=>value.items[0].mode==='plan','Plan selection')
- await evaluate(`(()=>{const draft=document.querySelector('[aria-label="消息草稿"]');draft.value='请制定完整计划';draft.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[aria-label="发送消息"]').click()})()`)
+ await evaluate(`(()=>{const draft=document.querySelector('[aria-label="消息草稿"]');${setControlled}(draft,'请制定完整计划','input');document.querySelector('[aria-label="发送消息"]').click()})()`)
  await until(state,value=>!!value.items[0].plan,'published plan')
  assert.equal(monitorCount,2);assert.equal(monitorMaximum,2)
  await click('查看计划')
  await until(()=>evaluate('document.querySelector(".workbench-plan-body")?.textContent.length ?? 0'),value=>value>10000,'paged full plan')
- await click('修改计划');await evaluate(`(()=>{const edit=document.querySelector('[aria-label="计划内容"]');edit.value+=${JSON.stringify('\n用户补充的验收要求。')}})()`);await click('保存计划')
+ await click('修改计划');await evaluate(`(()=>{const edit=document.querySelector('[aria-label="计划内容"]');${setControlled}(edit,edit.value+${JSON.stringify('\n用户补充的验收要求。')},'input')})()`);await click('保存计划')
  await until(state,value=>value.items[0].plan.version===2,'edited plan version')
  // Shift+Tab changes the draft mode and preserves the published plan without starting a Build.
  const modeKey=()=>evaluate(`(()=>{const draft=document.querySelector('[aria-label="消息草稿"]');draft.focus();const event=new KeyboardEvent('keydown',{key:'Tab',shiftKey:true,bubbles:true,cancelable:true});draft.dispatchEvent(event);return event.defaultPrevented})()`)
@@ -146,7 +156,7 @@ try{
  await click('查看计划')
  const workspace='.workbench-plan .workspace-folder'
  await until(()=>evaluate(`!document.querySelector(${JSON.stringify(workspace)})?.disabled && Boolean(document.querySelector(${JSON.stringify(workspace+' option[value=folder]')}))`),Boolean,'choose local workspace')
- await evaluate(`(()=>{const select=document.querySelector(${JSON.stringify(workspace)});select.value='folder';select.dispatchEvent(new Event('change',{bubbles:true}))})()`)
+ await evaluate(`(()=>{const select=document.querySelector(${JSON.stringify(workspace)});${setControlled}(select,'folder','change')})()`)
  await until(()=>evaluate(`document.querySelector(${JSON.stringify(workspace)})?.value`),value=>value==='selected-folder','local directory')
  await click('开始 Build');await approval('file_edit')
  const buildId=(await state()).selected
@@ -163,7 +173,7 @@ try{
  await click('允许本次');await until(()=>readFile(join(project,'running.pid'),'utf8').catch(()=>null),Boolean,'real shell running')
  const runningPid=Number(await readFile(join(project,'running.pid'),'utf8'))
  // Navigating home keeps the running Build alive. Stopping explicitly must terminate its shell.
- await click('← 返回主对话');await until(state,value=>value.selected==='chat:main','return home during Build')
+ await click('返回主对话');await until(state,value=>value.selected==='chat:main','return home during Build')
  assert.equal((await state()).items.find(item=>item.id===buildId).build.status,'running')
  process.kill(runningPid,0)
  await openBuild(buildId);await click('停止')
@@ -178,14 +188,14 @@ try{
  assert.ok(modelCalls.filter(call=>!call.build).every(call=>!call.tools.includes('file_read')));assert.equal(rendererErrors.length,0,rendererErrors.join('\n'))
  await capture('completed.png')
  await until(()=>evaluate('({groups:document.querySelectorAll(".tool-message-group").length,calls:document.querySelectorAll(".build-steps-rows .tool-message").length})'),value=>value.groups===1&&value.calls===5,'complete persisted grouped tool log')
- await click('← 返回主对话');approvalMode='never'
+ await click('返回主对话');approvalMode='never'
  await host.publishPlan('chat:main',0,'无需确认的实时操作记录','创建 no-confirm.txt，用 shell 输出，再读取文件。')
  await until(state,value=>value.items[0].plan.version===3,'second approved plan')
  await click('查看计划');await click('开始 Build')
  await until(()=>evaluate('document.querySelector(".tool-message[data-tool-status=running]")?.textContent'),value=>value?.includes('shell_execute'),'running command without approval')
  const unattendedId=(await state()).selected
  assert.notEqual(unattendedId,buildId)
- assert.equal(await evaluate('document.querySelector(".workbench-local-approval").hidden'),true)
+ assert.equal(await evaluate('document.querySelector(".workbench-local-approval")===null'),true)
  await capture('running-no-confirmation.png')
  await until(state,value=>value.items.find(item=>item.id===unattendedId)?.build?.status==='completed','unattended build completes')
  await until(()=>evaluate('({groups:document.querySelectorAll(".tool-message-group").length,calls:document.querySelectorAll(".build-steps-rows .tool-message").length})'),value=>value.groups===1&&value.calls===3,'file_write shell_execute file_read grouped logs')
@@ -193,7 +203,7 @@ try{
  await until(()=>evaluate('Boolean(document.querySelector(".build-full-reply summary"))'),Boolean,'long reply expansion link')
  await evaluate('document.querySelector(".build-full-reply summary").click()')
  await until(()=>evaluate('document.querySelector(".build-full-reply-content")?.textContent.length ?? 0'),value=>value>20000,'full long Build reply pages')
- await evaluate(`(()=>{const draft=document.querySelector('[aria-label="消息草稿"]');draft.value='完成并锁定';draft.dispatchEvent(new Event('input',{bubbles:true}));document.querySelector('[aria-label="发送消息"]').click()})()`)
+ await evaluate(`(()=>{const draft=document.querySelector('[aria-label="消息草稿"]');${setControlled}(draft,'完成并锁定','input');document.querySelector('[aria-label="发送消息"]').click()})()`)
  await until(state,value=>value.items.find(item=>item.id===unattendedId)?.build?.status==='finished','finish_build locks conversation')
  assert.equal(await evaluate('document.querySelector("[aria-label=消息草稿]").disabled'),true)
  assert.equal(await evaluate('[...document.querySelectorAll("button")].some(button=>button.textContent.trim()==="继续"&&!button.hidden)'),false)

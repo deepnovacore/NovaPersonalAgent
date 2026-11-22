@@ -10,7 +10,8 @@ test('generated browser wire set equals the runtime and every type has a rendere
   assert.equal(renderer.WIRE_FRAME_TYPES.length, new Set(runtimeTypes).size)
   assert.equal(await readFile(new URL('../src/renderer/wire-frame-types.mjs', import.meta.url), 'utf8'),
     wireFrameTypesSource(runtimeTypes), 'regenerate with the desktop build')
-  const source = (await Promise.all(['index', 'confirmation-controls', 'bubbles', 'camera'].map(name =>
+  // The shipped renderer is the React bundle; scan its engine plus the shared modules it imports.
+  const source = (await Promise.all(['react/desktop-engine', 'confirmation-controls', 'bubbles', 'camera'].map(name =>
     readFile(new URL(`../src/renderer/${name}.mjs`, import.meta.url), 'utf8')))).join('\n')
   const consumed = consumedTypes(source)
   // desktop.ready is the transport bootstrap marker; the orb intentionally ignores its payload.
