@@ -43,20 +43,10 @@ subscriptions appropriately.
 version conflicts, async responses, settings secrets, window cleanup, package
 configuration and compiled local asset graphs.
 
-Reproduce the Playwright comparison with synthetic public data:
+The one-off Playwright before/after comparison script used during the migration has been
+removed; the results below are kept as a historical record.
 
-```sh
-node clients/desktop/scripts/react-visual-compare.mjs --phase before
-node clients/desktop/scripts/react-visual-compare.mjs --phase after
-```
-
-Artifacts default to `/tmp/nova-react-validation/`: `comparison.html`, paired
-screenshots and per-phase `results.json`. Chromium defaults to
-`/usr/bin/chromium` (`--chromium` overrides); baseline defaults to `ea0fd201`
-(`--base` overrides). `--output` selects an approved `/tmp` subdirectory and
-`--renderer` selects the compiled renderer directory.
-
-Browser checks use a mocked Electron bridge. They establish rendering and
+Those browser checks used a mocked Electron bridge. They established rendering and
 browser interactions, not actual microphone/camera/native codec/OS permission,
 external authentication, pairing or installed-package behavior. Run the
 platform-specific Electron/native acceptance checks before releasing an app.

@@ -1,10 +1,11 @@
 package com.nova.nova_mobile
 
+import org.junit.Test
 import java.io.File
 import java.nio.file.Files
 
-object NativeSpaceSelectionChecks {
-    @JvmStatic fun main(args: Array<String>) {
+class NativeSpaceSelectionTest {
+    @Test fun roleGatesStaleScopeIdempotentSelectionPerSpaceFilesAndTraversalRejection() {
         val state = NativeSpaceSelection()
         check(runCatching { state.standalone() }.isFailure)
         val owner = Any(); var changes = 0
@@ -26,6 +27,5 @@ object NativeSpaceSelectionChecks {
             check(runCatching { NativeSpaceSelection.directory(root, "../../outside") }.isFailure)
         } finally { root.deleteRecursively() }
         state.removeListener(owner)
-        println("PASS production native Space policy: role gates, stale scope, idempotent selection, per-Space files and traversal rejection")
     }
 }
