@@ -10,7 +10,7 @@ import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createPackageWithOptions, extractFile, getRawHeader, statFile, uncache} from '@electron/asar'
 import {replacePackagedAsar, refreshSignedAsar, refreshMacAsarIntegrity} from '../scripts/build-owned-asar.mjs'
-import {inspectApplication, inspectMacApplicationInfo, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
+import {inspectApplication, inspectMacApplicationInfo, parseReleaseArgs, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
 import {loadSettings} from '../src/main/settings-store.mjs'
 import {backendLaunchSpec} from '../src/main/backend.mjs'
 import {describeMissingBlockingEnvironment} from '@nova-personal-agent/runtime/desktop'
@@ -21,6 +21,12 @@ async function file(root, name, body = 'fixture') {
   await mkdir(dirname(join(root, name)), {recursive: true})
   await writeFile(join(root, name), body)
 }
+
+test('release verifier launches by default and skips only the GUI launch with --no-launch', () => {
+  assert.equal(parseReleaseArgs(['--unsigned']).launch, true)
+  assert.deepEqual(parseReleaseArgs(['--unsigned', '--no-launch', '--dist-root', 'x']), {unsigned: true, distRoot: 'x', launch: false})
+  assert.throws(() => parseReleaseArgs(['--launch=no']))
+})
 
 test('smoke diagnostics retain the error but remove tokens, keys and private paths', () => {
   const text = redactSmokeOutput('Electron sandbox failed at /private/profile; key=private-key-123 token=0123456789abcdef0123456789abcdef',

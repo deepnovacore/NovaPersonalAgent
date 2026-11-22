@@ -3,7 +3,7 @@ import {spawn, spawnSync} from 'node:child_process'
 import {once} from 'node:events'
 import {createHash} from 'node:crypto'
 import {createServer} from 'node:https'
-import {cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile} from 'node:fs/promises'
+import {access, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile} from 'node:fs/promises'
 import {basename, normalize, resolve} from 'node:path'
 import {parseArgs} from 'node:util'
 import {getRawHeader, listPackage, statFile} from '@electron/asar'
@@ -248,7 +248,7 @@ async function findApp(directory, depth = 0) {
   return null
 }
 
-export async function verifyRelease({app, artifact, distRoot, unsigned = false, diagnosticsDir = process.env.NOVA_SMOKE_DIAGNOSTICS}) {
+export async function verifyRelease({app, artifact, distRoot, unsigned = false, launch = true, diagnosticsDir = process.env.NOVA_SMOKE_DIAGNOSTICS}) {
   const scratch = await realpath(await mkdtemp(resolve(candidateScratchParent(), 'nova-release-')))
   const install = resolve(scratch, 'install')
   const mount = resolve(scratch, 'dmg')
@@ -299,8 +299,13 @@ export async function verifyRelease({app, artifact, distRoot, unsigned = false, 
     } else if (process.platform === 'win32') {
       run('powershell.exe', ['-NoProfile', '-Command', 'if ((Get-AuthenticodeSignature -LiteralPath $env:NOVA_VERIFY_APPLICATION).Status -ne "Valid") { exit 1 }'], {env: {...process.env, NOVA_VERIFY_APPLICATION: executable}})
     } else throw new Error('signed verification unavailable for Linux; use --unsigned')
-    await smoke(executable, scratch, diagnosticsDir)
-    process.stdout.write('release verification passed: ASAR/native placement and installed backend handshake\n')
+    if (launch) {
+      await smoke(executable, scratch, diagnosticsDir)
+      process.stdout.write('release verification passed: ASAR/native placement and installed backend handshake\n')
+    } else {
+      await access(executable)
+      process.stdout.write('release verification passed: ASAR/native placement and installed executable present (launch skipped, --no-launch)\n')
+    }
   } finally {
     try { if (uninstall) uninstall() } finally {
       if (mounted) run('/usr/bin/hdiutil', ['detach', mount])
@@ -309,7 +314,13 @@ export async function verifyRelease({app, artifact, distRoot, unsigned = false, 
   }
 }
 
+// `--no-launch` keeps every static check but skips the GUI launch (hosted runners without a usable window server).
+export function parseReleaseArgs(args) {
+  const {values} = parseArgs({args, options: {app: {type: 'string'}, artifact: {type: 'string'}, 'dist-root': {type: 'string'}, unsigned: {type: 'boolean'}, 'no-launch': {type: 'boolean'}}})
+  const {'dist-root': distRoot, 'no-launch': noLaunch, ...rest} = values
+  return {...rest, distRoot, launch: !noLaunch}
+}
+
 if (process.argv[1] && resolve(process.argv[1]) === import.meta.filename) {
-  const {values} = parseArgs({options: {app: {type: 'string'}, artifact: {type: 'string'}, 'dist-root': {type: 'string'}, unsigned: {type: 'boolean'}}})
-  await verifyRelease({...values, distRoot: values['dist-root']})
+  await verifyRelease(parseReleaseArgs(process.argv.slice(2)))
 }

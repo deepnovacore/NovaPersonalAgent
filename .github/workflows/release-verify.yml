@@ -63,6 +63,8 @@ jobs:
       - name: Install the published desktop CLI
         run: npm install --prefix npm-smoke nova-personal-agent@${{ inputs.release_version }}
       - name: Verify public download and installed application
+        env:
+          NOVA_NPM_SMOKE_INSTALL_ONLY: ${{ runner.os == 'macOS' && '1' || '' }}
         run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} node scripts/verify-npm-desktop.mjs npm-smoke/node_modules/nova-personal-agent
       - name: Verify the published headless package
         if: runner.os == 'Linux'
