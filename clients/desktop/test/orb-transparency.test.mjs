@@ -15,7 +15,11 @@ const electron = require('electron')
 const probeTimeout = 30_000
 const probe = fileURLToPath(new URL('../scripts/orb-transparency-probe.cjs', import.meta.url))
 
-async function runProbe() {
+// Each probe launches Electron and measures every layout in one pass, so run it once and share the result.
+let probeRun
+function runProbe() { return probeRun ??= launchProbe() }
+
+async function launchProbe() {
   const root = await mkdtemp(join(await realpath(tmpdir()), 'nova-orb-launch-'))
   try {
     for (const name of ['home', 'codex', 'tmp']) await mkdir(join(root, name), { mode: 0o700 })

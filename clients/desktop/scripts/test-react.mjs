@@ -2,7 +2,8 @@ import {spawnSync} from 'node:child_process'
 import {readdir} from 'node:fs/promises'
 import {resolve} from 'node:path'
 const root=resolve(import.meta.dirname,'..')
-const tests=(await readdir(resolve(root,'test'))).filter(name=>/^react-.*\.test\.(mjs|tsx|ts)$/.test(name)).sort()
+// react-*.test.mjs files already run through the desktop `node --test test/*.test.mjs` glob.
+const tests=(await readdir(resolve(root,'test'))).filter(name=>/^react-.*\.test\.(tsx|ts)$/.test(name)).sort()
 let failed=0
 for(const file of tests){
  // Direct node:test execution ensures named cases execute in managed runtimes,
