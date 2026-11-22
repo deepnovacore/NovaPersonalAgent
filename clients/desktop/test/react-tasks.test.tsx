@@ -4,7 +4,9 @@ import React, { createRef } from 'react'
 import { JSDOM } from 'jsdom'
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' })
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })
-const { render, fireEvent, waitFor, cleanup, act } = await import('@testing-library/react')
+const { render, fireEvent, waitFor, cleanup, act, configure } = await import('@testing-library/react')
+// Slow Windows CI runners need more than the 1 s default for jsdom renders.
+configure({ asyncUtilTimeout: 5000 })
 const { TasksPage, TaskDetail, ScheduledTasksPage } = await import('../src/renderer/react/tasks.tsx')
 afterEach(() => { cleanup(); dom.window.localStorage.clear() })
 const task = (extra: any = {}) => ({ id:'t',conversation_id:'chat:t',goal:'Fix login',phase:'running',control_revision:0,goal_revision:0,controller:{kind:'nova'},session_ids:['s1','s2'],events:{items:[],next:0},artifact_refs:[],approvals:[],viewer:{client_id:'client',can_takeover:true},capabilities:{detail:'conversation',input:true},...extra })
