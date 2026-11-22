@@ -58,9 +58,9 @@ test('memory clear invalidates an in-flight page and copy is disabled until fres
 })
 
 test('personal memory search ignores replies for an edited query and next page carries exact cursor',async()=>{
- const first=deferred(),queries:any[]=[];const api={request:async(query:any)=>{queries.push(query);if(query?.channel==='personal'){if(query.query==='old')return first.promise;return{personal:{entries:[{id:'a',state:'learned',recordedAt:'2026-10-28',memories:['learned note'],original:'source'}],next:25}}}return boardPayload()}},v=render(<MemoryBoardApp api={api}/>);await waitFor(()=>assert.ok(v.getByText('hello')));fireEvent.click(v.getByText('本机记忆'));await waitFor(()=>assert.ok(v.getByText('learned note')))
+ const first=deferred(),queries:any[]=[];const api={request:async(query:any)=>{queries.push(query);if(query?.channel==='personal'){if(query.query==='old')return first.promise;return{personal:{entries:[{id:'a',state:'learned',recordedAt:'2026-10-28',memories:[query.query==='new'?'new query note':'learned note'],original:'source'}],next:25}}}return boardPayload()}},v=render(<MemoryBoardApp api={api}/>);await waitFor(()=>assert.ok(v.getByText('hello')));fireEvent.click(v.getByText('本机记忆'));await waitFor(()=>assert.ok(v.getByText('learned note')))
  const search=v.getByLabelText('搜索记忆来源原话');fireEvent.change(search,{target:{value:'old'}});fireEvent.click(v.getByText('搜索',{selector:'button'}));fireEvent.change(search,{target:{value:'new'}});await act(async()=>first.resolve({personal:{entries:[],next:null}}));assert.ok(v.getByText('learned note'))
- fireEvent.click(v.getByText('搜索',{selector:'button'}));await waitFor(()=>assert.ok(v.getByText('learned note')));fireEvent.click(v.getByText('下一页'));await waitFor(()=>assert.ok(queries.some(q=>q?.before_seq===25&&q.query==='new')))
+ fireEvent.click(v.getByText('搜索',{selector:'button'}));await waitFor(()=>assert.ok(v.getByText('new query note')));assert.equal(v.queryByText('learned note'),null);fireEvent.click(v.getByText('下一页'));await waitFor(()=>assert.ok(queries.some(q=>q?.before_seq===25&&q.query==='new')))
 })
 
 test('welcome saves consent once, keeps failed state retryable and releases listener',async()=>{
