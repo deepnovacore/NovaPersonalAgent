@@ -113,4 +113,7 @@ val verifyLinuxRuntime by tasks.registering {
         }
     }
 }
-tasks.named("preBuild") { dependsOn(verifyLinuxRuntime) }
+// Fail fast only on the tasks that emit the APK/AAB. preBuild (or merge*Assets/JniLibFolders, which unit tests also
+// run) would demand the runtime for unit tests and lint, which never package it.
+tasks.matching { it.name.matches(Regex("package(Debug|Release|Profile)(Bundle)?|bundle(Debug|Release|Profile)")) }
+    .configureEach { dependsOn(verifyLinuxRuntime) }

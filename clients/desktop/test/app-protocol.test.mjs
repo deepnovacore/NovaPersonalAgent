@@ -13,7 +13,8 @@ import {
   registerAppScheme,
 } from '../src/main/app-protocol.mjs'
 
-const ACTUAL_RENDERER_ROOT = resolve(import.meta.dirname, '../src/renderer')
+// Production serves the generated React renderer; `npm test` builds it first.
+const ACTUAL_RENDERER_ROOT = resolve(import.meta.dirname, '../build/renderer')
 
 test('app scheme enables media streaming for the file-backed camera', () => {
   const registrations = []
@@ -35,9 +36,11 @@ test('app scheme enables media streaming for the file-backed camera', () => {
 test('renderer protocol serves the complete reachable static import graph and nothing arbitrary', async () => {
   const rendererFiles = await buildRendererAssetGraph(ACTUAL_RENDERER_ROOT)
   assert.ok(Object.isFrozen(rendererFiles))
-  assert.ok(rendererFiles.includes('/camera.mjs'), 'index.mjs camera import is reachable')
-  assert.ok(rendererFiles.includes('/orb-visual.mjs'), 'index.mjs orb visual import is reachable')
-  for (const path of ['/setup.html', '/setup.css', '/setup.mjs']) assert.ok(rendererFiles.includes(path), `first-run ${path} is reachable`)
+  // The React bundle inlines camera/orb modules; the entry and its split chunks must be reachable.
+  assert.ok(rendererFiles.includes('/react/index.mjs'), 'index entry bundle is reachable')
+  assert.ok(rendererFiles.some(path => path.startsWith('/chunks/')), 'shared split chunks are reachable')
+  assert.ok(rendererFiles.includes('/capture-worklet.mjs'), 'audio worklet is reachable')
+  for (const path of ['/setup.html', '/setup.css', '/react/setup.mjs']) assert.ok(rendererFiles.includes(path), `first-run ${path} is reachable`)
 
   let handler
   const fetched = []

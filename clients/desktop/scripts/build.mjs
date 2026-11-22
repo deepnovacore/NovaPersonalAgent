@@ -12,7 +12,7 @@ import { stageReleaseApplication } from './stage-release-app.mjs'
 import { stageEndpointingProbeAssets } from './stage-endpointing-probe-assets.mjs'
 import { generateSourceHostResourceManifest } from './native-resource-contract.mjs'
 
-import {buildRenderer} from './build-renderer.mjs'
+import {buildRenderer, rendererEntries} from './build-renderer.mjs'
 
 const root = resolve(import.meta.dirname, '..')
 
@@ -90,10 +90,14 @@ await rename(sourceManifestTemporary, sourceManifestPath)
 
 checkJavaScriptFiles(root)
 
-const html = await readFile(resolve(root, 'src/renderer/index.html'), 'utf8')
-assert.match(html, /Content-Security-Policy/)
-assert.match(html, /connect-src ws:\/\/127\.0\.0\.1:\*/)
-assert.doesNotMatch(html, /https?:\/\//)
+// Assert on the generated React renderer pages that production actually loads.
+const rendererOutput = resolve(process.env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT ?? resolve(root, 'build/renderer'))
+for (const entry of Object.keys(rendererEntries)) {
+  const html = await readFile(resolve(rendererOutput, `${entry}.html`), 'utf8')
+  assert.match(html, /Content-Security-Policy/, `${entry}.html CSP`)
+  assert.match(html, /connect-src ws:\/\/127\.0\.0\.1:\*/, `${entry}.html connect-src`)
+  assert.doesNotMatch(html, /https?:\/\//, `${entry}.html external URL`)
+}
 
 const preload = await readFile(resolve(root, 'src/preload/preload.cjs'), 'utf8')
 assert.doesNotMatch(preload, /nodeIntegration|require\(['"]node:/)

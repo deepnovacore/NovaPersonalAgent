@@ -17,8 +17,9 @@ test('settings links open only fixed API key pages in the external browser', asy
   }
   await Promise.resolve()
   assert.deepEqual(opened, [allowed])
-  const html = await readFile(new URL('../src/renderer/settings.html', import.meta.url), 'utf8')
-  const links = [...html.matchAll(/<a class="key-link" href="([^"]+)" target="_blank" rel="noopener noreferrer"/g)]
+  // The shipped settings page is the React layout; its key-link anchors are serialized props.
+  const layout = await readFile(new URL('../src/renderer/react/settings/layout.ts', import.meta.url), 'utf8')
+  const links = [...layout.matchAll(/"class":"key-link","href":"([^"]+)","target":"_blank","rel":"noopener noreferrer"/g)]
   assert.equal(links.length, 7)
   for (const [, href] of links) handler({url: href.replaceAll('&amp;', '&')})
   assert.equal(opened.length, 8)

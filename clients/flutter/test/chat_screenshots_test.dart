@@ -1,3 +1,9 @@
+// Golden captures only. The goldens are intentionally untracked (see
+// .gitignore and docs/ASSET_PUBLICATION.md), so this file is excluded from the
+// default run; layout assertions live in chat_layout_test.dart.
+@Tags(['golden'])
+library;
+
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/services.dart';
@@ -106,9 +112,6 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      // The shell must not blur its backdrop: iOS keeps stale samples from the
-      // previous tab behind a bottom BackdropFilter.
-      expect(find.byType(BackdropFilter), findsNothing);
       await precachePetAvatar(tester);
       await expectLater(
         find.byType(NovaApp),
@@ -171,24 +174,6 @@ void main() {
         find.byType(NovaApp),
         matchesGoldenFile('goldens/chat-tasks.png'),
       );
-      await tester.tap(find.text('Nova').last);
-      await tester.pumpAndSettle();
-      // Exercise both compact and landscape layouts at accessible text sizes.
-      for (final size in [const Size(320, 640), const Size(844, 390)]) {
-        tester.view.physicalSize = size;
-        tester.platformDispatcher.textScaleFactorTestValue = 2;
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-        tester.view.viewInsets = const FakeViewPadding(bottom: 200);
-        await tester.enterText(
-          find.byType(TextField),
-          'A draft with the keyboard open',
-        );
-        await tester.pumpAndSettle();
-        expect(tester.takeException(), isNull);
-        tester.view.resetViewInsets();
-      }
-      tester.platformDispatcher.clearTextScaleFactorTestValue();
       await tester.pumpWidget(const SizedBox());
     },
   );

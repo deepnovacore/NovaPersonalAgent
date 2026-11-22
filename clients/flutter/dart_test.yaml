@@ -1,0 +1,7 @@
+# Opt-in suites excluded from the default run:
+#   flutter test --exclude-tags live,golden
+tags:
+  # Needs real services or built relay/runtime artifacts selected by NOVA_* environment variables.
+  live:
+  # Pixel goldens. The PNGs are intentionally untracked (docs/ASSET_PUBLICATION.md), so they cannot pass on a clean checkout.
+  golden:

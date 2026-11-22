@@ -34,8 +34,7 @@
     "verify:release": "node scripts/verify-release.mjs",
     "build:renderer": "node scripts/build-renderer.mjs",
     "typecheck:renderer": "tsc -p tsconfig.renderer.json",
-    "test:react": "node scripts/test-react.mjs",
-    "test:visual": "node scripts/react-visual-compare.mjs"
+    "test:react": "node scripts/test-react.mjs"
   },
   "dependencies": {
     "@nova-personal-agent/relay": "1.0.0",
