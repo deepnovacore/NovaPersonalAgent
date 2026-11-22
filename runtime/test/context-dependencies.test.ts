@@ -41,6 +41,22 @@ test('unknown legacy descendants inherit app dependencies; standalone legacy cha
  }finally{await host.close();await rm(directory,{recursive:true,force:true})}
 })
 
+test('product history validates each inherited dependency once per pass',async t=>{
+ const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-history-deps-')),host=new PersonalAgentHost({path:join(directory,'personal.json'),userScope:'test',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null})
+ try{
+  await host.open();await host.life.mutate({op:'create',kind:'todo',title:'Original app fact'},'todo')
+  const row=host.life.snapshot().todos[0]!,conversation=createConversation('chat','History'),at=new Date().toISOString()
+  // Every unmarked descendant inherits the app record, so a long chat re-presents the same dependency per message.
+  conversation.messages=[{id:'app',conversation_id:conversation.id,role:'assistant',text:'Original app fact',context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:at},
+   ...Array.from({length:40},(_,index)=>({id:'legacy-'+index,conversation_id:conversation.id,role:index%2?'assistant' as const:'user' as const,text:'Legacy turn '+index,created_at:at}))]
+  const validate=t.mock.method(host.appContext,'validateRecord')
+  assert.equal((await host.productConversation(conversation,null)).messages.length,41)
+  assert.equal(validate.mock.callCount(),1)
+  await host.life.mutate({op:'update',kind:'todo',id:row.id,expected_version:row.version,title:'Changed app fact'},'change')
+  assert.equal((await host.productConversation(conversation,null)).messages.filter(message=>message.role==='assistant').length,0,'a fresh pass still sees the changed record')
+ }finally{await host.close();await rm(directory,{recursive:true,force:true})}
+})
+
 test('resource replacement cannot reuse a compact token from the same backend owner',async()=>{
  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-owner-deps-'))
  const {emptyLifeState}=await import('../src/personal-agent/life.js')

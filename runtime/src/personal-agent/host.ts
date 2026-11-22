@@ -1144,14 +1144,20 @@ export class PersonalAgentHost {
         // A legacy plan without model provenance is safe only when its complete text is an owned user input.
         return source.messages.some(message=>message.role==='user'&&message.text===plan.content)?this.retainedConversationDependencies(source.id,source.generation):{state:'unavailable'};
     }
-    async contextDependenciesAuthorized(dependencies:ContextDependencies,consumer?:string|null):Promise<boolean>{
+    /** `memo` shares item verdicts across one pass; a new pass re-reads live authority. */
+    async contextDependenciesAuthorized(dependencies:ContextDependencies,consumer?:string|null,memo?:Map<string,Promise<boolean>>):Promise<boolean>{
         if(dependencies.state==='unavailable')return false;
         for(const item of dependencies.items){
-            if(item.kind==='scheduled'){if(!await this.scheduledResultAuthorized(item.run_id,consumer))return false}
-            else if(item.kind==='feed'){const feed=this.#state.feed.find(feed=>feed.id===item.id);if(feed?.updated_at!==item.updated_at||!await this.#productDependencies(feed,consumer))return false}
-            else if(!await this.appContext.validateRecord(item.section,item.id,item.version,consumer??null))return false;
+            const key=JSON.stringify(item);let verdict=memo?.get(key);
+            if(!verdict){verdict=this.#contextDependencyAuthorized(item,consumer);memo?.set(key,verdict)}
+            if(!await verdict)return false;
         }
         return true;
+    }
+    async #contextDependencyAuthorized(item:Extract<ContextDependencies,{state:'tracked'}>['items'][number],consumer?:string|null):Promise<boolean>{
+        if(item.kind==='scheduled')return this.scheduledResultAuthorized(item.run_id,consumer);
+        if(item.kind==='feed'){const feed=this.#state.feed.find(feed=>feed.id===item.id);return feed?.updated_at===item.updated_at&&await this.#productDependencies(feed,consumer)}
+        return this.appContext.validateRecord(item.section,item.id,item.version,consumer??null);
     }
     contextDependenciesCacheable(dependencies:ContextDependencies):boolean{
         if(dependencies.state==='unavailable')return false;
@@ -1188,6 +1194,8 @@ export class PersonalAgentHost {
         signal.throwIfAborted();
         const filtered=this.#filterConversation(conversation,feeds.filter((_,index)=>!allowed[index]));
         const visible=new Set(filtered.messages.map(message=>message.id)),messages=[];
+        // Unmarked descendants inherit every earlier dependency, so one pass must not re-check the same item per message.
+        const memo=new Map<string,Promise<boolean>>();
         let inherited=mergeContextDependencies(...(conversation.prepared?conversation.feed_ids.map(id=>this.feedContextDependencies(id)):[]));
         for(const original of conversation.messages){
             signal.throwIfAborted();
@@ -1196,7 +1204,7 @@ export class PersonalAgentHost {
             const dependencies=original.role==='assistant'&&original.context_dependencies===undefined?mergeContextDependencies(inherited,direct):direct;
             inherited=mergeContextDependencies(inherited,dependencies);
             if(!visible.has(original.id))continue;
-            const authorized=await abortable(this.contextDependenciesAuthorized(dependencies,consumer),signal);
+            const authorized=await abortable(this.contextDependenciesAuthorized(dependencies,consumer,memo),signal);
             signal.throwIfAborted();if(!authorized)continue;
             messages.push({...original,...(original.role==='assistant'?{context_dependencies:dependencies}:{})});
         }
