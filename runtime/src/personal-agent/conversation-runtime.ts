@@ -1,3 +1,4 @@
+import {setTimeout as delay} from 'node:timers/promises'
 import {abortable} from '../core/camera-session.js'
 import {contextDependenciesSchema,emptyContextDependencies,mergeContextDependencies,type ContextDependencies} from './context-dependencies.js'
 import {factoryForMemoryComposition, personalMemoryFactory} from '../memory/factory.js'
@@ -49,6 +50,7 @@ import {scopeApprovalController} from './approval-scope.js'
 import {deliveryToEvent,executorApprovalMessage,projectStateMessage} from '../desktop/desktop-wire.js'
 
 const SOURCE_TODO_TURNS=4
+const AUTHORIZATION_SETTLE_ATTEMPTS=10
 /** Prepared topic text must retain evidence authorization for the actual model recipient. */
 
 export async function maySendPreparedMemory(memory: PersonalMemoryResource|undefined, consumer: string|undefined, refs: readonly string[]): Promise<boolean> {
@@ -98,7 +100,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(execution||contextDependencies.state==='tracked'&&!contextDependencies.items.length)return
    authorizationFailure=undefined
    const authorizationSignal=AbortSignal.any([lifetime,AbortSignal.timeout(5000)])
-   for(let attempt=0;attempt<2;attempt++){
+   // Admitting a turn ingests its own message, which moves the revision for a moment. Forced checks gate
+   // startup and turns, so they wait for it to settle inside the authorization deadline instead of failing.
+   for(let attempt=0;attempt<(force?AUTHORIZATION_SETTLE_ATTEMPTS:2);attempt++){
+    if(attempt>=2)await delay(Math.min(50*2**(attempt-2),400),undefined,{signal:authorizationSignal})
     const before=await abortable(options.host.contextAuthorizationRevision(authorizationSignal),authorizationSignal)
     if(!force&&authorizationCacheable&&before!==undefined&&before===authorizationRevision)return
     if(!await abortable(options.host.contextDependenciesAuthorized(contextDependencies,configuredMemoryConsumer(options.settings,mode)??null),authorizationSignal)){authorizationFailure='unauthorized';throw Error('context_authorization_changed')}

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtemp,realpath,rm} from 'node:fs/promises'
+import {mkdtemp,realpath,rm,stat} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ScheduleService,type ScheduleInput,type ScheduleCreateAuthority} from '../src/personal-agent/scheduled-tasks.js'
@@ -88,3 +88,19 @@ test('upgrade preserves ordinary schedules and retires shared schedules without 
   const persisted=JSON.parse(await readFile(path,'utf8')) as typeof state;assert.deepEqual(persisted.items.find(item=>item.id===shared.id)?.shared,{owner_revision:1});
  }finally{await restored.close()}
 }));
+
+test('idempotent schedule replays neither rewrite state nor signal a change',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-schedules-noop-')),path=join(dir,'schedules.json')
+ let changes=0
+ const s=new ScheduleService(path,()=>{changes++},()=>new Date('2026-10-12T02:29:00Z'))
+ try{
+  await s.open()
+  const created=await s.create('same',input,authority)
+  assert.equal(changes,1)
+  const written=(await stat(path)).mtimeMs
+  // A replayed request resolves from its receipt: no observer churn, which would otherwise advance context authority.
+  for(let i=0;i<5;i++)assert.equal((await s.create('same',input,authority)).id,created.id)
+  assert.equal(changes,1)
+  assert.equal((await stat(path)).mtimeMs,written)
+ }finally{await s.close();await rm(dir,{recursive:true,force:true})}
+})
