@@ -3,6 +3,9 @@
 // acknowledgements (the text-only history a reconnected call sees).
 // NOVA_VOICE_LIVE_CONFIG points to a private JSON file; credentials, URLs and
 // model text never reach the test log, only counts.
+@Tags(['live'])
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

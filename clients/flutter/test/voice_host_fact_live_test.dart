@@ -1,4 +1,7 @@
 // Opt-in Qwen protocol acceptance using synthetic task facts; no microphone.
+@Tags(['live'])
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
