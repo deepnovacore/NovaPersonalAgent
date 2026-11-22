@@ -107,8 +107,7 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
   ProviderSetupCopy get _copy => ProviderSetupCopy(widget.language);
   ModelPreset? get _preset => ModelPreset.byId(_presetId);
   bool get _isCustom => _preset == null;
-  bool get _selfHosted => _preset?.selfHosted ?? false;
-  bool get _urlEditable => _isCustom || _selfHosted;
+  bool get _urlEditable => _isCustom;
   bool get _showModel => _noList || _manual;
 
   /// A provider that lists no models still has a recommended one to try.
@@ -217,7 +216,6 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
 
   /// Local services run without a key; every other provider needs one.
   bool get _keyRequired {
-    if (_selfHosted) return false;
     final uri = Uri.tryParse(_endpoint.text.trim());
     return !(_isCustom && uri != null && _loopback(uri.host));
   }
@@ -619,11 +617,6 @@ class _ProviderSetupPageState extends State<ProviderSetupPage> {
                 _text(
                   _isCustom ? copy.noListCustom : copy.noListPreset,
                   key: const ValueKey('provider.noList'),
-                ),
-              if (_selfHosted)
-                _text(
-                  copy.selfHostedNote,
-                  key: const ValueKey('provider.selfHosted'),
                 ),
               if (_unencrypted)
                 _text(

@@ -501,7 +501,6 @@ void main() {
     await _openSettings(tester, initial: _validCascaded(), language: 'en');
     await _openDropdown(tester, const ValueKey('fastLlm.provider'));
     for (final preset in modelPresets) {
-      if (preset.selfHosted) continue;
       expect(find.text(preset.label('en')), findsWidgets, reason: preset.id);
     }
     expect(find.text('Zhipu GLM'), findsWidgets);
@@ -533,13 +532,8 @@ void main() {
         initial.fastLlm.endpoint,
       );
       await _openDropdown(tester, const ValueKey('fastLlm.provider'));
-      // 127.0.0.1 is the phone itself, so self-hosted services are not offered.
       for (final preset in modelPresets) {
-        expect(
-          find.text(preset.name),
-          preset.selfHosted ? findsNothing : findsWidgets,
-          reason: preset.id,
-        );
+        expect(find.text(preset.name), findsWidgets, reason: preset.id);
       }
       await tester.tap(find.text('OpenAI').last);
       await tester.pumpAndSettle();

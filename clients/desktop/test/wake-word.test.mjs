@@ -7,6 +7,7 @@ import { WakeAudioRouter } from '../src/renderer/wake-audio.mjs'
 import { normalizeSettings, applySettingsUpdate, orbSettings } from '../src/main/settings-store.mjs'
 import { shouldOpenSettings } from '../src/main/launch-command.mjs'
 import { trayClickAction } from '../src/main/tray-unread.mjs'
+import { bindWindowShortcuts } from '../src/main/window-shortcuts.mjs'
 
 class Worker extends EventEmitter {
   messages = []
@@ -436,19 +437,25 @@ test('explicit bubble sleep works without a detector and resumes without changin
   }
 })
 
-test('Control M toggles the existing microphone path and Control L uses bubble sleep', () => {
+test('Control M toggles the microphone and Control L sleeps only while a Nova window is focused', () => {
   const source = readFileSync(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
-  const start = source.indexOf("for (const [key, action] of [")
-  const end = source.indexOf('\n  backendSupervisor', start)
-  const registered = new Map(), sent = []
-  let slept = 0
-  new Function('globalShortcut', 'sendToOrb', 'sleepOrb', source.slice(start, end))(
-    {register: (key, callback) => { registered.set(key, callback); return true }},
-    channel => sent.push(channel), () => slept++)
-  registered.get('Control+M')()
-  registered.get('Control+L')()
-  assert.deepEqual(sent, ['nova:microphone:toggle'])
-  assert.equal(slept, 1)
+  assert.doesNotMatch(source, /'Control\+[ML]'/, 'Control+M/L must not be registered globally')
+  assert.match(source, /bindWindowShortcuts\(window, \{toggleMicrophone: \(\) => sendToOrb\('nova:microphone:toggle'\), sleep: sleepOrb\}\)/)
+  let handler
+  const window = {webContents: {on: (name, callback) => { assert.equal(name, 'before-input-event'); handler = callback }}}
+  const sent = []
+  bindWindowShortcuts(window, {toggleMicrophone: () => sent.push('mic'), sleep: () => sent.push('sleep')})
+  const press = (key, extra = {}) => {
+    let prevented = false
+    handler({preventDefault: () => { prevented = true }}, {type: 'keyDown', key, control: true, ...extra})
+    return prevented
+  }
+  assert.equal(press('m'), true)
+  assert.equal(press('L'), true)
+  assert.deepEqual(sent, ['mic', 'sleep'])
+  for (const input of [{control: false}, {type: 'keyUp'}, {isAutoRepeat: true}, {meta: true}, {alt: true}, {shift: true}]) assert.equal(press('m', input), false)
+  assert.equal(press('x'), false)
+  assert.deepEqual(sent, ['mic', 'sleep'])
 })
 
 test('late sleeping audio after stop cannot reach a terminated wake worker', () => {

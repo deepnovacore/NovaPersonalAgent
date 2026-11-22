@@ -158,6 +158,7 @@ import {probeApiKey, probeKeyForSettings, canProbeKey} from './key-probe.mjs'
 import {planSecretChange, rotationPayload} from './credential-hot-apply.mjs'
 import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import {selectedTextLlmProvider} from './settings-defaults.mjs'
+import {bindWindowShortcuts} from './window-shortcuts.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
 import { isValidCategory } from '../renderer/settings-categories.mjs'
 
@@ -1782,6 +1783,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     mainWindow.on('show', () => { if (personalCollapsed) orbWindow.setDormant(false) })
   }
   for (const window of windowsPresentation?.windows ?? [mainWindow]) bindPresentationShow(window)
+  for (const window of windowsPresentation?.windows ?? [mainWindow]) bindWindowShortcuts(window, {toggleMicrophone: () => sendToOrb('nova:microphone:toggle'), sleep: sleepOrb})
   setPersonalCollapsed(false)
 
   const windowShown = new Promise((resolveShown, rejectShown) => {
@@ -2543,12 +2545,6 @@ async function startSelectedCamera(camera, smokeChannel) {
   // that instead of leaving the user to wonder why the hotkey never fires.
   if (!shortcutRegistered) {
     console.warn('[nova-personal-agent-desktop] global shortcut unavailable on this session')
-  }
-  for (const [key, action] of [
-    ['Control+M', () => sendToOrb('nova:microphone:toggle')],
-    ['Control+L', sleepOrb],
-  ]) {
-    if (!globalShortcut.register(key, action)) console.warn(`[nova-personal-agent-desktop] shortcut unavailable: ${key}`)
   }
   backendSupervisor = createBackendSupervisor({
     start: onExit => launchBackend(smokeChannel, onExit),

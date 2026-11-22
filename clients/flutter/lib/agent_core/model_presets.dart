@@ -19,8 +19,8 @@ class ProviderCapabilities {
   final int contextTokens;
 }
 
-/// Placeholder bearer for services that need no key (Ollama, LM Studio and
-/// other local servers): Nova's client and credential store require a value.
+/// Placeholder bearer for services that need no key (a custom loopback
+/// address): Nova's client and credential store require a value.
 const keylessServiceKey = 'not-needed';
 
 /// A provider with a fixed endpoint: the user only pastes a key.
@@ -44,7 +44,6 @@ class ModelPreset {
     this.noteEn,
     this.providerKind = ProviderKind.openAiCompat,
     this.capabilities = const ProviderCapabilities(),
-    this.selfHosted = false,
     this.sessionHeader,
     this.familyTokens = const [],
   });
@@ -57,10 +56,6 @@ class ModelPreset {
   final String? noteZh, noteEn;
   final ProviderKind providerKind;
   final ProviderCapabilities capabilities;
-
-  /// Runs on the user's own machine: the endpoint is only a default local port,
-  /// and the key may be left empty.
-  final bool selfHosted;
 
   /// Request header the provider requires for the conversation session id.
   final String? sessionHeader;
@@ -89,13 +84,12 @@ class ModelPreset {
   }
 
   /// A preset whose host equals the host of [url], whatever the path: someone
-  /// who typed a vendor's official address is offered that preset. Self-hosted
-  /// presets never match.
+  /// who typed a vendor's official address is offered that preset.
   static ModelPreset? forHost(String url) {
     final host = Uri.tryParse(url.trim())?.host.toLowerCase();
     if (host == null || host.isEmpty) return null;
     for (final preset in modelPresets) {
-      if (preset.selfHosted || preset.endpoint.isEmpty) continue;
+      if (preset.endpoint.isEmpty) continue;
       if (Uri.parse(preset.endpoint).host.toLowerCase() == host) return preset;
     }
     return null;
@@ -310,21 +304,5 @@ const modelPresets = <ModelPreset>[
     recommendedModels: [],
     keyUrl: 'https://console.groq.com/keys',
     capabilities: ProviderCapabilities(contextTokens: 128000),
-  ),
-  ModelPreset(
-    id: 'ollama',
-    name: 'Ollama',
-    endpoint: 'http://127.0.0.1:11434/v1',
-    recommendedModels: [],
-    keyUrl: '',
-    selfHosted: true,
-  ),
-  ModelPreset(
-    id: 'lmstudio',
-    name: 'LM Studio',
-    endpoint: 'http://127.0.0.1:1234/v1',
-    recommendedModels: [],
-    keyUrl: '',
-    selfHosted: true,
   ),
 ];
