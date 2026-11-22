@@ -13,18 +13,9 @@ void main() {
         for (final p in modelPresets) p.id,
       }, hasLength(modelPresets.length));
       for (final p in modelPresets) {
-        // Only a self-hosted default may be plain http, and only on loopback.
-        expect(
-          Uri.parse(p.endpoint).scheme,
-          p.selfHosted ? 'http' : 'https',
-          reason: '${p.id} must use https unless self-hosted',
-        );
-        if (p.selfHosted) {
-          expect(Uri.parse(p.endpoint).host, '127.0.0.1', reason: p.id);
-          expect(p.keyUrl, isEmpty, reason: p.id);
-        } else {
-          expect(Uri.parse(p.keyUrl).scheme, 'https', reason: p.id);
-        }
+        // Native iOS/Android refuse plain http, so every preset is https.
+        expect(Uri.parse(p.endpoint).scheme, 'https', reason: p.id);
+        expect(Uri.parse(p.keyUrl).scheme, 'https', reason: p.id);
         // Same validation as saving: a preset must never be unsavable.
         ModelConfiguration(
           endpoint: p.endpoint,
@@ -90,8 +81,6 @@ void main() {
         'minimax',
         'mistral',
         'groq',
-        'ollama',
-        'lmstudio',
         'opencode-go',
         'anthropic',
         'gemini',
@@ -99,8 +88,9 @@ void main() {
       ]) {
         expect(ModelPreset.byId(id), isNotNull, reason: id);
       }
-      // 20 Mika presets plus Nova's separate international Moonshot site.
-      expect(modelPresets, hasLength(21));
+      // 18 Mika presets (local-only Ollama and LM Studio excluded: native
+      // platforms require https) plus Nova's international Moonshot site.
+      expect(modelPresets, hasLength(19));
       expect(ModelPreset.byId('hunyuan')!.capabilities.contextTokens, 256000);
       expect(ModelPreset.byId('minimax')!.capabilities.vision, isTrue);
       expect(
@@ -108,10 +98,8 @@ void main() {
         'x-opencode-session',
       );
       expect(ModelPreset.byId('deepseek')!.sessionHeader, isNull);
-      expect(modelPresets.where((p) => p.selfHosted).map((p) => p.id), [
-        'ollama',
-        'lmstudio',
-      ]);
+      expect(ModelPreset.byId('ollama'), isNull);
+      expect(ModelPreset.byId('lmstudio'), isNull);
       expect(ModelPreset.byId('moonshot-cn')!.familyTokens, [
         'kimi',
         'moonshot',
@@ -159,21 +147,13 @@ void main() {
         'moonshot-global',
       );
       expect(ModelPreset.forHost('https://model.example/v1'), isNull);
-      // A self-hosted default is a port on this phone, not a vendor address.
       expect(ModelPreset.forHost('http://127.0.0.1:11434/v1'), isNull);
       expect(ModelPreset.forHost('not a url'), isNull);
       expect(ModelPreset.forHost(''), isNull);
     });
 
-    test('forEndpoint resolves the new local presets by exact address', () {
-      expect(
-        ModelPreset.forEndpoint('http://127.0.0.1:11434/v1')?.id,
-        'ollama',
-      );
-      expect(
-        ModelPreset.forEndpoint('http://127.0.0.1:1234/v1/')?.id,
-        'lmstudio',
-      );
+    test('forEndpoint resolves presets by exact address', () {
+      expect(ModelPreset.forEndpoint('http://127.0.0.1:11434/v1'), isNull);
       expect(
         ModelPreset.forEndpoint('https://api.anthropic.com/v1')?.id,
         'anthropic',

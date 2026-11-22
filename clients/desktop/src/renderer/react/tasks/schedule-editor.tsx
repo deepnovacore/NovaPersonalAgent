@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { t, currentLanguage } from '../../locale.mjs'
 import { scheduleError } from './helpers.mjs'
 export function ScheduleEditor({model,onSaved,onCancel,onReload,connected=true}:any) {
-  const [,render]=useState(0), first=useRef<HTMLInputElement>(null),[acceptance,setAcceptance]=useState(model.value.acceptance.join('\n'))
+  const first=useRef<HTMLInputElement>(null),[acceptance,setAcceptance]=useState(model.value.acceptance.join('\n'))
+  // Subscribing re-checks the snapshot, so a change made before the subscription is never lost.
+  useSyncExternalStore(model.subscribe,model.getSnapshot)
   const value=model.value, rule=value.rule,locked=model.busy||!!model.pending||!connected
-  useEffect(()=>{let live=true;model.onChange=()=>{if(live)render(n=>n+1)};first.current?.focus();if(!model.next&&!model.pending)void model.preview();return()=>{live=false;model.onChange=()=>{}}},[model])
+  useEffect(()=>{first.current?.focus();if(!model.next&&!model.pending)void model.preview()},[model])
   function setRule(next:any){if(model.set('rule',next))void model.preview()}
   const preview=(()=>{if(!model.next)return t('正在计算首次执行时间…');try{return t('首次执行：{0}',new Date(model.next.scheduled_at).toLocaleString(currentLanguage(),{timeZone:rule.timezone}))}catch{return t('请检查时间、时区和任务内容。')}})()
   const label=(text:string,input:React.ReactNode,hidden=false)=><label className="schedule-field" hidden={hidden}><span>{t(text)}</span>{input}</label>

@@ -685,33 +685,11 @@ void main() {
     );
   });
 
-  testWidgets('self-hosted services need no key and explain the address', (
-    tester,
-  ) async {
-    final backend = _Backend()..lister = ((_) => ModelListOk([_m('llama3')]));
-    await _open(tester, backend);
-    await _chip(tester, 'ollama');
-    expect(_key('provider.selfHosted'), findsOneWidget);
-    expect(find.textContaining('127.0.0.1 是这台手机自己'), findsOneWidget);
-    expect(
-      tester.widget<TextField>(_key('provider.baseUrl')).controller!.text,
-      'http://127.0.0.1:11434/v1',
-    );
-    expect(find.text('本地服务可不填'), findsOneWidget);
-    expect(_enabled(tester), isTrue);
-    await _test(tester);
-    expect(
-      backend.credentialSaves.single.endpoint,
-      'http://127.0.0.1:11434/v1',
-    );
-    expect(backend.credentialSaves.single.newKey, keylessServiceKey);
-  });
-
   testWidgets('a plain-http network address is flagged and not testable', (
     tester,
   ) async {
     await _open(tester, _Backend());
-    await _chip(tester, 'ollama');
+    await _chip(tester, 'custom');
     await _type(tester, 'provider.baseUrl', 'http://192.168.1.20:11434/v1');
     expect(_key('provider.unencrypted'), findsOneWidget);
     expect(find.textContaining('这个地址不加密'), findsOneWidget);
@@ -1255,7 +1233,7 @@ void main() {
     await reveal('provider.manualNote');
     await reveal('provider.model');
     await reveal('provider.chip.custom', delta: -200);
-    await reveal('provider.chip.lmstudio', delta: -200);
+    await reveal('provider.chip.groq', delta: -200);
     await reveal('provider.manual');
     await reveal('provider.baseUrl', delta: -200);
     await _type(tester, 'provider.baseUrl', 'https://api.deepseek.com/v1');

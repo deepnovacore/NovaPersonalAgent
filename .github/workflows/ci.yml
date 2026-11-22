@@ -231,7 +231,8 @@ jobs:
           echo "CXX=g++-12" >> "$GITHUB_ENV"
           echo "CXXFLAGS=-UV8_DEPRECATION_WARNINGS" >> "$GITHUB_ENV"
       - run: npm run ${{ matrix.script }}
-      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned
+      # Hosted macOS runners have no usable GUI session: keep static verification, skip the launch.
+      - run: ${{ runner.os == 'Linux' && 'xvfb-run -a' || '' }} npm run verify:release --workspace @nova-personal-agent/desktop -- --unsigned ${{ runner.os == 'macOS' && '--no-launch' || '' }}
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}

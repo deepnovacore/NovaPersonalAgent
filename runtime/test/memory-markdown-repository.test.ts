@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
-import {mkdtempSync,readFileSync,writeFileSync,readdirSync,rmSync,statSync,symlinkSync,mkdirSync,renameSync,linkSync,existsSync} from 'node:fs'
+import {mkdtempSync,readFileSync,writeFileSync,readdirSync,rmSync,statSync,symlinkSync,mkdirSync,renameSync,linkSync,existsSync,chmodSync,unlinkSync} from 'node:fs'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
 import {execFileSync,spawn} from 'node:child_process'
@@ -12,6 +12,26 @@ const next:EntryRevision={...first,revision:2,supersedes:1,op:'update',written_b
 function fixture(t:{after:(fn:()=>void)=>void}){const root=mkdtempSync(join(tmpdir(),'nova-markdown-'));t.after(()=>rmSync(root,{recursive:true,force:true}));return root}
 function document(root:string){return join(root,'entries',readdirSync(join(root,'entries'))[0]!)}
 function git(root:string,...args:string[]){return execFileSync('git',['-C',root,...args],{encoding:'utf8'}).trim()}
+
+test('every Git invocation disables background gc and maintenance',{skip:process.platform==='win32'},t=>{
+ const bin=fixture(t),log=join(bin,'calls.log'),real=execFileSync('which',['git'],{encoding:'utf8'}).trim()
+ writeFileSync(join(bin,'git'),`#!/bin/sh\nprintf '%s\\n' "$*" >> '${log}'\nexec '${real}' "$@"\n`);chmodSync(join(bin,'git'),0o755)
+ const previous=process.env.PATH;process.env.PATH=`${bin}:${previous}`;t.after(()=>{process.env.PATH=previous})
+ const repo=new MarkdownRepository(fixture(t));repo.open([first]);repo.publish([first,next]);repo.read()
+ const lines=readFileSync(log,'utf8').trim().split('\n');assert.ok(lines.length>0)
+ for(const line of lines)assert.match(line,/-c gc\.auto=0 -c maintenance\.auto=false /u,line)
+})
+
+test('regular files Git leaves in objects/ are tolerated but symlinks are not',t=>{
+ const root=fixture(t);new MarkdownRepository(root).open([first])
+ const objects=join(root,'.git','objects'),reopen=()=>new MarkdownRepository(root).open([])
+ writeFileSync(join(objects,'tmp_obj_fixture'),'git owned')
+ assert.deepEqual(reopen().revisions,[first])
+ const outside=fixture(t);rmSync(join(objects,'tmp_obj_fixture'));symlinkSync(outside,join(objects,'tmp_obj_link'))
+ assert.throws(reopen,/UNSAFE_PATH/u)
+ unlinkSync(join(objects,'tmp_obj_link'));symlinkSync(outside,join(objects,'cd'))
+ assert.throws(reopen,/UNSAFE_PATH/u)
+})
 
 test('permanent purge keeps other histories and removes selected content from every Git object',t=>{
  const root=fixture(t),repo=new MarkdownRepository(root),keep={...first,entry_id:'personal:test:keep',content:{text:'keep synthetic'}}
