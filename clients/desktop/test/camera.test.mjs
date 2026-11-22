@@ -20,6 +20,8 @@ import {
   parseCameraCapture,
   parseCameraPermissionRequest,
   cameraPermissionResultMessage,
+  cameraPermissionStatus,
+  answerCameraPermission,
 } from '../src/renderer/camera.mjs'
 
 
@@ -1019,4 +1021,41 @@ test('isCurrent is rechecked immediately before response and send failures stay 
   await new Promise(resolve => setImmediate(resolve))
   await new Promise(resolve => setImmediate(resolve))
   controller.dispose()
+})
+
+test('camera permission IPC results map onto the runtime wire enum', () => {
+  assert.equal(cameraPermissionStatus({status: 'granted'}), 'granted')
+  assert.equal(cameraPermissionStatus({status: 'denied'}), 'denied')
+  assert.equal(cameraPermissionStatus(Object.freeze({status: 'restricted'})), 'restricted')
+  // No OS pre-check: admit and let getUserMedia decide.
+  assert.equal(cameraPermissionStatus({status: 'unknown'}), 'granted')
+})
+
+test('camera permission normalizer rejects malformed IPC results', () => {
+  for (const bad of ['granted', undefined, null, 1, [], {}, {status: 'unavailable'}, {status: 'prompt'}, {status: 7}]) {
+    assert.throws(() => cameraPermissionStatus(bad), TypeError)
+  }
+})
+
+test('answerCameraPermission always sends the matching permission_result', async () => {
+  const request = {type: 'camera.permission', request_id: 'camera-permission-9'}
+  const answer = async (cameraSource, requestPermission) => {
+    const sent = []
+    await answerCameraPermission({request, cameraSource, requestPermission, send: m => sent.push(JSON.parse(m))})
+    assert.equal(sent.length, 1)
+    assert.deepEqual(Object.keys(sent[0]).sort(), ['request_id', 'status', 'type'])
+    assert.equal(sent[0].type, 'camera.permission_result')
+    assert.equal(sent[0].request_id, 'camera-permission-9')
+    return sent[0].status
+  }
+  assert.equal(await answer('local', async () => ({status: 'granted'})), 'granted')
+  assert.equal(await answer('local', async () => ({status: 'denied'})), 'denied')
+  assert.equal(await answer('local', async () => ({status: 'restricted'})), 'restricted')
+  assert.equal(await answer('local', async () => ({status: 'unknown'})), 'granted')
+  let asked = false
+  assert.equal(await answer('file', async () => { asked = true; return {status: 'granted'} }), 'unavailable')
+  assert.equal(asked, false)
+  assert.equal(await answer('local', async () => { throw new Error('ipc down') }), 'unavailable')
+  assert.equal(await answer('local', async () => 'granted'), 'unavailable')
+  assert.equal(await answer('local', async () => ({status: 'bogus'})), 'unavailable')
 })

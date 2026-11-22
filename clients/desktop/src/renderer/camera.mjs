@@ -69,6 +69,42 @@ export function parseCameraPermissionRequest(raw) {
   })
 }
 
+/**
+ * Maps the `nova:camera:permission` IPC result (`{status}` with status one of
+ * granted | denied | restricted | unknown, see main/security.mjs) onto the wire
+ * enum accepted by the runtime. This is only used for a local camera.
+ *
+ * `unknown` means the OS offers no permission pre-check (non-macOS). It is
+ * admitted as `granted` so the real getUserMedia capture decides: a failure
+ * there is reported as `capture_unavailable` (or permission_denied) within the
+ * renderer deadline. Reporting `unavailable` would instead make Watch/Guard
+ * fail before any capture was attempted. Sources other than local never reach
+ * this function; `answerCameraPermission` replies `unavailable` for them.
+ */
+export function cameraPermissionStatus(result) {
+  const status = result !== null && typeof result === 'object' ? result.status : undefined
+  if (status === 'granted' || status === 'denied' || status === 'restricted') return status
+  if (status === 'unknown') return 'granted'
+  throw new TypeError('invalid camera permission IPC result')
+}
+
+/**
+ * Answers a parsed `camera.permission` request. Any failure of the permission
+ * IPC (rejection or a malformed result) is answered with `unavailable` so the
+ * runtime is never left waiting and no generic renderer error is raised.
+ */
+export async function answerCameraPermission({request, cameraSource, requestPermission, send}) {
+  let status = 'unavailable'
+  if (cameraSource === 'local') {
+    try {
+      status = cameraPermissionStatus(await requestPermission())
+    } catch {
+      status = 'unavailable'
+    }
+  }
+  send(cameraPermissionResultMessage(request.request_id, status))
+}
+
 export function cameraPermissionResultMessage(requestId, status) {
   if (!validRequestId(requestId) || !permissionStatuses.has(status)) {
     throw new TypeError('invalid camera permission result')

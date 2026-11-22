@@ -32,7 +32,7 @@ import {
   preflightMicrophone,
 } from './microphone-permission.mjs'
 import {
-  cameraPermissionResultMessage,
+  answerCameraPermission,
   parseCameraPermissionRequest,
   RendererCameraController,
   RendererSocketRouter,
@@ -1076,12 +1076,12 @@ async function handleSocketMessage(event, delivery) {
   if (typeof event.data === 'string') {
     const permission = parseCameraPermissionRequest(event.data)
     if (permission !== null) {
-      const status = axes.cameraSource === 'local'
-        ? await window.novaPersonalAgentDesktop.camera.requestPermission()
-        : 'unavailable'
-      if (delivery?.isCurrent?.()) {
-        delivery.sendText(cameraPermissionResultMessage(permission.request_id, status))
-      }
+      await answerCameraPermission({
+        request: permission,
+        cameraSource: axes.cameraSource,
+        requestPermission: () => window.novaPersonalAgentDesktop.camera.requestPermission(),
+        send: message => { if (delivery?.isCurrent?.()) delivery.sendText(message) },
+      })
       render()
       return
     }
