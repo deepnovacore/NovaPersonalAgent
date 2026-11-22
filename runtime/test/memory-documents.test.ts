@@ -48,7 +48,8 @@ test('legacy format migrates on open without changing stable IDs or revision his
  const {root,repo}=setup(t);repo.open([first,next])
  writeFileSync(join(root,'.nova-memory.json'),'{"format":"nova-understanding","version":1}\n')
  rmSync(join(root,'USER.md'));rmSync(join(root,'MEMORY.md'))
- const git=(args:string[])=>execFileSync('git',['-c','core.hooksPath=/dev/null','-c','user.name=Fixture','-c','user.email=fixture@localhost','-C',root,...args],{stdio:'pipe'})
+ const env={...Object.fromEntries(Object.entries(process.env).filter(([key])=>!key.startsWith('GIT_'))),GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null'}
+ const git=(args:string[])=>execFileSync('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','gc.auto=0','-c','maintenance.auto=false','-c','user.name=Fixture','-c','user.email=fixture@localhost','-C',root,...args],{stdio:'pipe',env})
  git(['add','entries','.nova-memory.json']);git(['commit','-m','Synthetic legacy snapshot'])
  const reopened=new MarkdownRepository(root);const snapshot=reopened.open([])
  assert.deepEqual(snapshot.revisions,[first,next]);assert.match(readFileSync(join(root,'USER.md'),'utf8'),/new-name/)
