@@ -1,4 +1,5 @@
 import {stat} from 'node:fs/promises'
+import {basename as nativeBasename} from 'node:path'
 import {t} from '../renderer/locale.mjs'
 import {resolveDataRoot} from './data-root.mjs'
 import {
@@ -241,7 +242,8 @@ export async function prepareDesktopStartup({
     environment,
     home,
     // The legacy root stays active until its one-time migration has run.
-    dataRootName: dataRootName ?? pathApi.basename(resolveDataRoot(home).root),
+    // resolveDataRoot builds native paths, so take the name with the native path API, not the injected one.
+    dataRootName: dataRootName ?? nativeBasename(resolveDataRoot(home).root),
     platform,
     pathApi,
     canonicalize: canonicalizePath,

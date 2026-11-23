@@ -26,7 +26,9 @@ export function prepareVoiceMemSdk({source, output}) {
     if (dirname(parent) === parent) break
     parent = dirname(parent)
   }
-  if (!relative(canonicalSource, destination).startsWith('..')) throw Error('voicemem_output_inside_preimage')
+  // On Windows a destination on another drive has an absolute relative path, which is outside the preimage too.
+  const inside = relative(canonicalSource, destination)
+  if (!inside.startsWith('..') && !isAbsolute(inside)) throw Error('voicemem_output_inside_preimage')
   const names = files(canonicalSource)
   if (JSON.stringify(names) !== JSON.stringify(Object.keys(preimage.files).sort())) throw Error('voicemem_preimage_file_set')
   for (const name of names) if (sha256(readFileSync(join(canonicalSource, name))) !== preimage.files[name]) throw Error('voicemem_preimage_integrity')
