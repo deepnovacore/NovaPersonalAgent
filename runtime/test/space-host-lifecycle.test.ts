@@ -16,7 +16,8 @@ test('a retired transport cursor cannot write over the replacement Host journal'
  const old=new SpaceHost({path,space:'fixture-space',host,transport:transport()}),replacement=new SpaceHost({path,space:'fixture-space',host,transport:transport()});
  try{
   await old.open();await cursors[0]!.save(7);
-  const queuedSave=cursors[0]!.save(99),retiring=old.close();await queuedSave;await retiring;
+  // The retired cursor fails instead of reporting success, so the relay SDK never ACKs a cursor that was not saved.
+  const queuedSave=cursors[0]!.save(99),retiring=old.close();await assert.rejects(queuedSave,/space_host_closed/);await retiring;
   assert.equal((JSON.parse(await readFile(path,'utf8')) as {cursor:number}).cursor,7,'a queued cursor callback must recheck ownership when it runs');
   await replacement.open();
   await replacement.receive('phone',{v:1,type:'intent',op_id:'replacement-only',kind:'snapshot.request',input:{},created_at:Date.now()});
@@ -26,7 +27,7 @@ test('a retired transport cursor cannot write over the replacement Host journal'
   const originalWrite=BoundedJsonStore.prototype.write;let lateWrites=0;
   const watch=t.mock.method(BoundedJsonStore.prototype,'write',function(this:BoundedJsonStore<unknown>,value:unknown){if(this.path===path)lateWrites++;return originalWrite.call(this,value)});
   // This is the old RelayClient's saveCursor after receive rotated keys and replaced its service.
-  await cursors[0]!.save(8);
+  await assert.rejects(cursors[0]!.save(8),/space_host_closed/);
   watch.mock.restore();
   assert.equal(lateWrites,0,'a closed service must perform zero journal writes');
   assert.equal(await readFile(path,'utf8'),before,'the replacement journal must remain byte-for-byte unchanged');
