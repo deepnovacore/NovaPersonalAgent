@@ -27,7 +27,7 @@ The L0 blackboard persists through a dedicated SQLite Worker
 (`runtime/src/memory/blackboard-session.ts`, `blackboard-store.ts`, `blackboard-worker.ts`) so a
 conversation survives a restart. Retention is bounded by three independent limits — a 7-day entry
 lifetime, 1000 items and 8MB — and the oldest entries are dropped first. The database path is
-`BLACKBOARD_PATH` (default `~/.nova-audio-agent/blackboard.sqlite`), scoped by
+`BLACKBOARD_PATH` (default `~/.nova-personal-agent/blackboard.sqlite`), scoped by
 `BLACKBOARD_OWNER_ID`. This store recovers session history; it is not a queryable
 long-term memory, and unrestricted long-term memory search remains deferred
 ([design constraints](07-decision-record.md)).

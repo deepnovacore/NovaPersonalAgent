@@ -10,6 +10,23 @@ Codex authentication accepts the existing saved login or the API key configured 
 
 This provider-config alternative uses the ordinary CLI's compatible parsing of legacy configuration fields. Nova still validates the effective permissions, disabled features and MCP configuration before starting a turn. Saved-login and explicit-key launches retain strict configuration parsing.
 
+## Local data location
+
+Nova keeps local data (personal state, memory and knowledge databases, conversations, Codex homes and managed workspaces) in `~/.nova-personal-agent` on a new install. Earlier builds used `~/.nova-audio-agent`, and Nova keeps using that folder as-is when it exists: nothing moves on startup and no step is required. Settings shows a one-line notice while your data is still there. If `~/.nova-audio-agent` is a link you created (for example to another disk), it is used in place and never moved. Paths you set explicitly (for example `MEMORY_PATH`, `KNOWLEDGE_PATH`, `BLACKBOARD_PATH`, `CODEX_MANAGED_ROOT` or a path in Settings) are used as given.
+
+### Moving data to the new folder (optional)
+
+Quit Nova (the desktop app, any runtime or server and other `npa` sessions), then run:
+
+```
+npa migrate-data --dry-run   # show what would move, sizes and conflicts; changes nothing
+npa migrate-data             # move it
+```
+
+The command refuses while any Nova process, desktop window or data lock is present. It moves each entry from `~/.nova-audio-agent` into `~/.nova-personal-agent` by rename on the same volume, so nothing is copied or overwritten. A database moves only together with its `-wal`, `-shm`, `-journal` and `.memory` companions. A name already present in the new folder with different content, or a database present in both folders, stops the command before anything moves; move one copy out of the way and run it again. When every entry has moved, `~/.nova-audio-agent` becomes a link to the new folder so older builds and saved paths keep working, saved desktop settings and existing-data Space configs that point into the old folder are updated, and `.data-root-migrated.json` marks completion. If the command is interrupted, `~/.nova-personal-agent/.data-root-migration.journal.json` remains and Nova refuses to start until you run `npa migrate-data` again, which finishes or rolls back the move. If a rollback would overwrite something, the journal is kept and the command prints the exact steps to resolve it. While the command runs it holds `~/.nova-personal-agent.migration.lock`, and Nova refuses to start while that file exists. The lock is never taken over automatically: if a crashed run left it behind, confirm no `npa migrate-data` is running, then delete the file. `~/.nova-personal-agent` must be a real folder; the command refuses to migrate into a symbolic link. If the data was migrated but the `~/.nova-audio-agent` link is missing or points elsewhere, Nova keeps using the new folder, maps saved paths under the old folder onto it, and shows a notice; run `npa migrate-data` to recreate the link.
+
+An existing desktop profile, `Nova Audio Agent Ambient Orb` (`@nova-audio-agent/ambient-orb` for source launches, and for packaged launches when only that profile has saved settings), keeps being used in place, so saved settings and encrypted keys stay readable: the macOS Keychain item, the Linux Secret Service entry and the Windows `Local State` key keep their original storage name. New installs use the `Nova Personal Agent` profile (`@nova-personal-agent/desktop`). `npa migrate-data` does not move desktop profiles.
+
 ## Minimal setup
 
 The default Qwen realtime pipeline needs one key:
@@ -44,7 +61,7 @@ Set only what you need to change. Keep credentials out of Git.
 | `CASCADE_LLM_PROVIDER` | deepseek | Cascaded LLM provider. |
 | `CASCADE_LLM_MODEL` | provider default | Cascaded LLM model override. |
 | `CODEX_APPROVAL_MODE` | ask | Coding approval mode for Codex and ACP backends; Pi refuses ask. |
-| `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | Capabilities registry path. |
+| `CAPABILITIES_CONFIG` | ~/.nova-personal-agent/capabilities.json | Capabilities registry path. |
 | `MEMORY_CONNECTION` | local | Memory connection: disabled, local, or remote. |
 | `MEMORY_PROVIDER` | None | Deprecated local provider: voicemem keeps ledger migration; mem0 keeps standalone mode. Conflicts with new memory variables. |
 | `MEMORY_RECALL_ENGINE` | ledger | Expert local recall engine: ledger, voicemem or mem0; ledger remains authority. No UI picker. |
@@ -65,7 +82,7 @@ Set only what you need to change. Keep credentials out of Git.
 
 `ask` retains permission prompts; `yolo` lets Codex execute without approval. Choose according to your trust requirements.
 
-A few more variables round out less common setups. `COMPOSIO_API_KEY` authorizes the Google connector (Gmail and Calendar) through Composio. `OPENROUTER_API_KEY` feeds the Jev judgment model that scores personal-memory candidates (Todo, Idea, Goal, Profile) and ranks news relevance; both stay off without it. `DOUBAO_ASR_VOICEPRINT_ENABLED`, together with `DOUBAO_ASR_VOICEPRINT_ID`, `DOUBAO_ASR_VOICEPRINT_NAME` and `DOUBAO_ASR_VOICEPRINT_HEALTH_URL`, turns on opt-in speaker verification for ASR. `NEWS_LANGUAGE` sets the news feed's language independently of the UI language. `MEMORY_LEDGER_PATH` overrides where the unified memory ledger's SQLite file lives (default `~/.nova-audio-agent/workspace-graph.sqlite`).
+A few more variables round out less common setups. `COMPOSIO_API_KEY` authorizes the Google connector (Gmail and Calendar) through Composio. `OPENROUTER_API_KEY` feeds the Jev judgment model that scores personal-memory candidates (Todo, Idea, Goal, Profile) and ranks news relevance; both stay off without it. `DOUBAO_ASR_VOICEPRINT_ENABLED`, together with `DOUBAO_ASR_VOICEPRINT_ID`, `DOUBAO_ASR_VOICEPRINT_NAME` and `DOUBAO_ASR_VOICEPRINT_HEALTH_URL`, turns on opt-in speaker verification for ASR. `NEWS_LANGUAGE` sets the news feed's language independently of the UI language. `MEMORY_LEDGER_PATH` overrides where the unified memory ledger's SQLite file lives (default `~/.nova-personal-agent/workspace-graph.sqlite`).
 
 Remove the local provider setting when disabling memory or selecting a remote service. See [personal memory](personal-memory.md) for remote settings and the [iPhone guide](iphone.md) for phone connections.
 

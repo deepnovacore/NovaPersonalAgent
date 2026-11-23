@@ -95,7 +95,7 @@ test('settings public projection never opens the keychain or capability files', 
     secretCodec:{available:touched}, capabilityDocumentRevision:touched, decryptSecretsForSpawn:touched,
     readCapabilityDocument:touched, resolveSecretConfiguration:()=>({secretsPresent:{},secretSources:{}}),process:{env:{}},developmentEnv:{},
     secretsPresent:()=>({}), publicSettings:()=>({}), codexStatus:{},frontendUsage:{snapshot:()=>({})},VISION_MODELS:[],MODEL_CATALOG:{},backendStatus:{state:'stopped'},
-    settingsApplyStatus:'idle',settingsRecoveryAvailable:false,managedWorkspacesView:()=>({}),microphoneStatus:'unknown',wakeWord:null,desktopConfig:null,
+    settingsApplyStatus:'idle',settingsRecoveryAvailable:false,managedWorkspacesView:()=>({}),microphoneStatus:'unknown',wakeWord:null,desktopConfig:null,dataRootNotice:null,
     hasPlaintextSecret:()=>false,keyringAvailable:null,startup:{stage:'configuration',code:null},
     // Executable presence only: never reads the keychain, credentials or capability files.
     codingBackendStatus})

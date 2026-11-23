@@ -1,4 +1,5 @@
 import {inspectCapabilities} from './capability-registry.mjs'
+import {assertNoPendingDataRootMigration, defaultDataPath, mapLegacyDataPath} from './data-root.mjs'
 import {canProbeKey, probeApiKey} from './key-probe.mjs'
 import {CASCADED_ASR_PROVIDERS, CASCADED_LLM_PROVIDERS, CASCADED_TTS_PROVIDERS, INTEGRATED_PROVIDERS, requiredVoiceCredentials} from './voice-credentials.mjs'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
@@ -561,7 +562,9 @@ export async function resetPersonalState({
   renameFile = rename,
   now = () => new Date(),
 } = {}) {
-  const configured = environment.BLACKBOARD_PATH?.trim() || '~/.nova-audio-agent/blackboard.sqlite'
+  // Unconditional, even for an explicit BLACKBOARD_PATH: no data may change while a move is pending or running.
+  assertNoPendingDataRootMigration(home)
+  const configured = mapLegacyDataPath(environment.BLACKBOARD_PATH?.trim() || defaultDataPath('blackboard.sqlite', home), home)
   const blackboard = resolve(configured.startsWith('~/') ? join(home, configured.slice(2)) : configured)
   const statePath = blackboard + '.personal.json'
   const stamp = now().toISOString().replace(/[:.]/gu, '-')

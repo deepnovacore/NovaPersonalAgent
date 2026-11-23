@@ -2,7 +2,7 @@
 
 状态：**已增加单屏透明 HUD 的本地 macOS v1 实现；安装版最终 GUI 验收待解锁电脑。** 具体功能、验证和限制见 [VISOR_V1.md](VISOR_V1.md)。下图仍是概念参考，不能作为运行截图。
 
-关联：[Issue #11](https://github.com/deepnovacore/NovaAudioAgent/issues/11)。`codex/orb-skins` 包含 #10 的悬浮球换肤及本地 Visor v1；本文保留最初产品方向与验收目标，实际实现范围以 VISOR_V1.md 为准。
+关联：[Issue #11](https://github.com/deepnovacore/NovaPersonalAgent/issues/11)。`codex/orb-skins` 包含 #10 的悬浮球换肤及本地 Visor v1；本文保留最初产品方向与验收目标，实际实现范围以 VISOR_V1.md 为准。
 
 ## 已选定的视觉基准
 

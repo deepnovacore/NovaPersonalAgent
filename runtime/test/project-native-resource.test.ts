@@ -168,10 +168,10 @@ test('default project directories protect private defaults and prepare the manag
   const managedChildren: Readonly<[number, string, number]>[] = []
   let pathProtectionCalls = 0
   const descriptors = new Map([
-    ['/home/nova/.nova-audio-agent', 10],
-    ['/home/nova/.nova-audio-agent/state', 11],
-    ['/home/nova/.nova-audio-agent/workspaces', 12],
-    ['/home/nova/.nova-audio-agent/workspaces/default', 13],
+    ['/home/nova/.nova-personal-agent', 10],
+    ['/home/nova/.nova-personal-agent/state', 11],
+    ['/home/nova/.nova-personal-agent/workspaces', 12],
+    ['/home/nova/.nova-personal-agent/workspaces/default', 13],
   ])
   const host = {
     protectDirectory: () => {
@@ -189,9 +189,9 @@ test('default project directories protect private defaults and prepare the manag
   } as unknown as ProjectNativeHost
   const configuredDefaults = {
     homeDirectory: '/home/nova',
-    stateRoot: '/home/nova/.nova-audio-agent/state',
-    managedRoot: '/home/nova/.nova-audio-agent/workspaces',
-    workspace: '/home/nova/.nova-audio-agent/workspaces/default',
+    stateRoot: '/home/nova/.nova-personal-agent/state',
+    managedRoot: '/home/nova/.nova-personal-agent/workspaces',
+    workspace: '/home/nova/.nova-personal-agent/workspaces/default',
     pathApi: posix,
     directoryHandles: {
       open: (path: string) => {
@@ -205,12 +205,12 @@ test('default project directories protect private defaults and prepare the manag
   assert.equal(protectDefaultProjectDirectories(host, configuredDefaults), true)
   assert.equal(pathProtectionCalls, 0)
   assert.deepEqual(opened, [
-    '/home/nova/.nova-audio-agent',
-    '/home/nova/.nova-audio-agent/state',
-    '/home/nova/.nova-audio-agent',
-    '/home/nova/.nova-audio-agent/workspaces',
-    '/home/nova/.nova-audio-agent/workspaces',
-    '/home/nova/.nova-audio-agent/workspaces/default',
+    '/home/nova/.nova-personal-agent',
+    '/home/nova/.nova-personal-agent/state',
+    '/home/nova/.nova-personal-agent',
+    '/home/nova/.nova-personal-agent/workspaces',
+    '/home/nova/.nova-personal-agent/workspaces',
+    '/home/nova/.nova-personal-agent/workspaces/default',
   ])
   assert.deepEqual(protectedChildren, [
     [10, 'state', 11],
@@ -248,7 +248,7 @@ test('default project protection fails closed when managed preparation fails', (
   const result = protectDefaultProjectDirectories(host, {
     homeDirectory: '/home/nova',
     stateRoot: null,
-    managedRoot: '/home/nova/.nova-audio-agent/workspaces',
+    managedRoot: '/home/nova/.nova-personal-agent/workspaces',
     workspace: null,
     pathApi: posix,
     directoryHandles: {
@@ -267,7 +267,7 @@ test('default project protection fails closed and closes a retained parent when 
   const closed: number[] = []
   const paths = {
     homeDirectory: '/home/nova',
-    stateRoot: '/home/nova/.nova-audio-agent/state',
+    stateRoot: '/home/nova/.nova-personal-agent/state',
     managedRoot: null,
     workspace: null,
     pathApi: posix,

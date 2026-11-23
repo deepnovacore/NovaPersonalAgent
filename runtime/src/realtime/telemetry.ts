@@ -4,6 +4,7 @@ import {homedir} from 'node:os'
 import {dirname, join} from 'node:path'
 import type { Clock } from '../core/clock.js'
 import { jsonValueSchema, type JsonValue } from '../core/events.js'
+import {legacyDataRootActive, mapLegacyDataPath, rebaseDataRootDefault} from '../config/data-root.js'
 
 export interface RealtimeTelemetry {
   record(kind: string, payload: Readonly<Record<string, JsonValue>>): void
@@ -17,7 +18,7 @@ const MAX_DIAGNOSTIC_ARRAY_ITEMS = 16
 const MAX_DIAGNOSTIC_OBJECT_KEYS = 32
 const MAX_DIAGNOSTIC_DEPTH = 4
 const DIAGNOSTIC_BODY_KEY = /(?:^|_)(?:body|content|prompt|query|summary|text|transcript|work_order|arguments)(?:_|$)/iu
-const DEFAULT_REALTIME_TELEMETRY_PATH = '~/.nova-audio-agent/realtime-telemetry.jsonl'
+const DEFAULT_REALTIME_TELEMETRY_PATH = '~/.nova-personal-agent/realtime-telemetry.jsonl'
 
 export interface RealtimeDiagnosticRecord {
   readonly seq: number
@@ -140,15 +141,17 @@ export function createRealtimeTelemetry(
   options: {readonly clock: Clock; readonly homeDirectory?: string},
 ): RealtimeTelemetry {
   const configuredValue = environment.REALTIME_TELEMETRY
-  const configured = configuredValue?.trim() ?? DEFAULT_REALTIME_TELEMETRY_PATH
+  let configured = configuredValue?.trim() ?? DEFAULT_REALTIME_TELEMETRY_PATH
   if (configuredValue !== undefined && configured === '') {
     return new NullTelemetry({clock: options.clock})
   }
   const homeDirectory = options.homeDirectory ?? homedir()
+  const defaulted = configured === DEFAULT_REALTIME_TELEMETRY_PATH
+  configured = defaulted ? rebaseDataRootDefault(configured, legacyDataRootActive(homeDirectory)) : mapLegacyDataPath(configured, homeDirectory)
   const path = configured === '~'
     ? homeDirectory
     : configured.startsWith('~/') ? join(homeDirectory, configured.slice(2)) : configured
-  if (configured === DEFAULT_REALTIME_TELEMETRY_PATH) {
+  if (defaulted) {
     mkdirSync(dirname(path), {recursive: true, mode: 0o700})
   }
   return new JsonlTelemetry(path, {clock: options.clock})

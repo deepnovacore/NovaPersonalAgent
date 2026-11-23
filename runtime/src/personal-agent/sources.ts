@@ -17,7 +17,8 @@ import {readKnowledgeFile, KnowledgeDocumentFailure} from '../knowledge/document
 import type {KnowledgeService} from '../knowledge/service.js'
 
 export const SOURCE_EXCLUDES = ['.git', '.worktrees', '.codex', '.claude', 'node_modules', 'dist', 'build', 'target', '.cache', '__pycache__', '.venv', 'venv', 'Library', 'Browser', 'Chrome', 'Chromium', 'Firefox', 'Safari'] as const
-const COMPUTER_EXCLUDES = ['Applications', 'opt', 'System', 'Windows', 'Program Files', 'Program Files (x86)', '$RECYCLE.BIN', 'System Volume Information', 'private', 'dev', 'proc', 'sys', 'bin', 'sbin', 'usr', 'etc', 'var', '.Trash', '.Trashes', '.npm', '.cargo', '.rustup', '.local', '.nova-audio-agent']
+// Compatibility: `.nova-audio-agent` is the retired data root (a link to `.nova-personal-agent` once migrated).
+const COMPUTER_EXCLUDES = ['Applications', 'opt', 'System', 'Windows', 'Program Files', 'Program Files (x86)', '$RECYCLE.BIN', 'System Volume Information', 'private', 'dev', 'proc', 'sys', 'bin', 'sbin', 'usr', 'etc', 'var', '.Trash', '.Trashes', '.npm', '.cargo', '.rustup', '.local', '.nova-personal-agent', '.nova-audio-agent']
 const policy = new SensitivePathPolicy()
 const pathSchema = z.string().min(1).max(4096).refine(value => isAbsolute(value) && !value.includes('\0'))
 const idSchema = z.string().uuid()

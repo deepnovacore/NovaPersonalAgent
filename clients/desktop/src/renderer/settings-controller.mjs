@@ -80,6 +80,7 @@ const MAIN_LIVE_VIEW_FIELDS = [
   'microphoneStatus',
   'wakeWord',
   'effectivePaths',
+  'dataRootNotice',
   'capabilities',
 ]
 

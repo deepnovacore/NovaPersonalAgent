@@ -1,5 +1,6 @@
 import {homedir} from 'node:os'
 import {join} from 'node:path'
+import {resolveDataRoot} from '../config/data-root.js'
 import type {ExecutorAdapter, ExecutorDispatchContext, ExecutorHandoff} from '../core/causal-runtime.js'
 import type {HostApprovalController} from '../core/approval.js'
 import type {AgentController, AgentRuntimeDispatchPort} from './agent-controller.js'
@@ -52,7 +53,7 @@ export function loadMobileConfig(env: NodeJS.ProcessEnv): MobileIosConfig {
     maxSteps: integer('MAX_STEPS', 30, 100), budgetMs: integer('TIMEOUT_SECONDS', 600, 1800) * 1000,
     settleMs: integer('SETTLE_MS', 4000, 30000, 0),
     // Share the existing phone quarantine across engines; changing engines must not bypass ownership.
-    lockRoot: join(homedir(), '.nova-audio-agent', 'autoglm-devices')}
+    lockRoot: join(resolveDataRoot(homedir()).root, 'autoglm-devices')}
 }
 
 export class MobileExecutor implements ExecutorAdapter {

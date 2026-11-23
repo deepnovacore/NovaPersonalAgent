@@ -15,6 +15,7 @@ test('renderer builds at the desktop startup default without an output override'
   await cp(new URL('../src/renderer',import.meta.url),join(directory,'src/renderer'),{recursive:true})
   await mkdir(join(directory,'src/main'))
   await cp(new URL('../src/main/desktop-identity.mjs',import.meta.url),join(directory,'src/main/desktop-identity.mjs'))
+  await cp(new URL('../src/main/data-root.mjs',import.meta.url),join(directory,'src/main/data-root.mjs'))
   await symlink(fileURLToPath(new URL('../../../node_modules',import.meta.url)),join(directory,'node_modules'),process.platform==='win32'?'junction':'dir')
   const env={...process.env}
   delete env.NOVA_DESKTOP_RENDERER_OUTPUT_ROOT

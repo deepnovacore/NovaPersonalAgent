@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 npa
 ```
 
-命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。
+命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。升级后的安装继续使用 `~/.nova-audio-agent`；用 `npa migrate-data` 迁移到 `~/.nova-personal-agent` 是可选操作（见[本地数据位置](configuration.md#本地数据位置)）。
 
 Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
 
@@ -119,7 +119,7 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 ## 高级配置
 
-能力配置默认位于 `~/.nova-audio-agent/capabilities.json`。可以关闭不需要的模块，或配置外部 MCP 服务及允许使用的工具。只有启用的服务需要凭据。
+能力配置默认位于 `~/.nova-personal-agent/capabilities.json`。可以关闭不需要的模块，或配置外部 MCP 服务及允许使用的工具。只有启用的服务需要凭据。
 
 配置了 `TAVILY_API_KEY` 时用 Tavily 搜索，否则用 `DASHSCOPE_API_KEY` 走百炼 MCP 搜索，两者都没有时搜索关闭。选择 MCP 搜索后使用对应服务的密钥，不再需要 Tavily 密钥。远程 MCP 需要 HTTPS；本机无认证测试可使用回环 HTTP。
 

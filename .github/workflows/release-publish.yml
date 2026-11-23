@@ -77,6 +77,7 @@ jobs:
             exit 1
           fi
           grep -q 'E404' npm-server-view-error.txt
+          # Compatibility: the retired nova-audio-agent npm name still receives each release with a deprecation notice.
           if npm view "nova-audio-agent@$RELEASE_VERSION" version > existing-legacy-version.txt 2> npm-legacy-view-error.txt; then
             echo "nova-audio-agent@$RELEASE_VERSION already exists" >&2
             exit 1

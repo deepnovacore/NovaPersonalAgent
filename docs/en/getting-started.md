@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 npa
 ```
 
-The command is `npa`; `novapersonal` remains an alias. To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first.
+The command is `npa`; `novapersonal` remains an alias. To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first. An upgraded install keeps using `~/.nova-audio-agent`; moving it to `~/.nova-personal-agent` with `npa migrate-data` is optional (see [Local data location](configuration.md#local-data-location)).
 
 For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
 
@@ -117,7 +117,7 @@ Desktop launches into one of three views, controlled by the `startupView` settin
 
 ## Advanced configuration
 
-Capabilities are stored in `~/.nova-audio-agent/capabilities.json`. Disable unneeded modules or configure external MCP services and their allowed tools. Only enabled services need credentials.
+Capabilities are stored in `~/.nova-personal-agent/capabilities.json`. Disable unneeded modules or configure external MCP services and their allowed tools. Only enabled services need credentials.
 
 Search uses Tavily when `TAVILY_API_KEY` is set, otherwise Bailian MCP search with `DASHSCOPE_API_KEY`, otherwise it stays off. MCP search uses its own service credentials and does not need a Tavily key. Remote MCP requires HTTPS; unauthenticated local testing can use loopback HTTP.
 

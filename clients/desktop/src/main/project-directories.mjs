@@ -1,3 +1,5 @@
+import {DATA_ROOT_NAME, LEGACY_DATA_ROOT_NAME} from './data-root.mjs'
+
 function statusOf(value) {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return null
   const descriptor = Object.getOwnPropertyDescriptor(value, 'status')
@@ -61,7 +63,11 @@ export async function ensurePrivateProjectDirectories({
   openDirectory,
   mkdir,
 }) {
-  const productRoot = pathApi.resolve(pathApi.join(home, '.nova-audio-agent'))
+  // Either root may be active: the legacy one stays in use until its one-time migration has run.
+  const rootName = pathApi.basename(config.root)
+  const productRoot = [DATA_ROOT_NAME, LEGACY_DATA_ROOT_NAME].includes(rootName)
+    ? pathApi.resolve(pathApi.join(home, rootName))
+    : null
   if (platform !== 'win32') {
     for (const directory of new Set([
       config.root,
@@ -84,7 +90,7 @@ export async function ensurePrivateProjectDirectories({
   try {
     rootHandle = await ensureChild({
       parent: homeHandle,
-      name: '.nova-audio-agent',
+      name: rootName,
       path: config.root,
       stage: 'root',
       bootstrap: true,

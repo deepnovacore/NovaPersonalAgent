@@ -22,7 +22,7 @@ Nova 的记忆分为若干层，分别承担会话状态恢复、跨对话记忆
 
 <a id="session-recovery-store"></a>
 
-L0 黑板由专用 SQLite Worker 持久化（`runtime/src/memory/blackboard-session.ts`、`blackboard-store.ts`、`blackboard-worker.ts`），因此对话能跨重启保留。保留量受三个彼此独立的限制约束：条目存活 7 天、最多 1000 条、最多 8MB，超限时先丢弃最旧的条目。数据库路径由 `BLACKBOARD_PATH` 指定（默认 `~/.nova-audio-agent/blackboard.sqlite`），并按 `BLACKBOARD_OWNER_ID` 区分归属。
+L0 黑板由专用 SQLite Worker 持久化（`runtime/src/memory/blackboard-session.ts`、`blackboard-store.ts`、`blackboard-worker.ts`），因此对话能跨重启保留。保留量受三个彼此独立的限制约束：条目存活 7 天、最多 1000 条、最多 8MB，超限时先丢弃最旧的条目。数据库路径由 `BLACKBOARD_PATH` 指定（默认 `~/.nova-personal-agent/blackboard.sqlite`），并按 `BLACKBOARD_OWNER_ID` 区分归属。
 
 该存储只负责恢复会话历史，不是可查询的长期记忆，不受限制的长期记忆检索仍被推迟（[设计约束](07-decision-record.md)）。
 

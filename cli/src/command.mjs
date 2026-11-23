@@ -1,7 +1,10 @@
 import { ensureDesktop, inspectDoctor, launchDesktop, resetPersonalState } from './runtime.mjs'
 import { PRODUCT_VERSION } from './target.mjs'
+import { migrateData } from './migrate-data.mjs'
+import { assertNoPendingDataRootMigration } from './data-root.mjs'
+import { homedir } from 'node:os'
 
-export const HELP_TEXT = `Usage: npa [start|config|doctor|reset-state|--version|--help]
+export const HELP_TEXT = `Usage: npa [start|config|doctor|reset-state|migrate-data|--version|--help]
 
   npa                  Install if needed and launch Nova Personal Agent
   npa start            Install if needed and launch Nova Personal Agent
@@ -9,6 +12,8 @@ export const HELP_TEXT = `Usage: npa [start|config|doctor|reset-state|--version|
   npa doctor           Inspect local installation and configuration status
   npa doctor --online  Also test voice keys set in the environment against their provider
   npa reset-state      Move an unreadable personal state aside (quit Nova first); prints both paths
+  npa migrate-data     Move local data from ~/.nova-audio-agent to ~/.nova-personal-agent (optional; quit Nova first)
+  npa migrate-data --dry-run  Show what would move, conflicts and sizes without changing anything
 
 novapersonal and novaaudio remain aliases of npa.`
 
@@ -28,10 +33,12 @@ export async function main(argv, {
   launch = launchDesktop,
   doctor = inspectDoctor,
   reset = resetPersonalState,
+  migrate = migrateData,
 } = {}) {
   const command = argv[0] ?? 'start'
   const online = command === 'doctor' && argv.length === 2 && argv[1] === '--online'
-  if (argv.length > 1 && !online) {
+  const dryRun = command === 'migrate-data' && argv.length === 2 && argv[1] === '--dry-run'
+  if (argv.length > 1 && !online && !dryRun) {
     stdout.write(`${HELP_TEXT}\n`)
     return 2
   }
@@ -74,6 +81,9 @@ export async function main(argv, {
     }
     return report.supported && report.capabilities?.ok !== false && missingVoiceKeys.length === 0 && rejectedVoiceKeys.length === 0 ? 0 : 1
   }
+  if (command === 'migrate-data') {
+    return migrate({dryRun, write: text => stdout.write(text)})
+  }
   if (command === 'reset-state') {
     const result = await reset({})
     if (result.moved.length === 0) {
@@ -87,6 +97,8 @@ export async function main(argv, {
     stdout.write(`${HELP_TEXT}\n`)
     return 2
   }
+  // Refuse before installing or launching anything while a data move is pending or running.
+  assertNoPendingDataRootMigration(homedir())
   const installed = await ensure()
   await launch(installed.executable, {openSettings: command === 'config'})
   return 0

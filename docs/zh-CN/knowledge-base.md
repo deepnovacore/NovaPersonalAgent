@@ -4,7 +4,7 @@
 
 ## 开启模块
 
-该模块默认关闭。可在设置面板开启，或在 `~/.nova-audio-agent/capabilities.json` 中设置 `modules.knowledge.enabled`。生成向量需要 DashScope 凭据。
+该模块默认关闭。可在设置面板开启，或在 `~/.nova-personal-agent/capabilities.json` 中设置 `modules.knowledge.enabled`。生成向量需要 DashScope 凭据。
 
 ## 导入文档
 
@@ -22,7 +22,7 @@
 
 ## 数据流向
 
-片段存储在本地 `~/.nova-audio-agent/knowledge.sqlite`（可用 `KNOWLEDGE_PATH` 覆盖）。
+片段存储在本地 `~/.nova-personal-agent/knowledge.sqlite`（可用 `KNOWLEDGE_PATH` 覆盖）。
 
 **本地存储不等于本地处理。** 为了让文档可被检索，其文本会发送到配置的 embedding 服务，默认是 DashScope `text-embedding-v4`。请只导入你愿意发送过去的文档。疑似凭据的内容会在存储和发送之前被拒绝。
 

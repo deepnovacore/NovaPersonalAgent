@@ -1,5 +1,6 @@
 import {homedir} from 'node:os'
 import {join} from 'node:path'
+import {resolveDataRoot} from '../config/data-root.js'
 import {randomUUID} from 'node:crypto'
 import type {HostApprovalController} from '../core/approval.js'
 import type {ExecutorAdapter, ExecutorDispatchContext} from '../core/causal-runtime.js'
@@ -18,7 +19,7 @@ export function loadBrowserConfig(env: NodeJS.ProcessEnv): BrowserConfig {
   const config = {engine, url: env.BROWSER_URL ?? '', headless: env.BROWSER_HEADLESS !== 'false',
     baseUrl: env.EXECUTOR_BASE_URL ?? '', model: env.EXECUTOR_MODEL ?? '', modelFamily: env.EXECUTOR_MODEL_FAMILY ?? '', apiKey: env.EXECUTOR_API_KEY ?? '',
     maxSteps: Number(env.EXECUTOR_MAX_STEPS ?? 30), budgetMs: Number(env.EXECUTOR_TIMEOUT_SECONDS ?? 600) * 1000,
-    settleMs: Number(env.EXECUTOR_SETTLE_MS ?? 1000), lockRoot: join(homedir(), '.nova-audio-agent', 'gui-devices')}
+    settleMs: Number(env.EXECUTOR_SETTLE_MS ?? 1000), lockRoot: join(resolveDataRoot(homedir()).root, 'gui-devices')}
   if (!['chromium', 'firefox', 'webkit'].includes(engine) || !validBrowserUrl(config.url) || !validGuiConfig(config, 'validate')
     || (env.BROWSER_HEADLESS !== undefined && !['true', 'false'].includes(env.BROWSER_HEADLESS))) throw Error('invalid_browser_configuration')
   return config as BrowserConfig

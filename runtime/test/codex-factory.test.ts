@@ -287,7 +287,7 @@ function hostConfig(t: TestContext): ReturnType<typeof resolveCodexHostConfig> {
   chmodSync(binary, 0o700)
   mkdirSync(workspace, {mode: 0o700})
   if (process.platform === 'win32') {
-    mkdirSync(join(root, '.nova-audio-agent', 'workspaces'), {recursive: true})
+    mkdirSync(join(root, '.nova-personal-agent', 'workspaces'), {recursive: true})
   }
   t.after(() => { rmSync(root, {recursive: true, force: true}) })
   const catalog: CodexHostCatalog = {

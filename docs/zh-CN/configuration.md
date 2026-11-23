@@ -10,6 +10,23 @@ Codex 认证继续支持已有登录和 Nova 中配置的 API Key。共享本机
 
 这条 provider 配置通路沿用普通 CLI 对旧配置字段的兼容解析；执行前仍会校验生效后的权限、禁用功能和 MCP 配置。已有登录和显式 API Key 通路继续使用严格配置解析。
 
+## 本地数据位置
+
+新安装的 Nova 把本地数据（个人状态、记忆与知识库数据库、对话、Codex 目录和托管工作区）存放在 `~/.nova-personal-agent`。旧版本使用 `~/.nova-audio-agent`；该目录存在时 Nova 原样继续使用，启动时不移动任何数据，也无需任何操作。数据仍在旧目录期间，设置页会显示一行提示。如果 `~/.nova-audio-agent` 是你创建的链接（例如指向另一块磁盘），会原地使用，不会移动。显式设置的路径（如 `MEMORY_PATH`、`KNOWLEDGE_PATH`、`BLACKBOARD_PATH`、`CODEX_MANAGED_ROOT` 或设置页中的路径）按原样使用。
+
+### 把数据迁移到新目录（可选）
+
+先退出 Nova（桌面端、运行时或服务端以及其他 `npa` 会话），再运行：
+
+```
+npa migrate-data --dry-run   # 显示将移动的内容、大小和冲突，不做任何修改
+npa migrate-data             # 执行迁移
+```
+
+只要有 Nova 进程、桌面窗口或数据锁存在，命令就会拒绝执行。它在同一卷内逐项重命名，把 `~/.nova-audio-agent` 的内容移入 `~/.nova-personal-agent`，不复制、不覆盖。数据库只与其 `-wal`、`-shm`、`-journal` 和 `.memory` 配套文件一起移动。新目录中已有内容不同的同名项，或同一数据库在两个目录中都存在时，命令会在移动任何内容之前停止；把其中一份移开后再运行即可。全部移动完成后，`~/.nova-audio-agent` 变成指向新目录的链接，旧版本和已保存的路径继续可用；指向旧目录的桌面端设置和使用现有数据的 Space 配置会被更新；最后写入 `.data-root-migrated.json` 表示完成。命令中断时会留下 `~/.nova-personal-agent/.data-root-migration.journal.json`，在你再次运行 `npa migrate-data`（继续或回滚）之前 Nova 拒绝启动。如果回滚会覆盖文件，日志文件会保留，命令会打印具体的处理步骤。命令运行期间持有 `~/.nova-personal-agent.migration.lock`，该文件存在时 Nova 拒绝启动。锁不会被自动接管：如果崩溃的运行遗留了它，先确认没有 `npa migrate-data` 在运行，再删除该文件。`~/.nova-personal-agent` 必须是真实目录，命令拒绝迁移到符号链接。如果数据已迁移但 `~/.nova-audio-agent` 链接缺失或指向别处，Nova 继续使用新目录，把指向旧目录的已保存路径映射到新目录，并显示提示；运行 `npa migrate-data` 即可重建链接。
+
+已有的桌面配置目录 `Nova Audio Agent Ambient Orb`（源码启动，或打包版只有该目录保存了设置时，为 `@nova-audio-agent/ambient-orb`）继续原地使用，已保存的设置和加密密钥保持可读：macOS 钥匙串条目、Linux Secret Service 条目和 Windows `Local State` 中的密钥都沿用原来的存储名。新安装使用 `Nova Personal Agent` 配置目录（源码启动为 `@nova-personal-agent/desktop`）。`npa migrate-data` 不迁移桌面配置目录。
+
 ## 最小配置
 
 默认的 Qwen 实时语音只需要一把密钥：
@@ -44,7 +61,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 | `CASCADE_LLM_PROVIDER` | deepseek | 级联 LLM 提供方。 |
 | `CASCADE_LLM_MODEL` | provider default | 级联 LLM 模型覆盖。 |
 | `CODEX_APPROVAL_MODE` | ask | 编程审批模式，适用于 Codex 与 ACP 执行器；Pi 不接受询问模式。 |
-| `CAPABILITIES_CONFIG` | ~/.nova-audio-agent/capabilities.json | 能力注册表路径。 |
+| `CAPABILITIES_CONFIG` | ~/.nova-personal-agent/capabilities.json | 能力注册表路径。 |
 | `MEMORY_CONNECTION` | local | 记忆连接：disabled、local 或 remote。 |
 | `MEMORY_PROVIDER` | 无 | 已弃用本地提供方：voicemem 保留账本迁移；mem0 保留独立模式。不能与新记忆变量共用。 |
 | `MEMORY_RECALL_ENGINE` | ledger | 高级本地召回引擎：ledger、voicemem 或 mem0；账本仍是权威。无界面选择器。 |
@@ -65,7 +82,7 @@ DASHSCOPE_API_KEY=你的百炼密钥
 
 `ask` 保留权限确认；`yolo` 允许 Codex 无审批执行，请按信任范围选择。
 
-还有几个变量用于较少见的配置。`COMPOSIO_API_KEY` 用于通过 Composio 授权 Google 连接器（Gmail 与 Calendar）。`OPENROUTER_API_KEY` 提供 Jev 判定模型，用于给个人记忆候选内容（Todo、Idea、Goal、Profile）打分，以及给资讯排序相关性；缺少此密钥时，这两项功能都会保持关闭。`DOUBAO_ASR_VOICEPRINT_ENABLED` 与 `DOUBAO_ASR_VOICEPRINT_ID`、`DOUBAO_ASR_VOICEPRINT_NAME`、`DOUBAO_ASR_VOICEPRINT_HEALTH_URL` 搭配使用，开启可选的 ASR 声纹校验。`NEWS_LANGUAGE` 独立于界面语言设置资讯流的语言。`MEMORY_LEDGER_PATH` 可覆盖统一记忆账本 SQLite 文件的存放位置（默认 `~/.nova-audio-agent/workspace-graph.sqlite`）。
+还有几个变量用于较少见的配置。`COMPOSIO_API_KEY` 用于通过 Composio 授权 Google 连接器（Gmail 与 Calendar）。`OPENROUTER_API_KEY` 提供 Jev 判定模型，用于给个人记忆候选内容（Todo、Idea、Goal、Profile）打分，以及给资讯排序相关性；缺少此密钥时，这两项功能都会保持关闭。`DOUBAO_ASR_VOICEPRINT_ENABLED` 与 `DOUBAO_ASR_VOICEPRINT_ID`、`DOUBAO_ASR_VOICEPRINT_NAME`、`DOUBAO_ASR_VOICEPRINT_HEALTH_URL` 搭配使用，开启可选的 ASR 声纹校验。`NEWS_LANGUAGE` 独立于界面语言设置资讯流的语言。`MEMORY_LEDGER_PATH` 可覆盖统一记忆账本 SQLite 文件的存放位置（默认 `~/.nova-personal-agent/workspace-graph.sqlite`）。
 
 选择远程记忆或关闭记忆时，移除本地 provider 配置。远程记忆设置见[个人记忆](personal-memory.md)；手机连接见[iPhone 指南](iphone.md)。
 

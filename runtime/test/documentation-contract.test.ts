@@ -115,7 +115,7 @@ test('every production environment name is classified and private names stay pri
     ...await sourceFiles(resolve(repositoryRoot, 'runtime/src')),
     ...await sourceFiles(resolve(repositoryRoot, 'clients/desktop/src')),
   ]
-  const systemNames = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'PATH', 'APPDATA', 'SYSTEMROOT', 'NPM_CONFIG_PREFIX'])
+  const systemNames = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'PATH', 'APPDATA', 'USERPROFILE', 'SYSTEMROOT', 'NPM_CONFIG_PREFIX'])
   const environmentName = /\b(?:process\.env|environment|parentEnv|env)\.([A-Z][A-Z0-9_]+)\b/gu
   for (const source of sources) {
     const text = await readFile(source, 'utf8')

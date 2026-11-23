@@ -1,9 +1,12 @@
+import { DATA_ROOT_NAME } from './data-root.mjs'
+
 function nonempty(value) {
   return typeof value === 'string' && value.trim() !== '' ? value.trim() : null
 }
 
-export function productPaths({ home, pathApi }) {
-  const root = pathApi.join(home, '.nova-audio-agent')
+/** `dataRootName` is the active root: the new one, or the legacy one until its one-time migration has run. */
+export function productPaths({ home, pathApi, dataRootName = DATA_ROOT_NAME }) {
+  const root = pathApi.join(home, dataRootName)
   const managedRoot = pathApi.join(root, 'workspaces')
   return Object.freeze({
     root,
@@ -17,11 +20,12 @@ export function resolveDesktopConfig({
   settings = {},
   environment = {},
   home,
+  dataRootName,
   platform,
   pathApi,
   canonicalize = value => pathApi.resolve(value),
 }) {
-  const defaults = productPaths({ home, pathApi })
+  const defaults = productPaths({ home, pathApi, dataRootName })
   const settingsHasMode = Object.hasOwn(settings, 'codexBinaryMode')
   const settingsBinary = nonempty(settings.codexBinaryPath)
   const environmentBinary = nonempty(environment.CODEX_BIN)
