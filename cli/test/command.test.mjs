@@ -62,10 +62,32 @@ test('doctor reports key names but never values', async () => {
 test('doctor lists voice keys, guides a first run, and fails while one is missing', async () => {
   const doctorReport = voice => async () => ({supported: true, platform: 'darwin-arm64', desktopReady: true, settingsPresent: false, configuredSecretKeys: [], codexPresent: false, voice})
   const sink = output()
-  const code = await main(['doctor'], {stdout: sink.stream, doctor: doctorReport({pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})})
+  const code = await main(['doctor'], {stdout: sink.stream, doctor: doctorReport({pipeline: 'integrated', providers: {integrated: 'qwen'}, keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})})
   assert.equal(code, 1)
-  assert.match(sink.read(), /Voice pipeline: integrated\n {2}DASHSCOPE_API_KEY: missing\n/u)
-  assert.match(sink.read(), /First run: start `npa` and paste a DashScope API Key/u)
+  assert.match(sink.read(), /Voice pipeline: integrated \(qwen\)\n {2}DASHSCOPE_API_KEY: missing\n/u)
+  assert.match(sink.read(), /First run: start `npa` and enter DASHSCOPE_API_KEY in the setup window/u)
+  assert.match(sink.read(), /Codex: missing \(needed only for the Codex coding backend\)/u)
+
+  for (const [providers, names] of [
+    [{integrated: 'openai'}, ['OPENAI_API_KEY']],
+    [{integrated: 'gemini'}, ['GEMINI_API_KEY']],
+    [{integrated: 'stepfun'}, ['STEPFUN_API_KEY']],
+  ]) {
+    const named = output()
+    assert.equal(await main(['doctor'], {stdout: named.stream, doctor: doctorReport({pipeline: 'integrated', providers, keys: names.map(name => ({name, source: null}))})}), 1)
+    assert.match(named.read(), new RegExp(`Voice pipeline: integrated \\(${providers.integrated}\\)\\n {2}${names[0]}: missing\\n`, 'u'))
+    assert.match(named.read(), new RegExp(`enter ${names[0]} in the setup window`, 'u'))
+    assert.doesNotMatch(named.read(), /DashScope|DASHSCOPE/u)
+  }
+  const cascaded = output()
+  assert.equal(await main(['doctor'], {stdout: cascaded.stream, doctor: doctorReport({pipeline: 'cascaded', providers: {asr: 'gemini', llm: 'openai-compatible', tts: 'self-hosted'},
+    keys: [{name: 'OPENAI_COMPATIBLE_API_KEY', source: 'environment'}, {name: 'GEMINI_API_KEY', source: null}]})}), 1)
+  assert.match(cascaded.read(), /Voice pipeline: cascaded \(ASR gemini, LLM openai-compatible, TTS self-hosted\)\n/u)
+  assert.match(cascaded.read(), /enter GEMINI_API_KEY in the setup window/u)
+  const local = output()
+  assert.equal(await main(['doctor'], {stdout: local.stream, doctor: doctorReport({pipeline: 'integrated', providers: {integrated: 'minicpm-o'}, keys: []})}), 0)
+  assert.match(local.read(), /Voice pipeline: integrated \(minicpm-o\)\n {2}No cloud API key required by the selected providers\.\n/u)
+  assert.doesNotMatch(local.read(), /First run/u)
 
   const ready = output()
   assert.equal(await main(['doctor'], {stdout: ready.stream, doctor: doctorReport({pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: 'settings'}]})}), 0)

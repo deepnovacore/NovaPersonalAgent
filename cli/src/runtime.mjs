@@ -1,5 +1,6 @@
 import {inspectCapabilities} from './capability-registry.mjs'
-import {probeApiKey} from './key-probe.mjs'
+import {canProbeKey, probeApiKey} from './key-probe.mjs'
+import {CASCADED_ASR_PROVIDERS, CASCADED_LLM_PROVIDERS, CASCADED_TTS_PROVIDERS, INTEGRATED_PROVIDERS, requiredVoiceCredentials} from './voice-credentials.mjs'
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto'
 import { spawn, spawnSync } from 'node:child_process'
 import {
@@ -434,19 +435,37 @@ function findCodex(platform = process.platform) {
   return result.status === 0 && String(result.stdout).trim() !== ''
 }
 
-// Mirrors the desktop settings keys each voice pipeline cannot start without.
-const VOICE_KEYS = Object.freeze({
-  dashscopeApiKey: 'DASHSCOPE_API_KEY',
-  deepseekApiKey: 'DEEPSEEK_API_KEY',
-  arkApiKey: 'ARK_API_KEY',
-  doubaoBigmodelApiKey: 'DOUBAO_BIGMODEL_API_KEY',
+// Desktop settings `secrets` entry holding each credential the shared voice table can demand.
+export const VOICE_SECRET_KEYS = Object.freeze({
+  DASHSCOPE_API_KEY: 'dashscopeApiKey',
+  STEPFUN_API_KEY: 'stepfunApiKey',
+  OPENAI_API_KEY: 'openaiApiKey',
+  GEMINI_API_KEY: 'geminiApiKey',
+  ARK_API_KEY: 'arkApiKey',
+  DEEPSEEK_API_KEY: 'deepseekApiKey',
+  OPENAI_COMPATIBLE_API_KEY: 'openaiCompatibleApiKey',
+  DOUBAO_BIGMODEL_API_KEY: 'doubaoBigmodelApiKey',
+  COMPATIBLE_ASR_API_KEY: 'compatibleAsrApiKey',
+  COMPATIBLE_TTS_API_KEY: 'compatibleTtsApiKey',
 })
-const CASCADED_LLM_KEYS = Object.freeze({qwen: 'dashscopeApiKey', deepseek: 'deepseekApiKey', ark: 'arkApiKey'})
+// Endpoint-bound keys the desktop clears when their endpoint changes (compatible-providers.mjs isEndpointSecret).
+// A cleared entry is sent to the runtime as an explicit empty value, which masks the parent environment.
+export const CLEARABLE_VOICE_SECRETS = Object.freeze(['openaiCompatibleApiKey', 'compatibleAsrApiKey', 'compatibleTtsApiKey'])
+// The desktop's defaults for a settings file that omits a provider (settings-defaults.mjs).
+export const VOICE_DEFAULTS = Object.freeze({
+  pipeline: 'integrated', integratedProvider: 'qwen', asrProvider: 'volcengine', llmProvider: 'deepseek', ttsProvider: 'volcengine',
+})
 
-function voiceRequirement(document) {
-  const pipeline = document?.pipelineMode === 'cascaded' ? 'cascaded' : 'integrated'
-  const llm = Object.hasOwn(CASCADED_LLM_KEYS, document?.cascadedLlmProvider) ? document.cascadedLlmProvider : 'deepseek'
-  return {pipeline, keys: pipeline === 'integrated' ? ['dashscopeApiKey'] : [CASCADED_LLM_KEYS[llm], 'doubaoBigmodelApiKey']}
+// Like settings-store, an unknown value falls back to the default instead of failing.
+function voiceSelection(document) {
+  const pick = (value, allowed, fallback) => allowed.includes(value) ? value : fallback
+  return Object.freeze({
+    pipeline: pick(document?.pipelineMode, ['integrated', 'cascaded'], VOICE_DEFAULTS.pipeline),
+    integratedProvider: pick(document?.integratedProvider, INTEGRATED_PROVIDERS, VOICE_DEFAULTS.integratedProvider),
+    asrProvider: pick(document?.cascadedAsrProvider, CASCADED_ASR_PROVIDERS, VOICE_DEFAULTS.asrProvider),
+    llmProvider: pick(document?.cascadedLlmProvider, CASCADED_LLM_PROVIDERS, VOICE_DEFAULTS.llmProvider),
+    ttsProvider: pick(document?.cascadedTtsProvider, CASCADED_TTS_PROVIDERS, VOICE_DEFAULTS.ttsProvider),
+  })
 }
 
 const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/u
@@ -460,16 +479,22 @@ function savedSecret(document, key) {
 
 // Saved keys win over the environment in the desktop, and stay encrypted, so only environment keys can be probed here.
 async function inspectVoiceKeys(document, environment, {online, fetchImpl}) {
-  const {pipeline, keys} = voiceRequirement(document)
-  const sourceOf = (key, name) => savedSecret(document, key) ? 'settings' : environment[name]?.trim() ? 'environment' : null
+  const selection = voiceSelection(document)
+  const {pipeline, credentials} = requiredVoiceCredentials(selection)
+  const providers = pipeline === 'integrated'
+    ? {integrated: selection.integratedProvider}
+    : {asr: selection.asrProvider, llm: selection.llmProvider, tts: selection.ttsProvider}
+  const cleared = key => CLEARABLE_VOICE_SECRETS.includes(key) && document?.secrets?.[key]?.enc === 'cleared'
+  const sourceOf = (key, name) => savedSecret(document, key) ? 'settings' : cleared(key) ? null : environment[name]?.trim() ? 'environment' : null
   const entries = []
-  for (const key of keys) {
-    const name = VOICE_KEYS[key]
+  for (const name of credentials) {
+    const key = VOICE_SECRET_KEYS[name]
     const source = sourceOf(key, name)
-    const probe = online && source === 'environment' ? (await probeApiKey(key, environment[name], {fetch: fetchImpl})).status : undefined
+    const probe = online && source === 'environment' && canProbeKey(key)
+      ? (await probeApiKey(key, environment[name], {fetch: fetchImpl})).status : undefined
     entries.push(Object.freeze({name, source, ...(probe === undefined ? {} : {probe})}))
   }
-  return Object.freeze({pipeline, keys: Object.freeze(entries)})
+  return Object.freeze({pipeline, providers: Object.freeze(providers), keys: Object.freeze(entries)})
 }
 
 export async function inspectDoctor({
@@ -502,7 +527,10 @@ export async function inspectDoctor({
       if (normalized && [...normalized].length <= 32768) capabilitiesConfigPath = normalized
     }
     if (document?.secrets && typeof document.secrets === 'object' && !Array.isArray(document.secrets)) {
-      secretKeys = Object.keys(document.secrets).sort()
+      // A cleared or empty entry is not a configured key; voice reports it missing.
+      secretKeys = Object.entries(document.secrets).filter(([, entry]) => typeof entry === 'string' ? entry.trim() !== ''
+        : entry !== null && typeof entry === 'object' && entry.enc !== 'cleared' && typeof entry.data === 'string' && entry.data !== '')
+        .map(([key]) => key).sort()
     }
   } catch {}
   return Object.freeze({

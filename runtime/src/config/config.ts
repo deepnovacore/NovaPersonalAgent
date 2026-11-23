@@ -2,6 +2,7 @@ import {homedir} from 'node:os'
 import {resolve} from 'node:path'
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import {CODING_BACKEND_IDS} from './coding-backends.js'
+import {CASCADED_ASR_PROVIDERS, CASCADED_LLM_PROVIDERS, CASCADED_TTS_PROVIDERS, INTEGRATED_PROVIDERS, requiredVoiceCredentials} from './voice-credentials.js'
 import {isIP} from 'node:net'
 import {
   DASHSCOPE_COMPATIBLE_BASE_URL,
@@ -39,11 +40,11 @@ export {
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const promptLanguageSchema = z.enum(['zh-CN', 'en'])
-const integratedProviderNameSchema = z.enum(['qwen', 'stepfun', 'openai', 'gemini', 'minicpm-o', 'personaplex'])
+const integratedProviderNameSchema = z.enum(INTEGRATED_PROVIDERS)
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
-const cascadedAsrProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted', 'openai-compatible'])
-const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
-const cascadedTtsProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted', 'openai-compatible'])
+const cascadedAsrProviderNameSchema = z.enum(CASCADED_ASR_PROVIDERS)
+const cascadedLlmProviderNameSchema = z.enum(CASCADED_LLM_PROVIDERS)
+const cascadedTtsProviderNameSchema = z.enum(CASCADED_TTS_PROVIDERS)
 const qwenGuardHistoryRecoverySchema = z.enum(['none', 'packed'])
 const qwenGuardHistoryPairsSchema = z.union([z.literal(1), z.literal(2), z.literal(4)])
 /** Validity of a name is decided by assembly (`resolveExecutors`), which knows the registered adapters. */
@@ -1049,21 +1050,35 @@ export function withoutUncredentialedModules(registry: CapabilityRegistry, setti
   }}
 }
 
+/** Settings field holding each credential named by the shared voice-credential table. */
+const VOICE_CREDENTIAL_FIELDS: Readonly<Record<string, keyof Settings>> = Object.freeze({
+  DASHSCOPE_API_KEY: 'dashscope_api_key',
+  STEPFUN_API_KEY: 'stepfun_api_key',
+  OPENAI_API_KEY: 'openai_api_key',
+  GEMINI_API_KEY: 'gemini_api_key',
+  ARK_API_KEY: 'ark_api_key',
+  DEEPSEEK_API_KEY: 'deepseek_api_key',
+  OPENAI_COMPATIBLE_API_KEY: 'openai_compatible_api_key',
+  DOUBAO_BIGMODEL_API_KEY: 'doubao_bigmodel_api_key',
+  COMPATIBLE_ASR_API_KEY: 'compatible_asr_api_key',
+  COMPATIBLE_TTS_API_KEY: 'compatible_tts_api_key',
+})
+
 /** Mirrors requireIntegratedRealtime and requireCascadedCredentials without throwing, for first-run guidance. */
 export function describeMissingBlockingCredentials(settings: Settings, textConversations = false): {readonly pipeline: PipelineMode; readonly missing: readonly string[]} {
-  const present = (value: string | null) => stripLikePython(value ?? '') !== ''
-  if (!textConversations && settings.pipeline_mode === 'integrated') {
-    if (settings.integrated_provider === 'minicpm-o' || settings.integrated_provider === 'personaplex') return {pipeline:'integrated', missing:[]}
-    if (settings.integrated_provider === 'openai' || settings.integrated_provider === 'gemini') return {pipeline: 'integrated', missing: present(settings[`${settings.integrated_provider}_api_key`]) ? [] : [`${settings.integrated_provider.toUpperCase()}_API_KEY`]}
-    if (settings.integrated_provider === 'stepfun') return {pipeline: 'integrated', missing: present(settings.stepfun_api_key) ? [] : ['STEPFUN_API_KEY']}
-    return {pipeline: 'integrated', missing: present(settings.dashscope_api_key) ? [] : ['DASHSCOPE_API_KEY']}
+  const present = (name: string) => {
+    const field = VOICE_CREDENTIAL_FIELDS[name]
+    const value = field === undefined ? null : settings[field]
+    return typeof value === 'string' && stripLikePython(value) !== ''
   }
-  const llmField = cascadedCredentialField(settings.cascade_llm_provider)
-  return {pipeline: 'cascaded', missing: [...new Set([
-    ...(settings.cascade_llm_provider === 'self-hosted' || present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
-    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'openai-compatible' ? (present(settings.compatible_asr_api_key) ? [] : ['COMPATIBLE_ASR_API_KEY']) : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
-    ...(textConversations || settings.cascade_tts_provider === 'self-hosted' ? [] : settings.cascade_tts_provider === 'openai-compatible' ? (present(settings.compatible_tts_api_key) ? [] : ['COMPATIBLE_TTS_API_KEY']) : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
-  ])]}
+  const {pipeline, credentials} = requiredVoiceCredentials({
+    pipeline: settings.pipeline_mode,
+    integratedProvider: settings.integrated_provider,
+    asrProvider: settings.cascade_asr_provider,
+    llmProvider: settings.cascade_llm_provider,
+    ttsProvider: settings.cascade_tts_provider,
+  }, textConversations)
+  return {pipeline, missing: credentials.filter(name => !present(name))}
 }
 
 /** Host preflight over a launch environment; other configuration errors stay the runtime's to report. */
