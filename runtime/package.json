@@ -33,7 +33,6 @@
     "nova-space-host": "./dist/src/space-host/cli.js"
   },
   "files": [
-    "scripts/autoglm-bridge.py",
     "scripts/patch-pi-acp.mjs",
     "scripts/patch-codebuddy-recovery.mjs",
     "scripts/patch-acp-recovery.mjs",

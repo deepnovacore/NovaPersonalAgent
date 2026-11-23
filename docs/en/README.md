@@ -71,7 +71,7 @@
         <li><a href="executors/overview.md"><strong>Executors Overview</strong></a> — Dispatch, resource leases, and approval gates.</li>
         <li><a href="executors/coding.md"><strong>Coding Agents</strong></a> — Codex app-server &amp; ACP (OpenCode, CodeBuddy, Pi, DeepSeek Harness).</li>
         <li><a href="executors/computer-use-build.md"><strong>Computer Use in Build</strong></a> — Supervised desktop GUI actions on macOS &amp; Windows.</li>
-        <li><a href="../guides/mobile.md"><strong>Mobile Use (<code>mobile.run</code>)</strong></a> — Native TypeScript Midscene SDK (<a href="../guides/autoglm.md">legacy AutoGLM</a>).</li>
+        <li><a href="../guides/mobile.md"><strong>Mobile Use (<code>mobile.run</code>)</strong></a> — Native TypeScript Midscene SDK.</li>
         <li><a href="executors/loop-camera.md"><strong>Loop Camera</strong></a> — Independent camera condition monitoring.</li>
       </ul>
     </td>

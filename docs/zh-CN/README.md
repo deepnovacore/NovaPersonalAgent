@@ -71,7 +71,7 @@
         <li><a href="executors/overview.md"><strong>执行器概览</strong></a> — 任务分发、资源租约与审批门控。</li>
         <li><a href="executors/coding.md"><strong>Coding 编程执行器</strong></a> — Codex app-server 与 ACP（OpenCode、CodeBuddy、Pi、DeepSeek Harness）。</li>
         <li><a href="executors/computer-use-build.md"><strong>Build 中的 Computer Use</strong></a> — macOS 与 Windows 受控桌面界面操作。</li>
-        <li><a href="../guides/mobile.md"><strong>Mobile Use（<code>mobile.run</code>，英文）</strong></a> — 原生 TypeScript Midscene SDK（<a href="../guides/autoglm.md">旧版 AutoGLM</a>）。</li>
+        <li><a href="../guides/mobile.md"><strong>Mobile Use（<code>mobile.run</code>，英文）</strong></a> — 原生 TypeScript Midscene SDK。</li>
         <li><a href="executors/loop-camera.md"><strong>Loop Camera</strong></a> — 独立摄像头条件监控。</li>
       </ul>
     </td>

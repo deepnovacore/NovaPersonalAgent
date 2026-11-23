@@ -116,7 +116,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
   })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
-  const guiNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile' || name === 'computer' || name === 'browser')
+  const guiNames = settings.executors.filter(name => name === 'mobile' || name === 'computer' || name === 'browser')
   // Each supervised GUI executor runs one task at a time, so it adds one approval slot instead of taking Codex's.
   const sharedApproval = guiNames.length > 0
     ? new HostApprovalController({clock, idFactory: () => randomUUID(), capacity: MAX_CONCURRENT_WORK + guiNames.length}) : undefined
@@ -126,11 +126,6 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     closeSharedApproval = () => { sharedApproval.invalidate('shutdown'); unsubscribe() }
     ownership.own(closeSharedApproval)
   }
-  const autoglm = !settings.executors.includes('autoglm') ? undefined : await (async () => {
-    const {AutoGlmExecutor, loadAutoGlmConfig} = await import('../executors/autoglm.js')
-    return new AutoGlmExecutor(loadAutoGlmConfig(environment), sharedApproval!)
-  })()
-  if (autoglm !== undefined) ownership.own(() => autoglm.close())
   const mobile = !settings.executors.includes('mobile') ? undefined : await (async () => {
     const {MobileExecutor, loadMobileConfig} = await import('../executors/mobile.js')
     return new MobileExecutor(loadMobileConfig(environment), sharedApproval!)
@@ -146,7 +141,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     return new BrowserExecutor(loadBrowserConfig(environment), sharedApproval!)
   })()
   if (browser !== undefined) ownership.own(() => browser.close())
-  const guiExecutors = [...(autoglm === undefined ? [] : [autoglm]), ...(mobile === undefined ? [] : [mobile]),
+  const guiExecutors = [...(mobile === undefined ? [] : [mobile]),
     ...(computer === undefined ? [] : [computer]), ...(browser === undefined ? [] : [browser])]
   const codexResource = !capabilities.modules.coding.enabled || !settings.executors.includes('codex')
     ? null
