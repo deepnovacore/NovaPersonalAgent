@@ -10,7 +10,10 @@ class SpaceReconnectPage extends StatelessWidget {
     required this.lastOkAt,
     required this.onRetry,
     this.onSwitchSpace,
+    this.language = 'zh',
   });
+  final String language;
+  String t(String zh, String en) => language == 'zh' ? zh : en;
   final bool reconnecting;
   final DateTime? lastOkAt;
   final VoidCallback onRetry;
@@ -18,9 +21,9 @@ class SpaceReconnectPage extends StatelessWidget {
 
   String _lastSync() {
     final at = lastOkAt?.toLocal();
-    if (at == null) return '尚未成功连接';
+    if (at == null) return t('尚未成功连接', 'Not connected yet');
     String two(int v) => v.toString().padLeft(2, '0');
-    return '上次同步 ${two(at.hour)}:${two(at.minute)}';
+    return '${t('上次同步', 'Last synced')} ${two(at.hour)}:${two(at.minute)}';
   }
 
   @override
@@ -44,12 +47,22 @@ class SpaceReconnectPage extends StatelessWidget {
           ),
           const SizedBox(height: 20),
           Text(
-            reconnecting ? '正在重新连接…' : '暂时连不上你的空间',
+            reconnecting
+                ? t('正在重新连接…', 'Reconnecting…')
+                : t('暂时连不上你的空间', 'Can’t reach your Space right now'),
             style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
           ),
           const SizedBox(height: 8),
           Text(
-            reconnecting ? '请稍候，连上后会自动补齐内容' : '请检查网络，连上后会自动补齐内容',
+            reconnecting
+                ? t(
+                    '请稍候，连上后会自动补齐内容',
+                    'Please wait; content catches up once connected',
+                  )
+                : t(
+                    '请检查网络，连上后会自动补齐内容',
+                    'Check your network; content catches up once connected',
+                  ),
             textAlign: TextAlign.center,
             style: const TextStyle(
               fontSize: 14,
@@ -65,10 +78,13 @@ class SpaceReconnectPage extends StatelessWidget {
           const SizedBox(height: 24),
           FilledButton(
             onPressed: reconnecting ? null : onRetry,
-            child: const Text('重新连接'),
+            child: Text(t('重新连接', 'Reconnect')),
           ),
           if (onSwitchSpace != null)
-            TextButton(onPressed: onSwitchSpace, child: const Text('切换空间')),
+            TextButton(
+              onPressed: onSwitchSpace,
+              child: Text(t('切换空间', 'Switch Space')),
+            ),
         ],
       ),
     ),

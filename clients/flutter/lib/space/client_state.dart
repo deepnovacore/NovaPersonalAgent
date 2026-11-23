@@ -7,6 +7,9 @@ Map<String, dynamic> _copy(Map value) =>
 
 /// Only Host projections are authoritative. Pending edits are separate and are
 /// retained through conflicts, process death, and transport retries.
+/// Intent kind the Host accepts to resolve a projected executor approval.
+const approvalResolveKind = 'approval.resolve';
+
 class SpaceClientState extends ChangeNotifier {
   SpaceClientState(this.persistence);
   final SpacePersistence persistence;
@@ -156,6 +159,20 @@ class SpaceClientState extends ChangeNotifier {
           .whereType<Map>()
           .map((v) => Map<String, dynamic>.from(v))
           .toList();
+
+  /// Executor approvals the Host projects to its owner (`pending_approvals`).
+  List<Map<String, dynamic>> get pendingApprovals => cards('pending_approvals');
+
+  /// Queues an owner decision for a Host executor approval.
+  Future<String> resolveApproval({
+    required String conversationId,
+    required String approvalId,
+    required bool approved,
+  }) => enqueue(approvalResolveKind, {
+    'conversation_id': conversationId,
+    'approval_id': approvalId,
+    'approved': approved,
+  });
   Future<String> enqueue(
     String kind,
     Map<String, dynamic> input, {
@@ -509,6 +526,7 @@ class SpaceClientState extends ChangeNotifier {
         'host_settings',
         'host_credentials',
         'host_feishu',
+        'pending_approvals',
       ])
         if (value.containsKey(key)) key: value[key],
       if (processing is Map)
