@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath} from 'node:fs/promises'
 import {join} from 'node:path'
 import {tmpdir} from 'node:os'
+import {readFileSync} from 'node:fs'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {NotificationChannelAdapter} from '../src/notifications/contracts.js'
@@ -61,4 +62,21 @@ test('Feed feedback is bound to the notification revision and occurrence',async(
 test('restart cancels runtime-only notices whose source guard cannot be restored',async()=>{
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-runtime-recovery-'));const path=join(dir,'state.json');let clock=now.getTime();const make=()=>new PersonalAgentHost({path,userScope:'u',pool:new SuggestionPool(),memory:()=>undefined,evidence:()=>null,now:()=>new Date(clock)});const host=make();let recovered:PersonalAgentHost|undefined;
  try{await host.open();await host.publishNotification({event_key:'ephemeral',revision:'1',occurrence:'initial',kind:'task_progress',title:'Progress',body:'Unverifiable after restart',source:{type:'runtime',id:'ephemeral'},created_at:clock,expires_at:null,not_before:clock+60000,priority:40,coalesce_key:null,feedback:[],guard:{requires_runtime:true}},()=>true);await host.close();clock+=60000;recovered=make();await recovered.open();await recovered.flushNotifications();assert.equal(recovered.notifications.snapshot().counts.cancelled,1);assert.equal(recovered.conversationSnapshot().unread_count,0)}finally{await recovered?.close();await host.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('permanent memory purge erases queued notifications derived from the purged memory and evidence',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-purge-notice-'));let erased=false
+ const evidence=(ref:string)=>erased?null:{subject_key:ref,source:{type:'conversation' as const,ref}}
+ const memory={productSurfaces:true,get:()=>Promise.resolve(null),list:()=>Promise.resolve({entries:[],cursor:null}),purgeEntry:()=>{erased=true;return Promise.resolve({status:'complete',operation_id:'p',removed_entries:0,removed_evidence:1,removed_entry_ids:[],removed_evidence_ids:['conversation:secret'],backup_cleanup:{status:'complete',unresolved:[]}})}}
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'u',pool:new SuggestionPool(),memory:()=>memory as never,evidence,now:()=>now})
+ const stored=()=>readFileSync(join(dir,'personal.json.notifications.json'),'utf8')
+ try{await host.open()
+  await host.admit({kind:'notify',summary:'Secret purge marker',why_now:'Evidence',evidence_refs:['conversation:secret'],memory_refs:[]},{...(await host.discoverySnapshot()),evidence_refs:['conversation:secret']})
+  assert.ok(stored().includes('Secret purge marker'),'the notification delivery is persisted before the purge')
+  const result=await host.command({type:'personal.command',request_id:'purge',method:'memory.purge',params:{id:'gone',expected_version:1}}) as {ok:boolean}
+  assert.equal(result.ok,true);assert.equal(host.snapshot().feed.length,0)
+  assert.ok(!stored().includes('Secret purge marker'),'purged text is cleared from the notification store')
+  const rows=(JSON.parse(stored()) as {deliveries:{invalidated?:boolean;notification:{title:string;body:string}}[]}).deliveries
+  assert.ok(rows.length>0&&rows.every(d=>d.invalidated===true&&d.notification.title===''&&d.notification.body===''))
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 })

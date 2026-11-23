@@ -23,8 +23,11 @@ test('without an OpenRouter key news falls back to the support model visibly and
  assert.equal(calls.length,before,'Jev path never calls the chat model')
  const keyed=build({openrouter_api_key:'sk-test'})
  assert.equal(keyed.rankNewsFallback,undefined,'a configured key leaves Jev as the only news ranker')
- await assert.rejects(keyless.understand({id:'source',version:1,text:'记下想法',origin:'user'},new AbortController().signal),/jev_not_configured/)
- assert.equal(calls.at(-1)!.model,'support-test','understanding extracts with the shared LLM before Jev judgment')
+ const judged=calls.length
+ await assert.rejects(keyless.understand({id:'source',version:1,text:'记下想法',origin:'user'},new AbortController().signal),(e:Error)=>!e.message.includes('jev_not_configured'))
+ assert.ok(calls.length>judged+1,'keyless understanding extracts and judges with the support model, never Jev')
+ assert.ok(calls.every(c=>c.model==='support-test'))
+ assert.ok(!calls.some(c=>/\bdue\b/.test(c.system??'')&&c.system?.includes('Extract')===true),'extraction prompt does not offer a due patch the strict schema rejects')
 })
 test('typed transport rejects incomplete probability distributions',async()=>{
  const q={one:{type:'choice' as const,instructions:'test',criteria:{yes:'yes',no:'no'}}}
