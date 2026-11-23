@@ -1,354 +1,570 @@
 # Client Space realtime voice through the Host
 
-Status: design proposal (P9b step 1). Nothing here is implemented yet.
+Status: design proposal (P9b step 1), revision 2 after review. Nothing here is implemented.
 
 ## Goal and scope
 
-A phone in Client Space mode (paired to a desktop Host through the E2EE relay) holds a
-realtime voice conversation that runs on the **Host's** voice pipeline: the Host's
-selected integrated or cascaded provider, its tools, memory and conversation history.
-Today Client Space offers text chat only. Dictation is being added separately and is the
-fallback for this feature.
+A phone in Client Space mode (paired to a Host through the E2EE relay) holds a realtime
+voice conversation that runs on the **Host's** voice pipeline: the Host's selected
+integrated or cascaded provider, its tools, memory and conversation history. Today Client
+Space has text chat only. Dictation is being added separately.
 
-Out of scope: running providers on the phone (that is Standalone mode), multi-party calls,
-video, and changing the relay's mailbox semantics.
+**v1 scope (deliberately small):**
+- relay-only transport
+- PCM16 audio
+- one relay socket pair per call
+- any disconnect ends the call and the user sees **Retry**, which runs a fresh handshake
+  with fresh keys
 
-## What the code does today (constraints this design starts from)
+Same-key resume, path migration, a direct LAN/Tailscale path and Opus are later phases.
+Out of scope: provider execution on the phone (Standalone mode), multi-party calls,
+video, and changes to mailbox semantics.
 
-- **The relay already has a "stream" channel, but it is not a media channel.**
-  `relay/src/live.ts` (`LiveRelay`) and `POST /v1/stream` forward short-lived signed
-  envelopes (`chan: 'stream'`, `expiresAt` ≤ 60 s) to a recipient's `/v1/live` WebSocket.
-  Uplink is **one HTTPS POST per frame** (the WebSocket accepts only 1 KiB JSON heartbeats
-  from devices, `maxPayload: 1024`). Every frame is JSON with a base64 JWE body plus a
-  base64 Ed25519 JWS that embeds the body a second time. The relay verifies the signature
-  and runs SQLite membership/epoch lookups on enqueue *and* again on dequeue. Requests are
-  limited to 600/min per source and 30 000/min globally. The per-recipient queue is
-  64 messages / 1 MiB, and the connection is dropped on overflow. Chat deltas
-  (`chat.delta`) and `chat.send` already use this path.
+## What the code does today
+
+- **The relay already has a stream channel, but it is not a media channel.**
+  `relay/src/live.ts` and `POST /v1/stream` forward short-lived signed envelopes
+  (`chan:'stream'`, TTL ≤ 60 s) to the recipient's `/v1/live` WebSocket.
+  - Uplink is one HTTPS POST per frame. The live WebSocket accepts only ≤1 KiB JSON
+    heartbeats (`maxPayload: 1024`).
+  - Each frame is JSON with a base64 JWE body plus a base64 Ed25519 JWS that embeds the
+    body again.
+  - The relay verifies the signature and checks membership and epoch in SQLite on
+    enqueue *and* on dequeue.
+  - Requests are limited to 600/min per source and 30 000/min globally. The queue holds
+    64 messages / 1 MiB and drops the connection on overflow.
+  - `chat.send` and `chat.delta` use this channel today.
+- **Relay sessions:** login tokens live **900 s** (`security.ts`). The live socket
+  re-authenticates the *upgrade-time* header on every heartbeat, so it dies at token
+  expiry and the SDK reconnects.
 - **The mailbox** is durable, polled about once per second, and snapshots are cut into
-  48 KB chunks (`space-host/service.ts`). It is unsuitable for audio.
-- **Crypto.** There is one 32-byte content key per epoch, shared by the Host and all
-  members. It is delivered to each device wrapped with ECDH-ES+A256KW
-  (`relay/src/crypto.ts`, `space-host/config.ts`, `clients/flutter/lib/space/space_crypto.dart`).
-  Bodies are JWE `dir`/A256GCM with random nonces. Epochs rotate **only on device
-  revocation**: the Host closes and recreates its `SpaceHost` service, and the relay
-  rejects stale-epoch principals (`assertActive`) and sweeps their live sockets.
-  Because the content key is shared, it proves only "some member", never "the Host".
-  Sender identity comes from the per-envelope Ed25519 signature.
-- **The Host voice pipeline.** `conversations.voice {id, enabled, voice_mode}` on
-  `PersonalAgentHost` binds a single `voice_id` per Host (`voice_active` if another
-  conversation holds it). `sendConversationAudio(id, pcm)` feeds 16 kHz PCM16. Output
-  leaves through `onAudioFrame` / `onAudioClear` / `onAudioTerminal` / `onAudioAlert`
-  as `PlaybackFrame {utterance_id, generation_epoch, sequence, pcm}` at 24 kHz. Playback
-  truthfulness depends on renderer delivery reports. `desktop-session.ts` arbitrates one
-  audio owner, `'desktop' | 'phone'`. Here 'phone' is the legacy LAN `ClientServer`
-  (`/client/v1`, `NOVA` binary frames, macOS-only `phone.start`).
-- **The phone audio stack** (`packages/nova_audio`) captures mono PCM16 LE at 16 kHz,
-  handed off in ~20 ms (640-byte) packets with one in-flight handoff. It plays mono
-  PCM16 at 24 kHz with a render ledger (`playback.progress` with `played_ms`), a 50 s
-  outstanding cap, and `clear(utterance, epoch)` fencing. Platform AEC runs in relay
-  mode. Standalone voice is `PhoneVoiceSession` over the `VoiceProvider` interface.
-- **Versioning.** The Host's `intentSchema.kind` is a closed `z.enum`. An unknown kind
-  fails `safeParse` and is **silently dropped** (only `onError`), so an old Host never
-  answers a `voice.start`. The relay negotiates only `business_versions: [1]`.
+  48 KB chunks. It is unsuitable for audio.
+- **Crypto:**
+  - There is one 32-byte content key per epoch, shared by the Host and every member,
+    delivered wrapped with ECDH-ES+A256KW. Bodies are JWE `dir`/A256GCM.
+  - Epochs rotate only on revocation: the Host closes and recreates its `SpaceHost`
+    service, and the relay sweeps stale principals.
+  - The shared key proves "some member", never "the Host". Sender identity comes only
+    from the Ed25519 envelope signature.
+  - Flutter records verified newer-epoch evidence (`verifyAndObserve`,
+    `observedHostEpoch`) before the new key arrives.
+- **The Host voice pipeline:**
+  - `conversations.voice {id, enabled, voice_mode}` keeps one `voice_id` per Host.
+  - `sendConversationAudio` takes 16 kHz PCM16, and output arrives through
+    `onAudioFrame/Clear/Terminal/Alert`.
+  - `PlaybackRegistry` frames are `{utterance_id, generation_epoch, sequence, pcm ≤ 64 KiB}`
+    at 24 kHz, with sequence contiguous from 0 per generation.
+  - `desktop-session.ts` arbitrates one audio owner, `'desktop' | 'phone'`, where
+    `'phone'` is the legacy LAN `ClientServer` on `/client/v1`.
+  - `sendConversationAudio` and the `onAudioFrame` filter refuse in `background`
+    presentation.
+  - `playbackDisconnected({resumeDelivery:true})` fences the current generation and
+    **unpauses delivery immediately** in its `finally`. It cannot hold delivery for a
+    reconnect window.
+- **The Space Host service:**
+  - `#requireChat(id)` admits only `chat`/`topic` conversations in `chat` mode.
+  - Intents are journaled by `(sender, op_id)`.
+  - `intentSchema.kind` is a closed `z.enum`, and an unknown kind is **silently dropped**
+    (`onError` only, no receipt).
+  - Admin kinds are gated by `owner_device`.
+- **The headless server** (`server-entry.ts`, `remote: true`) can load a Space Host config
+  and builds non-text-only realtime, but its only audio owner is the legacy `ClientServer`.
+- **The phone:**
+  - `nova_audio` captures mono PCM16 at 16 kHz in ~20 ms (640 B) handoffs.
+  - It plays PCM16 at 24 kHz through native `PlaybackLedger`s that require
+    `frame.sequence == nextSequence` (contiguous from 0 per utterance), with
+    `playback.progress{played_ms}` and `clear(utterance, epoch)` fencing.
+  - `OwnedAudioPort` / `AudioOwner` arbitrate the device across voice and dictation.
+  - `voice_media.dart` encodes `NOVA` frames.
+  - `ClientState._replaceSnapshot` copies only an **allowlist** of snapshot keys.
 
 ## 1. Transport options
 
-| | (a) New relay media WebSocket | (b) Direct Host connection + relay fallback | (c1) Existing `/v1/stream` | (c2) WebRTC (ICE/TURN) | (c3) Turn-based voice notes over mailbox |
+| | (a) New relay media WebSocket | (b) Direct Host connection + relay fallback | (c1) Existing `/v1/stream` | (c2) WebRTC | (c3) Turn-based voice notes over mailbox |
 |---|---|---|---|---|---|
-| NAT / mobile | Works everywhere (both ends dial out over 443) | Direct works on the same LAN or a shared Tailscale/VPN tailnet. Never across carrier NAT without a VPN | Works everywhere | Best traversal, but symmetric NAT and CGNAT need TURN (same cost as (a)) | Works everywhere |
-| Latency added | ~1 relay hop, ~20–80 ms in region | Lowest on LAN (<10 ms) | One HTTPS POST per frame. 100–300 ms on mobile, head-of-line blocking | Low | 2–5 s per turn, not realtime |
-| Relay operator cost | Full call bandwidth, in + out | Zero when direct | ~5× call bandwidth plus per-frame signature and SQLite work | TURN = full bandwidth | Small |
-| Fits the limits? | New, purpose-built limits | n/a | No: 25–50 POST/s exceeds the 10/s source limit. The 64-message queue drops the connection | n/a | Yes |
-| New attack surface | Relay route (authenticated) | A listening socket on the Host | None | Large dependency, DTLS/ICE stack | None |
-| Effort | Medium | Medium-high (discovery, cert pinning, path switching) | Low for a prototype only | High (flutter_webrtc plus a Node WebRTC stack, and it bypasses nova_audio AEC) | Low |
+| NAT / mobile | Works everywhere (both ends dial out on 443) | Direct only on the same LAN or tailnet | Works everywhere | Needs TURN behind symmetric NAT or CGNAT (same cost as (a)) | Works everywhere |
+| Added latency | One relay hop, ~20–80 ms in region | Lowest | A POST per frame, 100–300 ms on mobile | Low | 2–5 s per turn |
+| Relay operator cost | Full call bandwidth, in and out | None when direct | ~5× bandwidth plus per-frame signature and DB work | Full bandwidth via TURN | Small |
+| Within limits? | Purpose-built limits | n/a | No: 25+ POST/s against a 10/s source limit | n/a | Yes |
+| Attack surface | Authenticated relay route | Listening socket on the Host | None | Large stack, bypasses `nova_audio` AEC | None |
 
-**Rejected outright:** phone-to-provider direct (ephemeral provider tokens). It bypasses
-the Host pipeline, its tools and memory, and cascaded providers have no such tokens.
-QUIC/WebTransport is not mature on Dart or Node today.
+Rejected: phone-to-provider tokens (bypass the Host pipeline, and cascaded providers have
+none) and QUIC/WebTransport (immature on Dart and Node).
 
-**Recommendation:** build **(a) first**: a new authenticated, binary, bidirectional,
-session-scoped relay route `/v1/media`. Its frames are end-to-end AEAD (section 2), so the
-relay forwards opaque bytes and verifies nothing per frame. Add **(b) next** as an
-optimization behind the same frame format: the Host advertises direct candidates in its
-signed `voice.accept`, the phone tries direct for ≤1.5 s, and the relay stays the fallback.
-The frame layer is transport-agnostic, so switching paths mid-call is a reconnect with the
-same session keys and sequence spaces. Keep (c3) as a possible later "voice note" mode.
-(c1) is useful only as a throwaway spike.
+**Recommendation.**
+- **v1 = (a) only:** `/v1/media`, a binary, bidirectional route with one socket pair per
+  call. Frames are end-to-end AEAD (§2), so the relay forwards opaque bytes.
+- **(b)** is a later phase behind the same frame format.
+- **(c1)** is a spike only.
+- **(c3)** is a possible later voice-note mode.
+- Relay capability or presence hints may only **prevent** a call (hide the button, fail
+  early). They never select keys, codecs the caller did not offer, or a destination for
+  audio.
 
-### `/v1/media` shape
+### `/v1/media` join and registration (v1)
 
-- `GET /v1/media?session=<128-bit random id>` upgrades with `Authorization: Bearer`
-  (the existing session token). The relay checks `assertActive`, that the session's two
-  parties are this device and the space's Host (star topology, like
-  `host_route_required`), and the per-space concurrency limit.
-- **Session registration** has no relay-side business knowledge. The Host registers
-  `{session, client_device, expires}` by an authenticated `POST /v1/media/sessions`.
-  The relay pairs the first Host socket and the first Client socket of that session and
-  refuses any third socket. Sessions expire when idle or at the max duration.
-- Frames are binary WebSocket messages forwarded verbatim to the peer socket, size-capped
-  (≤ 4 KiB). The relay keeps a bounded send queue per direction. When `bufferedAmount`
-  exceeds ~250 ms of the cap, it **drops the oldest audio frames** (realtime, latest-wins)
-  instead of closing. Control frames (type bit) are never dropped before audio.
-- The membership sweep (`live.sweep()` already runs each second) also terminates media
-  sockets whose principal became stale or revoked.
+1. **Principal.** Every media request uses the existing bearer token. The relay derives
+   `(space, epoch, device)` from durable security state only, never from request fields.
+2. **Reservation.** Only the Space's registered Host (`getSpace(space).host`) may call
+   `POST /v1/media/sessions {session, client, ttl}`. `client` must be an active,
+   non-revoked device of the same Space and different from the Host.
+   - Reservations are keyed `(space, epoch, session)`, so the same session id in two
+     Spaces never collides.
+   - The relay caps lifetime at `min(ttl, media.maxSessionMinutes)` and sets a 15 s join
+     deadline.
+   - Pending reservations are bounded per Space (2) and globally.
+   - A session id is never reusable: closed reservations are tombstoned until their
+     lifetime cap passes.
+3. **Join.** The upgrade is `GET /v1/media` with the `X-Nova-Media-Session` header (no
+   query string, so the id stays out of access logs). The pre-upgrade limiter
+   (`rate(req)`) and forwarded-connection accounting (`reserveForwardedConnection`) apply
+   as for `/v1/live`.
+   - The role claim is atomic: the Host principal claims `host`, and the reserved client
+     device claims `client`. Any other socket is rejected.
+   - A half-joined socket (peer absent) counts against a small per-Space and global cap
+     and is closed at the join deadline.
+4. **No replacement in v1.**
+   - A second socket for an already-claimed role is rejected.
+   - If either claimed socket closes, the relay closes the peer and tombstones the
+     session.
+   - Close handlers compare socket identity with the current claim before mutating
+     state, so a late close of an old socket can never tear down another session.
+5. **Token renewal.** A call may outlive the 900 s token. Before expiry, each endpoint
+   sends a text frame `{"type":"renew","token":"…"}` carrying a fresh token from its
+   normal login. The relay accepts it only if it maps to the identical
+   `(space, epoch, device)` principal, then swaps the stored credential. At expiry
+   without renewal the socket closes and the call ends.
+6. **Invalidation.** Device revocation (`/v1/devices/revoke`) and the 1 s maintenance
+   sweep run `assertActive` on every media socket. Stale-epoch or revoked principals
+   close the session at once.
 
 ## 2. E2EE framing
 
-The relay must never see plaintext audio. The shared epoch content key alone cannot
-authenticate the Host, so the design binds per-session keys to the signed handshake and to
-the epoch key:
+The relay must never see plaintext audio. Because the epoch content key is shared, call
+keys are bound to the *signed* handshake and mixed with the epoch key.
 
-1. The phone sends intent `voice.start` (a signed, content-key-encrypted envelope, as
-   today) carrying an ephemeral X25519 public key `ephC`, `conversation_id`, codec offers
-   and a client nonce. It travels on `chan: 'stream'` with a short TTL, like `chat.send`.
-2. The Host replies on the signed stream channel with `voice.accept {session, ephH,
-   codec, frame_ms, direct_candidates?, expires_at}`. The Host Ed25519 signature on the
-   envelope authenticates `ephH`.
-3. Both sides derive
-   `PRK = HKDF-SHA256(salt = content_key[epoch], IKM = X25519(ephC, ephH))` and
-   `k_up / k_down = HKDF-Expand(PRK, "nova-voice/v1|" + space + "|" + epoch + "|" + session + "|" + client_device + "|up" / "|down", 32)`.
-   This gives forward secrecy per call, sender authentication by direction, and an
-   explicit binding to the epoch. A former member holding an old content key learns
-   nothing. `X25519` is in `package:cryptography` (already a dependency) and in Node
-   `crypto`.
+**Handshake.**
+1. The phone sends intent `voice.start`: a signed envelope encrypted with the content key,
+   **stream channel only**, with `expires_at ≤ created_at + 15 s` (like `chat.send`). It
+   carries `op_id`, `conversation_id`, `voice_mode:"chat"`, an ephemeral X25519 key
+   `ephC`, a 32-byte random `nonceC`, `offers {codecs:["pcm16"], frame_ms:[40]}`, and
+   `deadline`.
+2. Both sides compute
+   `startHash = SHA-256(canonical(voice.start ‖ space ‖ epoch ‖ client_device ‖ host_device))`.
+   The canonical form is RFC 8785 JCS JSON of the full intent, with the fixed fields
+   appended as length-prefixed UTF-8.
+3. The Host replies on the signed stream channel with `voice.accept {op_id, startHash,
+   session, ephH, selected {codec, frame_ms}, call_deadline}`.
+4. The phone verifies, before deriving keys:
+   - the Host Ed25519 signature
+   - `startHash` against the start it actually sent and has not cancelled
+   - that `selected` was offered
+   - that the attempt has not expired
+5. Either side rejects the call on an all-zero or otherwise invalid X25519 result (checked
+   in constant time). A late `voice.accept` for a cancelled or expired attempt is
+   ignored, and the Host's reservation times out.
 
-**Frame (binary, both directions):**
+**Key derivation.** `LP(x)` is a 4-byte big-endian length followed by the bytes.
 
 ```
-0      1      2      4                12                    end
-| ver=1| type | flags| seq (u64 BE)    | AES-256-GCM(ciphertext ‖ 16-byte tag) |
-AAD = bytes[0..12)        nonce = 0x00000000 ‖ seq (12 bytes, per-direction key)
+ikm   = X25519(eph_priv, eph_peer)
+PRK   = HKDF-Extract(salt = content_key[epoch], ikm)
+info  = LP("nova-voice/v1") ‖ LP(startHash) ‖ LP(ephC) ‖ LP(ephH) ‖ LP(session)
+        ‖ LP(codec) ‖ LP(u16 frame_ms) ‖ LP(direction ∈ {"up","down"})
+k_dir = HKDF-Expand(PRK, info, 32)
 ```
 
-- `type`: 1 audio, 2 control (JSON inside), 3 keepalive (empty plaintext, still sealed).
-- The audio plaintext carries `media_ts` (u32 sample index), and on downlink the
-  `utterance_id` / `generation_epoch` / `sequence` of the `PlaybackFrame`, compactly
-  encoded, followed by codec payload. Control plaintext carries `playback.clear`,
-  `playback.terminal`, `playback.alert`, captions, `playback.progress` (phone → Host),
-  `voice.mute` and `voice.end`.
-- **Nonce and sequence.** `seq` starts at 0 per direction and increments per frame. It
-  never repeats because keys are per session and per direction. If `seq` reaches 2⁴⁸
-  the session ends (unreachable in practice).
-- **Replay protection.** The receiver keeps a 128-frame sliding window (SRTP/DTLS
-  style). It rejects duplicates and frames older than the window, and accepts gaps.
-  Any AEAD failure drops the frame. More than 8 consecutive failures end the session
-  (`voice_crypto_failed`).
-- **Epoch rotation mid-call.** Rotation happens only on revocation, and the Host
-  already tears down its `SpaceHost` service then. The voice session ends: the Host
-  stops the pipeline, sends a sealed `voice.end{reason:"epoch_rotated"}` best-effort,
-  and the relay sweep closes stale sockets. After the phone installs the new
-  Host-signed key it may offer "Resume call", which is a fresh `voice.start` in the new
-  epoch. There is no in-call rekey. That would add complexity for an event that is
-  rare and security-motivated. A revoked device's session is killed immediately.
+This gives per-call forward secrecy, direction separation, and binding to the epoch, the
+exact start and the selected parameters. A former member holding an old content key
+learns nothing. `X25519` is in `package:cryptography` (already a dependency) and in Node
+`crypto`.
 
-## 3. Codec and frame size
+**Frame (binary WebSocket message, both directions):**
 
-- **PCM16 first** (no new native code). Uplink is 16 kHz mono as captured. Downlink is
-  24 kHz mono as nova_audio renders, so there is no resampling on either side.
-  Packetization is 40 ms on the relay (two capture handoffs, 25 packets/s per direction)
-  and 20 ms on a direct path.
-- **Opus is worth adding** (Phase 3), mainly for mobile data and relay cost: ~10×
-  smaller. It uses the VOIP application at 20 ms frames, 16 kHz uplink (~24 kbps), and
-  24 kHz downlink (~32 kbps) decoded to 24 kHz PCM before `nova_audio.enqueue`.
-  Natively: iOS `AVAudioConverter` (Opus, iOS 11+); Android `MediaCodec` (decoder on
-  every supported API level, encoder API 29+, otherwise fall back to PCM). On the Host,
-  a Node Opus binding (native or WASM). It is negotiated in `voice.start` / `voice.accept`.
-  PCM stays mandatory to implement.
+```
+0      1      2       4                 12                                  end
+| ver=1| type | flags | seq (u64 BE)     | AES-256-GCM ciphertext ‖ 16 B tag |
+AAD = bytes[0..12)   nonce = 0x00000000 ‖ seq   key = k_up or k_down
+```
 
-Bandwidth per call (payload + 12 B header + 16 B tag + WS/TLS ≈ 60 B/packet at 25 pps
-≈ 12 kbps per direction):
+- Types: 1 audio, 2 control (compact JSON), 3 keepalive (empty plaintext, still sealed).
+  `flags` must be 0 in v1.
+- The receiver drops any frame with an unknown `ver`, `type` or flag, or a total length
+  outside `[28, 4096]`, before decryption.
+- Plaintext layouts per type have fixed minimum lengths. A length mismatch after
+  decryption is a protocol error.
+- **One sender per direction.** The phone owns `up`, the Host owns `down`. A single
+  counter allocates `seq` once across all frame types and paths, including frames whose
+  send later fails. A seq is never reused. At 2⁴⁸ the call ends.
+- **Receive state** is per direction: the highest authenticated `seq` plus a 128-bit
+  replay bitmap. It advances **only after** the GCM tag verifies. Duplicates and frames
+  older than the window are dropped, and gaps are allowed. More than 8 consecutive
+  authentication failures end the call (`voice_crypto_failed`).
+- **Volatile versus persisted state:**
+  - Ephemeral private keys, `k_up`/`k_down`, counters and windows are **volatile**. They
+    live only in memory, are never written to storage, and are zeroed when the call ends.
+  - The persisted state is the existing epoch and content-key records only.
+  - After an app or Host restart, a crash, an epoch change or any uncertain counter
+    state, the call is gone. A new call needs a fresh `voice.start` with fresh
+    ephemerals.
+- **Epoch rotation mid-call.**
+  - The Host fences and ends the call as part of tearing down `SpaceHost`.
+  - The relay sweep closes the sockets.
+  - Flutter ends the call as soon as it records verified higher-epoch evidence, even
+    before the new key arrives.
+  - There is no in-call rekey. "Retry" runs a fresh handshake in the new epoch.
 
-| Mode | Up | Down | Total | Per hour (each relay leg) |
+## 3. Codec, packetization and receipts
+
+- **v1: PCM16 only.** Uplink is 16 kHz mono (as captured) and downlink 24 kHz mono (as
+  rendered), so there is no resampling. Each packet is 40 ms: two capture handoffs, or
+  1 280 B up and 1 920 B down, giving 25 packets/s per direction.
+- **Opus later** (~10× smaller, CBR to avoid leaking speech activity) via iOS
+  `AVAudioConverter`, Android `MediaCodec` (encoder API 29+, otherwise PCM) and a Node
+  binding. PCM stays mandatory.
+
+**Downlink identity mapping.** The Host re-chunks each `PlaybackFrame` (up to 64 KiB) into
+40 ms media packets.
+
+| Layer | Identity | Scope |
+|---|---|---|
+| Host generation | `utterance_id`, `generation_epoch` | sent once in a sealed `playback.start` control, mapped to a u16 `gen` handle |
+| Sample offset | u32 count of 24 kHz samples since generation start | each audio packet |
+| Native frame seq | u32, contiguous from 0 per generation (what `PlaybackLedger` requires) | each audio packet |
+| Transport seq | u64 frame counter (§2) | per direction, all types |
+
+The audio plaintext is `gen (u16) ‖ native_seq (u32) ‖ sample_offset (u32) ‖ pcm`. The
+phone re-wraps it with the existing `NOVA` encoder (`voiceFrame(identity, native_seq, pcm)`)
+before `enqueue`, so native ledgers see exactly the Host's identities.
+
+**v1 loss policy.** The native ledger cannot skip a sequence number. If a downlink audio
+packet is missing (gap in `native_seq` for a live `gen`):
+1. The phone **fences that utterance**: no further enqueue for `gen`, and the jitter
+   buffer and pending enqueues are dropped.
+2. It lets the native ledger finish the contiguous prefix already handed over, then
+   reports `playback.stopped{utterance_id, generation_epoch, played_ms, reason:"loss"}`,
+   where `played_ms` is the last confirmed contiguous prefix from the native ledger.
+3. The Host treats this exactly like an interrupted playback receipt and truncates
+   history to what was heard.
+
+There is no concealment or splicing in v1. Uplink loss needs no repair: the Host feeds
+audio in seq order and endpointing tolerates gaps.
+
+**Receipts (phone → Host, control frames)** carry `utterance_id`, `generation_epoch` and
+`played_ms` from the native render ledger, never enqueue time:
+- `playback.started`
+- `playback.progress` (≤ 10/s)
+- `playback.done`
+- `playback.stopped{reason}`
+- `playback.cleared`
+
+**Bandwidth.** Per-packet overhead is the 12 B header, 16 B tag and WS/TLS framing,
+about 60 B, or ~12 kbps per direction at 25 packets/s.
+
+| Mode | Up | Down (realtime) | Down (paced burst ≤1.25×) | Per hour, each relay leg |
 |---|---|---|---|---|
-| PCM16 via `/v1/media` | ~268 kbps | ~396 kbps | ~83 KB/s | ~300 MB in + ~300 MB out |
-| Opus via `/v1/media` | ~36 kbps | ~44 kbps | ~10 KB/s | ~36 MB in + ~36 MB out |
-| PCM16 via existing `/v1/stream` (c1) | ~5× PCM | ~5× PCM | ~400 KB/s | ~1.4 GB, plus 50 HTTP requests/s |
+| PCM16 v1 | ~268 kbps | ~396 kbps | ~495 kbps | ~300 MB in + ~300 MB out |
+| Opus (later) | ~36 kbps | ~44 kbps | ~55 kbps | ~36 MB each way |
+| PCM over `/v1/stream` | ~5× PCM | ~5× PCM | — | ~1.4 GB, 50 POST/s |
 
-Downlink is bursty: providers generate faster than realtime. The Host paces downlink to
-≤1.5× realtime with ≤2 s lead. This bounds relay queues and makes barge-in cheap.
+Providers generate faster than realtime. The Host paces downlink to **≤ 1.25× realtime**
+with ≤ 1 s lead: 480 kbps of PCM payload, ~495 kbps on the wire, ~32 packets/s. This
+stays under the default relay caps in §6. (The earlier 1.5× figure would have needed
+576 kbps of payload, above the old 420 kbps cap.)
 
 ## 4. Session lifecycle and authorization
 
-New intents (Host `intentSchema` kinds) and Host messages:
-
-| Message | Direction | Content |
+| Message | Path | Content |
 |---|---|---|
-| `voice.start` | phone → Host intent | `conversation_id`, `voice_mode?`, `ephC`, `codecs`, `transports` |
-| `voice.accept` / `voice.reject{code}` | Host → phone (signed stream, plus a receipt) | see section 2. Rejection codes: `voice_active`, `voice_unavailable`, `conversation_busy`, `relay_media_disabled`, `owner_required`, … |
-| `voice.stop` | phone → Host intent, or sealed in-band `voice.end` | `session` |
-| `voice.ended{reason}` | Host → phone | `stopped`, `epoch_rotated`, `idle`, `max_duration`, `taken_over`, `provider_failed` |
+| `voice.start` | phone → Host intent, stream only, ≤ 15 s deadline, idempotent by `(sender, op_id)` | §2 fields |
+| `voice.accept` / `voice.reject{code}` | Host → phone, signed stream + journal receipt | §2. Codes include `voice_disabled`, `owner_required`, `owner_unassigned`, `conversation_read_only`, `voice_active`, `voice_unavailable`, `relay_media_unavailable` |
+| `ready` | first sealed control frame, each direction | `{startHash}`, proves both keys |
+| `voice.stop` | phone → Host intent, or a sealed in-band control `end` | `op_id` of the start |
+| `voice.ended{reason}` | Host → phone, sealed control, plus signed stream best-effort | `stopped`, `epoch_rotated`, `revoked`, `idle`, `max_duration`, `taken_over`, `policy_changed`, `provider_failed`, `transport_lost`, `loss` |
 
-- **Binding.** `voice.start` maps to `conversations.voice {id, enabled:true}` on the
-  Host, so the existing per-Host `voice_id` singleton, the `voice_active` and
-  `conversation_busy` checks, and the Build guard apply unchanged.
-  `voice.stop` / teardown maps to `enabled:false`.
-- **Audio owner.** Extend the desktop session's owner set from `'desktop' | 'phone'` to
-  include `{space: device}`, with a new `SpaceVoiceBridge` that implements the same sink
-  contract as `DesktopSocketBridge`. It handles `receiveAudio`, playback frames, clears,
-  terminals and delivery reports. The **one active voice session per Host** rule (any
-  device) follows from both `voice_id` and the audio owner. A device holds at most one
-  session; a second `voice.start` from the same device replaces its own session.
-  Desktop takeover policy: the local user always wins (`voice.ended{taken_over}`).
-- **Authorization.** Any paired member may start voice in a conversation it can already
-  chat in (same as `chat.send`). It is *not* in `ADMIN_KINDS`. A Host setting
-  `space_voice: off | owner | members` (default `owner`) lets the owner restrict it,
-  because voice spends the Host's provider credits and mic-driven tools. Tool approvals
-  stay as in text chat.
-- **Presentation.** `sendConversationAudio` and the `onAudioFrame` filter reject when
-  `presentationMode === 'background'`. A Space voice session must count as a voice
-  presentation (a new `'remote_voice'` reason, or the owner bridge exempting the check)
-  so a minimised Host desktop still serves the call.
-- **Timeouts.** `voice.accept` must arrive within 8 s or the phone falls back (section 7).
-  Sessions end after 60 s without media in both directions, and at a max duration
-  (default 60 min, configurable).
+`voice.end` and `voice.ended` are **best-effort**. Correctness rests on leases, deadlines
+and relay teardown, never on the goodbye arriving.
+
+**Authorization, evaluated in order before any `conversations.voice` call:**
+1. The sender is a current member (existing check).
+2. Space voice policy `off | owner | members` (Host setting, default `owner`):
+   - `off` rejects everyone.
+   - `owner` admits only `owner_device`. With no owner assigned (for example after the
+     owner was revoked), it rejects everyone with `owner_unassigned`.
+   - `members` admits every current member.
+3. `#requireChat(conversation_id)`, the same rule as `chat.send`.
+4. `voice_mode` is constrained to the authorized chat mode (`"chat"`). Anything else is
+   rejected and never passed through.
+5. Tool approvals raised during the call go through the same authorized decision surface
+   as text chat. A spoken "yes" never approves.
+
+**Start sequence (Host):**
+1. Journal and dedupe by `(sender, op_id)`. A replayed start returns the same receipt and
+   never a second call.
+2. **Reserve the slot** in a single audio-owner arbiter shared by the desktop renderer,
+   the legacy LAN phone and Space calls. Owners become `desktop | lan_phone |
+   space:<device>`.
+   - Each claim gets a monotonically increasing **lease id**.
+   - Start, takeover, stop and cleanup are serialized in the arbiter.
+   - Stop and cleanup must present the lease id, so a stale stop can never release a
+     newer call.
+   - A device's second start replaces only its own call. The local desktop user always
+     takes over (`taken_over`).
+3. Register the relay reservation and send `voice.accept`.
+4. Wait for both sockets and an authenticated `ready` from the phone (15 s). **Only then**
+   call `conversations.voice {id, enabled:true, voice_mode:"chat"}` and begin provider
+   work.
+5. Mark the call active. Playback is permitted in `background` presentation **only for
+   frames whose conversation is the call's conversation**, through the owner bridge. All
+   other background suppression stays.
+
+**Teardown (timeout, revoke, close, policy change, takeover, stop).** **Fence first, then
+clean up:**
+1. Bump the lease so in-flight work is stale.
+2. Stop accepting uplink and stop emitting downlink.
+3. Clear the current generation.
+4. Then stop the provider (`conversations.voice enabled:false`, only if this lease still
+   holds it), release the owner, close the relay session and zero the keys.
+
+A policy change re-evaluates every active call. Idle detection: no authenticated frame
+from the peer for 20 s ends the call.
+
+**Headless server.** v1 serves Space voice on the desktop Host only. The headless server
+does not advertise `voice.v1` until its composition registers the shared owner arbiter
+(Phase 5). Its legacy `ClientServer` phone stays as is.
 
 ## 5. Barge-in, latency and jitter
 
-- **Barge-in is Host-authoritative**, as on the desktop. Provider or cascaded
-  endpointing detects speech, the service raises the fence, and `playback.clear`
-  is sent as a control frame that overtakes queued audio (separate priority queue on
-  the Host and relay). The phone calls `nova_audio.clear(utterance, epoch)`. The phone
-  reports `playback.progress{played_ms}` from the native render ledger, so the Host
-  truncates history to what was actually heard (current delivery-report semantics).
-  Optional optimisation: the phone ducks playback locally when its capture level
-  crosses the threshold, hiding one RTT. It never clears on its own.
-- **AEC** is required (speakerphone self-barge-in). Use nova_audio relay mode with
-  platform voice processing, as Standalone already does.
-- **Latency targets** (transport only, same region): added mouth-to-Host ≤150 ms p50 /
-  ≤300 ms p95 on the relay, ≤30 ms direct on LAN. Speech end to first audible reply:
-  ≤1.5 s p50 over the relay, otherwise provider-bound. `playback.clear` to silence:
-  ≤250 ms p95.
-- **Jitter.** Downlink uses an adaptive buffer in front of `enqueue`: start 80 ms,
-  range 60–200 ms, grow on underrun, shrink slowly. Late frames past the buffer are
-  dropped and concealed (silence for PCM, Opus PLC). Uplink needs no playout buffer.
-  The Host feeds frames in `seq` order with a 60 ms reorder window and inserts nothing,
-  because endpointing tolerates gaps. Over a 1 s gap, the Host emits a
-  `voice.degraded` caption.
+- **Barge-in is Host-authoritative.**
+  - Endpointing detects speech, the service fences the generation, and a `playback.clear`
+    control frame is sent.
+  - A clear **cannot overtake bytes already written** to the socket. Its lag is bounded
+    by keeping the Host's per-call app queue at ≤ 200 ms and the relay queue at ≤ 16
+    frames.
+  - The phone fences the generation across **all three stages**: the jitter buffer,
+    pending `enqueue` calls, and the native ledger (`clear(utterance, epoch)`). Frames for
+    a fenced `gen` that arrive later are dropped.
+  - The phone then sends `playback.cleared{played_ms}`.
+  - Optional later improvement: local ducking when capture level crosses the threshold.
+    The phone never clears on its own.
+- **No hold-on-disconnect in v1.** A disconnect ends the call (§7), so
+  `playbackDisconnected({resumeDelivery:true})` is not used as a hold. If same-key resume
+  is added later, it must:
+  1. pause delivery explicitly
+  2. discard stale input and output
+  3. resume only after an *authenticated* replacement socket sends `ready`
+- **AEC.** Native relay mode with platform voice processing. This is a
+  **physical-device acceptance item**: simulators prove nothing.
+- **Latency targets (same region, relay):**
+  - added mouth-to-Host ≤ 150 ms p50, ≤ 300 ms p95
+  - speech end to first audible reply ≤ 1.5 s p50 (otherwise provider-bound)
+  - clear to silence ≤ 250 ms p95, **measured** from the Host fence timestamp to the
+    `playback.cleared` render-ledger time, with clock offset taken from `ready`/keepalive
+    RTT
+- **Jitter.**
+  - Downlink: an adaptive buffer before `enqueue`, starting at 80 ms (range 60–200 ms),
+    growing on underrun and shrinking slowly. An underrun waits and never skips
+    `native_seq`; a true gap triggers the §3 loss policy.
+  - Uplink: no playout buffer; a 60 ms reorder window, then in-order feed.
+
+**Flutter shape.** A small `SpaceCallController` owns the call. It is **not** a
+`VoiceProvider` adapter around `PhoneVoiceSession`, whose turn and response model would
+lose Host playback identities. It:
+- acquires the device through `OwnedAudioPort` / `AudioOwner` (so it competes cleanly
+  with dictation and Standalone voice)
+- starts native relay mode with capture on
+- re-wraps downlink audio with the existing `NOVA` encoder, preserving Host identities
+- maps native `playback.progress` and stopped events to receipts
+
+Platform cases:
+- **Audio focus loss** (phone call, other app) ends the call.
+- **App suspension** ends it unless the existing companion/PiP background path is active.
+- **Mute** stops uplink frames and keeps the call alive with keepalives.
+- **Teardown** releases the owner before closing the socket.
+- **Dictation** cannot start during a call, and a call cannot start during dictation:
+  `AudioOwner` decides.
 
 ## 6. Relay limits and abuse protection
 
-Media is **disabled by default** on the relay. It costs the operator real bandwidth and
-self-hosters must opt in. New `media` deployment config (and `RelayServerOptions.media`;
-note that `cli.ts` does not expose `live` options today either):
+Media is **disabled by default**. It costs the operator real bandwidth, so self-hosters
+opt in.
 
-| Option | Default when enabled | Purpose |
+| Option | Default when enabled | Notes |
 |---|---|---|
-| `media.enabled` | `false` | The route returns 404 / `relay_media_disabled` |
-| `media.maxKbpsPerDirection` | 420 (fits PCM16 downlink). Drop to 64 once all clients have Opus | Token bucket per socket. Excess frames are dropped, and sustained excess closes the socket |
-| `media.maxFrameBytes` | 4096 | |
-| `media.maxSessionsPerSpace` | 1 | Mirrors one-voice-per-Host |
-| `media.maxSessionsGlobal` | 64 | |
-| `media.maxSessionMinutes` | 60 | |
-| `media.idleTimeoutSeconds` | 30 | |
-| `media.monthlyBytesPerSpace` | unset | Optional quota, persisted in SQLite |
+| `media.enabled` | `false` | route 404 |
+| `media.maxKbpsPerDirection` | 512 | token bucket with 1 s burst. Fits PCM downlink at 1.25× pacing (~495 kbps) |
+| `media.maxFramesPerSecond` | 40 per direction | covers 32 paced audio packets + control + keepalive |
+| `media.maxFrameBytes` | 4096 | enforced by `ws` `maxPayload` **during assembly**, not after |
+| `media.queueFrames` / `media.queueBytes` | 16 / 64 KiB per direction | bounded app-level queue, not `bufferedAmount` |
+| `media.controlQueueFrames` | 8 | control frames jump audio inside the queue only, charge the same budgets, and cannot bypass caps |
+| `media.blockedPeerMs` | 2000 | a peer whose queue stays full this long is disconnected and the call ends |
+| `media.maxSessionsPerSpace` / global | 1 / 64 | |
+| `media.maxPendingReservations` | 2 per Space, 128 global | |
+| `media.maxHalfJoined` | 2 per Space, 128 global | 15 s join deadline |
+| `media.maxSessionMinutes` | 60 | server-side cap regardless of the requested TTL |
+| `media.idleTimeoutSeconds` | 20 | endpoints send sealed keepalives every 5 s |
+| `media.monthlyBytesPerSpace` | unset | optional quota |
 
-Media sockets count toward `maxConnectionsPerIp` / `maxConnections`, but **frames do not
-count toward `requestsPerMinute`**. Session registration and upgrades do. Only paired,
-non-revoked devices of one space can join, the two parties are fixed at registration,
-and frames are opaque. The relay logs only session id, byte counts and durations, never
-payloads. Self-hosters behind a reverse proxy must allow WebSocket upgrades on
-`/v1/media` and raise proxy idle timeouts above the 15 s keepalive. `GET /v1/capabilities`
-(new, unauthenticated, static) advertises `{media: {v:1, maxKbpsPerDirection}}` so the
-Host can decide before offering voice.
+- **Accounting.** Every inbound frame is charged against the byte and frame buckets
+  *before* it is forwarded or dropped, so dropping is not free for an abuser. Sustained
+  over-limit traffic (more than 3 s) closes the socket. Frames do not consume
+  `requestsPerMinute`; reservations, upgrades and renewals do.
+- Media sockets count toward `maxConnections`, `maxConnectionsPerIp` and the trusted-proxy
+  per-source budget.
+- **Timers.** The endpoint keepalive is 5 s, the relay idle timeout 20 s, the Host
+  media-idle timeout 20 s, and WebSocket ping 10 s (as in live). Reverse proxies must
+  allow upgrades on `/v1/media` and keep idle timeouts ≥ 60 s.
+- **Metadata the relay learns:**
+  - Space id, both device ids, IP addresses
+  - call start, end and duration
+  - byte and packet counts and timing (PCM is constant-rate, so speech activity is not
+    revealed; any later Opus must be CBR)
+  - renewal times
 
-## 7. Failure handling, fallback and reconnect
+  It never sees audio, transcripts, conversation ids or keys. Logs contain neither the
+  session header nor tokens; only a hashed session id and counters are recorded.
+- `GET /v1/capabilities` (static) advertises `{media:{v:1, codecs:["pcm16"],
+  maxKbpsPerDirection}}`. It is a hint only (§1).
 
-- **Cannot start** (old Host, `voice.reject`, relay without media, no accept within 8 s,
-  mic denied): show the reason and offer **dictation** in the same composer. Never
-  retry silently.
-- **Mid-call socket loss:** the phone reconnects to the same session with exponential
-  backoff (250 ms → 2 s, ≤10 s total). Keys and `seq` counters continue and the replay
-  window stays. The Host keeps the pipeline for 10 s (input muted, output paused via
-  `playbackDisconnected({resumeDelivery:true})`). Past that, it ends the session
-  (`voice.ended{transport_lost}`) and the UI offers Retry or dictation.
-- **Direct ↔ relay switching** (Phase 4): on direct-path loss, reconnect over the relay
-  with the same session. Never run both at once.
-- **Provider failure** on the Host maps to `voice.ended{provider_failed}` with the
-  existing `realtime_*` codes. Background or app suspension on the phone: keep the call
-  with the existing companion/PiP machinery when available, otherwise end it cleanly.
-- **Host offline** (presence false): disable the call button. This reuses `hostOnline()`.
+## 7. Failure handling and fallback
+
+- **Any disconnect, crypto failure, loss fence that ends the call, token expiry without
+  renewal, epoch evidence, revoke or takeover** ends the call. The phone shows the reason
+  and a **Retry** button. Retry is a fresh `voice.start` with new ephemerals. There is no
+  silent auto-reconnect, no same-key socket replacement and no path migration in v1.
+- **Cannot start** (old Host, reject, relay without media, no `voice.accept` within the
+  15 s deadline, microphone denied): show the reason. The **typed composer stays
+  available**. Dictation is offered as a separate button, and switching to it takes a
+  fresh user action, because it needs its own ASR configuration and microphone access.
+  Voice never auto-starts dictation.
+- **Host offline** (presence false): the call button is disabled.
+
+**Capability and fallback matrix**
+
+| Phone | Host | Relay | Result |
+|---|---|---|---|
+| old | any | any | no voice UI. Old phones never send `voice.*` |
+| new | old (no `host_capabilities`) | any | call hidden, composer and dictation as before |
+| new | new, voice not allowed for this device | any | call hidden (capability is per caller) |
+| new | new | old (no `/v1/media`) | Host omits `voice.v1`, call hidden |
+| new | new | media enabled, PCM admitted | call shown. The per-call check still runs |
+| new | stale positive capability (Host or relay changed) | — | start rejected or times out. Show reason, keep composer, refresh capability |
+| new, mic denied | new | ok | call fails locally before `voice.start`, permission hint shown |
 
 ## 8. Protocol and versioning impact
 
-- **Old phone + new Host:** no change. Old phones never send `voice.*`.
-- **New phone + old Host:** the old Host drops unknown intent kinds silently. So the
-  phone must **not** send `voice.start` unless the snapshot advertises it. Add
-  `host_capabilities: ['voice.v1', ...]` to `DisplaySnapshot` (additive, ignored by old
-  phones). Without it, the call button is hidden and dictation is offered. The 8 s
-  timeout is the backstop.
-- **New Host/phone + old relay:** `/v1/media` returns 404. The Host checks
-  `/v1/capabilities` and stops advertising `voice.v1` when relay media is unavailable,
-  unless a direct path is configured (Phase 4).
-- No change to `business_versions`, mailbox or stream semantics, or existing envelope
-  formats. The media frame has its own `ver` byte, and codecs and transports are
-  negotiated in the handshake.
-- Public/internal hygiene (AGENTS.md): no endpoints, domains or tenant data in defaults.
-  The relay URL stays deployment-configured.
+- Add `host_capabilities` to `DisplaySnapshot` (additive; old phones ignore it). It
+  contains `voice.v1` **only when** this Host can serve *this* recipient: the policy
+  admits the device, the Host is a desktop Host with the owner arbiter, and the relay
+  advertises media with PCM within the caps. Snapshots are already per recipient
+  (`snapshot(to)`).
+- The new phone **must add `host_capabilities` to the `_replaceSnapshot` allowlist**,
+  otherwise it is stripped. Cached availability expires on any change of Host device,
+  epoch or relay URL.
+- The per-call check stays authoritative: the capability only shows or hides the button.
+- An old Host silently drops `voice.start` (closed `intentSchema`), which is why the phone
+  never sends it without `voice.v1`. The start deadline is the backstop.
+- There is no change to `business_versions`, mailbox or stream semantics, or existing
+  envelopes. The media frame has its own `ver` byte.
+- AGENTS.md hygiene: no endpoints, domains or tenant data in defaults or docs.
 
 ## 9. Test plan
 
-- **Relay (`relay/test`)**, kernel plus real loopback WebSocket:
-  - session registration and pairing of exactly two sockets
-  - a third socket, a wrong device, a non-Host route, or a stale epoch is rejected
-  - revocation mid-session closes the sockets within one sweep
-  - frames are forwarded byte-identical and never parsed
-  - oversized frames are rejected
-  - the token-bucket cap drops excess frames, and sustained excess closes the socket
-  - backpressure drops the oldest audio, and control frames are preserved
-  - idle and max-duration expiry
-  - `media.enabled=false` returns 404
-  - `/v1/capabilities` output
-- **Frame crypto (shared vectors, TS and Dart):**
-  - golden HKDF and AES-GCM vectors, run by both `runtime` and Flutter tests
-  - tampered header or ciphertext fails, and a replayed `seq` is rejected
-  - window edges and wrong-direction keys
-  - a former-member content key cannot derive session keys
-- **Host voice session (`runtime`)**, fake provider, fake relay media socket:
-  - `voice.start` claims `voice_id` and the audio owner, and a second device gets
-    `voice_active`
-  - uplink PCM reaches `sendConversationAudio`
-  - fake provider audio becomes sealed downlink frames with paced lead ≤2 s
-  - fake speech-start emits `playback.clear` ahead of queued audio
-  - `playback.progress` drives delivery truncation
-  - revocation ends the session with `epoch_rotated`
-  - transport loss within 10 s resumes, and after 10 s ends
-  - the policy `owner` rejects a non-owner
-  - background presentation still serves the call
-  - an old-schema Host drops `voice.start` (documents the capability gate)
-- **Flutter:**
-  - a widget test for a `SpaceVoicePanel` with a fake transport and a fake `AudioPort`:
-    hidden without `voice.v1`, connecting → active → ended states, the mute button, a
-    reject showing the dictation fallback, and `voice.ended{epoch_rotated}` showing Resume
-  - a unit test for a `HostSpaceVoiceProvider` (implementing the existing
-    `VoiceProvider` so `PhoneVoiceSession` is reused) covering jitter-buffer
-    underrun/growth and `clear` fencing
-- **Manual acceptance:** same-LAN and cellular calls against a self-hosted relay, with
-  speakerphone barge-in, and with revoking another device mid-call.
+**Relay (`relay/test`)** (kernel plus real loopback WebSocket):
+- reservation only by the registered Host, for a distinct active device
+- atomic role claims, third socket rejected, replacement socket rejected
+- late close of an old socket is harmless
+- the same session id in two Spaces stays independent
+- a tombstoned id cannot be reused
+- join deadline and half-joined caps
+- token-expiry boundary: a call survives with renewal and closes at 900 s without it;
+  renewal with a different principal is rejected
+- revoke during a renewal or join closes the session
+- a stale epoch is swept within 1 s
+- `maxPayload` rejects during assembly
+- byte and frame buckets charge before drop
+- queue and control-queue bounds, and a blocked peer is disconnected
+- `media.enabled=false` gives 404
+- the session header never appears in logs
+
+**Frame crypto: cross-language vectors** (a JSON fixture shared by the TS and Dart tests):
+- canonical `startHash`
+- X25519 → HKDF → `k_up`/`k_down`
+- sealed frames for each type
+- negative cases: tampered header or ciphertext, nonzero flag, unknown type,
+  short/long length, replay inside and outside the window, wrong-direction key,
+  all-zero DH, an accept with an unoffered codec, a mismatched `startHash`, an expired
+  attempt
+- receive state unchanged after an authentication failure
+- a former-member content key cannot derive keys
+
+**Host voice session (`runtime`)** with a fake provider and a fake media socket:
+- authorization order: policy `off`, `owner`, owner unassigned and `members`;
+  `#requireChat`; `voice_mode` constraint
+- idempotent start by `(sender, op_id)`
+- no provider work before `ready`
+- lease fencing: a stale stop cannot release a newer call, and the desktop takes over
+- uplink reaches `sendConversationAudio`
+- downlink re-chunking keeps `native_seq` contiguous, and pacing stays ≤ 1.25×
+- clear is sent ahead of queued (not yet written) audio
+- `playback.stopped{loss}` truncates at `played_ms`
+- revoke, policy change and idle all fence before cleanup
+- background playback only for the call's conversation
+- an old-schema Host drops `voice.start`
+
+**Flutter:**
+- `SpaceCallController` unit tests with a fake `AudioPort` and transport: `NOVA` re-wrap
+  preserves identities; fencing covers the jitter buffer, pending enqueues and native
+  clear; a gap triggers the loss fence and report; mute; focus loss; suspension;
+  teardown order; dictation competition through `AudioOwner`; higher-epoch evidence
+  ends the call before the key arrives
+- `SpaceVoicePanel` widget tests: hidden without `voice.v1`; connecting → active →
+  ended → Retry; reasons; the composer stays usable; microphone denied
+- capability tests: old phone/new Host, new phone/old Host, old relay, stale positive
+  capability, the allowlist keeps `host_capabilities`
+
+**End-to-end acceptance** (real relay, real devices):
+1. Two phones start the same conversation: exactly one call becomes active and the other
+   gets `voice_active`. There are no crossed sockets.
+2. Revocation of a phone during Host playback: playback stops within 1 s on every
+   device, the revoked device's sockets close, and the survivor gets `epoch_rotated` and
+   can Retry after the new key.
+3. A missing downlink packet just before terminal: the phone fences, reports the
+   contiguous `played_ms`, and Host history ends at the heard prefix.
+
+**Also:** AEC/speakerphone barge-in and clear-to-silence measured on physical iOS and
+Android devices over cellular.
 
 ## 10. Phased plan
 
 | Phase | Content | Rough effort |
 |---|---|---|
-| 0 | Spike: measure relay RTT and jitter from cellular. Decide the open questions | 1–2 days |
-| 1 | Relay `/v1/media` (route, session registry, limits, capabilities, config, README) and tests | 4–6 days |
-| 2 | Shared frame crypto (TS and Dart) with vectors. Host `voice.*` intents, `SpaceVoiceBridge` audio owner, presentation exemption, snapshot capability. Flutter `HostSpaceVoiceProvider` plus panel on PCM16. Fallback to dictation. Tests | 8–12 days |
-| 3 | Opus negotiation (iOS, Android, Node), lower default relay cap | 5–8 days |
-| 4 | Direct path: Host listener (opt-in), signed candidates with a pinned cert fingerprint, LAN/Tailscale probing, path switching | 6–10 days |
-| 5 | Hardening: reconnect polish, metrics without payloads, cellular soak tests, docs for self-hosters | 3–5 days |
+| 0 | Spike: cellular RTT and jitter to a self-hosted relay. Confirm the owner-arbiter refactor scope. Settle open decisions | 2 days |
+| 1 | Relay `/v1/media`: reservations, role claims, renewal, sweep, all §6 limits, capabilities, CLI/README config, tests | 6–8 days |
+| 2 | Shared frame crypto (TS and Dart) with cross-language vectors | 3–4 days |
+| 3 | Host: `voice.*` intents, authorization, shared lease-based owner arbiter (desktop / LAN phone / Space), `SpaceVoiceBridge`, re-chunking, pacing, receipts, scoped background playback, snapshot capability, tests | 8–11 days |
+| 4 | Flutter: `SpaceCallController`, panel, allowlist and capability expiry, dictation fallback UX, tests. Physical-device AEC and acceptance runs | 7–10 days |
+| 5 | Headless-server owner arbiter, so the headless server can advertise voice | 2–3 days |
+| 6 | Opus (CBR) negotiation and lower default caps | 5–8 days |
+| 7 | Same-key resume (explicit pause, authenticated replacement), then the direct LAN/Tailscale path with signed candidates and a pinned certificate | 8–12 days |
 
-Phases 1–2 give a usable relay-only call (~3 weeks). Phases 3–4 cut cost and latency.
+Phases 0–4 give a usable relay-only PCM call in about 5–7 weeks. Phases 5–7 are
+optional follow-ups.
 
-## Open questions for the owner
+## Decisions needed from the user
 
-1. Default voice authorization: `owner` only, or all paired members?
-2. Ship Phase 2 on PCM16 (about 300 MB/h per relay leg) and require Opus before
-   enabling media on shared relays? Or make Opus a Phase 2 prerequisite?
-3. Should relay media ship disabled by default (proposed), and should a monthly
-   per-space byte quota exist in v1?
-4. Desktop/Space takeover policy when the local desktop user starts voice during a
-   phone call: always take over (proposed), or refuse?
-5. Is the Host allowed to open a listening socket for the direct path (Phase 4), or
-   is relay-only acceptable long-term?
-6. Is a dedicated "remote voice" presentation acceptable, or should Space voice require
-   the Host window to be visible?
+1. **Default voice policy:** `owner` (proposed) or `members`? With no owner assigned,
+   `owner` blocks everyone. Is that acceptable?
+2. **Relay media off by default** (proposed). Should v1 also ship a monthly per-Space byte
+   quota, or leave it unset?
+3. **Opus requirement:** v1 is PCM (~300 MB per hour per relay leg). Is Opus required
+   before media is enabled on any shared or multi-user relay?
+4. **Desktop takeover:** when the local desktop user starts voice during a phone call,
+   always take over (proposed), or refuse?
+5. **Background playback:** acceptable to play a Space call while the Host window is in
+   background presentation, scoped to the call's conversation (proposed)? Or require the
+   window to be visible?
+6. **Headless server:** is Phase 5 (voice on the headless server) wanted, or is
+   desktop-Host-only acceptable?
+7. **Direct path (Phase 7):** may the Host ever open a listening socket, or is relay-only
+   the long-term answer?
