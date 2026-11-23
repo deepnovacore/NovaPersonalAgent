@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 npa
 ```
 
-命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。升级后的安装继续使用 `~/.nova-audio-agent`；在 Nova 关闭时用 `npa migrate-data [--dry-run]` 迁移到 `~/.nova-personal-agent` 是可选操作（见[本地数据位置](configuration.md#本地数据位置)）。
+命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.1`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。升级后的安装继续使用 `~/.nova-audio-agent`；在 Nova 关闭时用 `npa migrate-data [--dry-run]` 迁移到 `~/.nova-personal-agent` 是可选操作（见[本地数据位置](configuration.md#本地数据位置)）。
 
 Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
 

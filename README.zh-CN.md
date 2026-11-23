@@ -21,7 +21,7 @@
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://youtu.be/YHziCK_cKbQ)**
 
-[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [画廊](#22-画廊) · [macOS](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) | [Android](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) | [iOS](https://testflight.apple.com/join/eQrtvXYJ)
+[快速开始](#3-快速开始) · [核心特性](#1-核心特性) · [画廊](#22-画廊) · [macOS](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-macos-arm64.dmg) | [Android](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-android-arm64.apk) | [iOS](https://testflight.apple.com/join/eQrtvXYJ)
 
 </div>
 
@@ -33,6 +33,7 @@ https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 
 ## News
 
+- **2026-11 · [v1.0.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.1)** — 手机 Client Space 支持经 Host 的实时语音、执行器审批与听写，Client Space 支持英文界面，数据目录迁到 `nova-personal-agent`（可选 `npa migrate-data`），并修复了大量稳定性问题。[发布说明](docs/releases/v1.0.1.md)。
 - **2026-11-19 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **端侧原生闭环，边干活边聊天，越聊越懂你：** 支持单设备多空间、手机电脑互联、手机原生任务执行、重写 Workbench、加入更多执行器（coding, computer-use、mobile-use）[发布说明](docs/releases/v1.0.0.md)。
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **持续理解，持续行动：** 浏览器、电脑与手机的 GUI-use（实验能力）、定时 Agent 任务，以及保留上下文、证据和任务结果的完整 Timeline。
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **你的个人 Agent：** 待办、想法、目标、资讯和 Profile，配合有出处的记忆与按证据核验的任务。
@@ -96,17 +97,17 @@ https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 
 ### 3.1 安装与启动
 
-**v1.0.0 下载** — [发布说明与 SHA-256 校验文件](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0) · [全部版本](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+**v1.0.1 下载** — [发布说明与 SHA-256 校验文件](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.1) · [全部版本](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 
 | 平台 | 下载 |
 | --- | --- |
-| macOS · Apple Silicon（arm64） | [DMG（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
-| Windows · x64 | [EXE（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) |
-| Linux · x64（Ubuntu 22.04+） | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [deb](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb)（未签名） |
+| macOS · Apple Silicon（arm64） | [DMG（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-macos-arm64.dmg) |
+| Windows · x64 | [EXE（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-windows-x64.exe) |
+| Linux · x64（Ubuntu 22.04+） | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-linux-x64.AppImage) · [deb](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-linux-x64.deb)（未签名） |
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
-| Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
+| Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-android-arm64.apk) |
 
-**也可以用 npm 安装命令行版**（1.0.0，需要 Node.js 22.13+）。命令为 `npa`，`novapersonal` 仍可用：
+**也可以用 npm 安装命令行版**（1.0.1，需要 Node.js 22.13+）。命令为 `npa`，`novapersonal` 仍可用：
 
 ```bash
 # 全局安装

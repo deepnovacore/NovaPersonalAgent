@@ -113,7 +113,17 @@ jobs:
           gradle-version: "9.1.0"
       - name: JVM unit tests
         working-directory: clients/flutter/android
-        run: gradle --no-daemon :phone-core:test :app:testDebugUnitTest :nova_audio:testDebugUnitTest
+        shell: bash
+        # Maven Central rate-limits (HTTP 429) dependency downloads on shared runners. Retry only when dependency
+        # resolution failed, never when a test failed.
+        run: |
+          for attempt in 1 2 3; do
+            if gradle --no-daemon :phone-core:test :app:testDebugUnitTest :nova_audio:testDebugUnitTest 2>&1 | tee "$RUNNER_TEMP/gradle.log"; then exit 0; fi
+            grep -qE "Could not resolve all files|status code 429" "$RUNNER_TEMP/gradle.log" || exit 1
+            echo "Dependency download failed (attempt $attempt); retrying after backoff."
+            sleep $((attempt * 30))
+          done
+          exit 1
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
