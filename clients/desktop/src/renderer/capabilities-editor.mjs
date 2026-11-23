@@ -12,7 +12,7 @@ export function moduleStatusNote(module) {
 }
 
 /** Native controls over the existing controller's one draft; probe metadata never enables a tool. */
-export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problemsLabel, stage, probe}) {
+export function createCapabilitiesEditor({root, codingRoot, problemsLabel, stage, probe}) {
   let current
   let signature = ''
   const probes = new Map()
@@ -80,7 +80,6 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     if (view.capabilitiesDocument === null) {
       signature = ''
       root.replaceChildren()
-      cameraRoot.replaceChildren()
       codingRoot.replaceChildren()
       if (typeof view.capabilitiesRevision !== 'string') {
         node('p', t("注册表无法安全显示，请在本机修正文件，凭据改用 ${ENV} 引用。") + (state.path ?? ''), root)
@@ -91,13 +90,13 @@ export function createCapabilitiesEditor({root, cameraRoot, codingRoot, problems
     const nextSignature = JSON.stringify([doc, state.runtime?.state, state.runtime?.modules, state.runtime?.servers, state.status?.servers])
     if (signature === nextSignature) return
     signature = nextSignature
-    const roots = [root, cameraRoot, codingRoot]
+    const roots = [root, codingRoot]
     const focused = roots.some(target => target.contains(document.activeElement)) ? document.activeElement.dataset.field : null
     const opened = new Set([...root.querySelectorAll('details[open]')].map(item => item.dataset.server))
     root.replaceChildren()
     if (view.capabilitiesDocument === null) node('p', t("注册表无法安全显示；修改下方草稿并保存可替换该文件，凭据改用 ${ENV} 引用。") + (state.path ?? ''), root)
     const modules = doc.modules ?? {}
-    for (const [name, label, target] of [['camera', t("视觉监控"), cameraRoot], ['coding', t("编程"), codingRoot]]) {
+    for (const [name, label, target] of [['coding', t("编程"), codingRoot]]) {
       target.replaceChildren()
       field(target, label, modules[name]?.enabled ?? true, enabled => update(next => {
         next.modules ??= {}; next.modules[name] = {...next.modules[name], enabled}

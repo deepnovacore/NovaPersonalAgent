@@ -2601,6 +2601,7 @@ export class PersonalAgentHost {
                 for(const [id,receipt] of Object.entries(next.receipts))if(references(receipt.result))delete next.receipts[id];
                 await this.#commit(next);
             });
+            await this.notifications.invalidateByEvidence(removedEvidence,false);
             this.#memory.entries=this.#memory.entries.filter(entry=>!removedEntries.has(entry.id));
             this.#memory.pending_purges=purged.status==='incomplete'?[{entry_id:q.id,expected_revision:Number(q.expected_version),operation_id:purged.operation_id}]:[];
             this.#notify();

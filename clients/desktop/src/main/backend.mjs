@@ -226,10 +226,8 @@ export function backendLaunchSpec({
     CODEX_RESOURCES_PATH: nodeResourcesPath,
     ...v4,
     MEMORY_PRERECALL_ENABLED: String(settings?.memoryPrerecallEnabled ?? false),
-    MONITOR_CAMERA_DEVICE_ID: settings?.monitorCameraDeviceId ?? '',
   }
   for (const [name, value] of [
-    ['WATCH_MODEL', settings?.watchModel ?? ''],
     ['EMBEDDING_MODEL', settings?.embeddingModel
       ?? SETTINGS_DEFAULTS.embeddingModel],
     ['CAPABILITIES_CONFIG', settings?.capabilitiesConfigPath

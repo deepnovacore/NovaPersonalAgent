@@ -16,7 +16,7 @@ This matrix follows the adapters and capability allowlists in the current code. 
 | Speech interruption | Integrated | Integrated |
 | Coding, search and memory tools | Available according to enabled capabilities | Available according to enabled capabilities |
 | Camera frames in conversation | Not supported | Listed vision models only; off by default |
-| Independent Loop Camera monitoring | Supported with a separate vision model | Supported with a separate vision model |
+| Independent Loop Camera monitoring | Deferred in the v1.0 desktop app; runtime only | Deferred in the v1.0 desktop app; runtime only |
 | iPhone text input | No editable input | Available when the host supports editable input |
 
 Integrated mode needs fewer settings. Use cascaded mode to change the language model or enable conversation vision. Both require credentials for the selected services.

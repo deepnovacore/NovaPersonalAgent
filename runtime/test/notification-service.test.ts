@@ -2,6 +2,7 @@ import {test} from 'node:test'
 import assert from 'node:assert/strict'
 import {mkdtemp,rm,realpath} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
+import {readFileSync} from 'node:fs'
 import {join} from 'node:path'
 import {NotificationService} from '../src/notifications/service.js'
 import type {ChannelBinding,NotificationChannelAdapter,NotificationInput,SendOutcome} from '../src/notifications/contracts.js'
@@ -16,7 +17,7 @@ async function fixture(){
  const adapter=(id:string):NotificationChannelAdapter=>({providerId:id,inspect:()=>Promise.resolve(true),prepare:n=>Promise.resolve([{body:n.body,title:n.title}]),send:async(part,c)=>{sent.push({target:c.binding.id,key:c.idempotency_key,body:part.body});await barrier?.();return outcome}})
  const make=()=>new NotificationService({path:join(dir,'state.json'),userScope:'u',adapters:[adapter('nova'),adapter('im'),adapter('other')],now:()=>now,random:()=>0.5})
  const service=make();await service.open();for(const id of ['nova','im','other'])await service.bind(binding(id))
- return {service,make,sent,setNow:(v:number)=>{now=v},setOutcome:(v:SendOutcome)=>{outcome=v},barrier:(v:()=>Promise<void>)=>{barrier=v},close:async()=>{await service.close();await rm(dir,{recursive:true,force:true})}}
+ return {service,make,sent,path:join(dir,'state.json'),setNow:(v:number)=>{now=v},setOutcome:(v:SendOutcome)=>{outcome=v},barrier:(v:()=>Promise<void>)=>{barrier=v},close:async()=>{await service.close();await rm(dir,{recursive:true,force:true})}}
 }
 
 test('durable admission deduplicates restart and route changes do not replay accepted messages',async()=>{
@@ -66,4 +67,16 @@ test('obsolete multipart validity cancels only its version, not the replacement'
  const dir=await mkdtemp(join(await realpath(tmpdir()),'nova-revisions-'));let revision='1',release!:()=>void,enter!:()=>void;const entered=new Promise<void>(r=>{enter=r});const sent:string[]=[];
  const adapter:NotificationChannelAdapter={providerId:'nova',inspect:()=>Promise.resolve(true),prepare:n=>Promise.resolve([{title:n.title,body:n.revision+'-a'},{title:n.title,body:n.revision+'-b'}]),send:async p=>{sent.push(p.body);if(p.body==='1-a'){enter();await new Promise<void>(r=>{release=r})}return {kind:'accepted',receipt:{message_id:p.body}}}};
  const service=new NotificationService({path:join(dir,'state.json'),userScope:'u',adapters:[adapter],now:()=>1000,valid:n=>Promise.resolve(n.revision===revision?'valid':'invalid')});try{await service.open();await service.publish(message());const run=service.dispatch();await entered;revision='2';await service.publish({...message(),revision});release();await run;await service.dispatch();assert.deepEqual(sent,['1-a','2-a','2-b']);assert.equal(service.snapshot().counts.accepted,1)}finally{await service.close();await rm(dir,{recursive:true,force:true})}
+})
+
+test('invalidateByEvidence erases queued non-feed notifications citing purged evidence only',async()=>{
+ const f=await fixture();try{
+  await f.service.publish({...message('alert'),kind:'alert',title:'Secret',body:'secret body',source:{type:'task',id:'t'},guard:{evidence_refs:['ev:purged']}})
+  await f.service.publish({...message('other'),guard:{evidence_refs:['ev:kept']}})
+  await f.service.invalidateByEvidence(['ev:purged'],false)
+  const rows=(JSON.parse(readFileSync(f.path,'utf8')) as {deliveries:{invalidated?:boolean;notification:{title:string;body:string;event_key:string}}[]}).deliveries
+  const secret=rows.find(d=>d.notification.event_key==='alert')!,kept=rows.find(d=>d.notification.event_key==='other')!
+  assert.equal(secret.invalidated,true);assert.equal(secret.notification.title+secret.notification.body,'')
+  assert.ok(!kept.invalidated);assert.equal(kept.notification.body,'complete body')
+ }finally{await f.close()}
 })
