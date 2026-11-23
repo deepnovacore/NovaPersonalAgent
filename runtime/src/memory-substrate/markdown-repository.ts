@@ -455,8 +455,9 @@ export class MarkdownRepository {
    // Git must not follow user-data symlinks into another repository or command configuration.
    for(const name of ['config','HEAD','objects','refs','index','packed-refs','shallow'])if(hasPath(join(gitDir,name)))this.assertSafe(join(gitDir,name),['objects','refs'].includes(name))
    const objects=join(gitDir,'objects')
-   // Git itself may leave regular temp/lock files directly in objects/; anything else must be a plain directory.
-   if(hasPath(objects))for(const name of readdirSync(objects)){const stat=lstatSync(join(objects,name));if(!stat.isSymbolicLink()&&stat.isFile())continue;this.assertSafe(join(objects,name),true)}
+   // Git itself may leave regular temp/lock files directly in objects/ (and may remove them between readdir and lstat);
+   // anything else must be a plain directory.
+   if(hasPath(objects))for(const name of readdirSync(objects)){const stat=lstatSync(join(objects,name),{throwIfNoEntry:false});if(stat===undefined||!stat.isSymbolicLink()&&stat.isFile())continue;this.assertSafe(join(objects,name),true)}
    const refs=join(gitDir,'refs')
    if(hasPath(refs))this.assertGitRefs(refs)
   }
@@ -482,7 +483,7 @@ export class MarkdownRepository {
   }finally{closeSync(fd)}
  }
  private assertGitRefs(path:string):void {
-  for(const name of readdirSync(path)){const child=join(path,name);const stat=lstatSync(child);this.assertSafe(child,stat.isDirectory());if(stat.isDirectory())this.assertGitRefs(child)}
+  for(const name of readdirSync(path)){const child=join(path,name);const stat=lstatSync(child,{throwIfNoEntry:false});if(stat===undefined)continue;this.assertSafe(child,stat.isDirectory());if(stat.isDirectory())this.assertGitRefs(child)}
  }
  private assertAncestors():void {
   const root=parse(this.root).root;let cursor=root
