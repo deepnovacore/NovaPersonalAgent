@@ -1,3 +1,5 @@
+import 'package:nova_audio/nova_audio.dart';
+import 'package:nova_mobile/conversation/phone_dictation.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -136,6 +138,10 @@ Future<void> pumpClient(
   SpaceClientState state, {
   VoidCallback? onSwitchSpace,
   Widget Function(Widget app)? wrap,
+  String? language = 'zh',
+  AudioPort? audio,
+  Future<bool> Function()? requestMicrophone,
+  PhoneDictation Function(ValueChanged<String> onText)? createDictation,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
@@ -148,6 +154,10 @@ Future<void> pumpClient(
       space: spaceRecord,
       onSwitchSpace: onSwitchSpace ?? () {},
       open: (_) async => controller,
+      language: language,
+      audio: audio,
+      requestMicrophone: requestMicrophone,
+      createDictation: createDictation,
     ),
   );
   await tester.pumpWidget(wrap?.call(app) ?? app);

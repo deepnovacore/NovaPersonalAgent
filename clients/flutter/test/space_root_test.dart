@@ -14,6 +14,9 @@ import 'package:nova_mobile/ui/theme.dart';
 import 'package:nova_mobile/space/space_storage.dart';
 import 'package:nova_mobile/space/space_crypto.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
+import 'support/space_client_fixture.dart' show pumpClient;
+import 'package:nova_mobile/space/client_state.dart';
+import 'package:nova_mobile/ui/app.dart' show BottomAppBarTabs;
 import 'experience_test.dart' show fixture;
 import 'package:nova_mobile/experience/persona.dart';
 
@@ -240,7 +243,10 @@ void main() {
       await tester.pumpAndSettle();
       final page = tester.widget<Scaffold>(
         find
-            .ancestor(of: find.text('创建 Space'), matching: find.byType(Scaffold))
+            .ancestor(
+              of: find.text('创建 Space'),
+              matching: find.byType(Scaffold),
+            )
             .first,
       );
       expect(page.backgroundColor?.a, 1);
@@ -574,4 +580,172 @@ void main() {
       expect(find.text('Client UI'), findsOneWidget);
     },
   );
+
+  testWidgets('Client Space screens render no CJK text in an English locale', (
+    tester,
+  ) async {
+    SharedPreferences.setMockInitialValues({});
+    tester.platformDispatcher.localeTestValue = const Locale('en', 'US');
+    addTearDown(tester.platformDispatcher.clearLocaleTestValue);
+    final state = SpaceClientState(MemorySpacePersistence())
+      ..hostOnline = true
+      ..snapshot = {
+        'schema_version': 1,
+        'owner': true,
+        'goals': [
+          {
+            'id': 'g1',
+            'title': 'Ship the client',
+            'status': 'active',
+            'version': 1,
+          },
+        ],
+        'todos': [
+          {'id': 't1', 'title': 'Check icons', 'status': 'open', 'version': 1},
+        ],
+        'ideas': <Object>[],
+        'profile': {'about': 'Engineer', 'version': 1},
+        'notifications': [
+          {
+            'id': 'n1',
+            'title': 'Host finished',
+            'body': 'Three inputs processed.',
+          },
+        ],
+        'feed': [
+          {'id': 'f1', 'title': 'Morning brief', 'body': 'Cloudy today.'},
+        ],
+        'timeline': <Object>[],
+        'conversations': [
+          {
+            'id': 'chat:main',
+            'kind': 'main',
+            'mode': 'chat',
+            'opening_empty': false,
+          },
+          {
+            'id': 'topic:1',
+            'kind': 'topic',
+            'title': 'Fix tests',
+            'preview': 'Running checks',
+          },
+        ],
+        'pending_approvals': [
+          {
+            'id': 'ap1',
+            'conversation_id': 'chat:main',
+            'summary': 'Run npm test',
+            'kind': 'command_execution',
+            'allowed_decisions': ['accept', 'decline'],
+            'expires_at': null,
+          },
+          {
+            'id': 'ap2',
+            'conversation_id': 'topic:1',
+            'summary': 'Edit README',
+            'kind': 'file_change',
+            'allowed_decisions': ['accept', 'decline'],
+            'expires_at': 1,
+          },
+        ],
+        'host_settings': {'devices': <Object>[]},
+      };
+    state.messages.addAll([
+      {'role': 'user', 'turn_id': 'a', 'text': 'Hello?', 'status': 'done'},
+      {
+        'role': 'assistant',
+        'turn_id': 'a',
+        'text': 'Hi there.',
+        'status': 'done',
+      },
+      {
+        'role': 'user',
+        'turn_id': 'b',
+        'text': 'Again',
+        'status': 'failed',
+        'error': 'chat_expired',
+      },
+      {
+        'role': 'assistant',
+        'turn_id': 'c',
+        'text': '',
+        'status': 'failed',
+        'failure_reason': 'quota',
+      },
+    ]);
+    state.pending.add({
+      'op_id': 'p1',
+      'kind': 'life.mutate',
+      'input': <String, dynamic>{},
+      'status': 'rejected',
+      'error': 'invalid',
+    });
+    await pumpClient(tester, state, language: null);
+    await tester.pump();
+    final cjk = RegExp(r'[　-〿㐀-鿿＀-￯]');
+    void expectNoCjk(String screen) {
+      final texts = <String>[
+        for (final widget in tester.allWidgets)
+          if (widget is Text)
+            widget.data ?? widget.textSpan?.toPlainText() ?? ''
+          else if (widget is RichText)
+            widget.text.toPlainText()
+          else if (widget is Tooltip)
+            widget.message ?? ''
+          else if (widget is Semantics)
+            widget.properties.label ?? '',
+      ];
+      expect(texts.where(cjk.hasMatch).toList(), isEmpty, reason: screen);
+    }
+
+    expect(find.text('Approval needed · Run a command'), findsOneWidget);
+    expect(find.text('Message Host'), findsOneWidget);
+    expectNoCjk('chat');
+    for (final (label, screen) in [
+      ('Tasks', 'tasks'),
+      ('Timeline', 'timeline'),
+      ('Me', 'me'),
+    ]) {
+      await tester.tap(
+        find.descendant(
+          of: find.byType(BottomAppBarTabs),
+          matching: find.text(label),
+        ),
+      );
+      await tester.pump();
+      await tester.pump();
+      expectNoCjk(screen);
+    }
+    expect(find.text('Me'), findsWidgets);
+    await tester.tap(find.byTooltip('Settings'));
+    await tester.pumpAndSettle();
+    expectNoCjk('settings');
+    await tester.tap(find.text('Devices'));
+    await tester.pumpAndSettle();
+    expectNoCjk('devices');
+  });
+
+  testWidgets('Standalone Space bar follows the selected language', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: StandaloneSpaceBar(
+            space: const SpaceRecord(
+              id: 's',
+              name: 'Desk',
+              mode: SpaceMode.standalone,
+              device: 'd',
+            ),
+            onSwitch: () {},
+            onSettings: () {},
+            language: 'en',
+          ),
+        ),
+      ),
+    );
+    expect(find.textContaining('On this device'), findsOneWidget);
+    expect(find.byTooltip('Settings'), findsOneWidget);
+  });
 }
