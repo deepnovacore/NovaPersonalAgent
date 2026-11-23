@@ -1,4 +1,4 @@
-import 'profile_writer_fixtures.dart';
+import 'support/profile_writer_fixtures.dart';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_writer.dart';

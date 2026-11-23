@@ -3,6 +3,12 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/context/profile_writer.dart';
 import 'package:nova_mobile/context/timeline_pipeline.dart';
 
+// Timeline only reads the last 14 days relative to the wall clock, so fixtures must be relative too.
+final recentIso = DateTime.now()
+    .toUtc()
+    .subtract(const Duration(days: 1))
+    .toIso8601String();
+
 void main() {
   test(
     'sparse evidence stays brief and only reviewed claims are published',
@@ -17,7 +23,7 @@ void main() {
             'evidence_id': id,
             'text': text,
             'relation': 'self',
-            'created_at': '2026-10-20T00:00:00Z',
+            'created_at': recentIso,
             'chat': 'c1',
           },
       ];

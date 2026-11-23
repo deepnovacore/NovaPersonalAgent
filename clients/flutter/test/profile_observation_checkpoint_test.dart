@@ -1,4 +1,4 @@
-import 'profile_writer_fixtures.dart';
+import 'support/profile_writer_fixtures.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:flutter_test/flutter_test.dart';

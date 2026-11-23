@@ -6,7 +6,7 @@ import 'package:nova_mobile/space/client_state.dart';
 import 'package:nova_mobile/space/relay_transport.dart';
 import 'package:nova_mobile/space/space_crypto.dart';
 import 'package:nova_mobile/space/space_storage.dart';
-import 'space_host_fixture.dart';
+import 'support/space_host_fixture.dart';
 import 'space_mobile_tools_test.dart' show FakeTools;
 
 class MemorySpacePersistence implements SpacePersistence {

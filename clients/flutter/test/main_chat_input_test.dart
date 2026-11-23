@@ -185,7 +185,8 @@ void main() {
           find.byType(LocalChatPanel),
         );
         expect(panel.widget.conversationId, ConversationStore.mainId);
-        expect(panel.dictation == null, mode == 'persona');
+        // Persona Spaces share ordinary Spaces' voice and dictation (9af6dabe); only the persona flag differs.
+        expect(panel.dictation, isNotNull);
         expect(panel.widget.host.experienceModel, isNotNull);
         expect(panel.widget.host.experiencePersona, mode == 'persona');
         await tester.tap(find.byTooltip('Settings'));

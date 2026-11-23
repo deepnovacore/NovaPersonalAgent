@@ -17,7 +17,8 @@ const original='我一贯更喜欢简洁直接的回答，这是一项长期沟�
 const signal=()=>AbortSignal.timeout(8000)
 const deferred=()=>{let resolve!:()=>void;const promise=new Promise<void>(done=>{resolve=done});return {promise,resolve}}
 
-test('production cached style inventory: contradiction, async mutation and other-client discovery preserve independent facts',{timeout:40_000},async t=>{
+// Real SQLite ledger, embedding/extraction fixture server and flush loops: ~10-30s alone on a loaded machine, so budget about 3x.
+test('production cached style inventory: contradiction, async mutation and other-client discovery preserve independent facts',{timeout:120_000},async t=>{
   const root=await mkdtemp(join(await realpath(tmpdir()),'style-cache-')),provider=await providerFixture(),path=join(root,'ledger.sqlite')
   const client=new MemoryLedgerClient(path)
   const memory=new SubstrateMemoryResource({client,userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},engine:{recall:'voicemem',styles:true,consumer:'consumer',config:{path:join(root,'engines'),embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}}})

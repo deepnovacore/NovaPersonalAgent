@@ -13,7 +13,8 @@ import {retrievalPrerecall} from '../src/memory/prerecall-port.js'
 import type {PersonalMemoryResource} from '../src/memory/personal-memory.js'
 import {providerFixture,settle} from './memory-engine-provider-fixture.js'
 
-for(const backend of ['ledger','mem0'] as const)test(`retrievalPrerecall consumes configured ${backend}+VoiceMem styles separately with TTL/forget/revoke`,{timeout:20_000},async t=>{
+// Real SQLite ledger, embedding/extraction fixture server and flush loops: ~10-30s alone on a loaded machine, so budget about 3x.
+for(const backend of ['ledger','mem0'] as const)test(`retrievalPrerecall consumes configured ${backend}+VoiceMem styles separately with TTL/forget/revoke`,{timeout:60_000},async t=>{
   const root=await mkdtemp(join(await realpath(tmpdir()),'nova-style-consume-')),provider=await providerFixture()
   const memory=new SubstrateMemoryResource({client:new MemoryLedgerClient(join(root,'ledger.sqlite')),userId:'owner',gateway:new OpenAIModelGateway({baseUrl:provider.baseUrl,apiKey:'fixture',clock:new RealClock()}),model:'fixture',inputConsent:true,conversationProviders:['consumer'],embedding:new DashScopeEmbeddingProvider({baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dims:2}),embeddingFingerprint:'embedding',extractionFingerprint:'extraction',consolidation:{enabled:false},engine:{recall:backend,styles:true,consumer:'consumer',config:{path:join(root,'engines'),embedding:{baseUrl:provider.baseUrl,apiKey:'fixture',model:'fixture',dimensions:2},extraction:{baseUrl:provider.baseUrl,apiKey:'fixture'},extractionModel:'fixture'}}})
   const signal=()=>new AbortController().signal

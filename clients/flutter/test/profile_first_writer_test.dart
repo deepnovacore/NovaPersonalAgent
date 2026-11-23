@@ -4,12 +4,17 @@ import 'package:nova_mobile/agent_core/model_client.dart';
 import 'package:nova_mobile/context/profile_writer.dart';
 import 'package:nova_mobile/context/timeline_pipeline.dart';
 
+// Timeline only reads the last 14 days relative to the wall clock, so fixtures must be relative too.
+final recentIso = DateTime.now()
+    .toUtc()
+    .subtract(const Duration(days: 1))
+    .toIso8601String();
 final records = <Map<String, dynamic>>[
   {
     'evidence_id': 'e0',
     'chat': 'c',
     'relation': 'self',
-    'created_at': '2026-10-19T00:00:00Z',
+    'created_at': recentIso,
     'text': '本人持续关注项目核验。',
   },
 ];

@@ -5,6 +5,12 @@ import 'package:nova_mobile/context/profile_writer.dart';
 import 'package:nova_mobile/context/timeline_brief.dart';
 import 'package:nova_mobile/context/timeline_pipeline.dart';
 
+// Timeline only reads the last 14 days relative to the wall clock, so fixtures must be relative too.
+final recentIso = DateTime.now()
+    .toUtc()
+    .subtract(const Duration(days: 1))
+    .toIso8601String();
+
 const source = '本人完成接口验收，完整原文仅作为证据。';
 List<Map<String, dynamic>> records() => [
   for (final id in ['e0', 'e1'])
@@ -12,7 +18,7 @@ List<Map<String, dynamic>> records() => [
       'evidence_id': id,
       'text': source,
       'relation': 'self',
-      'created_at': '2026-10-19T00:00:00Z',
+      'created_at': recentIso,
       'chat': 'c1',
       'speaker': 'p1',
     },
