@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import * as fs from 'node:fs'
 import {spawn} from 'node:child_process'
-import {join, relative} from 'node:path'
+import {join, relative, resolve, sep} from 'node:path'
 import {tmpdir} from 'node:os'
 import {DatabaseSync} from 'node:sqlite'
 import {main} from '../src/command.mjs'
@@ -16,6 +16,9 @@ function home(t) {
   return directory
 }
 
+/** Paths are interpolated into patterns verbatim: Windows separators and dots must not act as regex syntax. */
+const escapeRegExp = text => text.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&')
+
 function write(path, content) {
   fs.mkdirSync(join(path, '..'), {recursive: true})
   fs.writeFileSync(path, content)
@@ -27,7 +30,7 @@ function tree(root) {
   const visit = directory => {
     for (const name of fs.readdirSync(directory).sort()) {
       const path = join(directory, name), stats = fs.lstatSync(path)
-      const key = relative(root, path)
+      const key = relative(root, path).split(sep).join('/')
       if (stats.isSymbolicLink()) entries[key] = `link:${fs.readlinkSync(path)}`
       else if (stats.isDirectory()) { entries[`${key}/`] = 'dir'; visit(path) }
       else entries[key] = fs.readFileSync(path).toString('base64')
@@ -82,8 +85,8 @@ test('the dry run prints the plan, sizes and effect and changes nothing', t => {
   const {code, output} = run(directory, {dryRun: true})
   assert.equal(code, 0)
   assert.match(output, /Move \d+ entries \(.+\) from .*\.nova-audio-agent into .*\.nova-personal-agent/u)
-  assert.match(output, new RegExp(`move    ${join(legacy, 'goals.md')} -> ${join(root, 'goals.md')} \\(7 B\\)`, 'u'))
-  assert.match(output, /keep    .*computer-use\/SKILL\.md as .*SKILL\.md\.conflict-/u)
+  assert.match(output, new RegExp(`move    ${escapeRegExp(join(legacy, 'goals.md'))} -> ${escapeRegExp(join(root, 'goals.md'))} \\(7 B\\)`, 'u'))
+  assert.match(output, /keep    .*computer-use[\\/]SKILL\.md as .*SKILL\.md\.conflict-/u)
   assert.match(output, /replace .*\.nova-audio-agent with a link/u)
   assert.match(output, /Dry run: nothing was changed\./u)
   assert.deepEqual(tree(directory), before)
@@ -175,7 +178,7 @@ test('a database group that is partial or present on both sides is refused befor
     const before = tree(paths.directory)
     const dry = run(paths.directory, {dryRun: true})
     assert.equal(dry.code, 1, label)
-    assert.match(dry.output, new RegExp(`CONFLICT .*${name.replace(/[.]/gu, '\\.')}: .*database`, 'u'), label)
+    assert.match(dry.output, new RegExp(`CONFLICT .*${escapeRegExp(name)}: .*database`, 'u'), label)
     const result = run(paths.directory)
     assert.equal(result.code, 1, label)
     assert.deepEqual(tree(paths.directory), before, `${label}: nothing moved`)
@@ -312,14 +315,17 @@ test('settings and an existing-data Space config follow the move and match the r
   assert.equal(run(directory).code, 0)
   const config = JSON.parse(fs.readFileSync(configPath, 'utf8'))
   // space-host/config.ts scopeHostSpaceSettings: resolve(expanded blackboard_path) + '.personal.json', compared literally.
-  const blackboard = defaultDataPath('blackboard.sqlite', directory).replace(/^~(?=\/)/u, directory)
+  const blackboard = resolve(defaultDataPath('blackboard.sqlite', directory).replace(/^~(?=\/)/u, directory))
   assert.equal(config.personal_path, `${blackboard}.personal.json`)
   assert.equal(config.personal_path, join(root, 'blackboard.sqlite.personal.json'))
   assert.equal(fs.readFileSync(config.personal_path, 'utf8'), '{"goals":[1]}')
   const settings = JSON.parse(fs.readFileSync(settingsPath, 'utf8'))
   assert.deepEqual(settings, {version: 5, spaceHostConfigPath: configPath, knowledgePath: join(root, 'kb', 'k.sqlite'), codexManagedRoot: '~/.nova-personal-agent/workspaces', codexWorkspace: join(directory, 'projects'), secrets: {a: {enc: 'safeStorage', data: 'c2VhbGVk'}}})
-  assert.equal(fs.statSync(configPath).mode & 0o777, 0o600)
-  assert.equal(fs.statSync(settingsPath).mode & 0o777, 0o600)
+  // Windows has no POSIX permission bits: stat reports 0o666/0o444 regardless of chmod.
+  if (process.platform !== 'win32') {
+    assert.equal(fs.statSync(configPath).mode & 0o777, 0o600)
+    assert.equal(fs.statSync(settingsPath).mode & 0o777, 0o600)
+  }
 })
 
 test('npa routes migrate-data and its dry run, and rejects other arguments', async () => {

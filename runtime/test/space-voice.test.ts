@@ -11,11 +11,11 @@ import {decodeAudio,decodeControl,deriveCallKeys,encodeAudio,encodeControl,FRAME
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js'
+import {BoundedJsonStore} from '../src/storage/bounded-json.js'
 import {conversationRuntimeFactory} from '../src/personal-agent/conversation-runtime.js'
 import {settingsSchema} from '../src/config/config.js'
 import {realtimeCapabilities} from '../src/realtime/capabilities.js'
 import type {RealtimeProvider} from '../src/realtime/protocol.js'
-import {chmod} from 'node:fs/promises'
 import './helpers/space-host-sync-open.js'
 
 const CONTENT_KEY = randomBytes(32)
@@ -684,19 +684,27 @@ test('a journal write failure after the start releases the owner lease', async (
   const dir = await mkdtemp(join(await realpath(tmpdir()), 'space-voice-journal-'))
   const transport: SpaceHostTransport = {start: () => Promise.resolve(() => undefined), send: () => Promise.resolve(), stream: () => Promise.resolve(), clients: () => ['phone']}
   const personal = new PersonalAgentHost({path: join(dir, 'personal.json'), userScope: 'test', memory: () => undefined, pool: new SuggestionPool(), evidence: () => null})
-  const spaceDir = join(dir, 'space'); await import('node:fs/promises').then(fs => fs.mkdir(spaceDir, {mode: 0o700}))
-  // The journal becomes unwritable only once the start passed authorization and the lease claim.
+  const journalPath = join(dir, 'space.json')
+  // The journal becomes unwritable only once the start passed authorization and the lease claim. The failure is injected at the
+  // store rather than with a read-only directory: Windows ignores directory permission bits, so chmod would not fail the write there.
+  // eslint-disable-next-line @typescript-eslint/unbound-method -- restored in finally and invoked with each store as receiver via call.
+  const write = BoundedJsonStore.prototype.write
+  let unwritable = false
+  BoundedJsonStore.prototype.write = function (this: BoundedJsonStore<unknown>, state: unknown) {
+    if (unwritable && this.path === journalPath) return Promise.reject(Object.assign(Error(`EACCES: permission denied, open '${journalPath}'`), {code: 'EACCES'}))
+    return write.call(this, state)
+  }
   const fake = fakeHost(), media = fakeMedia(), reserve = media.media.reserve
-  media.media.reserve = async session => { await chmod(spaceDir, 0o500); await reserve(session) }
+  media.media.reserve = async session => { unwritable = true; await reserve(session) }
   const ctl = controller(fake, media)
-  const space = new SpaceHost({path: join(spaceDir, 'space.json'), space: 'space-1', host: personal, transport, owner: () => 'phone', voice: ctl.c})
+  const space = new SpaceHost({path: journalPath, space: 'space-1', host: personal, transport, owner: () => 'phone', voice: ctl.c})
   try {
     await personal.open({deferBackground: true}); await space.open(); await ctl.c.refreshCapability()
     await assert.rejects(space.receive('phone', startIntent(generateEphemeral())), /EACCES/)
     assert.deepEqual(media.state.reserved.length, 1)
     assert.equal(fake.arbiter.current, null)
     assert.equal(ctl.c.call('phone'), undefined)
-  } finally { await chmod(spaceDir, 0o700); await space.close(); await personal.close(); await rm(dir, {recursive: true, force: true}) }
+  } finally { BoundedJsonStore.prototype.write = write; await space.close(); await personal.close(); await rm(dir, {recursive: true, force: true}) }
 })
 
 test('a backgrounded desktop still feeds the Space call conversation microphone through the real runtime path', {timeout: 10000}, async () => {
