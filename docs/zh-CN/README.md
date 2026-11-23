@@ -4,13 +4,13 @@
 
 <a href="../en/README.md"><ins>English</ins></a> | <a href="README.md"><ins>简体中文</ins></a> · <a href="../../README.zh-CN.md">仓库首页</a>
 
-[![Version](https://img.shields.io/badge/Version-v1.0.0-0f172a.svg)](../releases/v1.0.0.md)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-0f172a.svg)](../releases/v1.0.1.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](../../LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](../../package.json)
 
-**Nova Personal Agent（`v1.0.0`）使用与开发文档** — 双脑实时语音与文本交互、账本权威个人记忆、多执行器协同，以及桌面端与移动端（**NovaCore**）之间的端到端加密 Space 连接。
+**Nova Personal Agent（`v1.0.1`）使用与开发文档** — 双脑实时语音与文本交互、账本权威个人记忆、多执行器协同，以及桌面端与移动端（**NovaCore**）之间的端到端加密 Space 连接。
 
-[上手指南](getting-started.md) · [工作原理](architecture.md) · [支持矩阵](support-matrix.md) · [安全与隐私](security.md) · [v1.0.0 版本说明](../releases/v1.0.0.md)
+[上手指南](getting-started.md) · [工作原理](architecture.md) · [支持矩阵](support-matrix.md) · [安全与隐私](security.md) · [v1.0.1 版本说明](../releases/v1.0.1.md)
 
 </div>
 

@@ -305,10 +305,11 @@ export class SpaceVoiceCall {
    const c=this.controller,host=c.options.host;
    if(this.#socket&&wasActive)await this.#send(FRAME_CONTROL,encodeControl({type:'voice.ended',reason})).catch(ignore);
    // A start still in flight is awaited only briefly: a stuck startVoice must not hold the lease.
+   // These bounded teardown waits stay ref'd so an ending call finishes even when nothing else keeps the process alive.
    // If it comes up later, the provider it started is stopped then.
    if(this.#starting&&!this.#voiceStarted){
     let timer:ReturnType<typeof setTimeout>|undefined;
-    const settled=await Promise.race([this.#starting.then(()=>true,()=>true),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),c.timing.providerStallMs);timer.unref?.()})]);
+    const settled=await Promise.race([this.#starting.then(()=>true,()=>true),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),c.timing.providerStallMs)})]);
     clearTimeout(timer);
     if(!settled){
      const conversation=this.conversationId;
@@ -322,7 +323,7 @@ export class SpaceVoiceCall {
    }
    if(this.#voiceStarted&&this.#lease!==undefined&&(host.arbiter.owns(this.#lease)||host.arbiter.current===null)){
     // Never wait indefinitely on a stalled provider write.
-    if(this.#uplinkPump){let timer:ReturnType<typeof setTimeout>|undefined;await Promise.race([this.#uplinkPump.catch(ignore),new Promise<void>(resolve=>{timer=setTimeout(resolve,c.timing.providerStallMs);timer.unref?.()})]);clearTimeout(timer)}
+    if(this.#uplinkPump){let timer:ReturnType<typeof setTimeout>|undefined;await Promise.race([this.#uplinkPump.catch(ignore),new Promise<void>(resolve=>{timer=setTimeout(resolve,c.timing.providerStallMs)})]);clearTimeout(timer)}
     await host.stopVoice(this.conversationId).catch(error=>c.options.onError?.(error));
    }
    if(this.#remoteSet)host.setRemoteVoice(null);

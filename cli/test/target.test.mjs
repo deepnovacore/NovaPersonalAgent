@@ -18,12 +18,12 @@ import {
 } from '../src/target.mjs'
 
 test('public version and target matrix are stable', () => {
-  assert.equal(PRODUCT_VERSION, '1.0.0')
-  assert.equal(resolveTarget('darwin', 'arm64').artifact, 'nova-personal-agent-1.0.0-macos-arm64-app.zip')
+  assert.equal(PRODUCT_VERSION, '1.0.1')
+  assert.equal(resolveTarget('darwin', 'arm64').artifact, 'nova-personal-agent-1.0.1-macos-arm64-app.zip')
   assert.equal(resolveTarget('win32', 'x64').executable, 'Nova Personal Agent.exe')
   assert.throws(() => resolveTarget('darwin', 'x64'), /unsupported platform/u)
   assert.equal(resolveTarget('linux', 'x64').archive, 'file')
-  assert.equal(resolveTarget('linux', 'x64').artifact, 'nova-personal-agent-1.0.0-linux-x64.AppImage')
+  assert.equal(resolveTarget('linux', 'x64').artifact, 'nova-personal-agent-1.0.1-linux-x64.AppImage')
   assert.throws(() => resolveTarget('linux', 'arm64'), /unsupported platform/u)
 })
 
@@ -31,13 +31,13 @@ test('release and settings paths use the documented local roots', () => {
   const target = resolveTarget('win32', 'x64')
   assert.equal(
     releaseRoot({home: '/tmp/nova-no-such-home', target}),
-    join('/tmp/nova-no-such-home', '.nova-personal-agent', 'cli', 'releases', '1.0.0', 'win32-x64'),
+    join('/tmp/nova-no-such-home', '.nova-personal-agent', 'cli', 'releases', '1.0.1', 'win32-x64'),
   )
   assert.equal(
     desktopSettingsPath({platform: 'linux', home: '/tmp/nova-no-such-home', environment: {}}),
     join('/tmp/nova-no-such-home', '.config', 'Nova Personal Agent', 'ambient-orb-settings.json'),
   )
-  assert.equal(releaseBaseUrl(), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0')
+  assert.equal(releaseBaseUrl(), 'https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1')
 })
 
 function temporaryHome(t) {
@@ -49,7 +49,7 @@ function temporaryHome(t) {
 test('the CLI installs into the new root, reads the legacy root before migration, and honours explicit paths', async t => {
   const target = resolveTarget('darwin', 'arm64')
   const home = temporaryHome(t)
-  const releases = join(home, '.nova-personal-agent', 'cli', 'releases', '1.0.0', 'darwin-arm64')
+  const releases = join(home, '.nova-personal-agent', 'cli', 'releases', '1.0.1', 'darwin-arm64')
   assert.equal(releaseRoot({home, target}), releases)
   mkdirSync(join(home, '.nova-audio-agent'))
   writeFileSync(join(home, '.nova-audio-agent', 'blackboard.sqlite.personal.json'), '{}')

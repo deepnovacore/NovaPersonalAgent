@@ -1,6 +1,6 @@
 {
   "name": "@nova-personal-agent/monorepo",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "packageManager": "npm@11.6.0",

@@ -1,6 +1,6 @@
 {
   "name": "@nova-personal-agent/push-gateway",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "private": true,
   "type": "module",
   "description": "Token-isolating, quota-enforced APNs/FCM/MiPush gateway",
