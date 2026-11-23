@@ -293,3 +293,44 @@ test('HTTP mailbox recovers payload capacity after ACK without weakening dedup o
   const remaining=await f.p.read();assert.equal(remaining.messages[0]?.envelope.id,second.id);assert.equal(remaining.nextCursor,2);
  }finally{f.h.stop();f.p.stop();await f.service.close();}
 });
+
+test('idle mailbox polls neither persist the cursor nor ACK, and an ACK lost after a save is resent', async () => {
+  const f=await fixture();let cursor:number|undefined;let saves=0;let acks=0;let failAck=false;
+  try {
+    await paired(f);
+    const ack=f.p.acknowledge.bind(f.p);
+    f.p.acknowledge=async value=>{acks++;if (failAck) {failAck=false;throw new Error('ack lost');}return ack(value);};
+    const subscription={onMailbox:async()=>{},loadCursor:async()=>cursor,saveCursor:async (value:number)=>{saves++;cursor=value;}};
+    const envelope=await signEnvelope({v:1,space:f.space,id:'first',from:f.host.device,to:f.phone.device,chan:'mailbox',epoch:1,
+      expiresAt:null,body:await encryptBody({value:1},generateContentKey())},f.host.signingPrivateKey);
+    await f.h.send(envelope);
+    await f.p.synchronize(subscription);assert.deepEqual({cursor,saves,acks},{cursor:1,saves:1,acks:1});
+    for (let i=0;i<5;i++) await f.p.synchronize(subscription);
+    assert.deepEqual({cursor,saves,acks},{cursor:1,saves:1,acks:1});
+    await f.h.send(await signEnvelope({...envelope,id:'second'},f.host.signingPrivateKey));
+    failAck=true;await assert.rejects(()=>f.p.synchronize(subscription),/ack lost/);
+    assert.deepEqual({cursor,saves,acks},{cursor:2,saves:2,acks:2});assert.equal((await f.p.status()).ackCursor,1);
+    // The cursor is already durable, so the next empty page only repairs the missing ACK.
+    await f.p.synchronize(subscription);assert.deepEqual({cursor,saves,acks},{cursor:2,saves:2,acks:3});
+    assert.equal((await f.p.status()).ackCursor,2);
+    await f.p.synchronize(subscription);assert.equal(acks,3);
+  } finally {f.h.stop();f.p.stop();await f.service.close();}
+});
+
+test('a failed cursor save is never ACKed, and a restart resumes from the durable cursor', async () => {
+  const f=await fixture();let durable:number|undefined;let acks=0;let failSave=true;
+  try {
+    await paired(f);
+    const ack=f.p.acknowledge.bind(f.p);f.p.acknowledge=async value=>{acks++;return ack(value);};
+    const applied:string[]=[];
+    const subscription=()=>({onMailbox:async (e:{id:string})=>{applied.push(e.id);},loadCursor:async()=>durable,
+      saveCursor:async (value:number)=>{if (failSave) {failSave=false;throw new Error('disk full');}durable=value;}});
+    await f.h.send(await signEnvelope({v:1,space:f.space,id:'first',from:f.host.device,to:f.phone.device,chan:'mailbox',epoch:1,
+      expiresAt:null,body:await encryptBody({value:1},generateContentKey())},f.host.signingPrivateKey));
+    await assert.rejects(()=>f.p.synchronize(subscription()),/disk full/);
+    assert.equal(acks,0);assert.equal(durable,undefined);assert.equal((await f.p.status()).ackCursor,0);
+    // Restart: a fresh subscription loads the durable cursor, redelivers the message, saves, then ACKs.
+    await f.p.synchronize(subscription());
+    assert.deepEqual(applied,['first','first']);assert.equal(durable,1);assert.equal(acks,1);assert.equal((await f.p.status()).ackCursor,1);
+  } finally {f.h.stop();f.p.stop();await f.service.close();}
+});

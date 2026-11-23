@@ -83,7 +83,11 @@ export class SecurityStore implements RelayAuthority {
  }
  listDevices(p:RelayPrincipal):DeviceRecord[]{this.assertActive(p);return this.db.prepare('SELECT device FROM security_devices WHERE space=? AND revoked=0 ORDER BY device').all(p.space).map(r=>this.device(p.space,String(r.device)));}
  beginLogin(space:string,device:string):LoginChallenge {
-  this.device(space,device);return this.transaction(()=>{this.device(space,device);this.cleanup(space);this.capacity('security_challenges',space,this.maxPending);
+  this.device(space,device);return this.transaction(()=>{this.device(space,device);this.cleanup(space);
+   // The endpoint is unauthenticated, so one known device id must not hold the space-wide pool. A device keeps only its newest live
+   // challenge besides the one issued now; a superseded challenge then fails completeLogin as invalid_challenge.
+   this.db.prepare('DELETE FROM security_challenges WHERE space=? AND device=? AND id NOT IN (SELECT id FROM security_challenges WHERE space=? AND device=? ORDER BY expires DESC,rowid DESC LIMIT 1)').run(space,device,space,device);
+   this.capacity('security_challenges',space,this.maxPending);
    const value={id:randomUUID(),nonce:randomBytes(32).toString('base64url'),space,device,epoch:this.getSpace(space).epoch,expiresAt:this.now()+60_000};
    this.db.prepare('INSERT INTO security_challenges VALUES(?,?,?,?,?,?)').run(value.id,space,device,value.epoch,value.nonce,value.expiresAt);return value;
   });
