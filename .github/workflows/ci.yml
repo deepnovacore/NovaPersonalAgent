@@ -41,6 +41,11 @@ jobs:
       - run: npm ci
       - run: npm run build:space -- --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
       - run: npm run test:space -- --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
+      # The JWE interop check compiles Java with `java --module`, which the runners' default JDK may not support.
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
       - run: node push-gateway/test/native-crypto-checks.mjs --output-root "${{ runner.temp }}" --run-id "space-${{ github.run_id }}-${{ github.run_attempt }}"
       # Build-tool tests: the Space stack builder and the VoiceMem SDK preparer (which needs POSIX symlinks).
       - run: node --test scripts/build-space-stack.test.mjs
