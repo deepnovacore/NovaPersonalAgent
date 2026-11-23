@@ -162,3 +162,58 @@ test('closing a media socket while its renewal login is in flight leaves no time
     assert.equal(logins, 1);
   } finally { await service.close(); }
 });
+
+test('a peer control frame sent before this leg joined arrives after ready: the Node client is not rejected and keeps it', async () => {
+  const service = new RelayServer({securityPath: ':memory:', mailboxPath: ':memory:', bootstrapToken: BOOT, media: {enabled: true}});
+  const url = await service.listen();
+  try {
+    const s = await space(url);
+    await s.h.reserveMedia(SID, s.phone.device);
+    const phoneLeg = await s.p.connectMedia(SID); // half-joined
+    const early = frame(2, 64, 9);
+    await phoneLeg.send(early); await delay(50); // queued as an early control frame for the Host
+    const hostLeg = await s.h.connectMedia(SID); // drains the early frame right at join
+    const toHost: Uint8Array[] = [];
+    await delay(50); // the frame arrived before any onFrame subscriber
+    hostLeg.onFrame(f => toHost.push(f));
+    await until(() => toHost.length === 1);
+    assert.deepEqual([...toHost[0]!], [...early]);
+    s.h.stop(); s.p.stop();
+  } finally { await service.close(); }
+});
+
+test('a raw socket sees the relay ready text frame before any drained binary frame', async () => {
+  const service = new RelayServer({securityPath: ':memory:', mailboxPath: ':memory:', bootstrapToken: BOOT, media: {enabled: true}});
+  const url = await service.listen();
+  try {
+    const s = await space(url);
+    await s.h.reserveMedia(SID, s.phone.device);
+    const phoneLeg = await s.p.connectMedia(SID);
+    await phoneLeg.send(frame(2, 64, 1)); await phoneLeg.send(frame(2, 64, 2)); await delay(50);
+    await s.h.login();
+    const ws = new WebSocket(new URL('/v1/media', url.replace('http', 'ws')), {headers: {authorization: `Bearer ${token(s.h)}`, 'x-nova-media-session': SID}});
+    const seen: string[] = [];
+    ws.on('message', (data, isBinary) => seen.push(isBinary ? 'binary' : JSON.parse(data.toString()).type));
+    await until(() => seen.length === 3);
+    assert.deepEqual(seen, ['ready', 'binary', 'binary']);
+    ws.close(); s.h.stop(); s.p.stop();
+  } finally { await service.close(); }
+});
+
+test('overflowing the pre-subscriber frame buffer fails the leg with media_overflow instead of dropping frames', async () => {
+  const service = new RelayServer({securityPath: ':memory:', mailboxPath: ':memory:', bootstrapToken: BOOT, media: {enabled: true}});
+  const url = await service.listen();
+  try {
+    const s = await space(url);
+    await s.h.reserveMedia(SID, s.phone.device);
+    const hostLeg = await s.h.connectMedia(SID), phoneLeg = await s.p.connectMedia(SID);
+    const closed: string[] = []; hostLeg.onClose(r => closed.push(r));
+    // Paced so the relay writes each one (its own queue sheds bursty audio).
+    for (let i = 0; i < 36 && !closed.length; i++) { await phoneLeg.send(frame(1, 64, i)).catch(() => undefined); await delay(5); }
+    await until(() => closed.length === 1);
+    assert.equal(closed[0], 'media_overflow');
+    const late: Uint8Array[] = []; hostLeg.onFrame(f => late.push(f));
+    assert.equal(late.length, 0);
+    s.h.stop(); s.p.stop();
+  } finally { await service.close(); }
+});

@@ -291,11 +291,18 @@ export class RelayServer {
     let header = String(req.headers.authorization ?? '');
     let leg: MediaLeg;
     const same = (a: RelayPrincipal,b: RelayPrincipal): boolean => a.space===b.space && a.device===b.device && a.epoch===b.epoch;
+    // `join` may drain the peer's early control frames synchronously: binary writes are held
+    // until the `ready` text frame is on the socket, so clients always see `ready` first.
+    let readySent = false;
+    const held: (() => void)[] = [];
     try {
       leg = this.media.join(p,session,{
         write: frame => new Promise<void>((resolve,reject) => {
-          if (ws.readyState !== WebSocket.OPEN) {reject(new RelayError('offline'));return;}
-          ws.send(frame,{binary:true},error => error ? reject(error) : resolve());
+          const write = (): void => {
+            if (ws.readyState !== WebSocket.OPEN) {reject(new RelayError('offline'));return;}
+            ws.send(frame,{binary:true},error => error ? reject(error) : resolve());
+          };
+          if (readySent) write(); else held.push(write);
         }),
         close: reason => {try {ws.close(1000,reason);} catch {ws.terminate();} setTimeout(() => ws.terminate(),1000).unref();},
         authorized: () => same(this.security.authenticate(header),p),
@@ -316,5 +323,7 @@ export class RelayServer {
     ws.on('error',() => ws.terminate());
     ws.on('close',() => {clearInterval(timer);leg.close();});
     ws.send(JSON.stringify({type:'ready',role:leg.role}));
+    readySent = true;
+    for (const write of held.splice(0)) write();
   }
 }

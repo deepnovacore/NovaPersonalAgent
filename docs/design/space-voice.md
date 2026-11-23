@@ -428,7 +428,7 @@ opt in.
 
 | Option | Default when enabled | Notes |
 |---|---|---|
-| `media.enabled` | `false` | route 404 |
+| `media.enabled` | `false` | route 404. The desktop-managed (Tailscale) relay enables media with these default limits for its own paired devices; self-hosted and public relays stay off |
 | `media.maxKbpsPerDirection` | 512 | token bucket with 1 s burst. Fits PCM downlink at 1.25× pacing (~495 kbps) |
 | `media.maxFramesPerSecond` | 40 per direction | covers 32 paced audio packets + control + keepalive |
 | `media.maxFrameBytes` | 4096 | enforced by `ws` `maxPayload` **during assembly**, not after |

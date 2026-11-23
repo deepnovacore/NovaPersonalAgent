@@ -88,6 +88,14 @@ class _RelaySocket implements SpaceCallSocket {
           return;
         }
         if (_ready.isCompleted && data is List<int>) {
+          // Frames before the first listener (even in the same burst as
+          // `ready`) are buffered by the single-subscription controller.
+          // Past the bound the leg fails explicitly rather than evicting a
+          // frame that may be the peer's sealed ready or a control.
+          if (!_frames.hasListener && ++_unlistened > _maxUnlistenedFrames) {
+            _fail('media_overflow');
+            return;
+          }
           _frames.add(data is Uint8List ? data : Uint8List.fromList(data));
         }
       },
@@ -99,7 +107,10 @@ class _RelaySocket implements SpaceCallSocket {
   final RelaySpaceCallMedia media;
   final WebSocket ws;
   final _ready = Completer<void>();
-  final _frames = StreamController<Uint8List>.broadcast(sync: true);
+  /// Relay control queue (8) plus some audio.
+  static const _maxUnlistenedFrames = 32;
+  final _frames = StreamController<Uint8List>(sync: true);
+  int _unlistened = 0;
   final _closed = Completer<String>();
   late final StreamSubscription<dynamic> _subscription;
   Timer? _renewal;
@@ -138,6 +149,13 @@ class _RelaySocket implements SpaceCallSocket {
     if (!_ready.isCompleted) _ready.completeError(StateError(reason));
     if (!_closed.isCompleted) _closed.complete(reason);
     unawaited(_frames.close());
+  }
+
+  void _fail(String reason) {
+    if (_done) return;
+    _finish(reason);
+    unawaited(_subscription.cancel());
+    unawaited(ws.close(1008, reason));
   }
 
   @override

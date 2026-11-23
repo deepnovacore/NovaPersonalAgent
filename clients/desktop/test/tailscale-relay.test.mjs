@@ -44,6 +44,8 @@ test('automatic credentials stay in memory; repeated starts share one loopback s
   const options=h.servers[0].options
   assert.equal(options.bind,'127.0.0.1');assert.equal(options.port,0)
   assert.deepEqual(options.trustedProxyAddresses,['127.0.0.1'])
+  // The desktop-managed relay carries Space voice media for its own paired devices (default limits).
+  assert.deepEqual(options.media,{enabled:true})
   const persisted=await readFile(join(h.root,'relay','managed.json'),'utf8')
   assert.deepEqual(JSON.parse(persisted),{v:1,relayUrl:a.relayUrl})
   assert.ok(!persisted.includes(a.bootstrapToken))

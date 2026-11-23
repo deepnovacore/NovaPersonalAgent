@@ -16,6 +16,9 @@ const UPLINK_BYTES_PER_MS=32;
 export const VOICE_MAX_AUDIO_FRAME_BYTES=FRAME_HEADER_BYTES+AUDIO_PREFIX_BYTES+Math.max(DOWNLINK_PACKET_BYTES,UPLINK_BYTES_PER_MS*VOICE_FRAME_MS)+FRAME_TAG_BYTES;
 export const UPLINK_MAX_QUEUED_MS=500,UPLINK_MAX_QUEUED_FRAMES=16;
 export const VOICE_CAPABILITY='voice.v1';
+/** Playback receipts waiting behind a slow one (e.g. playback.stopped awaiting provider cancellation). */
+export const VOICE_MAX_PENDING_RECEIPTS=16;
+const RECEIPT_TYPES=new Set(['playback.started','playback.done','playback.cleared','playback.stopped']);
 /** Best-effort sends: a lost keepalive, clear or goodbye is covered by leases, deadlines and relay teardown. */
 const ignore=():void=>undefined;
 
@@ -59,6 +62,8 @@ export interface SpaceVoiceOptions {
  /** A single provider sendAudio pending this long ends the call; teardown waits at most this long for it. */
  providerStallMs?:number;idleMs?:number;keepaliveMs?:number;leadMs?:number;paceFactor?:number;tickMs?:number;
  maxSessionMinutes?:number;maxQueuedAudioMs?:number;
+ /** Background capability re-probe cadence while media is unavailable. */
+ capabilityRetryMs?:number;
 }
 const b64=z.string().regex(/^[A-Za-z0-9_-]{43}$/);
 export const voiceStartSchema=z.object({
@@ -90,7 +95,9 @@ export class SpaceVoiceCall {
  #queue:Outbound[]=[];#queuedMs=0;#budgetMs:number;#budgetAt:number;#pumping=false;#pace:ReturnType<typeof setTimeout>|undefined;
  #gens=new Map<string,Generation>();#nextGen=0;#startSent=new Set<number>();
  #uplink:Buffer[]=[];#uplinkBytes=0;#uplinkPump:Promise<void>|undefined;
- #starting:Promise<void>|undefined;
+ #starting:Promise<void>|undefined;#activating=false;
+ /** Only playback receipts are ordered here; audio, keepalive and end never wait behind it. Bounded. */
+ #receipts:Promise<void>=Promise.resolve();#pendingReceipts=0;
  #ending:Promise<void>|undefined;#endSignal:Promise<void>;#signalEnd!:()=>void;
  constructor(readonly controller:SpaceVoiceController,readonly device:string,readonly opId:string,readonly conversationId:string,readonly voiceMode:string|undefined,readonly session:string,readonly hash:Buffer,keys:{up:Buffer;down:Buffer},readonly endReason:{value?:string}={}){
   this.#endSignal=new Promise(resolve=>{this.#signalEnd=resolve});
@@ -99,6 +106,7 @@ export class SpaceVoiceCall {
  }
  set lease(value:number){this.#lease=value}
  get lease():number|undefined{return this.#lease}
+ get voiceStarted():boolean{return this.#voiceStarted}
 
  /**
   * Reserve the relay session and join the Host leg. The accept is published only after this
@@ -116,25 +124,29 @@ export class SpaceVoiceCall {
    if(!socket||this.state!=='joining'){void connecting.then(late=>{late.close()},ignore);throw Error(this.endReason.value??'voice_ended')}
    this.#socket=socket;
    socket.onClose(()=>{void this.end('transport_lost')});
-   socket.onFrame(frame=>{void this.#receive(frame).catch(error=>{c.options.onError?.(error);void this.end('protocol_error')})});
+   socket.onFrame(frame=>{try{this.#receive(frame)}catch(error){c.options.onError?.(error);void this.end('protocol_error')}});
   }catch(error){
    if(this.state==='joining'){c.options.onError?.(error);await this.end('relay_media_unavailable')}
    throw Error(this.endReason.value??'relay_media_unavailable');
   }
  }
 
- async #receive(frame:Uint8Array):Promise<void>{
+ /** Cheap per-frame work runs synchronously on arrival, in order: open, liveness, uplink, end. */
+ #receive(frame:Uint8Array):void{
   if(this.state==='ending'||this.state==='ended')return;
   let opened;
-  try{opened=this.#receiver.open(frame)}catch(error){if(error instanceof Error&&error.message==='voice_crypto_failed')await this.end('voice_crypto_failed');return}
+  try{opened=this.#receiver.open(frame)}catch(error){if(error instanceof Error&&error.message==='voice_crypto_failed')void this.end('voice_crypto_failed');return}
   if(!opened)return;
   this.#lastHeard=this.controller.now();
   if(this.state==='joining'){
    if(opened.type!==FRAME_CONTROL)return;
    const body=decodeControl(opened.plaintext);
-   if(body.type!=='ready'||body.start_hash!==this.hash.toString('base64url')){await this.end('protocol_error');return}
+   if(body.type==='end'){void this.end('stopped');return}
+   if(body.type!=='ready'||body.start_hash!==this.hash.toString('base64url')){void this.end('protocol_error');return}
    // The Host's ready is the Client's go signal: it is sent only once the provider is up.
-   await this.#activate();return;
+   // Exactly one activation; a stuck startVoice cannot hold later frames.
+   if(this.#activating)return;
+   this.#activating=true;void this.#activate().catch(error=>{this.controller.options.onError?.(error);void this.end('protocol_error')});return;
   }
   if(opened.type===FRAME_KEEPALIVE)return;
   if(opened.type===FRAME_AUDIO){
@@ -146,7 +158,14 @@ export class SpaceVoiceCall {
    this.#uplinkPump??=this.#pumpUplink().finally(()=>{this.#uplinkPump=undefined});
    return;
   }
-  await this.#control(decodeControl(opened.plaintext));
+  const body=decodeControl(opened.plaintext);
+  if(body.type==='end'){void this.end('stopped');return}
+  // Anything but a playback receipt (a duplicate ready, unknown types) is ignored here and takes no slot.
+  if(typeof body.type!=='string'||!RECEIPT_TYPES.has(body.type))return;
+  // Receipts stay ordered (a slow playback.stopped must land before a later cleared), but bounded.
+  if(this.#pendingReceipts>=VOICE_MAX_PENDING_RECEIPTS){void this.end('protocol_error');return}
+  this.#pendingReceipts++;
+  this.#receipts=this.#receipts.then(()=>this.#control(body)).catch(error=>{this.controller.options.onError?.(error);void this.end('protocol_error')}).finally(()=>{this.#pendingReceipts--});
  }
  get uplinkQueuedMs():number{return this.#uplinkBytes/UPLINK_BYTES_PER_MS}
  async #pumpUplink():Promise<void>{
@@ -183,7 +202,7 @@ export class SpaceVoiceCall {
   this.#timer(()=>{void this.end('max_duration')},this.controller.timing.maxSessionMinutes*60_000);
  }
  async #control(body:Record<string,unknown>):Promise<void>{
-  if(body.type==='end'){await this.end('stopped');return}
+  if(this.state!=='active')return;
   const receipts=this.controller.options.host.receipts();
   const utterance=typeof body.utterance_id==='string'?body.utterance_id:undefined,epoch=typeof body.generation_epoch==='number'?body.generation_epoch:undefined;
   if(!receipts||utterance===undefined||epoch===undefined||![...this.#gens.values()].some(g=>g.utterance_id===utterance&&g.generation_epoch===epoch))return;
@@ -285,8 +304,22 @@ export class SpaceVoiceCall {
   this.#ending=(async()=>{
    const c=this.controller,host=c.options.host;
    if(this.#socket&&wasActive)await this.#send(FRAME_CONTROL,encodeControl({type:'voice.ended',reason})).catch(ignore);
-   // A start still in flight is awaited, so a provider that comes up after the fence is stopped too.
-   await this.#starting?.catch(ignore);
+   // A start still in flight is awaited only briefly: a stuck startVoice must not hold the lease.
+   // If it comes up later, the provider it started is stopped then.
+   if(this.#starting&&!this.#voiceStarted){
+    let timer:ReturnType<typeof setTimeout>|undefined;
+    const settled=await Promise.race([this.#starting.then(()=>true,()=>true),new Promise<false>(resolve=>{timer=setTimeout(()=>resolve(false),c.timing.providerStallMs);timer.unref?.()})]);
+    clearTimeout(timer);
+    if(!settled){
+     const conversation=this.conversationId;
+     void this.#starting.then(async()=>{
+      // Stop it while the Host voice is still this conversation and no other call has itself
+      // started voice; a joining successor then finds voice clear. An owner that is not one of this
+      // controller's calls (the desktop, or a call under a controller re-created by pairing) is left alone.
+      if(host.voiceConversationId()===conversation&&!c.voiceStartedByAnyCall()&&(host.arbiter.current===null||c.ownsCurrentLease()))await host.stopVoice(conversation);
+     },ignore).catch(error=>c.options.onError?.(error));
+    }
+   }
    if(this.#voiceStarted&&this.#lease!==undefined&&(host.arbiter.owns(this.#lease)||host.arbiter.current===null)){
     // Never wait indefinitely on a stalled provider write.
     if(this.#uplinkPump){let timer:ReturnType<typeof setTimeout>|undefined;await Promise.race([this.#uplinkPump.catch(ignore),new Promise<void>(resolve=>{timer=setTimeout(resolve,c.timing.providerStallMs);timer.unref?.()})]);clearTimeout(timer)}
@@ -306,11 +339,11 @@ export class SpaceVoiceCall {
 }
 
 export class SpaceVoiceController {
- readonly timing:{joinTimeoutMs:number;idleMs:number;keepaliveMs:number;leadMs:number;paceFactor:number;tickMs:number;maxSessionMinutes:number;maxQueuedAudioMs:number;providerStallMs:number};
- #calls=new Map<string,SpaceVoiceCall>();#media:{codecs:string[];maxKbpsPerDirection:number}|null|undefined;#closed=false;
+ readonly timing:{joinTimeoutMs:number;idleMs:number;keepaliveMs:number;leadMs:number;paceFactor:number;tickMs:number;maxSessionMinutes:number;maxQueuedAudioMs:number;providerStallMs:number;capabilityRetryMs:number};
+ #calls=new Map<string,SpaceVoiceCall>();#media:{codecs:string[];maxKbpsPerDirection:number}|null|undefined;#closed=false;#probedAt:number|undefined;#probe:Promise<void>|undefined;
  constructor(readonly options:SpaceVoiceOptions){
   this.timing={joinTimeoutMs:options.joinTimeoutMs??15_000,idleMs:options.idleMs??20_000,keepaliveMs:options.keepaliveMs??5_000,leadMs:options.leadMs??1_000,
-   paceFactor:options.paceFactor??1.25,tickMs:options.tickMs??20,maxSessionMinutes:options.maxSessionMinutes??60,maxQueuedAudioMs:options.maxQueuedAudioMs??120_000,providerStallMs:options.providerStallMs??2_000};
+   paceFactor:options.paceFactor??1.25,tickMs:options.tickMs??20,maxSessionMinutes:options.maxSessionMinutes??60,maxQueuedAudioMs:options.maxQueuedAudioMs??120_000,providerStallMs:options.providerStallMs??2_000,capabilityRetryMs:options.capabilityRetryMs??30_000};
  }
  now():number{return this.options.now?.()??Date.now()}
  /** Capability hint for one recipient: only hides or shows the call button (§8). */
@@ -319,16 +352,39 @@ export class SpaceVoiceController {
   const policy=this.options.policy(),owner=this.options.owner();
   return policy==='members'||policy==='owner'&&owner!==undefined&&owner===device;
  }
- async refreshCapability():Promise<void>{
-  const before=JSON.stringify(this.#media??null);
+ /** Single-flight: concurrent callers share one probe. */
+ refreshCapability():Promise<void>{
+  return this.#probe??=this.#probeCapability().finally(()=>{this.#probe=undefined});
+ }
+ async #probeCapability():Promise<void>{
+  this.#probedAt=this.now();
+  let next:{codecs:string[];maxKbpsPerDirection:number}|null;
   try{
    const media=(await this.options.media.capabilities()).media;
    // pcm16 is advertised and admitted only on a relay that can carry its largest packet.
-   this.#media=media&&(media.maxFrameBytes??0)>=VOICE_MAX_AUDIO_FRAME_BYTES?media:null;
-  }catch(error){this.#media=null;this.options.onError?.(error)}
-  if(JSON.stringify(this.#media??null)!==before)this.options.onAvailabilityChanged?.();
+   next=media&&(media.maxFrameBytes??0)>=VOICE_MAX_AUDIO_FRAME_BYTES?media:null;
+  }catch(error){
+   // Only an authoritative answer (media:null, which also covers a 404) disables voice; a transient
+   // failure keeps the last known value and the next start asks again.
+   this.options.onError?.(error);return;
+  }
+  // Compare against the value actually replaced, at assignment time.
+  const previous=this.#media;this.#media=next;
+  if(JSON.stringify(previous??null)!==JSON.stringify(next))this.options.onAvailabilityChanged?.();
+ }
+ /**
+  * Background recovery while media is not known to be available: at most one probe per
+  * capabilityRetryMs. A flip fires onAvailabilityChanged so the snapshot advertises voice.v1.
+  */
+ async refreshIfUnavailable():Promise<void>{
+  if(this.#closed||this.#media?.codecs.includes(VOICE_CODEC))return;
+  if(this.#probedAt!==undefined&&this.now()-this.#probedAt<this.timing.capabilityRetryMs)return;
+  await this.refreshCapability();
  }
  call(device:string):SpaceVoiceCall|undefined{return this.#calls.get(device)}
+ voiceStartedByAnyCall():boolean{return [...this.#calls.values()].some(call=>call.voiceStarted)}
+ /** True when the Host audio lease is held by one of this controller's own calls. */
+ ownsCurrentLease():boolean{const device=this.options.host.arbiter.spaceDevice;const lease=device===undefined?undefined:this.#calls.get(device)?.lease;return lease!==undefined&&this.options.host.arbiter.owns(lease)}
  /** Full §4 authorization for a call, used again at provider admission. Throws a stable code. */
  authorize(call:{device:string;conversationId:string;voiceMode:string|undefined}):void{
   if(this.#closed)throw Error('voice_unavailable');
@@ -347,7 +403,8 @@ export class SpaceVoiceController {
   const host=this.options.host;
   this.authorize({device:sender,conversationId:input.conversation_id,voiceMode:input.voice_mode});
   if(!input.offers.codecs.includes(VOICE_CODEC)||!input.offers.frame_ms.includes(VOICE_FRAME_MS))throw Error('codec_unavailable');
-  if(this.#media===undefined)await this.refreshCapability();
+  // Ask the relay again whenever media is not known to be available: a relay may enable it later.
+  if(!this.#media?.codecs.includes(VOICE_CODEC))await this.refreshCapability();
   if(!this.#media?.codecs.includes(VOICE_CODEC))throw Error('relay_media_unavailable');
   return host.arbiter.serial(async()=>{
    // A device's second start replaces only its own call.

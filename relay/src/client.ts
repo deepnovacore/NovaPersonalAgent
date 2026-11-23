@@ -3,6 +3,9 @@ import type {RelayEnvelope, RelayPrincipal} from './protocol.js';
 import type {MailboxPage, MailboxStatus} from './mailbox.js';
 import type {LoginChallenge,Invitation,PairingRequest,DeviceRecord,PairingInput,SpaceRecord,DevicePublicIdentity} from './security.js';
 
+/** Binary frames held until the first onFrame subscriber: the relay's control queue plus some audio. */
+const MEDIA_PENDING_FRAMES = 32;
+
 export class RelayClientError extends Error {
   constructor(readonly code: string,readonly status: number) {super(code);this.name='RelayClientError';}
 }
@@ -122,12 +125,29 @@ export class RelayClient {
     const url=new URL('/v1/media',this.base);url.protocol=url.protocol==='https:'?'wss:':'ws:';
     const ws=new WebSocket(url,{headers:{authorization:`Bearer ${token}`,'x-nova-media-session':session},maxPayload:8192,
       handshakeTimeout:this.options.requestTimeoutMs ?? 10000,followRedirects:false,perMessageDeflate:false});
-    await new Promise<void>((resolve,reject) => {
-      ws.once('message',data => {try {const v=JSON.parse(data.toString()) as {type?:string};if(v.type==='ready')resolve();else reject(new RelayClientError('media_rejected',0));} catch {reject(new RelayClientError('media_rejected',0));}});
+    // One persistent handler from socket creation: a binary frame in the same chunk as `ready`
+    // (or before the first onFrame subscriber) is buffered, never lost.
+    const frames: ((frame: Uint8Array) => void)[] = [], closes: ((reason: string) => void)[] = [], pending: Uint8Array[] = [];
+    let ready=false,failure: string | undefined;
+    const opened = new Promise<void>((resolve,reject) => {
+      ws.on('message',(data,isBinary) => {
+        const bytes=Array.isArray(data)?Buffer.concat(data):Buffer.from(data as ArrayBuffer);
+        if (!ready) {
+          try {const v=JSON.parse(bytes.toString()) as {type?:string};if(!isBinary&&v.type==='ready'){ready=true;resolve();return;}} catch {/* rejected below */}
+          reject(new RelayClientError('media_rejected',0));ws.terminate();return;
+        }
+        if (!isBinary) return;
+        const frame=new Uint8Array(bytes);
+        if (failure) return;
+        if (frames.length) {for (const f of frames) f(frame);return;}
+        // Never evict silently (a dropped frame may be the peer's sealed ready): fail the leg explicitly.
+        if (pending.length>=MEDIA_PENDING_FRAMES) {failure='media_overflow';pending.length=0;ws.close(1008,failure);return;}
+        pending.push(frame);
+      });
       ws.once('close',(code,reason) => reject(new RelayClientError(reason.toString()||'media_rejected',code)));
       ws.once('error',reject);
     });
-    const frames: ((frame: Uint8Array) => void)[] = [], closes: ((reason: string) => void)[] = [];
+    await opened;
     let renewal: ReturnType<typeof setTimeout> | undefined, closed=false;
     const schedule = (): void => {
       if (closed) return;
@@ -144,12 +164,11 @@ export class RelayClient {
     };
     const stop = (): void => {closed=true;if (renewal) clearTimeout(renewal);renewal=undefined;};
     schedule();
-    ws.on('message',(data,isBinary) => {if (!isBinary) return;const bytes=Array.isArray(data)?Buffer.concat(data):Buffer.from(data as ArrayBuffer);for (const f of frames) f(new Uint8Array(bytes));});
-    ws.on('close',(_code,reason) => {stop();for (const c of closes) c(reason.toString()||'closed');});
+    ws.on('close',(_code,reason) => {stop();for (const c of closes) c(failure ?? (reason.toString()||'closed'));});
     ws.on('error',() => ws.terminate());
     return {
       send: frame => new Promise<void>((resolve,reject) => {if (ws.readyState!==WebSocket.OPEN) {reject(new RelayClientError('media_closed',0));return;}ws.send(frame,{binary:true},e => e?reject(e):resolve());}),
-      onFrame: listener => {frames.push(listener);},
+      onFrame: listener => {frames.push(listener);for (const f of pending.splice(0)) listener(f);},
       onClose: listener => {closes.push(listener);},
       /** Pending renewal timer, for tests. */
       get renewalPending() {return renewal!==undefined;},
