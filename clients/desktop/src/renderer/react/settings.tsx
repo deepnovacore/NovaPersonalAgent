@@ -1,7 +1,7 @@
 import {SpaceHostPanel} from './settings/space-host';
 import React, { createElement, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@radix-ui/themes';
-import { Settings, Save, RefreshCw, Camera, Code2 } from 'lucide-react';
+import { Settings, Save, RefreshCw, Code2 } from 'lucide-react';
 import { t, currentLanguage } from '../locale.mjs';
 import { createSettingsController, settingsButtonState } from '../settings-controller.mjs';
 import { SETTINGS_CATEGORIES, categoryTabForKey, isValidCategory, resolveCategory } from '../settings-categories.mjs';
@@ -21,13 +21,13 @@ import {SettingsCategoryIcon} from './settings/icons';
 import {NewsPreferencesPanel} from './settings/news';
 import { VoiceprintPanel } from './settings/voiceprint';
 const SECRET_LABELS: any = { minicpmRealtimeApiKey: 'MiniCPM-o', personaplexRealtimeApiKey: 'PersonaPlex', openaiCompatibleApiKey: 'OpenAI-compatible LLM', compatibleAsrApiKey: 'OpenAI-compatible ASR', compatibleTtsApiKey: 'OpenAI-compatible TTS', selfHostedAsrApiKey: 'Self-hosted ASR', selfHostedLlmApiKey: 'Self-hosted LLM', selfHostedTtsApiKey: 'Self-hosted TTS', composioApiKey: 'Composio', dashscopeApiKey: 'DashScope', stepfunApiKey: 'StepFun', openaiApiKey: 'OpenAI', geminiApiKey: 'Google Gemini', tavilyApiKey: 'Tavily', openrouterApiKey: 'OpenRouter · Jev', arkApiKey: 'Ark', deepseekApiKey: 'DeepSeek（官方）', doubaoBigmodelApiKey: '火山语音' };
-const ALIASES: any = { 'startup-view': 'startupView', 'wake-word-enabled': 'wakeWordEnabled', 'auto-hide-seconds': 'autoHideSeconds', 'coding-progress-narration': 'codingProgressNarration', heartbeat: 'codexHeartbeatSeconds', 'coding-provider': 'codingBackend', 'memory-prerecall-enabled': 'memoryPrerecallEnabled', 'monitor-camera': 'monitorCameraDeviceId', 'watch-model': 'watchModel', 'conversation-vision-enabled': 'conversationVisionEnabled' };
+const ALIASES: any = { 'startup-view': 'startupView', 'wake-word-enabled': 'wakeWordEnabled', 'auto-hide-seconds': 'autoHideSeconds', 'coding-progress-narration': 'codingProgressNarration', heartbeat: 'codexHeartbeatSeconds', 'coding-provider': 'codingBackend', 'memory-prerecall-enabled': 'memoryPrerecallEnabled' };
 const WORKSPACE_TEXT: any = { opened: '已打开当前工作区', open_failed: '系统未能打开当前工作区', cleared: '已清空工作区', cancelled: '已取消', not_managed: '当前工作区不在 Nova 工作区根目录中', empty: '没有可清空的工作区', busy: '另一项保存或维护操作正在进行', stop_failed: '后台未能安全停止，未清空工作区', clear_failed: '工作区清空未完整完成，可重试清理', restart_failed: '工作区已处理，但后台恢复失败，请重试连接', clear_and_restart_failed: '工作区清理未完整完成，后台恢复也失败；请重启后重试清理', rollback_pending: '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚', cleanup_pending: '工作区清理仍在进行，请稍后重试', unavailable: '工作区维护状态暂时不可用', recovered: '工作区恢复完成，后台已开始重新连接', recovery_failed: '工作区恢复尚未完成，后台保持停止；请重试恢复' };
 const NOTICE: any = { restarting: '已保存，后台正在重启并重新连接', failed: '未生效：请恢复上次可用设置，再检查未保存的草稿', restart_failed: '后端未启动：上次设置已保留，请恢复后端', recovery_pending: '上次设置已还原，请点击恢复以确认后端可用', recovery_failed: '设置恢复未完成，恢复记录已保留；若重试仍失败，请修复配置目录中的 settings.json.recovery 或配置冲突后再恢复', complete: '设置已生效' };
 const GUIDANCE: any = { opencode: ['OpenCode', '配置文件', '安装 opencode-ai，并用 OpenCode 自己的登录或配置文件设置模型与凭据。'], codebuddy: ['CodeBuddy', '', '安装 @tencent-ai/codebuddy-code，并在 CodeBuddy 命令行中完成登录或密钥配置。'], pi: ['Pi', '配置目录', '安装 Pi 与 pi-acp，并在 Pi 自己的配置中设置模型与登录。Pi 不支持逐项审批，询问模式下任务会被拒绝。'], deepseek: ['DeepSeek Harness', '配置目录', '安装 @deepseek-ai/dsh，并在其配置中设置凭据；也可以使用服务配置里的 DeepSeek API Key。'] };
 const toOptions = (values: any[]) => values.map(v => typeof v === 'string' ? { value: v, label: v } : v);
 export default function SettingsApp({ bridge = (window as any).novaPersonalAgentDesktop, api = bridge?.settings }: any) {
-    const [snapshot, setSnapshot] = useState<any>({ view: {}, drafts: {}, dirty: false, busy: false }), [category, setCategory] = useState('general'), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [workspaceNote, setWorkspaceNote] = useState(''), [maintenance, setMaintenance] = useState(false), [secretDirty, setSecretDirty] = useState<Set<string>>(new Set()), [notes, setNotes] = useState<any>({}), [cameraDevices, setCameraDevices] = useState<any[]>([]), [custom, setCustom] = useState<any>({}), [nativeVoices, setNativeVoices] = useState<any>({}), [idleText, setIdleText] = useState<string | null>(null), [modelPane, setModelPane] = useState('routes'), [executorPane, setExecutorPane] = useState('vision'), [newsLocal,setNewsLocal] = useState<any>({}), [briefingDraft,setBriefingDraft] = useState<any>(null);
+    const [snapshot, setSnapshot] = useState<any>({ view: {}, drafts: {}, dirty: false, busy: false }), [category, setCategory] = useState('general'), [status, setStatus] = useState(''), [notice, setNotice] = useState(''), [workspaceNote, setWorkspaceNote] = useState(''), [maintenance, setMaintenance] = useState(false), [secretDirty, setSecretDirty] = useState<Set<string>>(new Set()), [notes, setNotes] = useState<any>({}), [custom, setCustom] = useState<any>({}), [nativeVoices, setNativeVoices] = useState<any>({}), [idleText, setIdleText] = useState<string | null>(null), [modelPane, setModelPane] = useState('routes'), [executorPane, setExecutorPane] = useState('coding'), [newsLocal,setNewsLocal] = useState<any>({}), [briefingDraft,setBriefingDraft] = useState<any>(null);
     const mounted = useRef(true), secretInputs = useRef<Record<string, HTMLInputElement | null>>({}), secretRevisions = useRef<Record<string, number>>({}), secretWrites = useRef<any>(null), writeOutcome = useRef<any>(null), categoryButtons = useRef<Record<string, HTMLButtonElement | null>>({}), maintenanceLock = useRef(false), currentView = useRef<any>({});
     currentView.current = snapshot.view;
     const controller = useMemo(() => createSettingsController({ api: { set: async (patch: any) => { const { capabilitiesDocument, capabilitiesBaseRevision, ...settingsPatch } = patch; if (secretWrites.current && Object.keys(secretWrites.current).length)
@@ -188,11 +188,12 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             return <div id={id} key={key} hidden={category !== 'capabilities'}>{children.filter((child: any) => typeof child === 'string' || child.tag !== 'h2').map(renderNode)}</div>;
         if (id === 'executors-section') {
             const cards = children.filter((node: any) => typeof node !== 'string' && node.props?.class === 'executor-card');
-            const paneOf = (card: any) => (card.children ?? []).some((child: any) => typeof child !== 'string' && String(child.props?.id ?? '').startsWith('camera')) ? 'vision' : 'coding';
-            const panes: any[] = [['vision', Camera, t('视觉监控'), t('配置摄像头与视觉监控模型。')], ['coding', Code2, t('编程'), t('配置编程工具、执行器与工作区。')]];
+            // Vision monitoring is not part of the v1.0 desktop app; only coding is configurable here.
+            const paneOf = (_card: any) => 'coding';
+            const panes: any[] = [['coding', Code2, t('编程'), t('配置编程工具、执行器与工作区。')]];
             return <section className="setting-section executor-page" id={id} key={key} hidden={category !== 'capabilities'}>
                 <h2>{t('执行器')}</h2>
-                <p className="hint">{t('按需启用和配置视觉监控或编程能力。')}</p>
+                <p className="hint">{t('按需启用和配置编程能力。')}</p>
                 <div className="executor-subnav" role="tablist" aria-label={t('执行器类别')}>{panes.map(([pane, Icon, label]) => <button key={pane} type="button" id={'executor-tab-' + pane} className="executor-tab" role="tab" aria-selected={executorPane === pane} tabIndex={executorPane === pane ? 0 : -1} onClick={() => setExecutorPane(pane)} onKeyDown={(event: any) => { if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key))
                 return;
             event.preventDefault();
@@ -258,7 +259,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             hidden['native-' + native] = view.integratedProvider !== native;
         if(props.class==='field'&&children.some((n:any)=>typeof n!=='string'&&n.props.for==='integratedVoicePreset'))p.hidden=view.integratedProvider==='minicpm-o'; if (Object.hasOwn(hidden, id))
             p.hidden = hidden[id];
-        const text: any = { 'heartbeat-value': t('{0} 秒', view.codexHeartbeatSeconds ?? 30), 'effective-workspace': view.effectivePaths?.workspace ?? '', 'effective-managed-root': view.effectivePaths?.managedRoot ?? '', 'codex-status': view.codexStatus?.status === 'ready' ? t('已连接 {0}', view.codexStatus.version) : t('未找到可用的 Codex CLI；可刷新或指定完整路径，Windows 支持 npm 安装的 codex.cmd。'), 'workspace-action-status': workspaceNote || t((view.managedWorkspaces?.recoveryStatus ?? 'idle') !== 'idle' ? '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚' : ''), 'wake-word-status': t(view.wakeWord?.status === 'loading' ? '正在准备唤醒模型…' : view.wakeWord?.status === 'error' ? '唤醒模型不可用，请重试；可用托盘显示窗口。' : ''), 'capabilities-problems': (view.capabilities?.problems ?? []).join(' · '), 'coding-backend-title': GUIDANCE[view.codingBackend] ? t('{0} 配置', GUIDANCE[view.codingBackend][0]) : '', 'coding-backend-guidance': GUIDANCE[view.codingBackend] ? t(GUIDANCE[view.codingBackend][2]) : '', 'coding-config-label': GUIDANCE[view.codingBackend]?.[1] ?? '', 'coding-permission-note': view.codingBackend === 'pi' ? t('Pi 不支持逐项审批：询问模式下任务会被拒绝，不会自动改为 YOLO。') : GUIDANCE[view.codingBackend] ? t('审批由所选执行器在任务开始时协商；不支持当前审批模式时任务会被拒绝。') : '', 'coding-backend-status': view.codingBackends?.[view.codingBackend]?.binary === 'available' ? t('已找到可执行文件；登录状态尚未验证，会在任务开始时检查。') : t('未找到可执行文件，请安装或指定路径'), ...notes };
+        const text: any = { 'heartbeat-value': t('{0} 秒', view.codexHeartbeatSeconds ?? 30), 'effective-workspace': view.effectivePaths?.workspace ?? '', 'effective-managed-root': view.effectivePaths?.managedRoot ?? '', 'data-root-notice': view.dataRootNotice ? (view.dataRootNotice.kind === 'link' ? t('数据已迁移，但兼容链接 {0} 缺失或指向别处。请先退出 Nova，再运行 {1} 修复。', view.dataRootNotice.path, view.dataRootNotice.command) : t('本地数据仍在 {0}。如需迁移到新目录，请先退出 Nova，再运行 {1}（可选）。', view.dataRootNotice.path, view.dataRootNotice.command)) : '', 'codex-status': view.codexStatus?.status === 'ready' ? t('已连接 {0}', view.codexStatus.version) : t('未找到可用的 Codex CLI；可刷新或指定完整路径，Windows 支持 npm 安装的 codex.cmd。'), 'workspace-action-status': workspaceNote || t((view.managedWorkspaces?.recoveryStatus ?? 'idle') !== 'idle' ? '工作区原内容尚未安全恢复，后台保持停止；请先处理回滚' : ''), 'wake-word-status': t(view.wakeWord?.status === 'loading' ? '正在准备唤醒模型…' : view.wakeWord?.status === 'error' ? '唤醒模型不可用，请重试；可用托盘显示窗口。' : ''), 'capabilities-problems': (view.capabilities?.problems ?? []).join(' · '), 'coding-backend-title': GUIDANCE[view.codingBackend] ? t('{0} 配置', GUIDANCE[view.codingBackend][0]) : '', 'coding-backend-guidance': GUIDANCE[view.codingBackend] ? t(GUIDANCE[view.codingBackend][2]) : '', 'coding-config-label': GUIDANCE[view.codingBackend]?.[1] ?? '', 'coding-permission-note': view.codingBackend === 'pi' ? t('Pi 不支持逐项审批：询问模式下任务会被拒绝，不会自动改为 YOLO。') : GUIDANCE[view.codingBackend] ? t('审批由所选执行器在任务开始时协商；不支持当前审批模式时任务会被拒绝。') : '', 'coding-backend-status': view.codingBackends?.[view.codingBackend]?.binary === 'available' ? t('已找到可执行文件；登录状态尚未验证，会在任务开始时检查。') : t('未找到可执行文件，请安装或指定路径'), ...notes };
         if (id === 'codex-status')
             p['data-ready'] = view.codexStatus?.status === 'ready' ? '1' : '0';
         if (id.startsWith('badge-')) {
@@ -332,17 +333,6 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                 } if (id === 'integratedModel') {
                     stage({ integratedModel: value, ...(!NATIVE_VOICE_PROVIDERS[view.integratedProvider] && value !== view.integratedModel ? { integratedVoice: ({ openai: 'marin', gemini: 'Kore', stepfun: 'default' } as any)[view.integratedProvider] ?? (value.startsWith('qwen3.5-omni-') ? 'Ethan' : value === 'qwen-audio-3.1-realtime-plus' ? 'longanqian_v3.1' : 'longanqian') } : {}) });
                     return;
-                } if (id === 'conversation-vision-enabled') {
-                    void (async () => { try {
-                        if (value && await bridge.camera.requestPermission() !== 'granted')
-                            throw Error();
-                        if (currentView.current.pipelineMode === 'cascaded')
-                            stage({ conversationVisionEnabled: value });
-                    }
-                    catch {
-                        setNote('conversation-vision-status', t('摄像头权限未授予'));
-                    } })();
-                    return;
                 } endpointPatch({ [field]: value }); };
             }
             if (id === 'auto-hide-seconds') {
@@ -352,11 +342,6 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             }
             if (id === 'codexBinaryPath')
                 p.disabled = view.codexBinaryMode !== 'manual';
-            if (id === 'conversation-vision-enabled') {
-                const supported = view.pipelineMode === 'cascaded' && view.visionModels?.[view.cascadedLlmProvider]?.includes(view.cascadedLlmModels?.[view.cascadedLlmProvider]);
-                p.disabled = !supported;
-                p.checked = !!supported && view.conversationVisionEnabled === true;
-            }
             if (id.startsWith('compatible-') && id.endsWith('-preset')) {
                 const s = id.split('-')[1], profile = COMPATIBLE_STAGES.find((v: any) => v.stage === s)!;
                 p.value = custom[id] ?? '';
@@ -366,27 +351,8 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
             }
             if (id === 'integratedModel')
                 return createElement('select', p, ...integratedModels.map(v => <option key={v.value} value={v.value}>{v.label}</option>));
-            if (id === 'monitor-camera') {
-                p.disabled = view.capabilitiesDocument?.modules?.camera?.enabled === false;
-                const rows = [{ deviceId: '', label: t('系统默认摄像头') }, ...cameraDevices];
-                if (view.monitorCameraDeviceId && !rows.some(r => r.deviceId === view.monitorCameraDeviceId))
-                    rows.push({ deviceId: view.monitorCameraDeviceId, label: t('已选摄像头（未检测到）') });
-                return createElement('select', p, ...rows.map(v => <option key={v.deviceId} value={v.deviceId}>{v.label}</option>));
-            }
-            if (id === 'watch-model') {
-                const rows = Object.entries(view.visionModels ?? {}).flatMap(([provider, models]: any) => view.secretsPresent?.[({ qwen: 'dashscopeApiKey', ark: 'arkApiKey' } as any)[provider]] ? models.map((model: string) => ({ value: model, label: `${provider === 'qwen' ? 'Qwen' : t('豆包')} · ${model}` })) : []);
-                p.disabled = view.capabilitiesDocument?.modules?.camera?.enabled === false || !rows.length;
-                return createElement('select', p, <option value="" disabled>{t(rows.length ? '选择监控模型' : '请先配置视觉模型 API Key')}</option>, ...rows.map(r => <option key={r.value} value={r.value}>{r.label}</option>), view.watchModel && !rows.some(r => r.value === view.watchModel) ? <option disabled value={view.watchModel}>{t('{0}（当前不可选）', view.watchModel)}</option> : null);
-            }
         }
-        const actions: any = { 'coding-executor-configure': () => { setCategory('capabilities'); setExecutorPane('coding'); }, 'wake-word-retry': () => bridge?.wakeWord?.retry?.(), 'codex-rescan': () => maintain(() => api.rescanCodex(), 'rescan'), 'projects-repair': async () => { const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root))); setStatus(t(results.every(r => r?.status === 'ok') ? 'Projects 目录权限已修复' : '部分 Projects 目录无法修复，请检查路径是否存在')); }, 'workspace-open-current': () => maintain(() => api.openCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-current': () => maintain(() => api.clearCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-all': () => maintain(() => api.clearAllManagedWorkspaces(), 'workspace'), 'workspace-retry-recovery': () => maintain(async () => { const v = await api.retryBackend(); return { view: v, status: v?.managedWorkspaces?.recoveryStatus === 'idle' ? 'recovered' : 'recovery_failed' }; }, 'workspace'), 'camera-refresh': async () => { try {
-                const devices = await bridge.camera.listDevices();
-                setCameraDevices(devices);
-                setNote('camera-devices-status', devices.length ? '' : t('未检测到摄像头；授权并连接设备后重试'));
-            }
-            catch {
-                setNote('camera-devices-status', t('无法获取摄像头列表'));
-            } } };
+        const actions: any = { 'coding-executor-configure': () => { setCategory('capabilities'); setExecutorPane('coding'); }, 'wake-word-retry': () => bridge?.wakeWord?.retry?.(), 'codex-rescan': () => maintain(() => api.rescanCodex(), 'rescan'), 'projects-repair': async () => { const results = await Promise.all(['state', 'managed', 'workspace'].map(root => api.repairProjects(root))); setStatus(t(results.every(r => r?.status === 'ok') ? 'Projects 目录权限已修复' : '部分 Projects 目录无法修复，请检查路径是否存在')); }, 'workspace-open-current': () => maintain(() => api.openCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-current': () => maintain(() => api.clearCurrentManagedWorkspace(), 'workspace'), 'workspace-clear-all': () => maintain(() => api.clearAllManagedWorkspaces(), 'workspace'), 'workspace-retry-recovery': () => maintain(async () => { const v = await api.retryBackend(); return { view: v, status: v?.managedWorkspaces?.recoveryStatus === 'idle' ? 'recovered' : 'recovery_failed' }; }, 'workspace') };
         if (id.startsWith('voice-preset-') && ['import', 'export'].includes(id.slice(13)))
             actions[id] = async () => { const action = id.slice(13); try {
                 const r = await api.voicePreset(action, action === 'export' ? controller.snapshot().view : undefined);
@@ -413,7 +379,7 @@ export default function SettingsApp({ bridge = (window as any).novaPersonalAgent
                 setNote('probe-status-' + provider, t('无法确认服务能力，请先保存设置，并检查服务地址、连接和密钥。'));
             } };
         if (actions[id]) {
-            const disabled = id === 'workspace-clear-all' ? buttons.workspaceDisabled : ['workspace-open-current', 'workspace-clear-current'].includes(id) ? buttons.currentDisabled : id === 'workspace-retry-recovery' ? buttons.recoveryDisabled : id === 'camera-refresh' ? view.capabilitiesDocument?.modules?.camera?.enabled === false : snapshot.busy || maintenance;
+            const disabled = id === 'workspace-clear-all' ? buttons.workspaceDisabled : ['workspace-open-current', 'workspace-clear-current'].includes(id) ? buttons.currentDisabled : id === 'workspace-retry-recovery' ? buttons.recoveryDisabled  : snapshot.busy || maintenance;
             return <Action {...p} disabled={disabled} action={actions[id]}>{id === 'codex-rescan' ? <RefreshCw size={15} aria-hidden="true"/> : children.map(renderNode)}</Action>;
         }
         if (Object.hasOwn(text, id))

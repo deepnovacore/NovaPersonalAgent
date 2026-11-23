@@ -4,13 +4,13 @@
 
 <a href="../en/README.md"><ins>English</ins></a> | <a href="README.md"><ins>简体中文</ins></a> · <a href="../../README.zh-CN.md">仓库首页</a>
 
-[![Version](https://img.shields.io/badge/Version-v1.0.0-0f172a.svg)](../releases/v1.0.0.md)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-0f172a.svg)](../releases/v1.0.1.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](../../LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](../../package.json)
 
-**Nova Personal Agent（`v1.0.0`）使用与开发文档** — 双脑实时语音与文本交互、账本权威个人记忆、多执行器协同，以及桌面端与移动端（**NovaCore**）之间的端到端加密 Space 连接。
+**Nova Personal Agent（`v1.0.1`）使用与开发文档** — 双脑实时语音与文本交互、账本权威个人记忆、多执行器协同，以及桌面端与移动端（**NovaCore**）之间的端到端加密 Space 连接。
 
-[上手指南](getting-started.md) · [工作原理](architecture.md) · [支持矩阵](support-matrix.md) · [安全与隐私](security.md) · [v1.0.0 版本说明](../releases/v1.0.0.md)
+[上手指南](getting-started.md) · [工作原理](architecture.md) · [支持矩阵](support-matrix.md) · [安全与隐私](security.md) · [v1.0.1 版本说明](../releases/v1.0.1.md)
 
 </div>
 
@@ -25,7 +25,7 @@
 
 - **双脑协同运行时：** **前脑**保持实时语音与文本响应，**后脑**编排持久化任务循环、证据核验与随时接管/交还控制。
 - **本地宿主权威：** 模型密钥、权限审批、信息源连接与个人记忆全部保留在本地 Host（`0700` 私密目录）；记忆内容永远不具备指令授权效力。
-- **多执行器门控调度：** 在统一的宿主准入与审批门控下，调度代码执行（Codex + ACP）、桌面操作（Computer Use）、手机操作（`mobile.run`）与独立视觉监控（Loop Camera）。
+- **多执行器门控调度：** 在统一的宿主准入与审批门控下，调度代码执行（Codex + ACP）、桌面操作（Computer Use）、手机操作（`mobile.run`）与独立视觉监控（Loop Camera，仅运行时；v1.0 桌面应用暂不提供）。
 - **端到端加密 Space 连接：** 通过 Tailscale Serve 自动配置或自托管零知识 `relay`，将 iOS 与 Android 客户端（**NovaCore**）安全配对到桌面或无头 Host。
 
 ---
@@ -71,7 +71,7 @@
         <li><a href="executors/overview.md"><strong>执行器概览</strong></a> — 任务分发、资源租约与审批门控。</li>
         <li><a href="executors/coding.md"><strong>Coding 编程执行器</strong></a> — Codex app-server 与 ACP（OpenCode、CodeBuddy、Pi、DeepSeek Harness）。</li>
         <li><a href="executors/computer-use-build.md"><strong>Build 中的 Computer Use</strong></a> — macOS 与 Windows 受控桌面界面操作。</li>
-        <li><a href="../guides/mobile.md"><strong>Mobile Use（<code>mobile.run</code>，英文）</strong></a> — 原生 TypeScript Midscene SDK（<a href="../guides/autoglm.md">旧版 AutoGLM</a>）。</li>
+        <li><a href="../guides/mobile.md"><strong>Mobile Use（<code>mobile.run</code>，英文）</strong></a> — 原生 TypeScript Midscene SDK。</li>
         <li><a href="executors/loop-camera.md"><strong>Loop Camera</strong></a> — 独立摄像头条件监控。</li>
       </ul>
     </td>

@@ -1,7 +1,9 @@
 import {homedir} from 'node:os'
+import {environmentHome, legacyDataRootActive, mapLegacyDataPath, rebaseDataRootDefault} from './data-root.js'
 import {resolve} from 'node:path'
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import {CODING_BACKEND_IDS} from './coding-backends.js'
+import {CASCADED_ASR_PROVIDERS, CASCADED_LLM_PROVIDERS, CASCADED_TTS_PROVIDERS, INTEGRATED_PROVIDERS, requiredVoiceCredentials} from './voice-credentials.js'
 import {isIP} from 'node:net'
 import {
   DASHSCOPE_COMPATIBLE_BASE_URL,
@@ -39,11 +41,11 @@ export {
 export const proactivityPresetSchema = z.enum(['conservative', 'balanced', 'eager'])
 const pipelineModeSchema = z.enum(['integrated', 'cascaded'])
 const promptLanguageSchema = z.enum(['zh-CN', 'en'])
-const integratedProviderNameSchema = z.enum(['qwen', 'stepfun', 'openai', 'gemini', 'minicpm-o', 'personaplex'])
+const integratedProviderNameSchema = z.enum(INTEGRATED_PROVIDERS)
 const cascadedEndpointingProviderNameSchema = z.enum(['auto'])
-const cascadedAsrProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted', 'openai-compatible'])
-const cascadedLlmProviderNameSchema = z.enum(['qwen', 'ark', 'deepseek', 'openai', 'gemini', 'self-hosted', 'openai-compatible'])
-const cascadedTtsProviderNameSchema = z.enum(['volcengine', 'gemini', 'self-hosted', 'openai-compatible'])
+const cascadedAsrProviderNameSchema = z.enum(CASCADED_ASR_PROVIDERS)
+const cascadedLlmProviderNameSchema = z.enum(CASCADED_LLM_PROVIDERS)
+const cascadedTtsProviderNameSchema = z.enum(CASCADED_TTS_PROVIDERS)
 const qwenGuardHistoryRecoverySchema = z.enum(['none', 'packed'])
 const qwenGuardHistoryPairsSchema = z.union([z.literal(1), z.literal(2), z.literal(4)])
 /** Validity of a name is decided by assembly (`resolveExecutors`), which knows the registered adapters. */
@@ -218,8 +220,8 @@ export const settingsSchema = z.object({
   codex_prefix_args: z.array(z.string().min(1).max(32_768)).max(1).default([]),
   codex_api_key: z.string().nullable().default(null),
   codex_prewarm: z.boolean().default(true),
-  codex_managed_root: z.string().default('~/.nova-audio-agent/workspaces'),
-  codex_project_state_root: z.string().default('~/.nova-audio-agent'),
+  codex_managed_root: z.string().default('~/.nova-personal-agent/workspaces'),
+  codex_project_state_root: z.string().default('~/.nova-personal-agent'),
   coding_progress_narration: z.enum(['smart', 'continuous']).default('smart'),
   proactivity_preset: proactivityPresetSchema.default('balanced'),
   codex_working_interval: z.number().finite().min(5).max(600).default(30),
@@ -235,12 +237,12 @@ export const settingsSchema = z.object({
   search_provider: searchProviderSchema.default('tavily'),
   search_mcp_url: z.string().default(''),
   search_mcp_tool: z.string().default('web_search'),
-  knowledge_path: z.string().default('~/.nova-audio-agent/knowledge.sqlite'),
+  knowledge_path: z.string().default('~/.nova-personal-agent/knowledge.sqlite'),
   embedding_provider: embeddingProviderSchema.default('dashscope'),
   embedding_model: z.string().default('text-embedding-v4'),
   embedding_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
   embedding_api_key: z.string().nullable().default(null),
-  blackboard_path: z.string().min(1).default('~/.nova-audio-agent/blackboard.sqlite'),
+  blackboard_path: z.string().min(1).default('~/.nova-personal-agent/blackboard.sqlite'),
   blackboard_owner_id: z.string().min(1).max(512).default('local'),
   memory_prerecall_enabled: z.boolean().default(false),
   memory_consolidation_enabled: z.boolean().default(true),
@@ -252,10 +254,10 @@ export const settingsSchema = z.object({
   memory_extractors: z.array(z.enum(['ledger','voicemem'])).min(1).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
-  memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
+  memory_path: z.string().min(1).default('~/.nova-personal-agent/memory.sqlite'),
   memory_user_id: z.string().min(1).default('local'),
   // Existing v0.3 ledger location; the retired workspace graph is not enabled.
-  workspace_graph_path: z.string().min(1).default('~/.nova-audio-agent/workspace-graph.sqlite'),
+  workspace_graph_path: z.string().min(1).default('~/.nova-personal-agent/workspace-graph.sqlite'),
 }).strict()
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -364,7 +366,24 @@ export const RENAMED_ENVIRONMENT: Readonly<Record<string, string>> = {SURROGATE_
  * to one provider. Refuse the retired names instead of quietly sending one provider's request to
  * another provider's URL or key.
  */
+const REMOVED_AUTOGLM_VARIABLES: readonly string[] = [
+  'AUTOGLM_PYTHON', 'AUTOGLM_SOURCE_PATH', 'AUTOGLM_DEVICE_ID', 'AUTOGLM_DEVICE_TYPE', 'AUTOGLM_WDA_URL',
+  'AUTOGLM_BASE_URL', 'AUTOGLM_MODEL', 'AUTOGLM_API_KEY', 'AUTOGLM_MAX_STEPS', 'AUTOGLM_TIMEOUT_SECONDS',
+]
+
+/** The AutoGLM executor is removed: its variables and its executor name fail closed before any executor is built. */
+function rejectRemovedAutoGlm(environment: NodeJS.ProcessEnv): void {
+  const removed = REMOVED_AUTOGLM_VARIABLES.filter(name => stripLikePython(environment[name] ?? '') !== '')
+  const selected = [environment.EXECUTORS, environment.EXECUTOR]
+    .some(raw => (raw ?? '').split(',').some(name => stripLikePython(name).toLowerCase() === 'autoglm'))
+  if (removed.length === 0 && !selected) return
+  throw new ConfigurationError(
+    `${[...removed, ...(selected ? ['EXECUTORS=autoglm'] : [])].join(', ')} 已移除；AutoGLM 执行器已下线，请改用 mobile 执行器（EXECUTORS=mobile）`,
+  )
+}
+
 function rejectRemovedModelOverrides(environment: NodeJS.ProcessEnv): void {
+  rejectRemovedAutoGlm(environment)
   const removed = ['MODEL_BASE_URL', 'MODEL_API_KEY']
     .filter(name => stripLikePython(environment[name] ?? '') !== '')
   if (removed.length === 0) return
@@ -640,7 +659,30 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`, 'invalid_configuration', fields.some(field=>memoryConfigurationVariables.includes(field)) ? {code:'memory_configuration_invalid',variables:fields.filter(field=>memoryConfigurationVariables.includes(field)) as MemoryConfigurationVariable[]} : undefined)
   }
   resolveMemoryConnection(result.data)
+  rebaseDataRootDefaults(result.data, environment)
   return result.data
+}
+
+/** Defaulted data paths follow the legacy root until its one-time migration has run; explicit values never move. */
+const DATA_ROOT_DEFAULTS = [
+  ['codex_managed_root', 'CODEX_MANAGED_ROOT'],
+  ['codex_project_state_root', 'CODEX_PROJECT_STATE_ROOT'],
+  ['knowledge_path', 'KNOWLEDGE_PATH'],
+  ['blackboard_path', 'BLACKBOARD_PATH'],
+  ['memory_path', 'MEMORY_PATH'],
+  ['workspace_graph_path', 'MEMORY_LEDGER_PATH'],
+] as const
+
+function rebaseDataRootDefaults(settings: Settings, environment: NodeJS.ProcessEnv): void {
+  const home = environmentHome(environment)
+  if (!legacyDataRootActive(home)) {
+    // Migrated: explicit paths named under the legacy root open the moved data, never a second copy.
+    for (const [key] of DATA_ROOT_DEFAULTS) settings[key] = mapLegacyDataPath(settings[key], home)
+    return
+  }
+  for (const [key, variable] of DATA_ROOT_DEFAULTS) {
+    if (optionalString(environment[variable]) === undefined) settings[key] = rebaseDataRootDefault(settings[key], true)
+  }
 }
 
 export function resolveProactivity(settings: Settings): ProactivityParams {
@@ -1049,21 +1091,35 @@ export function withoutUncredentialedModules(registry: CapabilityRegistry, setti
   }}
 }
 
+/** Settings field holding each credential named by the shared voice-credential table. */
+const VOICE_CREDENTIAL_FIELDS: Readonly<Record<string, keyof Settings>> = Object.freeze({
+  DASHSCOPE_API_KEY: 'dashscope_api_key',
+  STEPFUN_API_KEY: 'stepfun_api_key',
+  OPENAI_API_KEY: 'openai_api_key',
+  GEMINI_API_KEY: 'gemini_api_key',
+  ARK_API_KEY: 'ark_api_key',
+  DEEPSEEK_API_KEY: 'deepseek_api_key',
+  OPENAI_COMPATIBLE_API_KEY: 'openai_compatible_api_key',
+  DOUBAO_BIGMODEL_API_KEY: 'doubao_bigmodel_api_key',
+  COMPATIBLE_ASR_API_KEY: 'compatible_asr_api_key',
+  COMPATIBLE_TTS_API_KEY: 'compatible_tts_api_key',
+})
+
 /** Mirrors requireIntegratedRealtime and requireCascadedCredentials without throwing, for first-run guidance. */
 export function describeMissingBlockingCredentials(settings: Settings, textConversations = false): {readonly pipeline: PipelineMode; readonly missing: readonly string[]} {
-  const present = (value: string | null) => stripLikePython(value ?? '') !== ''
-  if (!textConversations && settings.pipeline_mode === 'integrated') {
-    if (settings.integrated_provider === 'minicpm-o' || settings.integrated_provider === 'personaplex') return {pipeline:'integrated', missing:[]}
-    if (settings.integrated_provider === 'openai' || settings.integrated_provider === 'gemini') return {pipeline: 'integrated', missing: present(settings[`${settings.integrated_provider}_api_key`]) ? [] : [`${settings.integrated_provider.toUpperCase()}_API_KEY`]}
-    if (settings.integrated_provider === 'stepfun') return {pipeline: 'integrated', missing: present(settings.stepfun_api_key) ? [] : ['STEPFUN_API_KEY']}
-    return {pipeline: 'integrated', missing: present(settings.dashscope_api_key) ? [] : ['DASHSCOPE_API_KEY']}
+  const present = (name: string) => {
+    const field = VOICE_CREDENTIAL_FIELDS[name]
+    const value = field === undefined ? null : settings[field]
+    return typeof value === 'string' && stripLikePython(value) !== ''
   }
-  const llmField = cascadedCredentialField(settings.cascade_llm_provider)
-  return {pipeline: 'cascaded', missing: [...new Set([
-    ...(settings.cascade_llm_provider === 'self-hosted' || present(settings[llmField]) ? [] : [configurationFieldName(llmField)]),
-    ...(textConversations || settings.cascade_asr_provider === 'self-hosted' ? [] : settings.cascade_asr_provider === 'openai-compatible' ? (present(settings.compatible_asr_api_key) ? [] : ['COMPATIBLE_ASR_API_KEY']) : settings.cascade_asr_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) || settings.cascade_tts_provider === 'volcengine' ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
-    ...(textConversations || settings.cascade_tts_provider === 'self-hosted' ? [] : settings.cascade_tts_provider === 'openai-compatible' ? (present(settings.compatible_tts_api_key) ? [] : ['COMPATIBLE_TTS_API_KEY']) : settings.cascade_tts_provider === 'gemini' ? (present(settings.gemini_api_key) ? [] : ['GEMINI_API_KEY']) : (present(settings.doubao_bigmodel_api_key) ? [] : ['DOUBAO_BIGMODEL_API_KEY'])),
-  ])]}
+  const {pipeline, credentials} = requiredVoiceCredentials({
+    pipeline: settings.pipeline_mode,
+    integratedProvider: settings.integrated_provider,
+    asrProvider: settings.cascade_asr_provider,
+    llmProvider: settings.cascade_llm_provider,
+    ttsProvider: settings.cascade_tts_provider,
+  }, textConversations)
+  return {pipeline, missing: credentials.filter(name => !present(name))}
 }
 
 /** Host preflight over a launch environment; other configuration errors stay the runtime's to report. */

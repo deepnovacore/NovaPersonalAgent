@@ -7,6 +7,7 @@ import {backendSettings, publicSettings, normalizeSettings} from '../src/main/se
 import {applySettingsTransaction} from '../src/main/settings-apply.mjs'
 import {createLifecycleCoordinator} from '../src/main/desktop-startup.mjs'
 import {planSecretChange, rotationPayload} from '../src/main/credential-hot-apply.mjs'
+import {codingBlockedByCodex} from '../src/main/coding-settings.mjs'
 
 const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
 
@@ -15,7 +16,7 @@ async function applyKeyChange({before, after, failDelivery = false, backendConne
   const requests = []
   let restarted = 0
   const context = vm.createContext({
-    configuredSpaceModelsPath: () => null, currentSettings: normalizeSettings({}), settingsRestartPending: false, settingsRecoveryAvailable: false,
+    configuredSpaceModelsPath: () => null, codingBlockedByCodex, desktopConfig: null, codexStatus: {status: 'ready'}, currentSettings: normalizeSettings({}), settingsRestartPending: false, settingsRecoveryAvailable: false,
     runtimeCapabilities: {modules: {coding: {enabled: true}}},
     backendSettings, publicSettings, applySettingsTransaction, lifecycleCoordinator: createLifecycleCoordinator(),
     planSecretChange, rotationPayload, backendStatus: {state: backendConnected ? 'connected' : 'stopped'},

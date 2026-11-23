@@ -4,7 +4,7 @@ Import your own documents so Nova can search them and cite what it finds. The kn
 
 ## Turn it on
 
-The module is off by default. Enable it in the settings panel, or set `modules.knowledge.enabled` in `~/.nova-audio-agent/capabilities.json`. Embedding needs your DashScope credential.
+The module is off by default. Enable it in the settings panel, or set `modules.knowledge.enabled` in `~/.nova-personal-agent/capabilities.json`. Embedding needs your DashScope credential.
 
 ## Import documents
 
@@ -22,7 +22,7 @@ Importing is not instant. The panel shows each source and reports failed jobs; r
 
 ## Where your data goes
 
-Passages are stored locally at `~/.nova-audio-agent/knowledge.sqlite` (override with `KNOWLEDGE_PATH`).
+Passages are stored locally at `~/.nova-personal-agent/knowledge.sqlite` (override with `KNOWLEDGE_PATH`).
 
 **Local storage does not mean local processing.** To make documents searchable, their text is sent to the configured embedding service — DashScope `text-embedding-v4` by default. Import only documents you are willing to send there. Content that looks like a credential is rejected before it is stored or sent.
 

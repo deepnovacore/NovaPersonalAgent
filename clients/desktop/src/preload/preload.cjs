@@ -130,6 +130,14 @@ contextBridge.exposeInMainWorld('novaPersonalAgentDesktop', Object.freeze({
       ipcRenderer.on('nova:camera:enumerate', listener)
       return () => ipcRenderer.removeListener('nova:camera:enumerate', listener)
     },
+    /**
+     * Resolves to `{status}` (not a bare string), where status is one of
+     * 'granted' | 'denied' | 'restricted' | 'unknown'. 'unknown' means the OS
+     * cannot pre-query camera access (non-macOS or non-local source). Renderers
+     * answer the runtime through `answerCameraPermission()` (renderer/camera.mjs),
+     * which maps it to the wire enum.
+     * @returns {Promise<{status: 'granted'|'denied'|'restricted'|'unknown'}>}
+     */
     requestPermission: () => ipcRenderer.invoke('nova:camera:permission'),
   }),
   microphone: Object.freeze({

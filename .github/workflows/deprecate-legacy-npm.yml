@@ -35,6 +35,7 @@ jobs:
           node --input-type=module <<'JS'
           import {execFileSync} from 'node:child_process';
           import {setTimeout as delay} from 'node:timers/promises';
+          // Compatibility: the retired nova-audio-agent npm names keep pointing users at the renamed packages.
           const packages = [
             ['nova-audio-agent', 'nova-personal-agent'],
             ['nova-audio-agent-server', 'nova-personal-agent-server'],

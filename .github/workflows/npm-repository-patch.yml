@@ -44,6 +44,7 @@ jobs:
         run: |
           set -euo pipefail
           npm test --prefix cli
+          # Compatibility: the retired nova-audio-agent npm name is patched alongside the current packages.
           for name in nova-personal-agent nova-personal-agent-server nova-audio-agent; do
             mkdir -p "previous/$name" "packed/$name" "unpacked/$name"
             npm pack "$name@0.4.0" --pack-destination "previous/$name"

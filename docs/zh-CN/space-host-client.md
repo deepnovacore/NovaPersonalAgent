@@ -34,13 +34,13 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
    ```
 
    配置中包含 Host 私钥和内容密钥，不能提交仓库或放到 relay。`--data` 必须是全新路径，已有数据不会被迁移或覆盖。配置和数据所在目录只能本用户访问：缺失的目录会以 `0700` 创建，已存在的目录需先 `chmod 700`，否则 `init` 报 `space_directory_must_be_private`。若网络在首次创建时中断，保留已写出的配置，使用 `resume --config /private/new-space/config.json --bootstrap-file /private/relay-bootstrap` 重试同一身份；不要删除配置重建身份。
-3. 设置 `NOVA_SPACE_HOST_CONFIG=/private/new-space/config.json` 后启动桌面端。桌面的 Settings → Connections → Space 与手机可生成一次性二维码、核对手机完整指纹、确认绑定及撤销设备。
+3. 设置 `NOVA_SPACE_HOST_CONFIG=/private/new-space/config.json` 后启动桌面端。桌面的 设置 → 设备可生成一次性二维码、核对手机完整指纹、确认绑定及撤销设备。
 4. 手机选择“Client”，扫描二维码；在手机与桌面核对指纹后由桌面确认。Client 等待密钥投递后补拉展示数据。Host 离线时状态修改显示等待，聊天立即失败，不会等 Host 上线后悄悄发送。
 5. 在手机创建其他 Space 可选独立模式或另一 Host 的 Client；每个 Space 的凭据、缓存、意图和工具执行记录相互隔离。桌面切到另一个 Host Space 需使用另一份独立配置启动。
 
 ## 在桌面设置页创建空间
 
-在桌面“设置 → Space 与手机”选择默认的“Tailscale 自动配置”，点击“创建空间”。不需要手填 relay 地址或 bootstrap 凭据。
+在桌面“设置 → 设备”选择默认的“Tailscale 自动配置”，点击“创建空间”。不需要手填 relay 地址或 bootstrap 凭据。
 
 1. 电脑与手机需登录并连接同一个 Tailscale 网络，管理员需已开启 MagicDNS 与 HTTPS 证书。未安装、未连接或缺少 HTTPS 时，页面会提示对应操作。
 2. 桌面在应用数据目录 `space/relay/` 下运行 relay，只监听 `127.0.0.1`，使用 Tailscale Serve 提供 HTTPS。首次从 8443、9443、10443 选择空闲端口并固定地址；已有服务不会被覆盖，也不会启用 Funnel。若重启时该端口被其他服务占用，会保留数据并等待恢复，不会换地址使手机失联。
@@ -48,6 +48,14 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
 4. 创建成功后桌面重启后台并显示一次性二维码。手机选择“Client”扫码，仍需核对完整指纹并由电脑确认。配对码会过期，可重新生成。首次申请 HTTPS 证书可能超时；连接失败后重试会沿用原 Space 身份。
 5. 配置和数据固定保存在桌面应用数据目录的 `space/`（目录权限 `0700`），不能自选路径。新空间是全新数据，不迁移本机现有数据；Host 损坏后此 Space 无法恢复。Tailscale 节点域名改变时需恢复原地址，不会自动重建身份。
 6. 已经有 relay 时，选择“高级：使用已有 Relay”，填写 HTTPS origin 和至少 32 字符的 bootstrap 凭据（本机开发可用 loopback HTTP），仍走相同的创建和恢复流程。启动环境中已有 `NOVA_SPACE_HOST_CONFIG` 时以环境变量为准。
+
+## 实时语音（可选）
+
+已配对的 Client 可以发起实时语音通话，由 Host 的语音流水线处理。音频只经 Space relay 转发，手机与 Host 之间端到端加密。
+
+- 只有 relay 提供媒体转发时，Client 才显示通话按钮。桌面端托管的 Tailscale relay 默认开启媒体转发；自建 relay 需要在部署 JSON 中设置 `"media": {"enabled": true}`，详见 [Space voice media](../../relay/README.md)。通话在 relay 每个方向约占 300 MB/小时。
+- 默认只有 Space 所有者可以发起通话（Space 语音策略 `owner`，在 Space Host 配置中设置）。
+- 看不到按钮时，可能是 Host 离线或 relay 未开启媒体转发；听写仍可使用。
 
 ## 无桌面 Host（Linux / macOS）
 

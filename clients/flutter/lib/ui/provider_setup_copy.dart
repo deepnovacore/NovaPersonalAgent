@@ -62,10 +62,6 @@ class ProviderSetupCopy {
     '这家没有列出模型。填一个模型名再点「测试并保存」，用它试调用一次，通了才保存。',
     'This provider listed no models. Enter a model name and tap Test and save; it is saved only if the call works.',
   );
-  String get selfHostedNote => t(
-    '127.0.0.1 是这台手机自己。服务跑在电脑上时，需要用 https 地址（例如反向代理）才能连接，Nova 不会向不加密的局域网地址发送 Key。',
-    '127.0.0.1 is this phone itself. For a service on a computer, use an https address (for example behind a reverse proxy); Nova does not send keys over plain-http network addresses.',
-  );
   String get urlNeed => t('请填写接口地址', 'Enter the API URL');
   String get urlScheme => t(
     '接口地址要以 http:// 或 https:// 开头',

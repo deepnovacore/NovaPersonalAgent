@@ -25,6 +25,7 @@ test('the runtime package root does not export Codex authority bypasses or test 
     'windowsGuardianHelperForTest',
     'windowsGuardianHelperPath',
     'resolveCodexHostConfig',
+    'resolveCodingHostConfig',
     'codexCredentialApiKey',
     'createCodexAssemblyResource',
     'OwnedCodexBackendTransportFactory',

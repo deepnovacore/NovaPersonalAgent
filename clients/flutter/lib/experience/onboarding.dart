@@ -3,6 +3,7 @@ import '../space/space_storage.dart';
 import 'persona.dart';
 import 'experience_session.dart';
 import 'experience_code_dialog.dart';
+import '../ui/components.dart';
 
 class ExperienceChooser extends StatefulWidget {
   const ExperienceChooser({
@@ -81,8 +82,8 @@ class _ExperienceChooserState extends State<ExperienceChooser> {
   }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-    appBar: AppBar(title: Text(t('体验 Space', 'Experience Spaces'))),
+  Widget build(BuildContext context) => NovaPage(
+    title: t('体验 Space', 'Experience Spaces'),
     body: ListView(
       padding: const EdgeInsets.all(20),
       children: [

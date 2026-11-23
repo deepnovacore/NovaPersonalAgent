@@ -44,7 +44,7 @@ Plan 和 Build 的文字会话可以使用当前后端支持的记忆检索工�
 
 ## 数据存在哪里
 
-统一账本默认保存在 `~/.nova-audio-agent/workspace-graph.sqlite`，可用 `MEMORY_LEDGER_PATH` 指定其他位置。旧独立 mem0 使用 `~/.nova-audio-agent/memory.sqlite.mem0/`，不同用户的数据分别存放；新的 SDK 召回组合继续使用账本，并另建派生索引。
+统一账本默认保存在 `~/.nova-personal-agent/workspace-graph.sqlite`，可用 `MEMORY_LEDGER_PATH` 指定其他位置。旧独立 mem0 使用 `~/.nova-personal-agent/memory.sqlite.mem0/`，不同用户的数据分别存放；新的 SDK 召回组合继续使用账本，并另建派生索引。
 
 **本地保存不等于离线处理。** 整理信息和生成检索向量会调用你配置的模型服务，并向该服务发送相关文本。
 

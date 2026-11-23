@@ -18,11 +18,12 @@ import {createSystemNotifier} from './system-notifier.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
-import {codingBackendStatus} from './coding-settings.mjs'
+import {codingBackendStatus, codingBlockedByCodex} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode, createConfigurationAttempt, runConfigurationStage, configurationTimeout} from './desktop-startup.mjs'
 import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
-import {configureDesktopIdentity, DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
+import {configureDesktopIdentity, DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
+import {checkDataRootStartup, legacyDataRootNotice} from './local-data.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
 import {createSpaceCreateHandler} from './space-create.mjs'
@@ -158,10 +159,11 @@ import {probeApiKey, probeKeyForSettings, canProbeKey} from './key-probe.mjs'
 import {planSecretChange, rotationPayload} from './credential-hot-apply.mjs'
 import {SETUP_KEYS, setupCommit} from './setup-choice.mjs'
 import {selectedTextLlmProvider} from './settings-defaults.mjs'
+import {bindWindowShortcuts} from './window-shortcuts.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
 import { isValidCategory } from '../renderer/settings-categories.mjs'
 
-configureDesktopIdentity(app)
+configureDesktopIdentity(app, {log: message => console.error(`[desktop-identity] ${message}`)})
 const acceptance = installAcceptanceGate()
 let acceptanceFailure=false
 if(acceptance)assertOriginalProfilePaths({userData:app.getPath('userData'),blackboardPath:process.env.BLACKBOARD_PATH},{userData:acceptance.originalUserData,blackboardPath:acceptance.originalBlackboardPath})
@@ -169,7 +171,8 @@ registerAppScheme(protocol)
 
 // Windows groups taskbar/notification identity by AppUserModelID; a no-op
 // everywhere else, so it is set unconditionally rather than gated by platform.
-app.setAppUserModelId('ai.deepnovacore.nova-audio-agent.orb')
+// It matches electron-builder's appId so the installer's Start-menu shortcut carries the same identity.
+app.setAppUserModelId(DESKTOP_APP_ID)
 
 // Wayland has no global window positioning, so the orb is pinned to X11
 // (XWayland handles Wayland sessions transparently). These switches must be
@@ -523,6 +526,7 @@ function settingsView() {
       managedRoot: desktopConfig.managedRoot,
       workspace: desktopConfig.workspace,
     }) : null,
+    dataRootNotice,
     secretsPresent: effectivePresence,
     secretSources,
     keyringAvailable: hasPlaintextSecret(currentSettings) ? false : keyringAvailable,
@@ -871,14 +875,19 @@ async function applyDesktopSettings(payload, restart = false) {
   let beforeSecrets, secretPlan = {changed: [], rotations: [], needsRestart: false}, liveCredentialsFailed = false
   const withoutSecrets = settings => { const {secrets: _secrets, ...rest} = backendSettings(settings); return JSON.stringify(rest) }
   const liveReady = () => backendControl !== null && backendStatus.state === 'connected'
-  const changesRequireRestart = () => restart || recoveryPending || capabilitiesChanged
+  // The coding default is delivered live, except when it decides whether Coding runs at all:
+  // the launch environment turns the module on or off, so only a restart can apply that.
+  const codexReadiness = () => ({codexConfigurationError: desktopConfig?.codexConfigurationError, codexStatus})
+  const codingAvailabilityChanged = () => codingBlockedByCodex(previousSettings.codingBackend, codexReadiness())
+    !== codingBlockedByCodex(currentSettings.codingBackend, codexReadiness())
+  const changesRequireRestart = () => restart || recoveryPending || capabilitiesChanged || codingAvailabilityChanged()
     || withoutSecrets(previousSettings) !== withoutSecrets(currentSettings)
     || secretPlan.needsRestart || (secretPlan.rotations.length > 0 && !liveReady())
   let applied = await applySettingsTransaction({
     deferRestart: !restart,
     needsBackendRestart: () => pendingRestart || changesRequireRestart(),
     applyLive: async () => {
-      if (previousSettings.codingBackend !== currentSettings.codingBackend) await applyLiveCodingBackend(currentSettings.codingBackend)
+      if (previousSettings.codingBackend !== currentSettings.codingBackend && !codingAvailabilityChanged()) await applyLiveCodingBackend(currentSettings.codingBackend)
       // A failed hand-over keeps the saved key and asks for a restart instead of discarding the save.
       if (liveReady()) await applyLiveCredentials(secretPlan).catch(() => { liveCredentialsFailed = true })
     },
@@ -1389,10 +1398,11 @@ async function launchBackend(smokeChannel, onExit) {
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
   const codingEnabled = !acceptance && launchDocument?.modules?.coding?.enabled !== false
-  // Coding is optional: without a usable Codex CLI, including an unfinished manual path,
-  // the runtime starts with the coding module off.
-  const codingUnavailable = codingEnabled
-    && (Boolean(desktopConfig?.codexConfigurationError) || codexStatus.status !== 'ready')
+  // Coding readiness follows the selected backend. With Codex selected but no usable Codex CLI,
+  // including an unfinished manual path, the runtime starts with the coding module off. ACP
+  // backends never need the Codex CLI; their binary and login are checked by the task preflight.
+  const codingUnavailable = codingEnabled && codingBlockedByCodex(currentSettings?.codingBackend,
+    {codexConfigurationError: desktopConfig?.codexConfigurationError, codexStatus})
   const token = randomBytes(16).toString('hex')
   const workspace = desktopConfig?.workspace || process.cwd()
   let spawnedBackend = null
@@ -1567,7 +1577,28 @@ async function loadStartupSettings() {
   }
 }
 
+let dataRootNotice = null
+
+/**
+ * Startup never moves data: it only resolves the data root. A pending move journal (an interrupted
+ * `npa migrate-data`) stops the app here, before settings are read or any backend starts.
+ */
+function prepareLocalData() {
+  const gate = checkDataRootStartup({home: homedir()})
+  if (!gate.ok) {
+    dialog.showErrorBox('Nova Personal Agent cannot start',
+      `Moving your local data from\n${gate.legacyRoot}\nto\n${gate.root}\nis running or did not finish. Nothing has been deleted. `
+      + `Keep Nova closed and let \`npa migrate-data\` finish, or run it again in a terminal to finish or roll it back.`
+      + `\n\n${gate.lock ? `Migration lock: ${gate.lock}` : `Migration journal: ${gate.journal}`}`)
+    app.exit(1)
+    return false
+  }
+  dataRootNotice = legacyDataRootNotice({home: homedir()})
+  return true
+}
+
 async function startSelectedCamera(camera, smokeChannel) {
+  if (!prepareLocalData()) return
   settingsReady = await loadStartupSettings()
   setLanguage(currentSettings.language)
   initializeDesktopBootstrap(camera.source)
@@ -1782,6 +1813,7 @@ async function startSelectedCamera(camera, smokeChannel) {
     mainWindow.on('show', () => { if (personalCollapsed) orbWindow.setDormant(false) })
   }
   for (const window of windowsPresentation?.windows ?? [mainWindow]) bindPresentationShow(window)
+  for (const window of windowsPresentation?.windows ?? [mainWindow]) bindWindowShortcuts(window, {toggleMicrophone: () => sendToOrb('nova:microphone:toggle'), sleep: sleepOrb})
   setPersonalCollapsed(false)
 
   const windowShown = new Promise((resolveShown, rejectShown) => {
@@ -2543,12 +2575,6 @@ async function startSelectedCamera(camera, smokeChannel) {
   // that instead of leaving the user to wonder why the hotkey never fires.
   if (!shortcutRegistered) {
     console.warn('[nova-personal-agent-desktop] global shortcut unavailable on this session')
-  }
-  for (const [key, action] of [
-    ['Control+M', () => sendToOrb('nova:microphone:toggle')],
-    ['Control+L', sleepOrb],
-  ]) {
-    if (!globalShortcut.register(key, action)) console.warn(`[nova-personal-agent-desktop] shortcut unavailable: ${key}`)
   }
   backendSupervisor = createBackendSupervisor({
     start: onExit => launchBackend(smokeChannel, onExit),

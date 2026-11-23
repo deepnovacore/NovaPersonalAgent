@@ -168,6 +168,10 @@ class NovaApp extends StatelessWidget {
             phoneChannel: phoneChannel,
           )
         : SpaceRoot(
+            // Null in production: each Client Space screen opens its own
+            // native audio port, since one ChannelAudio owns the channel.
+            audio: audio,
+            requestMicrophone: requestMicrophone,
             standaloneBuilder: (_) =>
                 _WorkbenchShell(phoneChannel: phoneChannel),
             standalonePageBuilder: (space, onSwitch) => _WorkbenchShell(
@@ -2303,6 +2307,7 @@ class _WorkbenchShellState extends State<_WorkbenchShell> {
           onSwitch: widget.onSwitchSpace!,
           onSettings: _settings,
           settingsLabel: _t('设置', 'Settings'),
+          language: language,
         ),
         Expanded(
           child: MediaQuery.removePadding(

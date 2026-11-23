@@ -3,6 +3,7 @@ import {readFileSync,mkdirSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {RelayServer,type RelayServerOptions} from './server.js';
+import {MEDIA_DEFAULTS,type MediaOptions} from './media.js';
 
 export interface RelayDeploymentConfig {
   dataDirectory: string;
@@ -24,6 +25,8 @@ export interface RelayDeploymentConfig {
   globalRequestsPerMinute?: number;
   globalBootstrapPerMinute?: number;
   maxRateSources?: number;
+  /** Space voice media forwarding; disabled unless `media.enabled` is true. */
+  media?: Omit<MediaOptions,'clock'>;
 }
 export function loadDeploymentConfig(path: string): RelayServerOptions {
   const config=JSON.parse(readFileSync(path,'utf8')) as RelayDeploymentConfig;
@@ -48,7 +51,19 @@ export function loadDeploymentConfig(path: string): RelayServerOptions {
     ...(config.bootstrapPerMinute===undefined?{}:{bootstrapPerMinute:config.bootstrapPerMinute}),
     ...(config.globalRequestsPerMinute===undefined?{}:{globalRequestsPerMinute:config.globalRequestsPerMinute}),
     ...(config.globalBootstrapPerMinute===undefined?{}:{globalBootstrapPerMinute:config.globalBootstrapPerMinute}),
-    ...(config.maxRateSources===undefined?{}:{maxRateSources:config.maxRateSources})};
+    ...(config.maxRateSources===undefined?{}:{maxRateSources:config.maxRateSources}),
+    ...(config.media===undefined?{}:{media:mediaConfig(config.media)})};
+}
+function mediaConfig(value: unknown): Omit<MediaOptions,'clock'> {
+  if (!value || typeof value!=='object' || Array.isArray(value)) throw new Error('media must be an object');
+  const {clock:_clock,...rest}=value as MediaOptions;
+  if (rest.enabled!==undefined && typeof rest.enabled!=='boolean') throw new Error('media.enabled must be a boolean');
+  for (const [key,option] of Object.entries(rest)) {
+    if (key==='enabled') continue;
+    if (!(key in MEDIA_DEFAULTS)) throw new Error(`unknown media option: ${key}`);
+    if (typeof option!=='number' || !Number.isFinite(option) || option<=0) throw new Error(`media.${key} must be a positive number`);
+  }
+  return rest;
 }
 export async function main(args=process.argv.slice(2)):Promise<void> {
   if (args.length!==2 || args[0]!=='--config' || !args[1]) throw new Error('Usage: nova-relay --config /path/to/deployment.json');

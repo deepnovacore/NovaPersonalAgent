@@ -125,6 +125,11 @@ export class NotificationService {
             if (d.status !== 'sending' && d.status !== 'unknown' && !terminal.has(d.status))
                 d.status = 'cancelled';
         } }, notify); }
+    /** Erase queued notifications whose guard cites any of these evidence ids (permanent purge); sources need not be feed items. */
+    async invalidateByEvidence(refs: Iterable<string>, notify = true) { const gone = new Set(refs); const hit = (d: Delivery) => !d.invalidated && (d.notification.guard?.evidence_refs ?? []).some(ref => gone.has(ref)); if (!gone.size || !this.#state.deliveries.some(hit))
+        return; await this.#mutate(s => { for (const d of s.deliveries)
+        if (hit(d))
+            this.#erase(d); }, notify); }
     /** Manual resend acknowledges an uncertain prior request; normal dispatch never uses this. */
     async retry(id: string, confirmUnknown = false) { await this.#mutate(s => { const d = s.deliveries.find(d => d.id === id); if (!d || d.invalidated || terminal.has(d.status) || d.status === 'sending')
         throw Error('notification_not_retryable'); if (d.status === 'unknown' && !confirmUnknown)

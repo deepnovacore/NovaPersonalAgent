@@ -3,7 +3,7 @@
 <a id="行为边界"></a>
 # Coding：编码任务
 
-编码功能把项目任务交给编码执行器。默认使用 Codex；新会话也可以通过 ACP 交给 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness。使用前先在宿主计算机上安装所选执行器并登录。
+编码功能把项目任务交给编码执行器。默认使用 Codex；新会话也可以通过 ACP 交给 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness。使用前先在宿主计算机上安装所选执行器并登录。只需要安装你选中的执行器：只有选择 Codex 时才需要 Codex CLI。
 
 ## 从提出需求到返回结果
 
@@ -34,6 +34,19 @@
 
 先安装执行器，再用它自己的方式登录。Nova 会在 `PATH` 中查找 `opencode`、`codebuddy`、`pi-acp` 或 `dsh`；也可以在设置中填写绝对路径，或设置 `OPENCODE_ACP_BIN`、`CODEBUDDY_ACP_BIN`、`PI_ACP_BIN`、`DEEPSEEK_ACP_BIN`。登录状态和协议能力在任务开始时检查，而不是在启动时，所以某个执行器缺失不会影响语音和其他执行器。
 
+### 依赖
+
+编码模块是否可用取决于所选的执行器。选择 Codex 时，需要可用的 Codex CLI 并通过其沙箱检查，否则编码模块以关闭状态启动。选择 ACP 执行器时完全不需要 Codex CLI：编码模块直接使用该执行器启动，只有同时装了 Codex 时才会把它作为额外选项提供。在没有可用 Codex CLI 的电脑上把默认执行器切换为 Codex 会被拒绝，原来的默认执行器保持不变。所有执行器共用 Nova 管理的同一套工作区和项目目录，不需要为某个执行器单独配置。使用其他执行器时，`npa doctor` 会报告 Codex 缺失，但不会因此判定失败。
+
+Nova 针对特定的执行器版本做过测试，其中一些需要打一个小的兼容补丁，避免失败或中断的回合被当作回答重放。这些脚本会核对确切版本，遇到其他版本会拒绝执行；重新安装或升级执行器会清除补丁，之后需要再运行一次：
+
+| 执行器 | 测试过的版本 | 脚本（位于 `runtime/scripts/`） |
+| --- | --- | --- |
+| OpenCode | 1.19.0 | `install-opencode-recovery.mjs`（在 OpenCode 配置中安装恢复插件） |
+| Pi | `pi-acp` 0.0.34，`@earendil-works/pi-coding-agent` 与 `pi-ai` 1.1.0 | `patch-pi-acp.mjs`、`patch-acp-recovery.mjs` |
+| DeepSeek Harness | `@deepseek-ai/dsh-agent-loop` 0.2.0-rc.2 | `patch-acp-recovery.mjs` |
+| CodeBuddy（Windows） | `@tencent-ai/codebuddy-code` 2.164.0 | `patch-codebuddy-recovery.mjs` |
+
 各执行器目前的能力：
 
 | | Codex | OpenCode | CodeBuddy | Pi | DeepSeek Harness |
@@ -46,7 +59,7 @@
 | 询问模式沙箱（仅限工作区文件、不联网） | 支持 | 不支持 | 不支持 | 不支持 | 不支持 |
 | 你授权的 MCP 工具 | 支持 | 支持 | 支持 | 不支持（有授权工具时拒绝任务） | 支持 |
 
-询问模式对 ACP 执行器的含义比对 Codex 窄。对 Codex，Nova 会把执行器限制在工作区内且不能联网，需要审批的命令或文件修改执行前也会先问你。对 ACP 执行器，Nova 只能回应执行器主动发来的权限请求，不会限制它的文件和网络访问；哪些操作需要询问，由执行器自己的权限设置决定。执行器自身配置里免询问放行的操作照常执行；DeepSeek Harness 启动时没有权限参数，按它自己的默认行为处理。需要 Codex 那样的限制时请使用 Codex，或只在你愿意让它修改的工作区和账号里运行 ACP 执行器。
+询问模式对 ACP 执行器的含义比对 Codex 窄。对 Codex，Nova 会把执行器限制在工作区内且不能联网，需要审批的命令或文件修改执行前也会先问你。对 ACP 执行器，Nova 只能回应执行器主动发来的权限请求，不会限制它的文件和网络访问；哪些操作需要询问，由执行器自己的权限设置决定。执行器自身配置里免询问放行的操作照常执行。执行器接受权限参数时，Nova 会传入当前模式：OpenCode 通过 `OPENCODE_PERMISSION`，CodeBuddy 通过 `--permission-mode default` 或 `--dangerously-skip-permissions`，DeepSeek Harness 通过 `DSH_PERMISSION_MODE`，询问模式下为 `read-only`，完全访问模式下为 `danger-full-access`。需要 Codex 那样的限制时请使用 Codex，或只在你愿意让它修改的工作区和账号里运行 ACP 执行器。
 
 对 ACP 执行器，执行中追加要求会明确返回“不支持”；Nova 不会用“取消后重新开一个任务”来冒充。如果执行器找不到要恢复的会话，这个会话仍保留在列表里，修好登录或配置后可以再试。
 

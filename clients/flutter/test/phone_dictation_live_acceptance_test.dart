@@ -2,6 +2,9 @@
 // Native capture/permissions are injected, so this is NOT microphone, acoustic,
 // device, AEC, speech-playback, LLM, TTS, or message-send acceptance.
 // Reads only NOVA_DICTATION_LIVE_CONFIG, never application secure storage.
+@Tags(['live'])
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

@@ -1,7 +1,9 @@
+import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
+import { assertNoPendingDataRootMigration, dataRootPaths } from './data-root.mjs'
 
-export const PRODUCT_VERSION = '1.0.0'
+export const PRODUCT_VERSION = '1.0.1'
 export const RELEASE_REPOSITORY = 'deepnovacore/NovaPersonalAgent'
 
 export function resolveTarget(platform = process.platform, arch = process.arch, version = PRODUCT_VERSION) {
@@ -30,7 +32,37 @@ export function releaseRoot({
   version = PRODUCT_VERSION,
   target = resolveTarget(),
 } = {}) {
-  return join(home, '.nova-audio-agent', 'cli', 'releases', version, target.id)
+  // Always the new root: only the desktop migrates, and it cannot move a legacy root it is running from. A pending
+  // migration refuses here, before anything is downloaded or created.
+  assertNoPendingDataRootMigration(home)
+  return join(dataRootPaths(home).root, 'cli', 'releases', version, target.id)
+}
+
+export const DESKTOP_STORAGE_NAME = 'Nova Personal Agent'
+// Compatibility: the profile written by builds before the identity change; existing installs keep using it in place.
+export const LEGACY_DESKTOP_STORAGE_NAME = 'Nova Audio Agent Ambient Orb'
+export const DESKTOP_IDENTITY_FILE = 'desktop-identity.json'
+
+export function desktopAppData({platform = process.platform, home = homedir(), environment = process.env} = {}) {
+  if (platform === 'darwin') return join(home, 'Library', 'Application Support')
+  if (platform === 'win32') return environment.APPDATA || join(home, 'AppData', 'Roaming')
+  return environment.XDG_CONFIG_HOME || join(home, '.config')
+}
+
+/** Every desktop profile directory a build of any age may hold open. */
+export function desktopProfileDirectories({platform = process.platform, home = homedir(), environment = process.env} = {}) {
+  const appData = desktopAppData({platform, home, environment})
+  return [DESKTOP_STORAGE_NAME, LEGACY_DESKTOP_STORAGE_NAME, '@nova-personal-agent/desktop', '@nova-audio-agent/ambient-orb']
+    .map(name => join(appData, name))
+}
+
+function newIdentityProfile(directory) {
+  try {
+    const record = JSON.parse(readFileSync(join(directory, DESKTOP_IDENTITY_FILE), 'utf8'))
+    return record?.version === 1 && typeof record.safeStorageName === 'string' && record.safeStorageName !== ''
+  } catch {
+    return false
+  }
 }
 
 export function desktopSettingsPath({
@@ -38,15 +70,14 @@ export function desktopSettingsPath({
   home = homedir(),
   environment = process.env,
 } = {}) {
-  // Stable storage identity shared with the renamed desktop (including encrypted settings).
-  const product = 'Nova Audio Agent Ambient Orb'
-  if (platform === 'darwin') {
-    return join(home, 'Library', 'Application Support', product, 'ambient-orb-settings.json')
-  }
-  if (platform === 'win32') {
-    const appData = environment.APPDATA || join(home, 'AppData', 'Roaming')
-    return join(appData, product, 'ambient-orb-settings.json')
-  }
-  const config = environment.XDG_CONFIG_HOME || join(home, '.config')
-  return join(config, product, 'ambient-orb-settings.json')
+  // Same order as a packaged desktop: a profile created under the new identity; else the existing profile chosen as
+  // before the identity change (legacy, or the source profile when only it has settings); else the new profile.
+  const appData = desktopAppData({platform, home, environment})
+  const current = join(appData, DESKTOP_STORAGE_NAME)
+  const legacy = join(appData, LEGACY_DESKTOP_STORAGE_NAME)
+  const source = join(appData, '@nova-audio-agent/ambient-orb')
+  const file = 'ambient-orb-settings.json'
+  if (newIdentityProfile(current)) return join(current, file)
+  const existing = !existsSync(join(legacy, file)) && existsSync(join(source, file)) ? source : legacy
+  return existsSync(existing) ? join(existing, file) : join(current, file)
 }

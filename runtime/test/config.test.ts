@@ -92,6 +92,17 @@ test('the retired generic model URL and key are refused explicitly', () => {
   assert.doesNotThrow(() => loadSettings({MODEL_BASE_URL: '', MODEL_API_KEY: '  '}))
 })
 
+test('the removed AutoGLM executor and its variables fail closed before any executor is built', () => {
+  for (const executors of ['autoglm', 'mobile,autoglm', ' AutoGLM ']) {
+    assert.throws(() => loadSettings({EXECUTORS: executors}), /EXECUTORS=autoglm 已移除/u)
+  }
+  assert.throws(() => loadSettings({EXECUTOR: 'autoglm'}), /EXECUTORS=autoglm 已移除/u)
+  assert.throws(() => loadSettings({AUTOGLM_API_KEY: 'secret-value'}), error =>
+    error instanceof Error && error.message.includes('AUTOGLM_API_KEY 已移除') && !error.message.includes('secret-value'))
+  assert.throws(() => loadSettings({AUTOGLM_DEVICE_ID: 'device'}), /AUTOGLM_DEVICE_ID 已移除/u)
+  assert.doesNotThrow(() => loadSettings({AUTOGLM_API_KEY: '  ', EXECUTORS: 'mobile'}))
+})
+
 test('a monitor preset loads its own provider credential independently of the conversation provider', () => {
   const integrated = loadSettings({WATCH_MODEL: 'doubao-seed-2-0-pro-260215', ARK_API_KEY: 'ark-test'})
   assert.equal(integrated.ark_api_key, 'ark-test')
@@ -162,9 +173,9 @@ test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Fl
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
-    knowledgePath: '~/.nova-audio-agent/knowledge.sqlite',
+    knowledgePath: '~/.nova-personal-agent/knowledge.sqlite',
     memoryConnection: 'local',
-    memoryPath: '~/.nova-audio-agent/memory.sqlite',
+    memoryPath: '~/.nova-personal-agent/memory.sqlite',
     memoryUserId: 'local',
   })
 })
@@ -515,8 +526,8 @@ test('selected Codex settings preserve the established host environment defaults
     binary: 'codex',
     apiKey: null,
     prewarm: true,
-    managedRoot: '~/.nova-audio-agent/workspaces',
-    stateRoot: '~/.nova-audio-agent',
+    managedRoot: '~/.nova-personal-agent/workspaces',
+    stateRoot: '~/.nova-personal-agent',
   })
   assert.equal(Object.hasOwn(defaults, 'codex_projects_enabled'), false)
 

@@ -6,7 +6,7 @@ Executors run background work while the foreground conversation continues. Nova 
 |---|---|---|
 | [Coding](coding.md) | Write code, edit files and run commands in an approved project | Codex app-server & ACP agents (OpenCode, CodeBuddy, Pi, DeepSeek Harness) integrated |
 | [Computer Use](computer-use-build.md) | Operate graphical interfaces under approval | Build-integrated & standalone computer executors |
-| [Mobile Use](../../guides/mobile.md) | Run supervised phone automation (`mobile.run`) | Native TypeScript Midscene SDK (`autoglm-phone`) & legacy AutoGLM bridge |
+| [Mobile Use](../../guides/mobile.md) | Run supervised phone automation (`mobile.run`) | Native TypeScript Midscene SDK (`autoglm-phone`) |
 | [Loop Camera](loop-camera.md) | Observe a selected camera and report when a condition is met | Native camera and independent vision model integrated |
 
 <picture>

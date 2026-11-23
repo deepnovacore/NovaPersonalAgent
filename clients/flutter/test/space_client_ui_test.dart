@@ -7,6 +7,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/ui/app.dart' show BottomAppBarTabs;
 import 'package:nova_mobile/ui/components.dart';
 import 'support/space_client_fixture.dart';
+import 'support/fake_audio.dart';
+import 'package:nova_mobile/conversation/phone_dictation.dart';
+import 'package:nova_mobile/voice/audio_owner.dart';
+import 'package:nova_mobile/space/client_state.dart'
+    show SpaceClientState, approvalResolveKind;
 import 'package:nova_mobile/ui/settings_sheet.dart';
 import 'package:nova_mobile/ui/pet_avatar.dart';
 import 'package:nova_mobile/ui/conversation_home.dart';
@@ -14,6 +19,45 @@ import 'package:nova_mobile/ui/timeline_page.dart';
 import 'package:nova_mobile/ui/timeline_briefs.dart';
 import 'package:nova_mobile/ui/workbench_page.dart';
 import 'remote_model_settings_backend_test.dart' show fixture;
+
+/// Dictation the test drives by hand: it records, transcribes and emits text
+/// only when told, so a late transcript can be delivered at any moment.
+class ScriptedDictation extends PhoneDictation {
+  ScriptedDictation(ValueChanged<String> onText)
+    : super(
+        onText: onText,
+        audio: FakeAudio(),
+        requestMicrophone: () async => true,
+        audioOwner: AudioOwner(),
+        readConfiguration: () async => null,
+      );
+  @override
+  Future<void> begin(String language) async {
+    recording = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> finish() async {
+    recording = false;
+    transcribing = true;
+    notifyListeners();
+  }
+
+  @override
+  Future<void> cancel() async {
+    recording = false;
+    transcribing = false;
+    notifyListeners();
+  }
+
+  /// Delivers [text] as the ASR result and ends the run.
+  void emit(String text) {
+    transcribing = false;
+    onText(text);
+    notifyListeners();
+  }
+}
 
 void main() {
   setUpAll(
@@ -589,5 +633,324 @@ void main() {
     addTearDown(tester.view.resetViewInsets);
     await tester.pump();
     expect(find.byType(BottomAppBarTabs), findsNothing);
+  });
+
+  Map<String, dynamic> approval(String id, {int? expiresInMs = 60000}) => {
+    'id': id,
+    'conversation_id': 'chat:main',
+    'summary': 'Run npm test in the project',
+    'kind': 'command_execution',
+    'allowed_decisions': ['accept', 'acceptForSession', 'decline'],
+    'expires_at': expiresInMs == null
+        ? null
+        : DateTime.now().millisecondsSinceEpoch + expiresInMs,
+  };
+
+  testWidgets(
+    'Host approval card renders from the snapshot and sends approval.resolve',
+    (tester) async {
+      final state = seededState()
+        ..snapshot['owner'] = true
+        ..snapshot['pending_approvals'] = [approval('ap1')];
+      await pumpClient(tester, state);
+      expect(find.text('Run npm test in the project'), findsOneWidget);
+      expect(find.text('需要你的确认 · 运行命令'), findsOneWidget);
+      // acceptForSession is not offered: the Host only resolves once.
+      expect(find.text('允许'), findsOneWidget);
+      expect(find.text('拒绝'), findsOneWidget);
+      await tester.tap(find.byKey(const ValueKey('space.approval.ap1.accept')));
+      await tester.pump();
+      await tester.pump();
+      final intent = state.pending.singleWhere(
+        (p) => p['kind'] == approvalResolveKind,
+      );
+      expect(intent['input'], {
+        'conversation_id': 'chat:main',
+        'approval_id': 'ap1',
+        'approved': true,
+      });
+      // While the decision is in flight the buttons cannot send it twice.
+      expect(
+        tester
+            .widget<FilledButton>(
+              find.byKey(const ValueKey('space.approval.ap1.accept')),
+            )
+            .onPressed,
+        isNull,
+      );
+      await state.apply({
+        'v': 1,
+        'type': 'receipt',
+        'op_id': intent['op_id'],
+        'status': 'rejected',
+        'error': 'approval_expired',
+      });
+      await tester.pump();
+      expect(find.text('确认已过期，电脑未执行该操作。'), findsOneWidget);
+      await tester.pump();
+      expect(
+        state.pending.where((p) => p['op_id'] == intent['op_id']),
+        isEmpty,
+      );
+    },
+  );
+
+  testWidgets('a denied approval reports the Host answer and the card leaves', (
+    tester,
+  ) async {
+    final state = seededState()
+      ..snapshot['owner'] = true
+      ..snapshot['schema_version'] = 1
+      ..snapshot['pending_approvals'] = [approval('ap2')];
+    await pumpClient(tester, state);
+    await tester.tap(find.byKey(const ValueKey('space.approval.ap2.decline')));
+    await tester.pump();
+    final intent = state.pending.singleWhere(
+      (p) => p['kind'] == approvalResolveKind,
+    );
+    expect((intent['input'] as Map)['approved'], isFalse);
+    await state.apply({
+      'v': 1,
+      'type': 'receipt',
+      'op_id': intent['op_id'],
+      'status': 'accepted',
+      'snapshot': {
+        ...state.snapshot,
+        'revision': 99,
+        'pending_approvals': <Object>[],
+      },
+    });
+    await tester.pump();
+    expect(find.text('已拒绝'), findsOneWidget);
+    expect(find.text('Run npm test in the project'), findsNothing);
+  });
+
+  testWidgets('an expired approval card cannot be decided', (tester) async {
+    final state = seededState()
+      ..snapshot['owner'] = true
+      ..snapshot['pending_approvals'] = [approval('ap3', expiresInMs: -1000)];
+    await pumpClient(tester, state);
+    expect(find.text('已过期，电脑不会执行。'), findsOneWidget);
+    expect(
+      tester
+          .widget<FilledButton>(
+            find.byKey(const ValueKey('space.approval.ap3.accept')),
+          )
+          .onPressed,
+      isNull,
+    );
+  });
+
+  testWidgets('task approvals also appear on the tasks tab', (tester) async {
+    final state = seededState()
+      ..snapshot['owner'] = true
+      ..snapshot['pending_approvals'] = [
+        {...approval('ap4'), 'conversation_id': 'topic:other'},
+      ];
+    await pumpClient(tester, state);
+    expect(find.text('Run npm test in the project'), findsNothing);
+    await tester.tap(find.text('任务').last);
+    await tester.pump();
+    expect(find.text('Run npm test in the project'), findsOneWidget);
+  });
+
+  testWidgets('dictation is wired into the Client Space composer', (
+    tester,
+  ) async {
+    final audio = FakeAudio();
+    var asked = 0;
+    await pumpClient(
+      tester,
+      seededState(),
+      audio: audio,
+      requestMicrophone: () async {
+        asked++;
+        return false;
+      },
+    );
+    final mic = find.byKey(const ValueKey('space.dictation.mic'));
+    expect(mic, findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.ancestor(of: mic, matching: find.byType(Row)).first,
+        matching: find.byType(TextField),
+      ),
+      findsOneWidget,
+    );
+    await tester.tap(mic);
+    await tester.pump();
+    expect(find.text('按住麦克风说话，松开后转成文字'), findsOneWidget);
+    final gesture = await tester.startGesture(tester.getCenter(mic));
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    await tester.pump();
+    // Holding the microphone starts a dictation run in the composer.
+    expect(
+      find.byKey(const ValueKey('space.dictation.status')),
+      findsOneWidget,
+    );
+    expect(find.text('松开后转为文字'), findsOneWidget);
+    await gesture.up();
+    await tester.pump();
+    // Releasing before capture began cancels it: no audio, no microphone prompt.
+    expect(find.byKey(const ValueKey('space.dictation.status')), findsNothing);
+    expect(audio.startCount, 0);
+    expect(asked, 0);
+  });
+
+  testWidgets('without audio inputs the composer shows no microphone', (
+    tester,
+  ) async {
+    await pumpClient(tester, seededState());
+    expect(find.byKey(const ValueKey('space.dictation.mic')), findsNothing);
+  });
+
+  Future<ScriptedDictation> pumpDictation(
+    WidgetTester tester,
+    SpaceClientState state,
+  ) async {
+    late ScriptedDictation dictation;
+    await pumpClient(
+      tester,
+      state,
+      createDictation: (onText) => dictation = ScriptedDictation(onText),
+    );
+    return dictation;
+  }
+
+  Future<TestGesture> holdMic(WidgetTester tester) async {
+    final gesture = await tester.startGesture(
+      tester.getCenter(find.byKey(const ValueKey('space.dictation.mic'))),
+    );
+    await tester.pump(const Duration(milliseconds: 600));
+    await tester.pump();
+    return gesture;
+  }
+
+  IconButton sendButton(WidgetTester tester) => tester.widget<IconButton>(
+    find.widgetWithIcon(IconButton, CupertinoIcons.arrow_up),
+  );
+
+  testWidgets('Send stays disabled while dictating and a late transcript '
+      'never restores sent text', (tester) async {
+    final state = seededState();
+    final dictation = await pumpDictation(tester, state);
+    await tester.enterText(find.byType(TextField), 'draft');
+    await tester.pump();
+    expect(sendButton(tester).onPressed, isNotNull);
+    final gesture = await holdMic(tester);
+    expect(dictation.recording, isTrue);
+    expect(sendButton(tester).onPressed, isNull, reason: 'recording');
+    await gesture.up();
+    await tester.pump();
+    expect(dictation.transcribing, isTrue);
+    expect(sendButton(tester).onPressed, isNull, reason: 'transcribing');
+    dictation.emit('spoken words');
+    await tester.pump();
+    expect(find.text('draft\nspoken words'), findsOneWidget);
+    expect(sendButton(tester).onPressed, isNotNull);
+    await tester.tap(find.widgetWithIcon(IconButton, CupertinoIcons.arrow_up));
+    await tester.pump();
+    await tester.pump();
+    final afterSend = tester
+        .widget<TextField>(find.byType(TextField))
+        .controller!
+        .text;
+    // A stale ASR callback after sending must not put the old text back.
+    dictation.emit('late duplicate');
+    await tester.pump();
+    final composer = tester
+        .widget<TextField>(find.byType(TextField))
+        .controller!;
+    expect(composer.text, afterSend);
+    expect(composer.text, isNot(contains('late duplicate')));
+  });
+
+  testWidgets('a transcript started in one task never lands in another', (
+    tester,
+  ) async {
+    final state = seededState()
+      ..snapshot['conversations'] = [
+        {'id': 'chat:main', 'kind': 'main', 'mode': 'chat'},
+        {
+          'id': 'topic:a',
+          'kind': 'topic',
+          'mode': 'chat',
+          'title': 'Task A',
+          'preview': 'Preview A',
+          'updated_at': '2026-11-01T10:00:01Z',
+        },
+        {
+          'id': 'topic:b',
+          'kind': 'topic',
+          'mode': 'chat',
+          'title': 'Task B',
+          'preview': 'Preview B',
+          'updated_at': '2026-11-01T10:00:02Z',
+        },
+      ];
+    final dictation = await pumpDictation(tester, state);
+    await tester.tap(find.text('任务').last);
+    await tester.pump();
+    await tester.tap(find.text('Task A'));
+    await tester.pump();
+    final gesture = await holdMic(tester);
+    await gesture.up();
+    await tester.pump();
+    expect(dictation.transcribing, isTrue);
+    // Leaving A ends its dictation run before B opens.
+    await tester.tap(find.byTooltip('返回任务'));
+    await tester.pump();
+    expect(dictation.busy, isFalse);
+    await tester.tap(find.text('Task B'));
+    await tester.pump();
+    dictation.emit('meant for A');
+    await tester.pump();
+    expect(
+      tester.widget<TextField>(find.byType(TextField)).controller!.text,
+      isEmpty,
+    );
+  });
+
+  testWidgets('32 long approval cards on the tasks tab stay reachable', (
+    tester,
+  ) async {
+    final summary = List.filled(
+      12,
+      'Run a long verification command',
+    ).join(' ');
+    final state = seededState()
+      ..snapshot['owner'] = true
+      ..snapshot['pending_approvals'] = [
+        for (var i = 0; i < 32; i++)
+          {
+            ...approval('bulk$i'),
+            'conversation_id': 'topic:$i',
+            'summary': '$i $summary',
+          },
+      ];
+    await pumpClient(tester, state);
+    await tester.tap(find.text('任务').last);
+    await tester.pump();
+    expect(tester.takeException(), isNull, reason: 'no overflow');
+    final last = find.byKey(const ValueKey('space.approval.bulk31.accept'));
+    await tester.scrollUntilVisible(
+      last,
+      300,
+      scrollable: find.descendant(
+        of: find.byKey(const ValueKey('space.tasks.approvals')),
+        matching: find.byType(Scrollable),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(last);
+    await tester.pump();
+    expect(
+      state.pending
+          .where((p) => p['kind'] == approvalResolveKind)
+          .map((p) => (p['input'] as Map)['approval_id']),
+      ['bulk31'],
+    );
+    expect(tester.takeException(), isNull);
   });
 }

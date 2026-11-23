@@ -501,7 +501,7 @@ export function buildAssembly(options: AssemblyOptions): Assembly {
       rankNews: observeOperation('news',createJevNewsRanker(jev)),
       // Only without an OpenRouter key; the host decides per ranking whether the user still allows it.
       ...(jev.apiKey.trim()?{}:{rankNewsFallback: observeOperation('news',createNewsRanker(supportGateway,routedSettings.support_model))}),
-      understand: observeOperation('understanding',createUnderstandingPipeline({gateway:supportGateway,model:routedSettings.support_model,judge:createJevJudge(jev)})),
+      understand: observeOperation('understanding',createUnderstandingPipeline({gateway:supportGateway,model:routedSettings.support_model,...(jev.apiKey.trim()?{judge:createJevJudge(jev)}:{})})),
       prepareBrief: observeOperation('digest',writer.prepareBrief.bind(writer)),
       prepareProposal: observeOperation('proactivity',writer.prepareProposal.bind(writer)),
       summarizeMemory: observeOperation('memory',writer.summarizeMemory.bind(writer)),

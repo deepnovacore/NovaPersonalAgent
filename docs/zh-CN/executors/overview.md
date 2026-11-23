@@ -7,7 +7,7 @@
 |---|---|---|
 | [Coding](coding.md) | 在已批准的项目中写代码、修改文件、运行命令 | 已接入 Codex app-server 及 ACP（OpenCode、CodeBuddy、Pi、DeepSeek Harness） |
 | [Computer Use](computer-use-build.md) | 在审批下操作图形界面 | 已接入 Build 内置及独立桌面执行器 |
-| [Mobile Use](../../guides/mobile.md) | 受控执行手机端操作（`mobile.run`） | 原生 TypeScript Midscene SDK（`autoglm-phone`）及旧版 AutoGLM 桥接 |
+| [Mobile Use](../../guides/mobile.md) | 受控执行手机端操作（`mobile.run`） | 原生 TypeScript Midscene SDK（`autoglm-phone`） |
 | [Loop Camera](loop-camera.md) | 观察指定摄像头，条件满足时上报 | 已接入原生摄像头与独立视觉模型 |
 
 <picture>

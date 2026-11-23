@@ -32,9 +32,9 @@ From the repository root:
 
 ```sh
 npm ci
-npm run build --workspace @nova-audio-agent/runtime
+npm run build --workspace @nova-personal-agent/runtime
 node --test clients/desktop/test/orb-skins.test.mjs clients/desktop/test/orb-particle-core.test.mjs clients/desktop/test/settings-store.test.mjs clients/desktop/test/settings-panel.test.mjs clients/desktop/test/app-protocol.test.mjs clients/desktop/test/capabilities-settings.test.mjs clients/desktop/test/settings-apply.test.mjs clients/desktop/test/orb-visual.test.mjs clients/desktop/test/palette-hover.test.mjs
-npm exec --workspace @nova-audio-agent/desktop -- electron scripts/orb-skin-smoke.mjs
+npm exec --workspace @nova-personal-agent/desktop -- electron scripts/orb-skin-smoke.mjs
 ```
 
 The Chromium smoke uses isolated settings and no audio/provider services. It checks invalid import, preview, discard, save, reload, removal and renderer errors, and writes `output/orb-skin-settings.png`. It is not an end-to-end voice-call or installer release test.

@@ -1,5 +1,6 @@
 import {snapshotRegularFile, sameSnapshot, type FileSnapshot} from '../storage/native-resource-snapshot.js'
 import {createProjectNodeFiles} from './project-node-files.js'
+import {DATA_ROOT_NAME, LEGACY_DATA_ROOT_NAME} from '../config/data-root.js'
 import {constants as fsConstants} from 'node:fs'
 import {
   chmodSync,
@@ -59,13 +60,14 @@ export function protectDefaultProjectDirectories(
   const dirnamePath = (path: string): string => paths.pathApi?.dirname(path) ?? dirname(path)
   const basenamePath = (path: string): string => paths.pathApi?.basename(path) ?? basename(path)
   const handles = paths.directoryHandles ?? host.directoryHandles
-  const productRoot = joinPath(paths.homeDirectory, '.nova-audio-agent')
-  const defaultManagedRoot = joinPath(productRoot, 'workspaces')
-  const defaults = new Set([
-    joinPath(productRoot, 'state'),
-    defaultManagedRoot,
-    joinPath(productRoot, 'workspaces', 'default'),
-  ])
+  // Either root may be active: the legacy one stays in use until its one-time migration has run.
+  const productRoots = [DATA_ROOT_NAME, LEGACY_DATA_ROOT_NAME].map(name => joinPath(paths.homeDirectory, name))
+  const managedRoots = new Set(productRoots.map(root => joinPath(root, 'workspaces')))
+  const defaults = new Set(productRoots.flatMap(root => [
+    joinPath(root, 'state'),
+    joinPath(root, 'workspaces'),
+    joinPath(root, 'workspaces', 'default'),
+  ]))
   for (const path of [paths.stateRoot, paths.managedRoot, paths.workspace]) {
     if (path !== null && defaults.has(path) && !protectDefaultDirectory(
       host,
@@ -73,7 +75,7 @@ export function protectDefaultProjectDirectories(
       basenamePath(path),
       path,
       handles,
-      path === defaultManagedRoot,
+      managedRoots.has(path),
     )) return false
   }
   return true

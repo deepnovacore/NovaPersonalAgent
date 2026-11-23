@@ -103,7 +103,7 @@ test('desktop telemetry defaults to a private app-state JSONL path', async t => 
   telemetry.record('always.available', {revision: 1})
   telemetry.close()
 
-  const telemetryPath = join(directory, '.nova-audio-agent', 'realtime-telemetry.jsonl')
+  const telemetryPath = join(directory, '.nova-personal-agent', 'realtime-telemetry.jsonl')
   assert.equal((await stat(telemetryPath)).mode & 0o777, 0o600)
   assert.deepEqual(
     (await readFile(telemetryPath, 'utf8')).trim().split('\n')
@@ -116,13 +116,13 @@ test('desktop telemetry creates the app-state directory for the explicit default
   const directory = await mkdtemp(join(tmpdir(), 'nova-telemetry-env-'))
   t.after(() => rm(directory, { recursive: true, force: true }))
   const telemetry = createRealtimeTelemetry({
-    REALTIME_TELEMETRY: '~/.nova-audio-agent/realtime-telemetry.jsonl',
+    REALTIME_TELEMETRY: '~/.nova-personal-agent/realtime-telemetry.jsonl',
   }, {clock: new VirtualClock(), homeDirectory: directory})
   telemetry.record('configured.default', {revision: 1})
   telemetry.close()
 
   const contents = await readFile(
-    join(directory, '.nova-audio-agent', 'realtime-telemetry.jsonl'),
+    join(directory, '.nova-personal-agent', 'realtime-telemetry.jsonl'),
     'utf8',
   )
   assert.match(contents, /configured\.default/u)

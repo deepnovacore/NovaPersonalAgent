@@ -9,7 +9,7 @@ import {test} from 'node:test'
 
 import {ensureDesktop, inspectDoctor, launchDesktop, parseChecksum} from '../src/runtime.mjs'
 
-const ARTIFACT = 'nova-personal-agent-1.0.0-windows-x64-portable.zip'
+const ARTIFACT = 'nova-personal-agent-1.0.1-windows-x64-portable.zip'
 const TARGET_OPTIONS = Object.freeze({platform: 'win32', arch: 'x64'})
 
 async function extractFixture({artifact, payload, target}) {
@@ -86,13 +86,13 @@ test('checksum failure leaves no runnable installation', async () => {
     ensureDesktop({...TARGET_OPTIONS, home, fetchImpl, extractImpl: extractFixture}),
     /checksum mismatch/u,
   )
-  const root = join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64')
+  const root = join(home, '.nova-audio-agent/cli/releases/1.0.1/win32-x64')
   await assert.rejects(readFile(join(root, 'Nova Personal Agent.exe')))
 })
 
 test('a failed replacement preserves an existing cache directory', async () => {
   const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
-  const root = join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64')
+  const root = join(home, '.nova-audio-agent/cli/releases/1.0.1/win32-x64')
   await mkdir(root, {recursive: true})
   await writeFile(join(root, 'previous-cache'), 'keep')
   const fetchImpl = async url => String(url).endsWith('.sha256')
@@ -141,7 +141,7 @@ test('an interrupted download leaves no partial executable', async () => {
     ensureDesktop({...TARGET_OPTIONS, home, fetchImpl, extractImpl: extractFixture}),
     /connection lost/u,
   )
-  const executable = join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64/Nova Personal Agent.exe')
+  const executable = join(home, '.nova-audio-agent/cli/releases/1.0.1/win32-x64/Nova Personal Agent.exe')
   await assert.rejects(readFile(executable))
 })
 
@@ -219,7 +219,7 @@ test('doctor names the voice pipeline keys and probes only environment keys when
   }
   const environment = {APPDATA: appData, DEEPSEEK_API_KEY: 'env-value'}
   const offline = await inspectDoctor({...TARGET_OPTIONS, home, environment, fetchImpl})
-  assert.deepEqual(offline.voice, {pipeline: 'cascaded', keys: [
+  assert.deepEqual(offline.voice, {pipeline: 'cascaded', providers: {asr: 'volcengine', llm: 'deepseek', tts: 'volcengine'}, keys: [
     {name: 'DEEPSEEK_API_KEY', source: 'environment'},
     {name: 'DOUBAO_BIGMODEL_API_KEY', source: 'settings'},
   ]})
@@ -252,7 +252,55 @@ test('doctor counts only saved keys the desktop can load', async () => {
 test('doctor defaults a fresh install to the integrated DashScope key', async () => {
   const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
   const report = await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: join(home, 'appdata')}})
-  assert.deepEqual(report.voice, {pipeline: 'integrated', keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})
+  assert.deepEqual(report.voice, {pipeline: 'integrated', providers: {integrated: 'qwen'}, keys: [{name: 'DASHSCOPE_API_KEY', source: null}]})
+})
+
+test('doctor demands the keys of the providers actually selected', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
+  t.after(() => rm(home, {recursive: true, force: true}))
+  const appData = join(home, 'appdata')
+  const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
+  await mkdir(join(settings, '..'), {recursive: true})
+  const voice = async (document, environment = {}) => {
+    await writeFile(settings, JSON.stringify(document))
+    const report = (await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: appData, ...environment}})).voice
+    return {pipeline: report.pipeline, providers: report.providers, missing: report.keys.filter(key => key.source === null).map(key => key.name)}
+  }
+  const integrated = async integratedProvider => (await voice({pipelineMode: 'integrated', integratedProvider})).missing
+  assert.deepEqual(await integrated('qwen'), ['DASHSCOPE_API_KEY'])
+  assert.deepEqual(await integrated('openai'), ['OPENAI_API_KEY'])
+  assert.deepEqual(await integrated('gemini'), ['GEMINI_API_KEY'])
+  assert.deepEqual(await integrated('stepfun'), ['STEPFUN_API_KEY'])
+  // Local realtime models need no cloud key.
+  assert.deepEqual(await integrated('minicpm-o'), [])
+  assert.deepEqual(await integrated('personaplex'), [])
+  // An unknown provider falls back to the desktop default, like settings-store.
+  assert.deepEqual(await voice({pipelineMode: 'integrated', integratedProvider: 'retired'}), {pipeline: 'integrated', providers: {integrated: 'qwen'}, missing: ['DASHSCOPE_API_KEY']})
+
+  const cascaded = async (asr, llm, tts, environment) => voice({pipelineMode: 'cascaded', cascadedAsrProvider: asr, cascadedLlmProvider: llm, cascadedTtsProvider: tts}, environment)
+  assert.deepEqual(await cascaded('volcengine', 'qwen', 'volcengine'), {pipeline: 'cascaded', providers: {asr: 'volcengine', llm: 'qwen', tts: 'volcengine'}, missing: ['DASHSCOPE_API_KEY', 'DOUBAO_BIGMODEL_API_KEY']})
+  assert.deepEqual((await cascaded('volcengine', 'deepseek', 'volcengine')).missing, ['DEEPSEEK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+  assert.deepEqual((await cascaded('volcengine', 'ark', 'volcengine')).missing, ['ARK_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+  assert.deepEqual((await cascaded('gemini', 'gemini', 'gemini')).missing, ['GEMINI_API_KEY'])
+  assert.deepEqual((await cascaded('gemini', 'openai', 'volcengine')).missing, ['OPENAI_API_KEY', 'GEMINI_API_KEY', 'DOUBAO_BIGMODEL_API_KEY'])
+  assert.deepEqual((await cascaded('self-hosted', 'self-hosted', 'self-hosted')).missing, [])
+  assert.deepEqual((await cascaded('openai-compatible', 'openai-compatible', 'openai-compatible')).missing,
+    ['OPENAI_COMPATIBLE_API_KEY', 'COMPATIBLE_ASR_API_KEY', 'COMPATIBLE_TTS_API_KEY'])
+  assert.deepEqual((await cascaded('self-hosted', 'deepseek', 'openai-compatible', {DEEPSEEK_API_KEY: 'd'})).missing, ['COMPATIBLE_TTS_API_KEY'])
+})
+
+test('doctor treats a key the desktop cleared for a changed endpoint as missing despite the environment', async t => {
+  const home = await mkdtemp(join(tmpdir(), 'novapersonal-cli-'))
+  t.after(() => rm(home, {recursive: true, force: true}))
+  const appData = join(home, 'appdata')
+  const settings = join(appData, 'Nova Audio Agent Ambient Orb/ambient-orb-settings.json')
+  await mkdir(join(settings, '..'), {recursive: true})
+  await writeFile(settings, JSON.stringify({pipelineMode: 'cascaded', cascadedAsrProvider: 'self-hosted', cascadedLlmProvider: 'openai-compatible', cascadedTtsProvider: 'openai-compatible',
+    secrets: {openaiCompatibleApiKey: {enc: 'cleared', data: ''}, compatibleTtsApiKey: {enc: 'safeStorage', data: 'c2VhbGVk'}}}))
+  const report = await inspectDoctor({...TARGET_OPTIONS, home, environment: {APPDATA: appData, OPENAI_COMPATIBLE_API_KEY: 'inherited', COMPATIBLE_TTS_API_KEY: 'inherited'}})
+  assert.deepEqual(report.voice.keys, [{name: 'OPENAI_COMPATIBLE_API_KEY', source: null}, {name: 'COMPATIBLE_TTS_API_KEY', source: 'settings'}])
+  // One report never lists a cleared key as configured while voice reports it missing.
+  assert.deepEqual(report.configuredSecretKeys, ['compatibleTtsApiKey'])
 })
 
 test('doctor never probes a custom model endpoint without a voice key', async t => {
@@ -293,7 +341,7 @@ for (const failure of ['checksum', 'artifact', 'persistent']) {
     if (failure === 'persistent') {
       await assert.rejects(install, error => /download.*failed.*3 attempts/i.test(error.message) && /retry/i.test(error.message) && error.cause?.message === 'terminated')
       assert.equal(interruptions, 3)
-      await assert.rejects(readFile(join(home, '.nova-audio-agent/cli/releases/1.0.0/win32-x64/novaaudio-install.json')))
+      await assert.rejects(readFile(join(home, '.nova-audio-agent/cli/releases/1.0.1/win32-x64/novaaudio-install.json')))
     } else {
       const installed = await install
       assert.deepEqual(await readFile(installed.executable), bytes)

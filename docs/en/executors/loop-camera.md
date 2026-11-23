@@ -1,10 +1,12 @@
 # Loop Camera
 
+> **Not available in the v1.0 desktop app (deferred).** The desktop conversation runtime keeps the camera module off and the settings page no longer offers a monitor camera or monitor model, so Watch and Guard cannot be started from the desktop app. The capability remains in the runtime: where a host composes the runtime without forcing the camera module off (for example headless or remote deployments), it follows the `camera` module in the capabilities registry and the `MONITOR_CAMERA_DEVICE_ID` and `WATCH_MODEL` environment variables. The rest of this page describes that runtime behavior.
+
 Loop Camera observes a camera with an independent vision model and reports according to your condition. The foreground conversation continues; its model does not need image support.
 
 ## Use it
 
-Select a monitor camera and model in desktop settings, allow camera access, then describe a condition, such as “Watch this scene and let me know when someone appears.” The selected device remains fixed for that task. Ending monitoring releases the camera.
+Where the camera module is enabled, configure a monitor camera device and monitor model for the runtime, allow camera access, then describe a condition, such as “Watch this scene and let me know when someone appears.” The selected device remains fixed for that task. Ending monitoring releases the camera.
 
 ## Runtime behavior
 

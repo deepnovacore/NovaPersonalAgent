@@ -53,7 +53,7 @@ Chat 不能创建、取消或分派任务，不能创建定时任务，也不能
 
 ## Nova 托管工作区
 
-Nova维护自己的工作区，而不是每次都要求选择目录。托管根目录是 `~/.nova-audio-agent/workspaces`，其中 `workspaces/default` 是宿主批准的默认工作区。两个宿主命令负责暴露它：
+Nova维护自己的工作区，而不是每次都要求选择目录。托管根目录是 `~/.nova-personal-agent/workspaces`，其中 `workspaces/default` 是宿主批准的默认工作区。两个宿主命令负责暴露它：
 
 - `workspaces.list` 返回 Nova 托管的工作区加上已批准的默认项，按最近使用排序，每项为 `{workspace_id, name, is_default, last_used?}`。它有意不含绝对路径，也不会列出任意导入的执行器项目。
 - `workspaces.create {name}` 创建一个显示名唯一的托管工作区，并返回同样的公开结构。

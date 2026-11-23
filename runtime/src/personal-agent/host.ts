@@ -71,6 +71,10 @@ import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
 import {personalFeedIdForAffordance,type ContextView} from '../core/context-view.js';
 import { createHash, randomUUID } from 'node:crypto';
+import {AudioOwnerArbiter} from '../space-host/audio-owner.js';
+import type {SpaceVoiceHostPort,VoiceReceipts} from '../space-host/voice.js';
+import type {PlaybackFrame} from '../realtime/playback.js';
+export interface SpaceVoiceSink {onAudioFrame(frame:PlaybackFrame):void;onAudioClear(utteranceId:string,generationEpoch:number):void;onAudioAlert(utteranceId:string|null,generationEpoch:number|null):void;onAudioTerminal(utteranceId:string,generationEpoch:number):void}
 import { z } from 'zod';
 import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
@@ -759,7 +763,7 @@ export class PersonalAgentHost {
     #taskApprovals=new Map<string,{conversation_id:string;generation:number;view:ApprovalView}>();
     recordTaskApproval(conversationId:string,generation:number,view:ApprovalView):void{const key=conversationId+':'+generation;if(view.pending_approval)this.#taskApprovals.set(key,{conversation_id:conversationId,generation,view:structuredClone(view)});else this.#taskApprovals.delete(key);this.#notify()}
     taskApprovals(taskId:string):ApprovalView[]{const task=this.tasks.get(taskId);return [...this.#taskApprovals.values()].filter(entry=>entry.conversation_id===task.conversation_id&&entry.generation===(task.conversation_generation??0)&&entry.view.work&&task.work_ids.includes(entry.view.work.work_id)).map(entry=>structuredClone(entry.view))}
-    #pendingDecisions(){const views=[...this.#taskApprovals.values()].map(entry=>({view:entry.view,conversation_id:entry.conversation_id})),global=this.#approvalView?.();if(global?.pending_approval&&!views.some(entry=>entry.view.pending_approval_id===global.pending_approval_id)){const approvalOwner=global.pending_approval_id?this.#state.conversations.approval_owners[global.pending_approval_id]:undefined;views.push({view:global,conversation_id:approvalOwner??(global.work?this.workConversation(global.work.work_id)??'':'')})}return {pending_approvals:views.filter(entry=>entry.view.pending_approval&&entry.view.pending_approval_id).map(({view,conversation_id})=>({approval_id:view.pending_approval_id!,conversation_id:conversation_id||null,summary:view.operation_summary??'',queued:view.queued,task_id:view.work?this.tasks.list().find(task=>task.work_ids.includes(view.work!.work_id))?.id:undefined})),pending_confirmations:[...this.#confirmationViews].map(([id,view])=>({proposal_id:view.pending_confirmation_id,conversation_id:id||null,summary:view.pending_workspace_display_name??view.workspace_display_name??'',action:view.pending_action??null,workspace:view.pending_workspace_display_name??null,session:view.pending_session_title??null,busy:view.pending_confirmation_busy}))}}
+    #pendingDecisions(){const views=[...this.#taskApprovals.values()].map(entry=>({view:entry.view,conversation_id:entry.conversation_id})),global=this.#approvalView?.();if(global?.pending_approval&&!views.some(entry=>entry.view.pending_approval_id===global.pending_approval_id)){const approvalOwner=global.pending_approval_id?this.#state.conversations.approval_owners[global.pending_approval_id]:undefined;views.push({view:global,conversation_id:approvalOwner??(global.work?this.workConversation(global.work.work_id)??'':'')})}return {pending_approvals:views.filter(entry=>entry.view.pending_approval&&entry.view.pending_approval_id).map(({view,conversation_id})=>({approval_id:view.pending_approval_id!,conversation_id:conversation_id||null,summary:view.operation_summary??'',kind:view.kind,allowed_decisions:view.allowed_decisions,expires_at:view.held?null:view.expires_at,queued:view.queued,task_id:view.work?this.tasks.list().find(task=>task.work_ids.includes(view.work!.work_id))?.id:undefined})),pending_confirmations:[...this.#confirmationViews].map(([id,view])=>({proposal_id:view.pending_confirmation_id,conversation_id:id||null,summary:view.pending_workspace_display_name??view.workspace_display_name??'',action:view.pending_action??null,workspace:view.pending_workspace_display_name??null,session:view.pending_session_title??null,busy:view.pending_confirmation_busy}))}}
     #presentationMode:PresentationMode|null=null;
     #orbVoiceBinding:{conversation_id:string;voice_mode:VoiceMode}={conversation_id:'chat:main',voice_mode:'delegate'};
     #voiceMode:VoiceMode|undefined;
@@ -1015,7 +1019,33 @@ export class PersonalAgentHost {
     })}
     rememberWorkOwner(id:string,conversationId:string,approvalId?:string):Promise<void>{return this.#serial(async()=>{const next=structuredClone(this.#state);if(!next.conversations.items.some(item=>item.id===conversationId))return;next.conversations.work_owners[id]=conversationId;if(approvalId)next.conversations.approval_owners[approvalId]=conversationId;for(const owners of [next.conversations.work_owners,next.conversations.approval_owners])for(const key of Object.keys(owners).slice(0,-1024))delete owners[key];await this.#commit(next)})}
     voiceService(){const id=this.#state.conversations.voice_id??(this.#presentationMode==='orb'?this.#orbVoiceBinding.conversation_id:null);return id&&this.#conversationPool?.hasVoice(id)?this.#conversationPool.service(id):undefined}
-    async sendConversationAudio(id:string,pcm:Uint8Array):Promise<void>{if(this.#presentationMode==='background')throw Error('presentation_hidden');if(this.#state.conversations.voice_id!==id)throw Error('voice_not_owned');await this.#conversationPool?.sendAudio(id,pcm)}
+    /** Host-wide audio owner shared by desktop, the legacy LAN phone and Space voice calls. */
+    readonly audioOwner=new AudioOwnerArbiter();
+    #remoteVoice:string|null=null;#spaceVoiceEnabled=false;#spaceVoiceAdmission:string|undefined;#spaceVoiceSink:SpaceVoiceSink|undefined;
+    /** Conversation whose voice call may play while the window is backgrounded (Space voice, approved decision 5). */
+    remoteVoiceConversationId():string|null{return this.#remoteVoice}
+    /** The desktop composition enables Space voice; the headless server does not (deferred to Phase 5). */
+    enableSpaceVoice():void{this.#spaceVoiceEnabled=true}
+    setSpaceVoiceSink(sink:SpaceVoiceSink|undefined):void{this.#spaceVoiceSink=sink}
+    /** Audio sink while a Space call owns audio. */
+    spaceVoiceSink():SpaceVoiceSink|undefined{return this.audioOwner.spaceDevice===undefined?undefined:this.#spaceVoiceSink}
+    spaceVoicePort():SpaceVoiceHostPort|undefined{
+        if(!this.#spaceVoiceEnabled)return undefined;
+        const command=async(id:string,enabled:boolean)=>{const result=await this.command({type:'personal.command',request_id:randomUUID(),method:'conversations.voice',params:{id,enabled,...(enabled?{voice_mode:'chat'}:{})}},{client_id:'space:voice'}) as {ok?:boolean;error?:string};if(!result.ok)throw Error(typeof result.error==='string'&&/^[a-z_]{1,64}$/u.test(result.error)?result.error:'voice_unavailable')};
+        return {
+            arbiter:this.audioOwner,
+            requireChat:id=>{const row=this.conversationSnapshot(0).items.find(item=>item.id===id);if(!row)throw Error('conversation_not_found');if(!['chat','topic'].includes(row.kind)||(row.mode??'chat')!=='chat')throw Error('conversation_read_only')},
+            voiceConversationId:()=>this.#state.conversations.voice_id??null,
+            // Admission re-checks chat-only inside the same command that starts voice, so a conversation
+            // switched to plan (or another kind) during the join is refused rather than forced into chat voice.
+            startVoice:async id=>{this.#spaceVoiceAdmission=id;try{await command(id,true)}finally{this.#spaceVoiceAdmission=undefined}},
+            stopVoice:id=>command(id,false),
+            sendAudio:(id,pcm)=>this.sendConversationAudio(id,pcm),
+            receipts:():VoiceReceipts|undefined=>this.voiceService(),
+            setRemoteVoice:id=>{this.#remoteVoice=id},
+        };
+    }
+    async sendConversationAudio(id:string,pcm:Uint8Array):Promise<void>{if(this.#presentationMode==='background'&&this.#remoteVoice!==id)throw Error('presentation_hidden');if(this.#state.conversations.voice_id!==id)throw Error('voice_not_owned');await this.#conversationPool?.sendAudio(id,pcm)}
     async #conversationCommand(method:string,p:Record<string,unknown>):Promise<unknown>{
         if(typeof p.id==='string'&&this.#state.conversations.items.some(item=>item.id===p.id&&item.kind==='schedule'))throw Error('hidden_conversation');
         if(method==='conversations.targets'){return {targets:await this.#codingTargets?.list()??[],executors:this.#workbenchExecutors,local_build_supported:['darwin','win32'].includes(process.platform)}}
@@ -1037,6 +1067,7 @@ export class PersonalAgentHost {
             // Starting voice clears the conversation runtime; on the active Build that would abort
             // its in-flight run. Voice on other conversations stays available during a Build.
             if(q.enabled&&item.kind==='build'&&this.activeLocalBuild()?.id===item.id)throw Error('conversation_busy');
+            if(q.enabled&&this.#spaceVoiceAdmission===q.id&&(!['chat','topic'].includes(item.kind)||(item.mode??'chat')!=='chat'))throw Error('conversation_read_only');
             const c=this.#state.conversations;
             const voiceMode=q.voice_mode??(this.#presentationMode==='orb'&&this.#orbVoiceBinding.conversation_id===q.id?this.#orbVoiceBinding.voice_mode:item.kind==='build'?'build':item.mode??'chat');
             if(q.enabled){
@@ -1144,14 +1175,20 @@ export class PersonalAgentHost {
         // A legacy plan without model provenance is safe only when its complete text is an owned user input.
         return source.messages.some(message=>message.role==='user'&&message.text===plan.content)?this.retainedConversationDependencies(source.id,source.generation):{state:'unavailable'};
     }
-    async contextDependenciesAuthorized(dependencies:ContextDependencies,consumer?:string|null):Promise<boolean>{
+    /** `memo` shares item verdicts across one pass; a new pass re-reads live authority. */
+    async contextDependenciesAuthorized(dependencies:ContextDependencies,consumer?:string|null,memo?:Map<string,Promise<boolean>>):Promise<boolean>{
         if(dependencies.state==='unavailable')return false;
         for(const item of dependencies.items){
-            if(item.kind==='scheduled'){if(!await this.scheduledResultAuthorized(item.run_id,consumer))return false}
-            else if(item.kind==='feed'){const feed=this.#state.feed.find(feed=>feed.id===item.id);if(feed?.updated_at!==item.updated_at||!await this.#productDependencies(feed,consumer))return false}
-            else if(!await this.appContext.validateRecord(item.section,item.id,item.version,consumer??null))return false;
+            const key=JSON.stringify(item);let verdict=memo?.get(key);
+            if(!verdict){verdict=this.#contextDependencyAuthorized(item,consumer);memo?.set(key,verdict)}
+            if(!await verdict)return false;
         }
         return true;
+    }
+    async #contextDependencyAuthorized(item:Extract<ContextDependencies,{state:'tracked'}>['items'][number],consumer?:string|null):Promise<boolean>{
+        if(item.kind==='scheduled')return this.scheduledResultAuthorized(item.run_id,consumer);
+        if(item.kind==='feed'){const feed=this.#state.feed.find(feed=>feed.id===item.id);return feed?.updated_at===item.updated_at&&await this.#productDependencies(feed,consumer)}
+        return this.appContext.validateRecord(item.section,item.id,item.version,consumer??null);
     }
     contextDependenciesCacheable(dependencies:ContextDependencies):boolean{
         if(dependencies.state==='unavailable')return false;
@@ -1188,6 +1225,8 @@ export class PersonalAgentHost {
         signal.throwIfAborted();
         const filtered=this.#filterConversation(conversation,feeds.filter((_,index)=>!allowed[index]));
         const visible=new Set(filtered.messages.map(message=>message.id)),messages=[];
+        // Unmarked descendants inherit every earlier dependency, so one pass must not re-check the same item per message.
+        const memo=new Map<string,Promise<boolean>>();
         let inherited=mergeContextDependencies(...(conversation.prepared?conversation.feed_ids.map(id=>this.feedContextDependencies(id)):[]));
         for(const original of conversation.messages){
             signal.throwIfAborted();
@@ -1196,7 +1235,7 @@ export class PersonalAgentHost {
             const dependencies=original.role==='assistant'&&original.context_dependencies===undefined?mergeContextDependencies(inherited,direct):direct;
             inherited=mergeContextDependencies(inherited,dependencies);
             if(!visible.has(original.id))continue;
-            const authorized=await abortable(this.contextDependenciesAuthorized(dependencies,consumer),signal);
+            const authorized=await abortable(this.contextDependenciesAuthorized(dependencies,consumer,memo),signal);
             signal.throwIfAborted();if(!authorized)continue;
             messages.push({...original,...(original.role==='assistant'?{context_dependencies:dependencies}:{})});
         }
@@ -2593,6 +2632,7 @@ export class PersonalAgentHost {
                 for(const [id,receipt] of Object.entries(next.receipts))if(references(receipt.result))delete next.receipts[id];
                 await this.#commit(next);
             });
+            await this.notifications.invalidateByEvidence(removedEvidence,false);
             this.#memory.entries=this.#memory.entries.filter(entry=>!removedEntries.has(entry.id));
             this.#memory.pending_purges=purged.status==='incomplete'?[{entry_id:q.id,expected_revision:Number(q.expected_version),operation_id:purged.operation_id}]:[];
             this.#notify();

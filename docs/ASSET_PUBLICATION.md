@@ -277,3 +277,16 @@ On 2026-11-20 the project owner approved these files for the public website and 
 | `website` branch `public/media/gallery/phone-site-file.webp` | `15783bf687e6bdaf934b25cdd747c6346b2f21bde56ba9d43f64baadfb4bbd24` |
 | `website` branch `public/media/gallery/phone-site-result.webp` | `3d7eaebd77b5460f80a441d46e6fd096455e4edcf416b37efbee8606daeb744f` |
 | `website` branch `public/media/gallery/phone-voice-site.webp` | `123fac705fdf0c3ff5cd8255b3d56722222ae1773300740157652c21ee799b24` |
+
+## Desktop tray icons (2026-11-23)
+
+On 2026-11-23 the project owner reviewed and approved the desktop tray icons introduced in commit `bc7b2ee1` for the public repository and the v1.0.1 release. They replace the earlier crescent tray icon with the Eclipse ring on a dark square, derived from the approved Eclipse app icon. The approval covers these exact files; new sizes or edits need separate review.
+
+| File | SHA-256 |
+| --- | --- |
+| `clients/desktop/resources/tray/tray-16.png` | `070260a06a4ca6bb9fc4d6434867cafcb8b6672967b1baa1b8e45efe91e76b31` |
+| `clients/desktop/resources/tray/tray-16@2x.png` | `7f7191f25c333ba99960947febf23e472ebdffed2abc7fab55033a730675fc6d` |
+| `clients/desktop/resources/tray/tray-22.png` | `5e7b3f30bb651a97f56bdf48b50e4d66511ba8c0c0934ca256a78d9f8353755e` |
+| `clients/desktop/resources/tray/tray-22@2x.png` | `9db6c945971f84b28c2def6c2de980502f9445aae3f163b60481b13a52510d96` |
+| `clients/desktop/resources/tray/tray-32.png` | `7f7191f25c333ba99960947febf23e472ebdffed2abc7fab55033a730675fc6d` |
+| `clients/desktop/resources/tray/tray-32@2x.png` | `9a5da61f89f89a68a39ba7196d0a68438ea3c832ac5ee12532303a95492fcd6e` |

@@ -4,13 +4,13 @@
 
 <a href="README.md"><ins>English</ins></a> | <a href="../zh-CN/README.md"><ins>简体中文</ins></a> · <a href="../../README.md">Repository Home</a>
 
-[![Version](https://img.shields.io/badge/Version-v1.0.0-0f172a.svg)](../releases/v1.0.0.md)
+[![Version](https://img.shields.io/badge/Version-v1.0.1-0f172a.svg)](../releases/v1.0.1.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](../../LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](../../package.json)
 
-**Documentation for Nova Personal Agent (`v1.0.0`)** — dual-brain realtime voice & text interaction, ledger-authoritative personal memory, specialist executors, and end-to-end encrypted Space connectivity across desktop and mobile (**NovaCore**).
+**Documentation for Nova Personal Agent (`v1.0.1`)** — dual-brain realtime voice & text interaction, ledger-authoritative personal memory, specialist executors, and end-to-end encrypted Space connectivity across desktop and mobile (**NovaCore**).
 
-[Getting Started](getting-started.md) · [Architecture](architecture.md) · [Support Matrix](support-matrix.md) · [Security & Privacy](security.md) · [v1.0.0 Release Notes](../releases/v1.0.0.md)
+[Getting Started](getting-started.md) · [Architecture](architecture.md) · [Support Matrix](support-matrix.md) · [Security & Privacy](security.md) · [v1.0.1 Release Notes](../releases/v1.0.1.md)
 
 </div>
 
@@ -25,7 +25,7 @@
 
 - **Dual-Brain Runtime:** The **Front Brain** stays responsive in realtime voice/text while the **Back Brain** orchestrates durable background tasks, evidence checks, and take-over/hand-back controls.
 - **Authoritative Local Host:** Model keys, permissions, source connectors, and personal memory stay on your Host (`0700` private storage); retrieved memories never grant execution authority.
-- **Specialist Executors:** Delegate coding (`Codex` + `ACP` agents), desktop GUI (`Computer Use`), phone automation (`mobile.run`), and independent `Loop Camera` monitoring under unified host approval gates.
+- **Specialist Executors:** Delegate coding (`Codex` + `ACP` agents), desktop GUI (`Computer Use`), phone automation (`mobile.run`), and independent `Loop Camera` monitoring (runtime only; deferred in the v1.0 desktop app) under unified host approval gates.
 - **E2EE Space Connectivity:** Pair iOS and Android (**NovaCore**) to your desktop or headless Host via Tailscale Serve or a self-hosted zero-knowledge `relay`.
 
 ---
@@ -71,7 +71,7 @@
         <li><a href="executors/overview.md"><strong>Executors Overview</strong></a> — Dispatch, resource leases, and approval gates.</li>
         <li><a href="executors/coding.md"><strong>Coding Agents</strong></a> — Codex app-server &amp; ACP (OpenCode, CodeBuddy, Pi, DeepSeek Harness).</li>
         <li><a href="executors/computer-use-build.md"><strong>Computer Use in Build</strong></a> — Supervised desktop GUI actions on macOS &amp; Windows.</li>
-        <li><a href="../guides/mobile.md"><strong>Mobile Use (<code>mobile.run</code>)</strong></a> — Native TypeScript Midscene SDK (<a href="../guides/autoglm.md">legacy AutoGLM</a>).</li>
+        <li><a href="../guides/mobile.md"><strong>Mobile Use (<code>mobile.run</code>)</strong></a> — Native TypeScript Midscene SDK.</li>
         <li><a href="executors/loop-camera.md"><strong>Loop Camera</strong></a> — Independent camera condition monitoring.</li>
       </ul>
     </td>

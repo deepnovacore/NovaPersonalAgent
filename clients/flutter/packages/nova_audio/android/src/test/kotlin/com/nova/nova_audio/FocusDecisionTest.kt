@@ -18,4 +18,9 @@ class FocusDecisionTest {
   assertTrue(callMode(AudioManager.MODE_IN_CALL))
   assertFalse(callMode(AudioManager.MODE_IN_COMMUNICATION))
  }
+ @Test fun holdAndRegainAreReportedToDart() {
+  assertEquals(mapOf("type" to "audio.focus","state" to "hold"),focusControl(FocusDecision.HOLD))
+  assertEquals(mapOf("type" to "audio.focus","state" to "resumed"),focusControl(FocusDecision.RESUME))
+  assertNull(focusControl(FocusDecision.END))
+ }
 }

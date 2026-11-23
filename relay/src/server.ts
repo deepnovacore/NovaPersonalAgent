@@ -4,6 +4,7 @@ import type {AddressInfo} from 'node:net';
 import {WebSocketServer, WebSocket} from 'ws';
 import {MailboxStore, type MailboxOptions} from './mailbox.js';
 import {LiveRelay, type LiveOptions} from './live.js';
+import {MediaRelay, type MediaLeg, type MediaOptions} from './media.js';
 import {RelayError, type RelayEnvelope, type RelayPrincipal} from './protocol.js';
 import {SecurityStore} from './security.js';
 import {canonicalAddress,sourceAddress,trustedAddresses} from './source-address.js';
@@ -33,6 +34,10 @@ export interface RelayServerOptions {
   maxRateSources?: number;
   mailbox?: MailboxOptions;
   live?: LiveOptions;
+  /** Space voice media forwarding. Disabled unless `media.enabled` is true (docs/design/space-voice.md). */
+  media?: MediaOptions;
+  /** Test/operator clock shared by security state and media deadlines. Defaults to Date.now. */
+  clock?: () => number;
   /** Non-blocking metadata-only integration, invoked after durable insertion. */
   onMailbox?: (principal: RelayPrincipal, envelope: RelayEnvelope, seq: number) => void | Promise<void>;
 }
@@ -44,8 +49,10 @@ export class RelayServer {
   readonly security: SecurityStore;
   readonly mailbox: MailboxStore;
   readonly live: LiveRelay;
+  readonly media: MediaRelay;
   readonly http: Server;
   private readonly sockets = new WebSocketServer({noServer:true, maxPayload:1024, perMessageDeflate:false});
+  private readonly mediaSockets: WebSocketServer;
   private readonly rates = new Map<string, RateBucket>();
   private readonly trustedProxies:ReadonlySet<string>;
   private readonly forwardedConnections=new Map<string,number>();
@@ -65,9 +72,12 @@ export class RelayServer {
       !(options.externalTls && options.publicUrl && new URL(options.publicUrl).protocol === 'https:')) throw new RelayError('tls_required');
     if (this.options.maxResponseBytes < (options.mailbox?.maxMessageBytes ?? 512*1024) + 256) throw new RelayError('invalid_response_budget');
     this.trustedProxies=trustedAddresses(options.trustedProxyAddresses);
-    this.security = new SecurityStore(options.securityPath,{bootstrapToken:options.bootstrapToken,...(options.maxControlOperationsPerSpace===undefined?{}:{maxControlOperations:options.maxControlOperationsPerSpace})});
+    this.security = new SecurityStore(options.securityPath,{bootstrapToken:options.bootstrapToken,...(options.clock===undefined?{}:{now:options.clock}),...(options.maxControlOperationsPerSpace===undefined?{}:{maxControlOperations:options.maxControlOperationsPerSpace})});
     this.mailbox = new MailboxStore(options.mailboxPath,this.security,{maxMessageBytes:512*1024,...options.mailbox});
     this.live = new LiveRelay(this.security,{...options.live,maxConnections:this.options.maxConnections});
+    this.media = new MediaRelay(this.security,{...options.media,...(options.clock===undefined?{}:{clock:options.clock})});
+    // ws enforces maxPayload while assembling a message, before it is buffered whole.
+    this.mediaSockets = new WebSocketServer({noServer:true, maxPayload:this.media.maxFrameBytes, perMessageDeflate:false});
     const listener = (req: IncomingMessage,res: ServerResponse): void => {void this.route(req,res);};
     this.http = options.tls ? createSecureServer(options.tls,listener) : createServer(listener);
     this.http.maxConnections = this.options.maxConnections;
@@ -94,9 +104,13 @@ export class RelayServer {
         release=this.reserveForwardedConnection(req);socket.once('close',release);
         this.rate(req,false);
         const url = new URL(req.url ?? '/', 'http://relay.invalid');
-        if (url.pathname !== '/v1/live' || url.search) throw new RelayError('invalid_route');
+        if (url.search || (url.pathname !== '/v1/live' && !(url.pathname === '/v1/media' && this.media.enabled))) throw new RelayError('invalid_route');
         const p = this.security.authenticate(req.headers.authorization);
-        this.sockets.handleUpgrade(req,socket,head,ws => {if(release)ws.once('close',release);this.connected(p,ws,req);});
+        if (url.pathname === '/v1/media') {
+          const session = req.headers['x-nova-media-session'];
+          if (typeof session !== 'string') throw new RelayError('invalid_media_session');
+          this.mediaSockets.handleUpgrade(req,socket,head,ws => {if(release)ws.once('close',release);this.mediaConnected(p,session,ws,req);});
+        } else this.sockets.handleUpgrade(req,socket,head,ws => {if(release)ws.once('close',release);this.connected(p,ws,req);});
       } catch (error) {
         release?.();
         const code = this.errorCode(error);
@@ -105,6 +119,7 @@ export class RelayServer {
     });
     this.maintenance = setInterval(() => {
       this.live.sweep();
+      try {this.media.sweep();} catch {/* A clock fault must not stop rate-bucket maintenance. */}
       const before = Date.now()-60000;
       for (const [key,value] of this.rates) if (value.start <= before) this.rates.delete(key);
     },1000);
@@ -122,7 +137,9 @@ export class RelayServer {
   async close(): Promise<void> {
     clearInterval(this.maintenance);
     for (const ws of this.sockets.clients) ws.terminate();
+    for (const ws of this.mediaSockets.clients) ws.terminate();
     await new Promise<void>(resolve => this.sockets.close(() => resolve()));
+    await new Promise<void>(resolve => this.mediaSockets.close(() => resolve()));
     try {
       await new Promise<void>((resolve,reject) => this.http.close(error => {
         if (error && (error as NodeJS.ErrnoException).code !== 'ERR_SERVER_NOT_RUNNING') reject(error); else resolve();
@@ -211,7 +228,11 @@ export class RelayServer {
           case 'GET /v1/pairing/requests': result = this.security.pendingPairings(p);break;
           case 'POST /v1/pairing/confirm': {const body=await this.body(req);result=this.security.confirmPairing(p,String(body.requestId??''),String(body.opId??''));break;}
           case 'GET /v1/devices': result = this.security.listDevices(p);break;
-          case 'POST /v1/devices/revoke': {const body=await this.body(req);result=this.security.revokeDevice(p,String(body.device??''),String(body.opId??''));this.live.sweep();break;}
+          case 'POST /v1/devices/revoke': {const body=await this.body(req);result=this.security.revokeDevice(p,String(body.device??''),String(body.opId??''));this.live.sweep();this.media.sweep();break;}
+          case 'POST /v1/media/sessions': {if (!this.media.enabled) throw new RelayError('invalid_route');const body=await this.body(req);result=this.media.reserve(p,{session:body.session,client:body.client,ttlMs:body.ttlMs});break;}
+          case 'GET /v1/capabilities':
+            if (!this.media.enabled) throw new RelayError('invalid_route');
+            result = {media:{v:1,codecs:['pcm16'],maxKbpsPerDirection:this.media.maxKbpsPerDirection,maxFrameBytes:this.media.maxFrameBytes}};break;
           default: throw new RelayError('invalid_route');
         }
       }
@@ -231,6 +252,7 @@ export class RelayServer {
     if (code === 'rate_limited') return 429;
     if (['body_too_large','message_too_large'].includes(code)) return 413;
     if (code === 'invalid_route') return 404;
+    if (['media_capacity','media_session_exists','media_role_claimed','media_session_limit'].includes(code)) return 409;
     if (['offline','id_conflict','cursor_expired','capacity_exceeded','history_capacity_exceeded','backpressure','page_too_small'].includes(code)) return 409;
     if (/auth|session|token|signature|proof|revoked|epoch|forbidden|host_required|inactive|unknown_device/.test(code)) return 401;
     return 400;
@@ -263,5 +285,45 @@ export class RelayServer {
     ws.on('error',() => ws.terminate());
     ws.on('close',() => {clearInterval(timer);try {connection.close();} catch {/* Revoked connections already dropped. */}});
     ws.send(JSON.stringify({type:'ready',principal:p}));
+  }
+  /** One media leg. Frames are opaque; only renewal text frames are parsed (docs/design/space-voice.md §1). */
+  private mediaConnected(p: RelayPrincipal,session: string,ws: WebSocket,req: IncomingMessage): void {
+    let header = String(req.headers.authorization ?? '');
+    let leg: MediaLeg;
+    const same = (a: RelayPrincipal,b: RelayPrincipal): boolean => a.space===b.space && a.device===b.device && a.epoch===b.epoch;
+    // `join` may drain the peer's early control frames synchronously: binary writes are held
+    // until the `ready` text frame is on the socket, so clients always see `ready` first.
+    let readySent = false;
+    const held: (() => void)[] = [];
+    try {
+      leg = this.media.join(p,session,{
+        write: frame => new Promise<void>((resolve,reject) => {
+          const write = (): void => {
+            if (ws.readyState !== WebSocket.OPEN) {reject(new RelayError('offline'));return;}
+            ws.send(frame,{binary:true},error => error ? reject(error) : resolve());
+          };
+          if (readySent) write(); else held.push(write);
+        }),
+        close: reason => {try {ws.close(1000,reason);} catch {ws.terminate();} setTimeout(() => ws.terminate(),1000).unref();},
+        authorized: () => same(this.security.authenticate(header),p),
+      });
+    } catch (error) {ws.close(1008,this.errorCode(error));return;}
+    const timer = setInterval(() => {if (ws.readyState === WebSocket.OPEN) ws.ping();},10000);timer.unref();
+    ws.on('message',(data,isBinary) => {
+      try {
+        const bytes = Array.isArray(data) ? Buffer.concat(data) : Buffer.from(data as ArrayBuffer);
+        if (isBinary) {leg.receive(bytes);return;}
+        this.rate(req,false);
+        const frame = JSON.parse(bytes.toString('utf8')) as {type?:unknown;token?:unknown};
+        if (frame.type !== 'renew' || typeof frame.token !== 'string') throw new RelayError('invalid_frame');
+        const next = `Bearer ${frame.token}`;
+        leg.renew(this.security.authenticate(next));header = next;
+      } catch {ws.close(1008,'invalid_frame');}
+    });
+    ws.on('error',() => ws.terminate());
+    ws.on('close',() => {clearInterval(timer);leg.close();});
+    ws.send(JSON.stringify({type:'ready',role:leg.role}));
+    readySent = true;
+    for (const write of held.splice(0)) write();
   }
 }

@@ -10,7 +10,7 @@ import {spawnSync} from 'node:child_process'
 import {fileURLToPath} from 'node:url'
 import {createPackageWithOptions, extractFile, getRawHeader, statFile, uncache} from '@electron/asar'
 import {replacePackagedAsar, refreshSignedAsar, refreshMacAsarIntegrity} from '../scripts/build-owned-asar.mjs'
-import {inspectApplication, inspectMacApplicationInfo, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
+import {inspectApplication, inspectMacApplicationInfo, parseReleaseArgs, readReadiness, prepareSmokeHome, redactSmokeOutput} from '../scripts/verify-release.mjs'
 import {loadSettings} from '../src/main/settings-store.mjs'
 import {backendLaunchSpec} from '../src/main/backend.mjs'
 import {describeMissingBlockingEnvironment} from '@nova-personal-agent/runtime/desktop'
@@ -21,6 +21,12 @@ async function file(root, name, body = 'fixture') {
   await mkdir(dirname(join(root, name)), {recursive: true})
   await writeFile(join(root, name), body)
 }
+
+test('release verifier launches by default and skips only the GUI launch with --no-launch', () => {
+  assert.equal(parseReleaseArgs(['--unsigned']).launch, true)
+  assert.deepEqual(parseReleaseArgs(['--unsigned', '--no-launch', '--dist-root', 'x']), {unsigned: true, distRoot: 'x', launch: false})
+  assert.throws(() => parseReleaseArgs(['--launch=no']))
+})
 
 test('smoke diagnostics retain the error but remove tokens, keys and private paths', () => {
   const text = redactSmokeOutput('Electron sandbox failed at /private/profile; key=private-key-123 token=0123456789abcdef0123456789abcdef',
@@ -179,14 +185,9 @@ test('staging keeps the runtime CLI evaluation imports executable', async () => 
     await file(root, `${runtime}/package.json`, JSON.stringify({name: '@nova-personal-agent/runtime', type: 'module', files: ['dist/src', 'dist/eval']}))
     await file(root, `${runtime}/dist/src/cli.js`, "import {marker} from '../eval/probe.js'; console.log(marker)")
     await file(root, `${runtime}/dist/eval/probe.js`, "export const marker = 'evaluation-ready'")
-    await file(root, `${runtime}/scripts/autoglm-bridge.py`, '# supervised bridge')
-    await file(root, `${runtime}/scripts/test_autoglm_bridge.py`, '# excluded test')
     const staged = await stageReleaseApplication({packageRoot: root})
     const result = spawnSync(process.execPath, [join(staged, runtime, 'dist/src/cli.js')], {encoding: 'utf8'})
     assert.equal(result.status, 0, result.stderr)
     assert.equal(result.stdout.trim(), 'evaluation-ready')
-    const {readFile, access} = await import('node:fs/promises')
-    assert.equal(await readFile(join(staged, runtime, 'scripts/autoglm-bridge.py'), 'utf8'), '# supervised bridge')
-    await assert.rejects(access(join(staged, runtime, 'scripts/test_autoglm_bridge.py')), /ENOENT/u)
   } finally { await rm(root, {recursive: true, force: true}) }
 })

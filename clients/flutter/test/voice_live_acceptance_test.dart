@@ -2,6 +2,9 @@
 // NOVA_VOICE_LIVE_CONFIG points to a private JSON file; no credentials in logs.
 // This exercises the production Dart providers, not native microphone/playback,
 // PhoneVoiceSession, tool execution, AEC, or physical-device acceptance.
+@Tags(['live'])
+library;
+
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';

@@ -39,7 +39,7 @@ function hostFixture(t: TestContext): {
   chmodSync(binary, 0o700)
   mkdirSync(workspace, {mode: 0o700})
   if (process.platform === 'win32') {
-    mkdirSync(join(root, '.nova-audio-agent', 'workspaces'), {recursive: true})
+    mkdirSync(join(root, '.nova-personal-agent', 'workspaces'), {recursive: true})
   }
   t.after(() => { rmSync(root, {recursive: true, force: true}) })
   return {
@@ -80,7 +80,7 @@ test('host resolver is lazy without Codex and brands one allowlisted launch tupl
   assert.equal(Object.hasOwn(resolved, 'projectsEnabled'), false)
   assert.ok(resolved.stateRoot !== null)
   assert.ok(resolved.managedRoot !== null)
-  const stateRoot = join(fixture.root, '.nova-audio-agent')
+  const stateRoot = join(fixture.root, '.nova-personal-agent')
   const managedRoot = join(stateRoot, 'workspaces')
   assert.equal(existsSync(stateRoot), true)
   assert.equal(existsSync(managedRoot), true)

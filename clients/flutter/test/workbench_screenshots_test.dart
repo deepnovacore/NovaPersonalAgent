@@ -1,3 +1,9 @@
+// Golden captures only. The goldens are intentionally untracked (see
+// .gitignore and docs/ASSET_PUBLICATION.md), so this file is excluded from the
+// default run; layout assertions live in workbench_layout_test.dart.
+@Tags(['golden'])
+library;
+
 import 'support/mobile_navigation.dart';
 import 'package:nova_mobile/agent_core/agent_core_host.dart';
 import 'package:nova_mobile/agent_core/model_settings.dart';
@@ -297,17 +303,6 @@ Future<void> precachePetAvatar(WidgetTester tester) async {
     );
     await tester.pageBack();
     await tester.pumpAndSettle();
-    tester.view.physicalSize = const Size(320, 740);
-    tester.platformDispatcher.textScaleFactorTestValue = 1.3;
-    addTearDown(tester.platformDispatcher.clearTextScaleFactorTestValue);
-    for (final page in ['Nova', 'Feeds', 'Todos', 'Ideas', 'Goals']) {
-      if (page != 'Nova') await openLibrary(tester, page);
-      expect(tester.takeException(), isNull);
-      if (page != 'Nova') {
-        await tester.pageBack();
-        await tester.pumpAndSettle();
-      }
-    }
     await tester.pumpWidget(const SizedBox());
   });
 }

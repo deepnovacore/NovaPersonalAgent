@@ -75,7 +75,11 @@ const errorCode=error=>error?.refusal_code??error?.message
 export const scheduleError=error=>{const code=errorCode(error);return t(({stale_schedule:'规则已更新，请载入最新版本后再保存。',schedule_in_past:'请选择未来的执行时间。',invalid_params:'请检查时间、时区和任务内容。',schedule_running:'上次任务尚未结束，请先查看执行进展。',context_authorization_changed:'相关资料已变化，请重新运行后查看结果。'})[code]??code??String(error))}
 const contextDefault={todos:true,goals:true,tasks:true,memory:false,knowledge:false,search:false}
 export class ScheduleDraft{
- constructor(value,command){this.value=structuredClone(value??{});this.value={title:'',goal:'',acceptance:[],rule:{kind:'daily',time:'09:00',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone},context:contextDefault,...this.value};this.command=command;this.next=null;this.sequence=0;this.pending=null;this.busy=false;this.conflict=false;this.error='';this.onChange=()=>{}}
+ constructor(value,command){this.value=structuredClone(value??{});this.value={title:'',goal:'',acceptance:[],rule:{kind:'daily',time:'09:00',timezone:Intl.DateTimeFormat().resolvedOptions().timeZone},context:contextDefault,...this.value};this.command=command;this.next=null;this.sequence=0;this.pending=null;this.busy=false;this.conflict=false;this.error='';this.version=0;this.listeners=new Set()}
+ /** Every state change goes through here; `version` is the snapshot useSyncExternalStore compares. */
+ onChange=()=>{this.version++;for(const listener of [...this.listeners])listener()}
+ subscribe=listener=>{this.listeners.add(listener);return()=>{this.listeners.delete(listener)}}
+ getSnapshot=()=>this.version
  set(key,value){if(this.pending||this.busy)return false;this.value[key]=structuredClone(value);this.error='';if(key==='rule'){this.sequence++;this.next=null}this.onChange();return true}
  async preview(){const sequence=++this.sequence,rule=structuredClone(this.value.rule);this.next=null;this.onChange();try{const result=await this.command('schedules.preview',{rule});if(sequence===this.sequence){this.next=result.next_slot;this.previewKey=JSON.stringify(rule);this.error=this.next?'':t('请选择未来的执行时间。')}}catch(error){if(sequence===this.sequence)this.error=scheduleError(error)}finally{if(sequence===this.sequence)this.onChange()}}
  async save(){

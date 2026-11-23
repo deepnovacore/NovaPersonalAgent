@@ -222,13 +222,23 @@ class SpaceCatalog extends ChangeNotifier {
   List<SpaceRecord> bindings(SpaceRecord space) => spaces
       .where((v) => v.id == space.id || sameClientHost(v, space))
       .toList();
+
+  /// Binding ids in the order they were last selected (most recent last),
+  /// persisted so the chooser stays stable across restarts.
+  final List<String> recent = [];
+
+  /// One entry per Host: the selected binding, else the most recently
+  /// selected one, else the first. A re-pair selects its fresh binding, so the
+  /// chooser keeps showing it instead of an old revoked or needs-repair one.
   List<SpaceRecord> get visibleSpaces {
+    int rank(SpaceRecord space) =>
+        space.id == selectedId ? recent.length : recent.indexOf(space.id);
     final result = <SpaceRecord>[];
     for (final space in spaces) {
       final index = result.indexWhere((v) => sameClientHost(v, space));
       if (index < 0) {
         result.add(space);
-      } else if (space.id == selectedId) {
+      } else if (rank(space) > rank(result[index])) {
         result[index] = space;
       }
     }
@@ -290,6 +300,14 @@ class SpaceCatalog extends ChangeNotifier {
         ),
       );
       selectedId = value['selected'] as String?;
+      final saved = value['recent'];
+      if (saved is List) {
+        recent.addAll(saved.whereType<String>());
+      } else if (selectedId != null) {
+        // Catalogs written before `recent` existed: the current selection is
+        // the most recent; other Hosts keep the first-binding fallback.
+        recent.add(selectedId!);
+      }
     }
     ready = true;
     SpaceStorage.active = selected;
@@ -301,10 +319,16 @@ class SpaceCatalog extends ChangeNotifier {
     List<SpaceRecord>? nextSpaces,
     List<SpaceRecord>? nextRetired,
   }) async {
+    final known = {...(nextSpaces ?? spaces).map((s) => s.id)};
+    final nextRecent = [
+      ...recent.where((id) => id != selection && known.contains(id)),
+      ?selection,
+    ];
     await persistence.write(
       jsonEncode({
         'v': 1,
         'selected': selection,
+        'recent': nextRecent,
         'retired': (nextRetired ?? retired).map((s) => s.toJson()).toList(),
         'spaces': (nextSpaces ?? spaces).map((s) => s.toJson()).toList(),
       }),
@@ -320,6 +344,9 @@ class SpaceCatalog extends ChangeNotifier {
         ..addAll(nextRetired);
     }
     selectedId = selection;
+    recent
+      ..clear()
+      ..addAll(nextRecent);
     SpaceStorage.active = selected;
     notifyListeners();
   }
@@ -339,6 +366,17 @@ class SpaceCatalog extends ChangeNotifier {
     }
     final next = List<SpaceRecord>.of(spaces)..[index] = record;
     await _commit(record.id, nextSpaces: next);
+  });
+
+  /// Add a fresh device binding next to the existing ones for the same Host
+  /// and select it. Older bindings are never retired automatically: a relay
+  /// can forge "inactive", so only the Host-confirmed cleanup flow removes them.
+  Future<void> addBinding(SpaceRecord next) => _serial(() async {
+    if (!spaces.any((v) => sameClientHost(v, next)) ||
+        spaces.any((v) => v.id == next.id || v.device == next.device)) {
+      throw StateError('binding_identity_changed');
+    }
+    await _commit(next.id, nextSpaces: [...spaces, next]);
   });
 
   Future<void> select(String? id, {bool ignoreMissing = false}) =>

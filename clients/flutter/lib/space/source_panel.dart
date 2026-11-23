@@ -13,17 +13,20 @@ class SpaceSourcePanel extends StatefulWidget {
     super.key,
     required this.state,
     required this.onSync,
+    this.language = 'zh',
   });
   final SpaceClientState state;
+  final String language;
   final Future<void> Function() onSync;
   @override
   State<SpaceSourcePanel> createState() => _SpaceSourcePanelState();
 }
 
 class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
+  String t(String zh, String en) => widget.language == 'zh' ? zh : en;
   Future<void> collect({Map<String, dynamic>? source}) async {
     final name = TextEditingController(
-      text: source?['name'] as String? ?? '手机输入',
+      text: source?['name'] as String? ?? t('手机输入', 'Phone input'),
     );
     final text = TextEditingController();
     final currentProvider =
@@ -35,7 +38,7 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
-          title: const Text('向 Host 发送采集输入'),
+          title: Text(t('向 Host 发送采集输入', 'Send collected input to the host')),
           content: SizedBox(
             width: 420,
             child: SingleChildScrollView(
@@ -44,31 +47,56 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
                 children: [
                   TextField(
                     controller: name,
-                    decoration: const InputDecoration(labelText: '来源名称'),
+                    decoration: InputDecoration(
+                      labelText: t('来源名称', 'Source name'),
+                    ),
                     maxLength: 100,
                   ),
                   TextField(
                     controller: text,
-                    decoration: const InputDecoration(labelText: '你采集的内容'),
+                    decoration: InputDecoration(
+                      labelText: t('你采集的内容', 'Content you collected'),
+                    ),
                     minLines: 4,
                     maxLines: 8,
                     maxLength: 16000,
                   ),
                   Text(
                     currentProvider == null
-                        ? 'Host 尚未配置模型：可上传，不会进行模型处理。'
-                        : 'Host 模型：${currentProvider['label']}\n授权仅限当前配置，Host 更换模型需重新授权。',
+                        ? t(
+                            'Host 尚未配置模型：可上传，不会进行模型处理。',
+                            'The host has no model configured: content can be uploaded but will not be processed by a model.',
+                          )
+                        : t(
+                            'Host 模型：${currentProvider['label']}\n授权仅限当前配置，Host 更换模型需重新授权。',
+                            'Host model: ${currentProvider['label']}\nAuthorization covers this configuration only; a model change on the host needs new authorization.',
+                          ),
                   ),
                   CheckboxListTile(
                     value: upload,
-                    title: const Text('允许将这份内容发送并保存在 Host'),
+                    title: Text(
+                      t(
+                        '允许将这份内容发送并保存在 Host',
+                        'Allow this content to be sent to and stored on the host',
+                      ),
+                    ),
                     onChanged: (value) =>
                         setDialog(() => upload = value ?? false),
                   ),
                   CheckboxListTile(
                     value: processing,
-                    title: const Text('允许 Host 使用模型处理这份内容'),
-                    subtitle: const Text('不勾选时仅上传，不用于模型推断个人资料。'),
+                    title: Text(
+                      t(
+                        '允许 Host 使用模型处理这份内容',
+                        'Allow the host to process this content with a model',
+                      ),
+                    ),
+                    subtitle: Text(
+                      t(
+                        '不勾选时仅上传，不用于模型推断个人资料。',
+                        'If unchecked, content is only uploaded and not used for model-based profile inference.',
+                      ),
+                    ),
                     onChanged: currentProvider == null
                         ? null
                         : (value) =>
@@ -81,11 +109,11 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: const Text('取消'),
+              child: Text(t('取消', 'Cancel')),
             ),
             FilledButton(
               onPressed: upload ? () => Navigator.pop(context, true) : null,
-              child: const Text('授权并发送'),
+              child: Text(t('授权并发送', 'Authorize and send')),
             ),
           ],
         ),
@@ -111,16 +139,22 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
     final save = await showSpaceDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('向 Host 纠正个人资料'),
+        title: Text(t('向 Host 纠正个人资料', 'Correct your profile on the host')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
               initialValue: key,
-              items: const [
-                DropdownMenuItem(value: 'about', child: Text('个人情况')),
-                DropdownMenuItem(value: 'work', child: Text('工作')),
-                DropdownMenuItem(value: 'interests', child: Text('兴趣')),
+              items: [
+                DropdownMenuItem(
+                  value: 'about',
+                  child: Text(t('个人情况', 'About you')),
+                ),
+                DropdownMenuItem(value: 'work', child: Text(t('工作', 'Work'))),
+                DropdownMenuItem(
+                  value: 'interests',
+                  child: Text(t('兴趣', 'Interests')),
+                ),
               ],
               onChanged: (v) => key = v!,
             ),
@@ -129,18 +163,20 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
               minLines: 3,
               maxLines: 5,
               maxLength: 2600,
-              decoration: const InputDecoration(labelText: '正确内容'),
+              decoration: InputDecoration(
+                labelText: t('正确内容', 'Correct content'),
+              ),
             ),
           ],
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(t('取消', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('发送纠正'),
+            child: Text(t('发送纠正', 'Send correction')),
           ),
         ],
       ),
@@ -160,20 +196,30 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
     final ok = await showSpaceDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text(delete ? '删除采集来源？' : '撤销采集授权？'),
+        title: Text(
+          delete
+              ? t('删除采集来源？', 'Delete this source?')
+              : t('撤销采集授权？', 'Revoke this source’s authorization?'),
+        ),
         content: Text(
           delete
-              ? '将请求 Host 删除这个来源及由它派生的资料。处理结果以 Host 回执为准。'
-              : '将禁止 Host 继续上传和处理这个来源。Host 离线时会等待同步；已发送内容在撤销请求生效前仍可能被处理。',
+              ? t(
+                  '将请求 Host 删除这个来源及由它派生的资料。处理结果以 Host 回执为准。',
+                  'Asks the host to delete this source and the data derived from it. The host’s receipt is authoritative.',
+                )
+              : t(
+                  '将禁止 Host 继续上传和处理这个来源。Host 离线时会等待同步；已发送内容在撤销请求生效前仍可能被处理。',
+                  'Stops the host from uploading and processing this source. While the host is offline the request waits to sync; content already sent may still be processed until it takes effect.',
+                ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: const Text('取消'),
+            child: Text(t('取消', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认'),
+            child: Text(t('确认', 'Confirm')),
           ),
         ],
       ),
@@ -189,18 +235,21 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
       NovaSection(
-        header: '手机采集与授权',
-        footer: '由你选择内容并授权 Host 处理。此设备不运行个人资料推断。',
+        header: t('手机采集与授权', 'Phone input & permissions'),
+        footer: t(
+          '由你选择内容并授权 Host 处理。此设备不运行个人资料推断。',
+          'You choose content and authorize the host to process it. This device does not infer your profile.',
+        ),
         children: [
           _processingSummary(),
           NovaTile(
-            title: '发送采集输入',
+            title: t('发送采集输入', 'Send input'),
             leading: const NovaIconTile(CupertinoIcons.doc_text),
             trailing: const CupertinoListTileChevron(),
             onTap: collect,
           ),
           NovaTile(
-            title: '纠正个人资料',
+            title: t('纠正个人资料', 'Correct profile'),
             leading: const NovaIconTile(CupertinoIcons.person_crop_circle),
             trailing: const CupertinoListTileChevron(),
             onTap: correction,
@@ -209,13 +258,13 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
       ),
       if (widget.state.clientSources.isNotEmpty)
         NovaSection(
-          header: '已授权来源',
+          header: t('已授权来源', 'Authorized sources'),
           children: [
             for (final source in widget.state.clientSources.values)
               NovaTile(
-                title: source['name'] as String? ?? '手机输入',
+                title: source['name'] as String? ?? t('手机输入', 'Phone input'),
                 subtitle: Text(
-                  '${_status(source['status'] as String?)} · ${source['allow_processing'] == true ? '允许模型处理' : '禁止模型处理'}${source['error'] == null ? '' : ' · ${source['error']}'}',
+                  '${_status(source['status'] as String?)} · ${source['allow_processing'] == true ? t('允许模型处理', 'Model processing allowed') : t('禁止模型处理', 'Model processing not allowed')}${source['error'] == null ? '' : ' · ${source['error']}'}',
                 ),
                 trailing: source['status'] == 'deleted'
                     ? null
@@ -233,17 +282,19 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
                           }
                         },
                         itemBuilder: (_) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'edit',
-                            child: Text('修改并重新授权'),
+                            child: Text(t('修改并重新授权', 'Edit and re-authorize')),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'revoke',
-                            child: Text('撤销授权'),
+                            child: Text(t('撤销授权', 'Revoke authorization')),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'delete',
-                            child: Text('删除来源及派生资料'),
+                            child: Text(
+                              t('删除来源及派生资料', 'Delete source and derived data'),
+                            ),
                           ),
                         ],
                       ),
@@ -260,35 +311,55 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
     final status = hasStatus ? processing['status'] : null;
     final needsUpdate = hasStatus && processing['needs_update'] == true;
     final title = !hasStatus
-        ? '等待 Host 提供处理状态'
+        ? t('等待 Host 提供处理状态', 'Waiting for the host’s processing status')
         : switch (status) {
-            'working' => 'Host 正在处理采集内容',
-            'ready' => needsUpdate ? 'Host 已完成上次处理' : 'Host 已完成处理',
-            'failed' => 'Host 处理失败，请检查 Host',
-            _ => '等待 Host 处理',
+            'working' => t(
+              'Host 正在处理采集内容',
+              'The host is processing collected content',
+            ),
+            'ready' =>
+              needsUpdate
+                  ? t('Host 已完成上次处理', 'The host finished the previous run')
+                  : t('Host 已完成处理', 'The host finished processing'),
+            'failed' => t(
+              'Host 处理失败，请检查 Host',
+              'Host processing failed; check the host',
+            ),
+            _ => t('等待 Host 处理', 'Waiting for the host to process'),
           };
     return NovaTile(
-      title: 'Host 处理汇总',
+      title: t('Host 处理汇总', 'Host processing summary'),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title),
-          if (needsUpdate) const Text('有新内容等待更新'),
+          if (needsUpdate)
+            Text(t('有新内容等待更新', 'New content is waiting to be updated')),
           if (!widget.state.hostOnline)
-            Text(hasStatus ? 'Host 不在线，显示上次处理状态' : 'Host 不在线，等待获取处理状态'),
+            Text(
+              hasStatus
+                  ? t(
+                      'Host 不在线，显示上次处理状态',
+                      'Host offline; showing the last processing status',
+                    )
+                  : t(
+                      'Host 不在线，等待获取处理状态',
+                      'Host offline; waiting for processing status',
+                    ),
+            ),
         ],
       ),
     );
   }
 
   String _status(String? value) => switch (value) {
-    'accepted' => 'Host 已收妥',
-    'revoked' => '授权已撤销',
-    'deleted' => 'Host 已删除',
-    'conflict' => '授权存在冲突',
-    'rejected' => 'Host 拒绝请求',
-    'revoking' => '等待 Host 撤销',
-    'deleting' => '等待 Host 删除',
-    _ => '等待 Host 接收',
+    'accepted' => t('Host 已收妥', 'Received by host'),
+    'revoked' => t('授权已撤销', 'Authorization revoked'),
+    'deleted' => t('Host 已删除', 'Deleted by host'),
+    'conflict' => t('授权存在冲突', 'Authorization conflict'),
+    'rejected' => t('Host 拒绝请求', 'Host rejected the request'),
+    'revoking' => t('等待 Host 撤销', 'Waiting for the host to revoke'),
+    'deleting' => t('等待 Host 删除', 'Waiting for the host to delete'),
+    _ => t('等待 Host 接收', 'Waiting for the host to receive'),
   };
 }

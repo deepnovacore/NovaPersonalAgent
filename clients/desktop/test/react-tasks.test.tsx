@@ -5,7 +5,8 @@ import { JSDOM } from 'jsdom'
 const dom = new JSDOM('<!doctype html><html><body></body></html>', { url: 'http://localhost' })
 Object.assign(globalThis, { window: dom.window, document: dom.window.document, HTMLElement: dom.window.HTMLElement, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true })
 const { render, fireEvent, waitFor, cleanup, act } = await import('@testing-library/react')
-const { TasksPage, TaskDetail, ScheduledTasksPage } = await import('../src/renderer/react/tasks.tsx')
+const { TasksPage, TaskDetail, ScheduledTasksPage, ScheduleEditor } = await import('../src/renderer/react/tasks.tsx')
+const { ScheduleDraft } = await import('../src/renderer/react/tasks/helpers.mjs')
 afterEach(() => { cleanup(); dom.window.localStorage.clear() })
 const task = (extra: any = {}) => ({ id:'t',conversation_id:'chat:t',goal:'Fix login',phase:'running',control_revision:0,goal_revision:0,controller:{kind:'nova'},session_ids:['s1','s2'],events:{items:[],next:0},artifact_refs:[],approvals:[],viewer:{client_id:'client',can_takeover:true},capabilities:{detail:'conversation',input:true},...extra })
 const schedule = (extra: any = {}) => ({id:'s',revision:1,enabled:true,title:'Daily',goal:'Review priorities',acceptance:['Summary'],rule:{kind:'daily',time:'09:00',timezone:'UTC'},context:{todos:true,goals:true,tasks:true,memory:false,knowledge:false,search:false},...extra})
@@ -195,4 +196,16 @@ test('a completed save from an older editor cannot replace a newly selected sche
   await waitFor(()=>assert.ok(v.getByText('Newest schedule')))
   await act(async()=>finishSave(schedule({id:'old',title:'Saved old schedule'})))
   assert.ok(v.getByText('Newest schedule'));assert.equal(v.queryByText('Saved old schedule'),null)
+})
+
+test('schedule editor shows a draft change made before its subscription and previews once', async () => {
+ const next={scheduled_at:'2030-01-01T01:00:00.000Z'};let previews=0
+ const model:any=new ScheduleDraft({title:'Before',goal:'g',acceptance:['a'],rule:{kind:'daily',time:'09:00',timezone:'Asia/Shanghai'}},async(method:string)=>{if(method==='schedules.preview'){previews++;return {next_slot:next}}return {}})
+ const subscribe=model.subscribe
+ // Simulates a change landing between render and subscription: it must not be dropped.
+ model.subscribe=(listener:()=>void)=>{model.set('title','Late edit');return subscribe(listener)}
+ const v=render(<ScheduleEditor model={model} onSaved={()=>{}} onCancel={()=>{}} onReload={()=>{}} />)
+ await waitFor(()=>assert.equal((v.getByLabelText('任务名称') as HTMLInputElement).value,'Late edit'))
+ await waitFor(()=>assert.ok(v.container.querySelector('.schedule-preview')!.textContent!.includes('首次执行')))
+ assert.equal(previews,1)
 })

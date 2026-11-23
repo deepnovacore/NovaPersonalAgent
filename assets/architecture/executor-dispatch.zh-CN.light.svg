@@ -40,7 +40,7 @@
   
     <rect x="380" y="216" width="290" height="54" rx="12" fill="#ffffff" stroke="#3b82f6" stroke-width="1.5"/>
     <text x="398" y="240" font-size="14.5" font-weight="700" fill="#1e3a8a" text-anchor="start">Mobile Use</text>
-    <text x="398" y="258" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start">mobile.run (Midscene) · AutoGLM</text>
+    <text x="398" y="258" font-size="11.5" font-weight="400" fill="#475569" text-anchor="start">mobile.run (Midscene)</text>
     <line x1="336" y1="208" x2="378" y2="243" stroke="#64748b" stroke-width="1.75" marker-end="url(#arrow)"/>
     <line x1="670" y1="243" x2="718" y2="154" stroke="#14b8a6" stroke-width="1.75" marker-end="url(#arrow-teal)"/>
   

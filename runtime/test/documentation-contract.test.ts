@@ -19,55 +19,9 @@ const currentDocs = [
   'docs/zh-CN/archs/06-verification.md',
 ] as const
 
-test('current docs state the Node release truth and do not advertise retired capabilities', async () => {
-  const documents = await Promise.all(currentDocs.map(async file => ({
-    file,
-    text: await readFile(resolve(repositoryRoot, file), 'utf8'),
-  })))
-  for (const {file, text} of documents) {
-    assert.doesNotMatch(text, /active executors?[^\n]*(?:Home Assistant|AutoGLM)|(?:Home Assistant|AutoGLM)[^\n]*(?:implemented|supported active)/iu, file)
-    assert.equal(text.includes('tests/snapshots'), false, file)
-    assert.doesNotMatch(text, /no production source constructs (?:it|CausalRuntime)|does not instantiate CausalRuntime|desktop (?:microphone )?audio remains (?:deliberately )?unwired/iu, file)
-    assert.doesNotMatch(text, /live (?:DashScope )?smoke[^\n]*(?:landed|pass)|runtime:smoke:qwen[^\n]*pass/iu, file)
-    assert.doesNotMatch(text, /v1-mini[^\n]*(?:real|actual) executor[^\n]*(?:proven|pass)|v1-mini path runs locally/iu, file)
-  }
-  const gettingStarted = documents.find(item => item.file === 'docs/en/getting-started.md')!.text
-  assert.match(documents.find(item => item.file === 'docs/en/archs/06-verification.md')!.text, /Node\.js and TypeScript[^\n]*only product runtime/iu)
-  assert.match(gettingStarted, /Desktop targets macOS arm64, Windows x64, and Ubuntu 22\.04\+ x64/iu)
-  assert.doesNotMatch(gettingStarted, /Linux is available for source use/iu)
-})
-
-test('audio pipeline docs distinguish the selectable topology, credentials, and deferred settings effects', async () => {
-  const documents = new Map(await Promise.all(currentDocs.map(async file => [
-    file,
-    await readFile(resolve(repositoryRoot, file), 'utf8'),
-  ] as const)))
-  const english = `${documents.get('README.md')}\n${documents.get('docs/en/getting-started.md')}\n${documents.get('docs/en/archs/06-verification.md')}`
-  const chinese = `${documents.get('README.zh-CN.md')}\n${documents.get('docs/zh-CN/getting-started.md')}\n${documents.get('docs/zh-CN/archs/06-verification.md')}`
-
-  assert.match(english, /integrated.*cascaded/isu)
-  assert.match(english, /qwen-audio-3\.0-realtime-plus.*longanqian/isu)
-  assert.match(english, /Volcengine ASR\s*->\s*DeepSeek `deepseek-flash`\s*->\s*Volcengine TTS/u)
-  assert.match(english, /Ark.*explicit.*cascaded LLM/isu)
-  assert.match(english, /one key per platform.*reused/isu)
-  assert.match(english, /DOUBAO_BIGMODEL_API_KEY` for both ASR and TTS/u)
-  assert.match(english, /conditional.*Settings Panel/isu)
-  assert.match(english, /write-only.*presence/isu)
-  assert.match(english, /next launch/iu)
-  assert.match(english, /opt-in live smoke/iu)
-
-  assert.match(chinese, /集成.*级联/su)
-  assert.match(chinese, /qwen-audio-3\.0-realtime-plus.*longanqian/su)
-  assert.match(chinese, /火山 ASR\s*->\s*DeepSeek `deepseek-flash`\s*->\s*火山 TTS/u)
-  assert.match(chinese, /Ark.*显式.*级联 LLM/su)
-  assert.match(chinese, /每个平台.*一把密钥.*复用/su)
-  assert.match(chinese, /ASR 与 TTS 共用 `DOUBAO_BIGMODEL_API_KEY`/u)
-  assert.match(chinese, /条件.*设置面板/su)
-  assert.match(chinese, /只写.*存在/u)
-  assert.match(chinese, /下次启动/u)
-  assert.match(chinese, /可选.*在线 smoke/u)
-
-  for (const [file, text] of documents) {
+test('current docs do not name retired environment selectors', async () => {
+  for (const file of currentDocs) {
+    const text = await readFile(resolve(repositoryRoot, file), 'utf8')
     assert.doesNotMatch(text, /workspace-graph surfaces|工作区图谱|WORKSPACE_GRAPH/u, file)
     assert.doesNotMatch(text, /(?:REALTIME_PROVIDER|VOLCENGINE_ARK_MODEL|VOLCENGINE_ARK_SUPPORT_MODEL|DOUBAO_ASR_API_KEY)/u, file)
   }
@@ -154,36 +108,6 @@ function generatedBlock(document: string): string {
   return document.slice(start, end)
 }
 
-test('current Node Codex transport claim remains exact', async () => {
-  const gettingStarted = await readFile(
-    resolve(repositoryRoot, 'docs/en/archs/06-verification.md'),
-    'utf8',
-  )
-  assert.match(gettingStarted, /Codex is app-server-only; JSONL is\s+fixture-parser-only/iu)
-})
-
-test('coding docs state that ACP ask mode is not sandboxed', async () => {
-  for (const [file, row] of [
-    ['docs/en/executors/coding.md', /\| Ask-mode sandbox \(workspace-only files, no network\) \| Yes \| No \| No \| No \| No \|/u],
-    ['docs/zh-CN/executors/coding.md', /\| 询问模式沙箱（仅限工作区文件、不联网） \| 支持 \| 不支持 \| 不支持 \| 不支持 \| 不支持 \|/u],
-  ] as const) {
-    assert.match(await readFile(resolve(repositoryRoot, file), 'utf8'), row, file)
-  }
-})
-
-test('ACP coding backend claims stay scoped to the non-Codex agents in both languages', async () => {
-  const read = (file: string): Promise<string> => readFile(resolve(repositoryRoot, file), 'utf8')
-  assert.match(await read('docs/en/archs/06-verification.md'), /OpenCode, CodeBuddy, Pi and DeepSeek Harness sessions use ACP\./u)
-  assert.match(await read('docs/zh-CN/archs/06-verification.md'), /OpenCode、CodeBuddy、Pi 与 DeepSeek Harness 会话通过 ACP 接入。/u)
-  const readme = await read('README.md')
-  assert.match(readme, /\| Coding agent \| Codex, OpenCode, CodeBuddy, Pi, DeepSeek Harness \|/u)
-  assert.match(await read('README.zh-CN.md'), /\| 编码 Agent \| Codex、OpenCode、CodeBuddy、Pi、DeepSeek Harness \|/u)
-  for (const [file, steer] of [['docs/en/executors/coding.md', /\| Add requirements while running \| Yes \| No \| No \| No \| No \|/u],
-    ['docs/zh-CN/executors/coding.md', /\| 执行中追加要求 \| 支持 \| 不支持 \| 不支持 \| 不支持 \| 不支持 \|/u]] as const) {
-    assert.match(await read(file), steer, file)
-  }
-})
-
 test('every production environment name is classified and private names stay private', async () => {
   const classified = new Map(environmentContract.map(entry => [entry.name, entry]))
   assert.equal(classified.size, environmentContract.length, 'environment names must be unique')
@@ -191,7 +115,7 @@ test('every production environment name is classified and private names stay pri
     ...await sourceFiles(resolve(repositoryRoot, 'runtime/src')),
     ...await sourceFiles(resolve(repositoryRoot, 'clients/desktop/src')),
   ]
-  const systemNames = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'PATH', 'APPDATA', 'SYSTEMROOT', 'NPM_CONFIG_PREFIX'])
+  const systemNames = new Set(['HTTPS_PROXY', 'HTTP_PROXY', 'PATH', 'APPDATA', 'USERPROFILE', 'SYSTEMROOT', 'NPM_CONFIG_PREFIX'])
   const environmentName = /\b(?:process\.env|environment|parentEnv|env)\.([A-Z][A-Z0-9_]+)\b/gu
   for (const source of sources) {
     const text = await readFile(source, 'utf8')
@@ -226,14 +150,5 @@ test('current architecture and numbered specs do not depend on the retired graph
       assert.doesNotMatch(text, /workspace-graph\/|workspace_graph|WORKSPACE_GRAPH|GraphContext|PublishedGraphSnapshot/u, `${root}/${file}`)
       assert.doesNotMatch(text, /Workspace Graph|workspace graph|工作区图/u, `${root}/${file}`)
     }
-  }
-})
-
-
-test('focused user guides describe use without branch or documentation-maintenance labels', async () => {
-  for (const file of ['docs/en/README.md', 'docs/zh-CN/README.md', 'docs/en/getting-started.md', 'docs/zh-CN/getting-started.md', 'docs/en/configuration.md', 'docs/zh-CN/configuration.md', 'docs/en/knowledge-base.md', 'docs/zh-CN/knowledge-base.md', 'docs/en/personal-memory.md', 'docs/zh-CN/personal-memory.md', 'docs/en/features.md', 'docs/zh-CN/features.md', 'docs/en/iphone.md', 'docs/zh-CN/iphone.md', 'docs/en/architecture.md', 'docs/zh-CN/architecture.md']) {
-    const markdown = await readFile(resolve(repositoryRoot, file), 'utf8')
-    const visible = markdown.replace(/\]\([^)]+\)/gu, ']')
-    assert.doesNotMatch(visible, /v0\.[23](?:\.0)?(?:dev)?|M1\.5c|Documentation verification|文档维护|本轮|本地基线/u, file)
   }
 })

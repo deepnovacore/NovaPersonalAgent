@@ -116,7 +116,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     asr: settings.cascade_asr_provider, tts: settings.cascade_tts_provider,
   })
   let publishExecutorApproval: (view: ExecutorApprovalView) => void = () => undefined
-  const guiNames = settings.executors.filter(name => name === 'autoglm' || name === 'mobile' || name === 'computer' || name === 'browser')
+  const guiNames = settings.executors.filter(name => name === 'mobile' || name === 'computer' || name === 'browser')
   // Each supervised GUI executor runs one task at a time, so it adds one approval slot instead of taking Codex's.
   const sharedApproval = guiNames.length > 0
     ? new HostApprovalController({clock, idFactory: () => randomUUID(), capacity: MAX_CONCURRENT_WORK + guiNames.length}) : undefined
@@ -126,11 +126,6 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     closeSharedApproval = () => { sharedApproval.invalidate('shutdown'); unsubscribe() }
     ownership.own(closeSharedApproval)
   }
-  const autoglm = !settings.executors.includes('autoglm') ? undefined : await (async () => {
-    const {AutoGlmExecutor, loadAutoGlmConfig} = await import('../executors/autoglm.js')
-    return new AutoGlmExecutor(loadAutoGlmConfig(environment), sharedApproval!)
-  })()
-  if (autoglm !== undefined) ownership.own(() => autoglm.close())
   const mobile = !settings.executors.includes('mobile') ? undefined : await (async () => {
     const {MobileExecutor, loadMobileConfig} = await import('../executors/mobile.js')
     return new MobileExecutor(loadMobileConfig(environment), sharedApproval!)
@@ -146,19 +141,20 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     return new BrowserExecutor(loadBrowserConfig(environment), sharedApproval!)
   })()
   if (browser !== undefined) ownership.own(() => browser.close())
-  const guiExecutors = [...(autoglm === undefined ? [] : [autoglm]), ...(mobile === undefined ? [] : [mobile]),
+  const guiExecutors = [...(mobile === undefined ? [] : [mobile]),
     ...(computer === undefined ? [] : [computer]), ...(browser === undefined ? [] : [browser])]
   const codexResource = !capabilities.modules.coding.enabled || !settings.executors.includes('codex')
     ? null
     : await (async () => {
-      const {createCodexAssemblyResource, createProductionCodexHost, resolveCodexHostConfig, prepareManagedCodexMcp,
+      const {createCodexAssemblyResource, createProductionCodexHost, resolveCodingHostConfig, prepareManagedCodexMcp,
         createAcpBackendRouting, loadWindowsGuardianFactoryFromResources} = await import('../executors/codex/host.js')
       const sourceResourcesPath = environment.CODEX_RESOURCES_PATH
       const codexHost = createProductionCodexHost(settings, {
         ...(sourceResourcesPath === undefined ? {} : {resourcesPath: sourceResourcesPath}),
         onDiagnostic: code => onDiagnostic(`[runtime-diagnostic] ${code}`),
       })
-      const codexConfig = resolveCodexHostConfig(settings, codexHost.catalog)
+      // Readiness follows the selected default backend: Codex is required only when it is the default.
+      const codexConfig = resolveCodingHostConfig(settings, codexHost.catalog)
       if (codexConfig === null) return null
       const resourcesPath = sourceResourcesPath ?? (process as NodeJS.Process & {resourcesPath?: string}).resourcesPath
       const acpProcessFactory = process.platform === 'win32' && resourcesPath !== undefined
@@ -195,7 +191,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     token,
     stop,
     ...(createServer === undefined ? {} : {createServer: options => createServer(options, media)}),
-    ...(remote ? {transportFailure: 'disconnect' as const} : {}),
+    ...(remote ? {transportFailure: 'disconnect' as const} : {spaceVoice: true}),
     telemetry,
     progressBubbles: settings.progress_bubbles,
     ...(codexResource?.projectView === null || codexResource === null

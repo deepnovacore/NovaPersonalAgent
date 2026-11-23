@@ -455,14 +455,15 @@ export class MarkdownRepository {
    // Git must not follow user-data symlinks into another repository or command configuration.
    for(const name of ['config','HEAD','objects','refs','index','packed-refs','shallow'])if(hasPath(join(gitDir,name)))this.assertSafe(join(gitDir,name),['objects','refs'].includes(name))
    const objects=join(gitDir,'objects')
-   if(hasPath(objects))for(const name of readdirSync(objects))this.assertSafe(join(objects,name),true)
+   // Git itself may leave regular temp/lock files directly in objects/; anything else must be a plain directory.
+   if(hasPath(objects))for(const name of readdirSync(objects)){const stat=lstatSync(join(objects,name));if(!stat.isSymbolicLink()&&stat.isFile())continue;this.assertSafe(join(objects,name),true)}
    const refs=join(gitDir,'refs')
    if(hasPath(refs))this.assertGitRefs(refs)
   }
   const env:NodeJS.ProcessEnv={...process.env}
   for(const key of Object.keys(env))if(key.startsWith('GIT_'))delete env[key]
   Object.assign(env,{GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:process.platform==='win32'?'NUL':'/dev/null',GIT_TERMINAL_PROMPT:'0',GIT_AUTHOR_NAME:'Nova',GIT_AUTHOR_EMAIL:'nova@localhost',GIT_COMMITTER_NAME:'Nova',GIT_COMMITTER_EMAIL:'nova@localhost'})
-  try{const output=execFileSync('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','commit.gpgSign=false','-C',this.root,...args],{input,env,timeout:15_000,maxBuffer:MAX_BATCH,stdio:['pipe','pipe','pipe']});return binary?output:output.toString('utf8')}
+  try{const output=execFileSync('git',['-c','core.hooksPath=/dev/null','-c','core.fsmonitor=false','-c','commit.gpgSign=false','-c','gc.auto=0','-c','maintenance.auto=false','-C',this.root,...args],{input,env,timeout:15_000,maxBuffer:MAX_BATCH,stdio:['pipe','pipe','pipe']});return binary?output:output.toString('utf8')}
   catch(error){if(optional)return binary?Buffer.alloc(0):'';throw new Error('MEMORY_MARKDOWN_GIT',{cause:error})}
  }
  private ensureRoot():void {

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -6,6 +7,7 @@ import 'package:cryptography/cryptography.dart' as crypto;
 import 'package:jose/jose.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:pointycastle/key_derivators/concat_kdf.dart' as pc;
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'space_storage.dart';
 
 String b64url(List<int> value) => base64UrlEncode(value).replaceAll('=', '');
@@ -23,6 +25,23 @@ List<int> _bigBytes(BigInt n) => List.generate(
 );
 BigInt _big(List<int> bytes) =>
     bytes.fold(BigInt.zero, (v, b) => (v << 8) | BigInt.from(b));
+
+/// The key file could not be read or written. Transient: callers retry.
+class SpaceKeyStorageError implements Exception {
+  const SpaceKeyStorageError(this.cause);
+  final Object cause;
+  @override
+  String toString() => 'key_storage_unavailable: $cause';
+}
+
+/// A Host-signed key delivery whose wrapped key cannot be used. Permanent:
+/// retrying never helps, so callers skip it.
+class SpaceInvalidKeyDelivery implements Exception {
+  const SpaceInvalidKeyDelivery(this.reason);
+  final String reason;
+  @override
+  String toString() => 'invalid_key_delivery: $reason';
+}
 
 /// JOSE compact serialization with mature Ed25519/AES-GCM implementations,
 /// PointyCastle P-256/ConcatKDF, and jose's AES key unwrap implementation.
@@ -125,25 +144,195 @@ class SpaceCrypto {
   final SpaceRecord space;
   final SpaceIdentity identity;
   final SpacePersistence secrets;
+
+  /// Persisted content-key epoch. Only a delivery signed by the pinned Host
+  /// key advances it (see [openEnvelope]); relay responses never do.
   int epoch = 1;
   Map<int, List<int>> keys = {};
+
+  /// Epoch of the current relay session. It is used only to sign the login
+  /// proof and gate sealing; it is never persisted and never changes [keys].
+  int? sessionEpoch;
+
+  /// Highest epoch seen on any envelope whose Host signature verified. It is
+  /// persisted with the keys, never lowered, and blocks sealing while the
+  /// Host has rotated past our key: after a revocation the old key may be
+  /// held by the revoked member, so nothing is encrypted under it.
+  ///
+  /// Limit (pre-existing, out of scope): a relay that withholds every piece
+  /// of rotation evidence can keep this device on its old epoch. Closing that
+  /// needs a Host-authenticated freshness check.
+  int observedHostEpoch = 1;
+
+  /// Fires synchronously (with [observedHostEpoch]) whenever the local epoch
+  /// or the observed Host epoch changes, including key deliveries whose
+  /// [openEnvelope] returns null. Space voice and capability expiry use it.
+  Stream<int> get epochEvents => _epochEvents.stream;
+  final _epochEvents = StreamController<int>.broadcast(sync: true);
+
+  /// Whether intents can be sealed for the current relay session.
+  bool get canSeal =>
+      !needsRepair &&
+      keys.containsKey(epoch) &&
+      epoch >= observedHostEpoch &&
+      (sessionEpoch == null || sessionEpoch == epoch);
   Future<void> load() async {
     final raw = await secrets.read();
+    Map<String, dynamic>? value;
     if (raw != null) {
-      final value = jsonMap(raw);
+      value = jsonMap(raw);
       epoch = value['epoch'] as int? ?? 1;
       keys = (value['keys'] as Map? ?? {}).map(
         (k, v) => MapEntry(int.parse(k as String), unb64(v as String)),
       );
+      observedHostEpoch = max(epoch, value['observed'] as int? ?? epoch);
+      _durableObserved = observedHostEpoch;
+    }
+    // Older clients persisted relay-supplied epochs and cleared the keys. A
+    // saved epoch without its key was never proven by the Host, and falling
+    // back to an older epoch would let a replayed delivery roll it back, so
+    // such a binding must be re-paired as a fresh device. Files written by
+    // this version always carry `observed` and are never treated as legacy.
+    needsRepair =
+        value != null &&
+        !value.containsKey('observed') &&
+        !keys.containsKey(epoch);
+  }
+
+  /// Content keys kept for opening older envelopes. Sealing only ever uses
+  /// the current epoch's key, and the Host stops using old keys after a
+  /// rotation, so retaining a few only lets late content still decrypt.
+  static const retainedEpochs = 4;
+
+  /// Read-join-write under a lock shared by every instance in this isolate.
+  /// The join is pure: keys are the union of stored and given keys (a stored
+  /// key wins a same-epoch conflict), epoch and `observed` are maxima, so no
+  /// write — even from a stale instance — removes a key or lowers state.
+  /// Only the separate retention rule then drops keys older than the
+  /// [retainedEpochs] newest. Memory adopts the result after the write;
+  /// [_durableObserved] is what was actually written.
+  Future<void> _commit(
+    int nextEpoch,
+    Map<int, List<int>> nextKeys,
+    int seen,
+  ) async {
+    final String? raw;
+    try {
+      raw = await secrets.read();
+    } catch (error) {
+      throw SpaceKeyStorageError(error);
+    }
+    final joined = <int, List<int>>{...nextKeys};
+    if (raw != null) {
+      final stored = jsonMap(raw);
+      final storedEpoch = stored['epoch'] as int? ?? 1;
+      final storedKeys = (stored['keys'] as Map? ?? {}).map(
+        (k, v) => MapEntry(int.parse(k as String), unb64(v as String)),
+      );
+      // A legacy record whose epoch has no key proves nothing; ignore it.
+      if (stored.containsKey('observed') ||
+          storedKeys.containsKey(storedEpoch)) {
+        nextEpoch = max(nextEpoch, storedEpoch);
+        seen = max(seen, stored['observed'] as int? ?? storedEpoch);
+        storedKeys.forEach((epoch, key) {
+          final mine = joined[epoch];
+          if (mine != null && b64url(mine) != b64url(key)) {
+            debugPrint('[Space] conflicting key for epoch $epoch; kept stored');
+          }
+          joined[epoch] = key;
+        });
+      }
+    }
+    seen = max(seen, nextEpoch);
+    final kept = _retain(joined);
+    try {
+      await secrets.write(
+        jsonEncode({
+          'epoch': nextEpoch,
+          'keys': kept.map((k, v) => MapEntry('$k', b64url(v))),
+          'observed': seen,
+        }),
+      );
+    } catch (error) {
+      throw SpaceKeyStorageError(error);
+    }
+    final changed = epoch != nextEpoch || seen > observedHostEpoch;
+    epoch = nextEpoch;
+    keys = kept;
+    observedHostEpoch = max(observedHostEpoch, seen);
+    _durableObserved = seen;
+    if (changed) _epochEvents.add(observedHostEpoch);
+  }
+
+  /// Retention: the [retainedEpochs] newest keys.
+  static Map<int, List<int>> _retain(Map<int, List<int>> all) {
+    final epochs = all.keys.toList()..sort();
+    return {
+      for (final epoch in epochs.skip(max(0, epochs.length - retainedEpochs)))
+        epoch: all[epoch]!,
+    };
+  }
+
+  static Future<void> _lock = Future.value();
+  Future<T> _locked<T>(Future<T> Function() change) {
+    final run = _lock.then((_) => change());
+    _lock = run.then<void>((_) {}, onError: (Object _, StackTrace _) {});
+    return run;
+  }
+
+  /// Raise [observedHostEpoch] for Host-verified evidence: synchronously in
+  /// memory (so a concurrent seal already refuses, and memory is never
+  /// lowered even if the write fails), then durably under the lock.
+  Future<void> _observe(int seen) {
+    if (needsRepair) return Future.value();
+    if (seen > observedHostEpoch) {
+      observedHostEpoch = seen;
+      _epochEvents.add(seen);
+    }
+    return _flushObserved();
+  }
+
+  /// Persist the live observed epoch if it is ahead of what was written.
+  Future<void> _flushObserved() => _locked(() async {
+    if (observedHostEpoch > _durableObserved) {
+      await _commit(epoch, keys, observedHostEpoch);
+    }
+  });
+
+  /// The observed epoch actually written by the last commit (or loaded).
+  int _durableObserved = 1;
+
+  /// A legacy binding whose saved epoch cannot be trusted. It never seals or
+  /// opens anything; re-scanning the Host's code pairs a fresh device.
+  bool needsRepair = false;
+
+  /// Serialized install: the epoch is re-checked under the lock, so
+  /// concurrent deliveries can never move it backwards. The new state is
+  /// persisted before it is published in memory, so a failed write changes
+  /// nothing. Returns false when [nextEpoch] is already stale.
+  Future<bool> _install(int nextEpoch, List<int> key) async {
+    final installed = await _locked(() async {
+      if (needsRepair || nextEpoch < epoch) return false;
+      await _commit(nextEpoch, {...keys, nextEpoch: key}, observedHostEpoch);
+      return true;
+    });
+    // Evidence raised while the write was in flight is persisted too.
+    if (observedHostEpoch > _durableObserved) await _flushObserved();
+    return installed;
+  }
+
+  /// Unauthenticated routing hint: whether [envelope] carries a wrapped key.
+  /// Callers must still open it, which verifies the Host signature.
+  static bool isKeyDelivery(Map<String, dynamic> envelope) {
+    try {
+      final compact = utf8.decode(base64Decode(envelope['body'] as String));
+      return jsonMap(utf8.decode(unb64(compact.split('.').first)))['alg'] ==
+          'ECDH-ES+A256KW';
+    } catch (_) {
+      return false;
     }
   }
 
-  Future<void> _persist() => secrets.write(
-    jsonEncode({
-      'epoch': epoch,
-      'keys': keys.map((k, v) => MapEntry('$k', b64url(v))),
-    }),
-  );
   Future<String> signControl(
     Map<String, dynamic> payload, {
     String type = 'nova-control+jws',
@@ -214,24 +403,40 @@ class SpaceCrypto {
     String channel = 'mailbox',
     int? expiresAt,
   }) async {
-    final key = keys[epoch];
-    if (key == null) throw StateError('waiting_for_host_key');
-    final body = await encryptBody(payload, key);
-    final envelope = {
-      'v': 1,
-      'space': space.remoteSpace,
-      'id': id,
-      'from': space.device,
-      'to': space.hostDevice,
-      'chan': channel,
-      'epoch': epoch,
-      'expiresAt': expiresAt,
-      'body': body,
-    };
-    envelope['sig'] = base64Encode(
-      utf8.encode(await signControl(envelope, type: 'nova-envelope+jws')),
-    );
-    return envelope;
+    if (needsRepair) throw StateError('needs_repair');
+    for (var attempt = 0; attempt < 3; attempt++) {
+      // Epoch and key are captured together; a rotation installed while this
+      // seal awaits discards the result instead of mislabelling it.
+      final sealedEpoch = epoch;
+      final key = keys[sealedEpoch];
+      if (key == null ||
+          sealedEpoch < observedHostEpoch ||
+          (sessionEpoch != null && sessionEpoch! > sealedEpoch)) {
+        throw StateError('waiting_for_host_key');
+      }
+      if (sessionEpoch != null && sessionEpoch! < sealedEpoch) {
+        throw StateError('stale_relay_epoch');
+      }
+      final body = await encryptBody(payload, key);
+      final envelope = {
+        'v': 1,
+        'space': space.remoteSpace,
+        'id': id,
+        'from': space.device,
+        'to': space.hostDevice,
+        'chan': channel,
+        'epoch': sealedEpoch,
+        'expiresAt': expiresAt,
+        'body': body,
+      };
+      envelope['sig'] = base64Encode(
+        utf8.encode(await signControl(envelope, type: 'nova-envelope+jws')),
+      );
+      if (epoch == sealedEpoch && observedHostEpoch <= sealedEpoch) {
+        return envelope;
+      }
+    }
+    throw StateError('waiting_for_host_key');
   }
 
   static Future<String> encryptBody(
@@ -253,15 +458,29 @@ class SpaceCrypto {
     );
   }
 
-  Future<Map<String, dynamic>?> openEnvelope(
-    Map<String, dynamic> envelope,
-  ) async {
+  /// Whether [envelope] is routed to this device and signed by the pinned
+  /// Host key. Nothing is decrypted or installed.
+  /// Verified envelopes for a newer epoch are recorded as rotation evidence
+  /// (durably) before this returns; storage errors propagate.
+  Future<bool> verifyAndObserve(Map<String, dynamic> envelope) async {
+    try {
+      await _verifyHost(envelope);
+    } catch (_) {
+      return false;
+    }
+    final seen = envelope['epoch'] as int;
+    if (seen > epoch) await _observe(seen);
+    return true;
+  }
+
+  Future<void> _verifyHost(Map<String, dynamic> envelope) async {
     if (envelope['v'] != 1 ||
         envelope['space'] != space.remoteSpace ||
         envelope['from'] != space.hostDevice ||
         envelope['to'] != space.device ||
         envelope['epoch'] is! int ||
-        (envelope['epoch'] as int) > epoch) {
+        (envelope['epoch'] as int) < 1 ||
+        envelope['sig'] is! String) {
       throw StateError('invalid_envelope_route');
     }
     if (envelope['expiresAt'] != null &&
@@ -277,24 +496,52 @@ class SpaceCrypto {
     if (jsonEncode(signed) != jsonEncode(unsigned(envelope))) {
       throw StateError('signed_envelope_mismatch');
     }
-    if ((envelope['epoch'] as int) < epoch) return null;
-    final compact = utf8.decode(base64Decode(envelope['body'] as String));
-    final parts = compact.split('.');
-    if (parts.length != 5) throw StateError('invalid_jwe');
-    final header = jsonMap(utf8.decode(unb64(parts[0])));
-    if (header['enc'] != 'A256GCM' ||
-        header.containsKey('crit') ||
-        header.containsKey('zip')) {
-      throw StateError('invalid_jwe_header');
+  }
+
+  Future<Map<String, dynamic>?> openEnvelope(
+    Map<String, dynamic> envelope,
+  ) async {
+    if (needsRepair) throw StateError('needs_repair');
+    await _verifyHost(envelope);
+    final envelopeEpoch = envelope['epoch'] as int;
+    // Verified evidence of a Host rotation stops sealing with the old key.
+    if (envelopeEpoch > epoch) await _observe(envelopeEpoch);
+    // Older epochs are stale unless their key is still retained.
+    if (envelopeEpoch < epoch && !keys.containsKey(envelopeEpoch)) {
+      return null;
     }
-    List<int> cek;
-    if (header['alg'] == 'ECDH-ES+A256KW') {
-      cek = _unwrap(parts, header);
-    } else if (header['alg'] == 'dir' && parts[1].isEmpty) {
-      cek = keys[epoch] ?? (throw StateError('missing_content_key'));
-    } else {
+    if (isKeyDelivery(envelope)) {
+      if (envelope['chan'] != 'mailbox') {
+        throw StateError('invalid_key_channel');
+      }
+      // A key we already hold (including a retained older one) is final.
+      if (envelopeEpoch <= epoch && keys.containsKey(envelopeEpoch)) {
+        return null;
+      }
+      // Host-signed and identifiable as a delivery: any format, header or
+      // unwrap error is permanent. Only storage errors (in _install) retry.
+      final List<int> key;
+      try {
+        key = await _unwrapDelivery(envelope, envelopeEpoch);
+      } on Object catch (error) {
+        throw SpaceInvalidKeyDelivery('$error');
+      }
+      // The only way to move to a newer epoch: an envelope signed by the
+      // pinned Host key whose wrapped payload is bound to that epoch and to
+      // this device. Older epochs were rejected above.
+      await _install(envelopeEpoch, key);
+      return null;
+    }
+    final (parts, header) = _parseJwe(envelope);
+    if (header['alg'] != 'dir' || parts[1].isNotEmpty) {
       throw StateError('invalid_jwe_algorithm');
     }
+    // Content for a newer epoch, or for an epoch whose key has not arrived,
+    // waits for the Host's key delivery; nothing local changes, so the
+    // envelope can be retried once the key is installed.
+    final cek = envelopeEpoch > epoch
+        ? throw StateError('waiting_for_host_key')
+        : keys[envelopeEpoch] ?? (throw StateError('waiting_for_host_key'));
     final plain = await crypto.AesGcm.with256bits().decrypt(
       crypto.SecretBox(
         unb64(parts[3]),
@@ -304,21 +551,49 @@ class SpaceCrypto {
       secretKey: crypto.SecretKey(cek),
       aad: utf8.encode(parts[0]),
     );
-    final payload = jsonMap(utf8.decode(plain));
-    if (header['alg'] == 'ECDH-ES+A256KW') {
-      if (payload['v'] != 1 ||
-          payload['space'] != space.remoteSpace ||
-          payload['epoch'] != epoch ||
-          payload['recipient'] != space.device) {
-        throw StateError('invalid_key_binding');
-      }
-      final key = unb64(payload['key'] as String);
-      if (key.length != 32) throw StateError('invalid_content_key');
-      keys = {epoch: key};
-      await _persist();
-      return null;
+    return jsonMap(utf8.decode(plain));
+  }
+
+  static (List<String>, Map<String, dynamic>) _parseJwe(
+    Map<String, dynamic> envelope,
+  ) {
+    final compact = utf8.decode(base64Decode(envelope['body'] as String));
+    final parts = compact.split('.');
+    if (parts.length != 5) throw StateError('invalid_jwe');
+    final header = jsonMap(utf8.decode(unb64(parts[0])));
+    if (header['enc'] != 'A256GCM' ||
+        header.containsKey('crit') ||
+        header.containsKey('zip')) {
+      throw StateError('invalid_jwe_header');
     }
-    return payload;
+    return (parts, header);
+  }
+
+  /// Unwrap and check a delivery's content key; any failure is permanent.
+  Future<List<int>> _unwrapDelivery(
+    Map<String, dynamic> envelope,
+    int envelopeEpoch,
+  ) async {
+    final (parts, header) = _parseJwe(envelope);
+    final plain = await crypto.AesGcm.with256bits().decrypt(
+      crypto.SecretBox(
+        unb64(parts[3]),
+        nonce: unb64(parts[2]),
+        mac: crypto.Mac(unb64(parts[4])),
+      ),
+      secretKey: crypto.SecretKey(_unwrap(parts, header)),
+      aad: utf8.encode(parts[0]),
+    );
+    final payload = jsonMap(utf8.decode(plain));
+    if (payload['v'] != 1 ||
+        payload['space'] != space.remoteSpace ||
+        payload['epoch'] != envelopeEpoch ||
+        payload['recipient'] != space.device) {
+      throw StateError('invalid_key_binding');
+    }
+    final key = unb64(payload['key'] as String);
+    if (key.length != 32) throw StateError('invalid_content_key');
+    return key;
   }
 
   List<int> _unwrap(List<String> parts, Map<String, dynamic> header) {
@@ -384,12 +659,4 @@ class SpaceCrypto {
     (value >> 8) & 255,
     value & 255,
   ];
-  Future<void> setEpoch(int value) async {
-    if (value < epoch) throw StateError('stale_epoch');
-    if (value != epoch) {
-      epoch = value;
-      keys = {};
-      await _persist();
-    }
-  }
 }

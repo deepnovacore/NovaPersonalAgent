@@ -1,5 +1,6 @@
 import {SOURCE_PROCESSING_GOAL} from '../core/source-processing-instructions.js'
 import {createHash,randomUUID} from 'node:crypto'
+import {isDeepStrictEqual} from 'node:util'
 import {z} from 'zod'
 import {BoundedJsonStore} from '../storage/bounded-json.js'
 import {canonicalJson} from '../text/canonical-json.js'
@@ -188,6 +189,8 @@ export class ScheduleService{
    const terminal=next.runs.filter(run=>run.stage==='terminal'&&run.terminal_summary?.published),retire=new Set(terminal.slice(0,Math.max(0,terminal.length-2000)).map(run=>run.run_id))
    next.runs=next.runs.filter(run=>!retire.has(run.run_id))
    if(next.runs.length>4096)throw Error('schedule_capacity')
+   // Idempotent ticks must not rewrite state or advance context authority, or foreground authorization never settles.
+   if(isDeepStrictEqual(next,this.#state))return result
    await this.#store.write(next);this.#state=next
    try{this.changed()}catch{/* persistence already committed */}
    return result

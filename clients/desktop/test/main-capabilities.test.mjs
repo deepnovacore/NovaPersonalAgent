@@ -1,4 +1,4 @@
-import {codingBackendStatus} from '../src/main/coding-settings.mjs'
+import {codingBackendStatus, codingBlockedByCodex} from '../src/main/coding-settings.mjs'
 import {tmpdir} from 'node:os'
 import assert from 'node:assert/strict'
 import test from 'node:test'
@@ -33,11 +33,11 @@ test('actual main prelaunch registry failures stop the supervisor without schedu
     await supervisor.stop()
   }
 })
-test('actual main turns Coding off instead of blocking on an unfinished manual Codex path', async () => {
+async function launchEnvironment({codingBackend, desktopConfig = {}, codexStatus = {status: 'ready'}}) {
   const specs = []
   const context = vm.createContext({refreshSpaceModels: async () => {}, acceptance: null, readCapabilityDocument: () => ({version: 1}), classifyBackendFailure,
     accessCredentials: fn => fn(), refreshCapabilityEditor() {}, preferredLanguage: () => 'en', acceptanceBackendSettings: value => value,
-    currentSettings: {}, process: {env: {}, cwd: () => '/tmp'}, desktopConfig: {codexConfigurationError: 'manual_path_required'}, codexStatus: {status: 'ready'},
+    currentSettings: codingBackend === undefined ? {} : {codingBackend}, process: {env: {}, cwd: () => '/tmp'}, desktopConfig, codexStatus, codingBlockedByCodex,
     randomBytes: () => Buffer.alloc(16), createReadinessListener: () => ({endpoint: Promise.resolve('ep'), close() {}}), createBackendDiagnosticCollector: () => ({}),
     decryptSecretsForSpawn: () => ({}), secretCodec: {}, settingsGeneration: 0, launchGeneration: 0, mainWindow: null, app: {isPackaged: false, getAppPath: () => '/app', getPreferredSystemLanguages: () => ['en']},
     nodeRuntimeEntry: () => 'entry', packageRoot: '/pkg', realpathSync: value => value, existsSync: () => false, chatGptFile: () => '/tmp/fixture-chatgpt-accounts.enc', resolve: (...parts) => parts.join('/'), openSetupWindow: () => {},
@@ -46,7 +46,47 @@ test('actual main turns Coding off instead of blocking on an unfinished manual C
     describeHostBlockingEnvironment: (_environment, textConversations) => {assert.equal(textConversations, true); return {pipeline: 'cascaded', missing: ['DASHSCOPE_API_KEY']}}})
   vm.runInContext(launch, context)
   await assert.rejects(context.launchBackend('node', {}), error => error.kind === 'configuration_required' && error.code !== 'manual_path_required')
-  assert.equal(specs[0].env.CODING_MODULE_ENABLED, 'false')
+  return specs[0].env
+}
+test('actual main turns Coding off instead of blocking on an unfinished manual Codex path', async () => {
+  assert.equal((await launchEnvironment({desktopConfig: {codexConfigurationError: 'manual_path_required'}})).CODING_MODULE_ENABLED, 'false')
+  assert.equal((await launchEnvironment({codingBackend: 'codex', desktopConfig: {codexConfigurationError: 'manual_path_required'}})).CODING_MODULE_ENABLED, 'false')
+})
+test('actual main gates Coding on the Codex CLI only when Codex is the selected backend', async () => {
+  assert.equal((await launchEnvironment({codingBackend: 'codex', codexStatus: {status: 'missing'}})).CODING_MODULE_ENABLED, 'false')
+  assert.equal((await launchEnvironment({codingBackend: 'codex'})).CODING_MODULE_ENABLED, undefined)
+  for (const codingBackend of ['opencode', 'codebuddy', 'pi', 'deepseek']) {
+    assert.equal((await launchEnvironment({codingBackend, codexStatus: {status: 'missing'}})).CODING_MODULE_ENABLED, undefined, codingBackend)
+    assert.equal((await launchEnvironment({codingBackend, desktopConfig: {codexConfigurationError: 'manual_path_required'}})).CODING_MODULE_ENABLED, undefined, codingBackend)
+  }
+})
+// Whether Coding runs is fixed in the launch environment, so a backend change that flips it needs a restart.
+async function saveCodingBackend({from, to, codexStatus, desktopConfig = {}}) {
+  const live = []
+  const context = vm.createContext({configuredSpaceModelsPath: () => null, settingsRestartPending: false, currentSettings: {codingBackend: from},
+    settingsRecoveryAvailable: false, backendSettings: ({codingBackend: _coding, ...rest}) => rest, backendControl: {}, backendStatus: {state: 'connected'},
+    lifecycleCoordinator: {}, desktopConfig, codexStatus, codingBlockedByCodex, applyLiveCodingBackend: async backend => { live.push(backend) }, applyLiveCredentials: async () => {},
+    refreshSettingsCapabilities: async () => {}, settingsView: () => ({}), publishSettingsApplyStatus() {}, publishCommittedSettings() {},
+    completeSettings: async () => {}, commitDesktopConfiguration() {}, discardDesktopConfiguration() {}, restartSettingsBackend() {},
+    applySettingsTransaction: async options => {
+      context.currentSettings = {codingBackend: to}
+      const restart = options.needsBackendRestart()
+      await options.applyLive()
+      return {saved: true, operationStatus: restart ? 'pending_restart' : 'applied'}
+    }})
+  vm.runInContext(source.slice(source.indexOf('async function applyDesktopSettings('), source.indexOf('function visorUsage()')), context)
+  const result = await context.applyDesktopSettings({settingsPatch: {codingBackend: to}})
+  return {status: result.operationStatus, live}
+}
+test('actual main restarts instead of reporting applied when a coding backend change turns Coding on or off', async () => {
+  const missing = {status: 'missing'}, ready = {status: 'ready'}
+  // Codex missing: Coding started off, so choosing OpenCode only takes effect after a restart (and vice versa).
+  assert.deepEqual(await saveCodingBackend({from: 'codex', to: 'opencode', codexStatus: missing}), {status: 'pending_restart', live: []})
+  assert.deepEqual(await saveCodingBackend({from: 'opencode', to: 'codex', codexStatus: missing}), {status: 'pending_restart', live: []})
+  assert.deepEqual(await saveCodingBackend({from: 'codex', to: 'pi', codexStatus: ready, desktopConfig: {codexConfigurationError: 'manual_path_required'}}), {status: 'pending_restart', live: []})
+  // Coding stays on: the default is handed to the running backend.
+  assert.deepEqual(await saveCodingBackend({from: 'opencode', to: 'pi', codexStatus: missing}), {status: 'applied', live: ['pi']})
+  assert.deepEqual(await saveCodingBackend({from: 'codex', to: 'opencode', codexStatus: ready}), {status: 'applied', live: ['opencode']})
 })
 test('actual settings view never decrypts while projecting startup and panel state', () => {
   let decrypts = 0
@@ -54,7 +94,7 @@ test('actual settings view never decrypts while projecting startup and panel sta
     readCapabilityDocument: () => ({version: 1}), decryptSecretsForSpawn: () => {decrypts++; return {}},
     readCapabilityEditor: () => ({document: {version: 1}, revision: 'test-revision', problems: []}), capabilityEnvironment: () => ({}), capabilityPath, statSync, capabilityDocumentRevision: () => 'fixed',
     runtimeCapabilities: null, publicSettings: () => ({}), codexStatus: {}, backendStatus: {}, settingsApplyStatus: 'idle', settingsRecoveryAvailable: false, managedWorkspacesView: () => ({}),
-    startup: {}, keyringAvailable: true, microphoneStatus: 'unknown', desktopConfig: null, secretsPresent: () => ({}), secretCodec: {available: () => true}, hasPlaintextSecret: () => false})
+    startup: {}, keyringAvailable: true, microphoneStatus: 'unknown', desktopConfig: null, dataRootNotice: null, secretsPresent: () => ({}), secretCodec: {available: () => true}, hasPlaintextSecret: () => false})
   vm.runInContext(view, context)
   context.settingsView(); context.settingsView()
   assert.equal(decrypts, 0)

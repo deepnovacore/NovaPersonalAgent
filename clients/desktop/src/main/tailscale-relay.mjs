@@ -144,7 +144,9 @@ export function createTailscaleRelay({directory, run = runTailscale, serve = sta
     const bootstrapToken = randomBytes(32).toString('base64url')
     const {RelayServer} = await loadRelay()
     const server = new RelayServer({securityPath:join(root,'security.sqlite'), mailboxPath:join(root,'mailbox.sqlite'),
-      bootstrapToken, bind:'127.0.0.1', port:0, externalTls:true, publicUrl:relayUrl, trustedProxyAddresses:['127.0.0.1']})
+      bootstrapToken, bind:'127.0.0.1', port:0, externalTls:true, publicUrl:relayUrl, trustedProxyAddresses:['127.0.0.1'],
+      // Space voice media for this Host's own paired devices; standalone relays keep it off.
+      media:{enabled:true}})
     let proxy
     try {
       const target = await server.listen()

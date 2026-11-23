@@ -52,6 +52,14 @@ export function codingProfileRegistry(settings) {
   return {defaults, profiles}
 }
 
+/**
+ * Coding readiness follows the selected backend: only Codex needs the Codex CLI, and an unfinished
+ * manual Codex path counts as unavailable. ACP backends are checked by the task preflight instead.
+ */
+export function codingBlockedByCodex(backend, {codexConfigurationError, codexStatus} = {}) {
+  return (backend ?? 'codex') === 'codex' && (Boolean(codexConfigurationError) || codexStatus?.status !== 'ready')
+}
+
 /** Presence only: login and negotiated ACP readiness are verified by the task preflight. */
 export function codingBackendStatus(settings, environment = process.env) {
   const paths = normalizeCodingPaths(settings?.codingBackendPaths)

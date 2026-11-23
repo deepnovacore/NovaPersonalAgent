@@ -1,10 +1,12 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react'
 import { t, currentLanguage } from '../../locale.mjs'
 import { scheduleError } from './helpers.mjs'
 export function ScheduleEditor({model,onSaved,onCancel,onReload,connected=true}:any) {
-  const [,render]=useState(0), first=useRef<HTMLInputElement>(null),[acceptance,setAcceptance]=useState(model.value.acceptance.join('\n'))
+  const first=useRef<HTMLInputElement>(null),[acceptance,setAcceptance]=useState(model.value.acceptance.join('\n'))
+  // Subscribing re-checks the snapshot, so a change made before the subscription is never lost.
+  useSyncExternalStore(model.subscribe,model.getSnapshot)
   const value=model.value, rule=value.rule,locked=model.busy||!!model.pending||!connected
-  useEffect(()=>{let live=true;model.onChange=()=>{if(live)render(n=>n+1)};first.current?.focus();if(!model.next&&!model.pending)void model.preview();return()=>{live=false;model.onChange=()=>{}}},[model])
+  useEffect(()=>{first.current?.focus();if(!model.next&&!model.pending)void model.preview()},[model])
   function setRule(next:any){if(model.set('rule',next))void model.preview()}
   const preview=(()=>{if(!model.next)return t('正在计算首次执行时间…');try{return t('首次执行：{0}',new Date(model.next.scheduled_at).toLocaleString(currentLanguage(),{timeZone:rule.timezone}))}catch{return t('请检查时间、时区和任务内容。')}})()
   const label=(text:string,input:React.ReactNode,hidden=false)=><label className="schedule-field" hidden={hidden}><span>{t(text)}</span>{input}</label>
@@ -18,7 +20,7 @@ export function ScheduleEditor({model,onSaved,onCancel,onReload,connected=true}:
       {label('日期',<input aria-label={t('日期')} type="date" value={rule.date??new Date().toLocaleDateString('sv-SE')} disabled={locked} onChange={e=>setRule({...rule,date:e.target.value})}/>,rule.kind!=='once')}
       {label('时区',<input aria-label={t('时区')} type="text" value={rule.timezone} disabled={locked} onChange={e=>setRule({...rule,timezone:e.target.value.trim()})}/>)}
     </section>
-    <div className="schedule-weekdays" role="group" aria-label={t('运行星期')} hidden={rule.kind!=='weekly'}>{['周一','周二','周三','周四','周五','周六','周日'].map((text,i)=><button key={i} type="button" data-day={i+1} disabled={locked} aria-pressed={rule.weekdays?.includes(i+1)??false} onClick={()=>{const days=new Set<number>(rule.weekdays??[]);days.has(i+1)?days.delete(i+1):days.add(i+1);setRule({...rule,weekdays:[...days].sort((a,b)=>a-b)})}}>{t(text)}</button>)}</div>
+    <div className="schedule-weekdays" role="group" aria-label={t('运行星期')} hidden={rule.kind!=='weekly'}>{['周一','周二','周三','周四','周五','周六','周日'].map((text,i)=><button key={i} type="button" data-day={i+1} disabled={locked} aria-pressed={rule.weekdays?.includes(i+1)??false} onClick={()=>{const current=model.value.rule,days=new Set<number>(current.weekdays??[]);days.has(i+1)?days.delete(i+1):days.add(i+1);setRule({...current,weekdays:[...days].sort((a,b)=>a-b)})}}>{t(text)}</button>)}</div>
     <p className="schedule-preview" aria-live="polite">{preview}</p>
     <details><summary>{t('完成标准与读取范围')}</summary>{label('完成标准（每行一条）',<textarea aria-label={t('完成标准（每行一条）')} rows={3} value={acceptance} disabled={locked} onChange={e=>{setAcceptance(e.target.value);model.set('acceptance',e.target.value.split('\n').map((s:string)=>s.trim()).filter(Boolean))}}/>)}<p className="schedule-muted">{t('只读取你勾选的数据；整理结果后，由你决定是否转为事项。')}</p><div className="schedule-scopes">{[['todos','待办'],['goals','目标'],['tasks','Agent 任务'],['memory','记忆'],['knowledge','已授权资料'],['search','联网搜索']].map(([id,text])=><label key={id}><input type="checkbox" aria-label={t(text)} checked={value.context[id]===true} disabled={locked} onChange={e=>model.set('context',{...value.context,[id]:e.target.checked})}/><span>{t(text)}</span></label>)}</div></details>
     <p className="schedule-error" role="alert">{model.error}</p>

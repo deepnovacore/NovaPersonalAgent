@@ -164,33 +164,13 @@ export function createProductionCodexHost(
   if (
     resourcesPath === null
     || workspace === null
-    || binary === null
     || homeDirectory === null
   ) return Object.freeze({
     catalog,
     transportFactory: unavailableCodexBackendTransportFactory,
     projectHost: null,
   })
-  const hostEnvironment: Readonly<Record<string, string | undefined>> = (
-    platform === 'win32'
-      || typeof environment.HOME === 'string' && environment.HOME !== ''
-    ? environment
-    : Object.freeze({...environment, HOME: homeDirectory})
-  )
-  const probe = loadCodexSandboxProbeFromResources({resourcesPath, platform, arch})
-  if (probe === null) return Object.freeze({
-    catalog,
-    transportFactory: unavailableCodexBackendTransportFactory,
-    projectHost: null,
-  })
-  const windowsGuardianFactory = platform === 'win32'
-    ? loadWindowsGuardianFactoryFromResources({resourcesPath, platform, arch})
-    : null
-  if (platform === 'win32' && windowsGuardianFactory === null) return Object.freeze({
-    catalog,
-    transportFactory: unavailableCodexBackendTransportFactory,
-    projectHost: null,
-  })
+  // Project roots and locks serve every coding backend, so they never depend on the Codex CLI.
   let projectHost = loadProjectNativeHostFromResources({
     resourcesPath,
     platform,
@@ -203,6 +183,31 @@ export function createProductionCodexHost(
     managedRoot: canonicalDirectory(stripLikePython(settings.codex_managed_root)),
     workspace,
   })) projectHost = null
+  if (binary === null) return Object.freeze({
+    catalog,
+    transportFactory: unavailableCodexBackendTransportFactory,
+    projectHost,
+  })
+  const hostEnvironment: Readonly<Record<string, string | undefined>> = (
+    platform === 'win32'
+      || typeof environment.HOME === 'string' && environment.HOME !== ''
+    ? environment
+    : Object.freeze({...environment, HOME: homeDirectory})
+  )
+  const probe = loadCodexSandboxProbeFromResources({resourcesPath, platform, arch})
+  if (probe === null) return Object.freeze({
+    catalog,
+    transportFactory: unavailableCodexBackendTransportFactory,
+    projectHost,
+  })
+  const windowsGuardianFactory = platform === 'win32'
+    ? loadWindowsGuardianFactoryFromResources({resourcesPath, platform, arch})
+    : null
+  if (platform === 'win32' && windowsGuardianFactory === null) return Object.freeze({
+    catalog,
+    transportFactory: unavailableCodexBackendTransportFactory,
+    projectHost,
+  })
   const temporaryDirectory = options.temporaryDirectory === undefined
     ? canonicalSystemTemporaryDirectoryForTest(tmpdir())
     : canonicalDirectory(options.temporaryDirectory)

@@ -83,7 +83,10 @@ class CleanupTransport extends SpaceRelayTransport {
     return {
       'messages': [
         for (var i = 0; i < events.length; i++)
-          {'seq': cursor + i + 1, 'envelope': events[i]},
+          {
+            'seq': cursor + i + 1,
+            'envelope': {...events[i], 'chan': 'mailbox'},
+          },
       ],
       'nextCursor': cursor + events.length,
       'hasMore': false,

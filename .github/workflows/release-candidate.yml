@@ -29,7 +29,7 @@ jobs:
       fail-fast: false
       matrix:
         target: ${{ fromJSON(inputs.candidate_scope == 'windows' && '["win32-x64"]' || '["darwin-arm64","win32-x64","linux-x64"]') }}
-    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-15","win32-x64":"windows-latest","linux-x64":"ubuntu-22.04"}')[matrix.target] }}
+    runs-on: ${{ fromJSON('{"darwin-arm64":"macos-15","win32-x64":"windows-2022","linux-x64":"ubuntu-22.04"}')[matrix.target] }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

@@ -1,9 +1,9 @@
 // Generated from runtime/src/config/capability-registry.ts; run node runtime/scripts/check-capabilities.mjs --write.
 /** One dependency-free registry parser, also emitted into the standalone CLI by check-capabilities.mjs. */
-import { readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-export const DEFAULT_CAPABILITIES_PATH = '~/.nova-audio-agent/capabilities.json';
+export const DEFAULT_CAPABILITIES_PATH = '~/.nova-personal-agent/capabilities.json';
 export const BAILIAN_SEARCH_MCP_URL = 'https://dashscope.aliyuncs.com/api/v1/mcps/EnhancedSearch/mcp';
 export const BAILIAN_SEARCH_MCP_TOOL = 'search_pro';
 export const DEFAULT_FRONTBRAIN_TOOL_BUDGET = 24;
@@ -274,12 +274,57 @@ function parseServer(value, environment) {
         invalid('server.env');
     return { ...computerUse, enabled, transport, command, args: args, env: enabled ? interpolateMap(env, environment) : env, tools, exposeTo };
 }
+/**
+ * Mirrors data-root.ts without importing it (this file is copied into the dependency-free CLI): the legacy
+ * `~/.nova-audio-agent` root stays the default until its move has run; a pending move or held migrator lock refuses.
+ */
+function capabilitiesMigrated(home) {
+    const pending = (path) => { try {
+        lstatSync(path);
+        return true;
+    }
+    catch {
+        return false;
+    } };
+    if (pending(join(home, '.nova-personal-agent', '.data-root-migration.journal.json')) || pending(join(home, '.nova-personal-agent.migration.lock'))) {
+        throw Object.assign(new Error('Nova data migration is incomplete. Quit Nova and run `npa migrate-data` to finish or roll it back.'), { code: 'data_root_migration_pending' });
+    }
+    try {
+        return statSync(join(home, '.nova-personal-agent', '.data-root-migrated.json')).isFile();
+    }
+    catch {
+        return false;
+    }
+}
+export function defaultCapabilitiesPath(home) {
+    let legacy = false;
+    const migrated = capabilitiesMigrated(home);
+    try {
+        const stats = lstatSync(join(home, '.nova-audio-agent'));
+        legacy = stats.isDirectory() || stats.isSymbolicLink();
+    }
+    catch { /* no legacy root */ }
+    return !migrated && legacy ? '~/.nova-audio-agent/capabilities.json' : DEFAULT_CAPABILITIES_PATH;
+}
+/** Once migrated, an explicit path under the legacy root names the moved file, never a second copy. */
+function mapLegacyCapabilitiesPath(path, home) {
+    if (!capabilitiesMigrated(home))
+        return path;
+    if (path === '~/.nova-audio-agent' || path.startsWith('~/.nova-audio-agent/'))
+        return `~/.nova-personal-agent${path.slice('~/.nova-audio-agent'.length)}`;
+    const legacy = join(home, '.nova-audio-agent');
+    if (path === legacy || path.startsWith(`${legacy}/`) || path.startsWith(`${legacy}\\`))
+        return join(home, '.nova-personal-agent', path.slice(legacy.length));
+    return path;
+}
 export function loadCapabilityRegistry(options = {}) {
     const environment = options.environment ?? process.env;
     const explicitPath = (options.path === '' ? undefined : options.path) ?? environmentOverride(environment, 'CAPABILITIES_CONFIG');
     const path = explicitPath ?? DEFAULT_CAPABILITIES_PATH;
     const explicit = explicitPath !== undefined;
-    const resolved = path.startsWith('~/') ? join(options.home ?? homedir(), path.slice(2)) : path;
+    const home = options.home ?? homedir();
+    const chosen = explicit ? mapLegacyCapabilitiesPath(path, home) : defaultCapabilitiesPath(home);
+    const resolved = chosen.startsWith('~/') ? join(home, chosen.slice(2)) : chosen;
     let input;
     try {
         const bytes = readFileSync(resolved);

@@ -483,6 +483,12 @@ void main() {
   testWidgets('active compact call resumes fullscreen without recreating chat', (
     tester,
   ) async {
+    // A synthetic active call shows the pet visual, whose listening pulse repeats forever and keeps
+    // pumpAndSettle from ever settling. The pulse honours the platform reduce-motion setting; this test
+    // checks presentation ownership, not the animation.
+    tester.platformDispatcher.accessibilityFeaturesTestValue =
+        const FakeAccessibilityFeatures(disableAnimations: true);
+    addTearDown(tester.platformDispatcher.clearAccessibilityFeaturesTestValue);
     await openChat(tester);
     final original = tester.state<LocalChatPanelState>(
       find.byType(LocalChatPanel),

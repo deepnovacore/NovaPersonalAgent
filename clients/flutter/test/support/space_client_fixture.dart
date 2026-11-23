@@ -1,3 +1,5 @@
+import 'package:nova_audio/nova_audio.dart';
+import 'package:nova_mobile/conversation/phone_dictation.dart';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -7,6 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/space/client_controller.dart';
 import 'package:nova_mobile/space/client_state.dart';
 import 'package:nova_mobile/space/relay_transport.dart';
+import 'package:nova_mobile/space/space_call_controller.dart';
 import 'package:nova_mobile/space/space_crypto.dart';
 import 'package:nova_mobile/space/space_root.dart';
 import 'package:nova_mobile/space/space_storage.dart';
@@ -136,18 +139,30 @@ Future<void> pumpClient(
   SpaceClientState state, {
   VoidCallback? onSwitchSpace,
   Widget Function(Widget app)? wrap,
+  String? language = 'zh',
+  AudioPort? audio,
+  Future<bool> Function()? requestMicrophone,
+  PhoneDictation Function(ValueChanged<String> onText)? createDictation,
+  SpaceCallController Function(SpaceClientController controller)? createCall,
+  ValueChanged<SpaceClientController>? onController,
 }) async {
   tester.view.physicalSize = const Size(390, 844);
   tester.view.devicePixelRatio = 1;
   addTearDown(tester.view.resetPhysicalSize);
   addTearDown(tester.view.resetDevicePixelRatio);
   final controller = await fakeController(tester, state);
+  onController?.call(controller);
   final app = MaterialApp(
     theme: novaTheme(),
     home: SpaceClientScreen(
       space: spaceRecord,
       onSwitchSpace: onSwitchSpace ?? () {},
       open: (_) async => controller,
+      language: language,
+      audio: audio,
+      requestMicrophone: requestMicrophone,
+      createDictation: createDictation,
+      createCall: createCall,
     ),
   );
   await tester.pumpWidget(wrap?.call(app) ?? app);

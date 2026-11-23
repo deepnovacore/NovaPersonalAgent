@@ -14,6 +14,9 @@ import type { MemoryEntry } from '../src/memory/entry.js';
 import type { PersonalMemoryResource } from '../src/memory/personal-memory.js';
 import { parseDesktopControl } from '../src/desktop.js';
 import { ClientCommands } from '../src/server/client-protocol.js';
+// Quiet hours (default 22:00-08:00) follow the machine's zone unless a test sets one. These fixtures use fixed clocks
+// (or the real clock) and expect delivery, so pin the zone instead of depending on where and when the suite runs.
+process.env.TZ = 'UTC'
 const now = new Date('2026-09-11T10:00:00Z');
 const entry = (id = 'plan', version = 1): MemoryEntry => ({ id, version, content: 'Today prepare a demo', kind: 'plan', origin: 'stated', source_refs: [{ type: 'conversation', ref: 'conversation:1', observed_at: now.toISOString() }], observed_at: now.toISOString(), recorded_at: now.toISOString(), topic: 'work', status: 'active', corrected_to: null, confidence_note: null });
 const proposal = (id = 'plan', version = 1) => ({ kind: 'question' as const, summary: 'Check demo materials?', why_now: 'You said the demo is today', evidence_refs: [] as string[], memory_refs: [{ entry_id: id, version }] });

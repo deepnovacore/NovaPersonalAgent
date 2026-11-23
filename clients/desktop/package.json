@@ -1,6 +1,6 @@
 {
   "name": "@nova-personal-agent/desktop",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Nova Personal Agent (NPA) desktop client",
   "homepage": "https://github.com/deepnovacore/NovaPersonalAgent",
   "author": {
@@ -34,12 +34,11 @@
     "verify:release": "node scripts/verify-release.mjs",
     "build:renderer": "node scripts/build-renderer.mjs",
     "typecheck:renderer": "tsc -p tsconfig.renderer.json",
-    "test:react": "node scripts/test-react.mjs",
-    "test:visual": "node scripts/react-visual-compare.mjs"
+    "test:react": "node scripts/test-react.mjs"
   },
   "dependencies": {
-    "@nova-personal-agent/relay": "1.0.0",
-    "@nova-personal-agent/runtime": "1.0.0",
+    "@nova-personal-agent/relay": "1.0.1",
+    "@nova-personal-agent/runtime": "1.0.1",
     "sherpa-onnx": "1.13.4",
     "tar-stream": "3.1.7",
     "unbzip2-stream": "1.4.3",

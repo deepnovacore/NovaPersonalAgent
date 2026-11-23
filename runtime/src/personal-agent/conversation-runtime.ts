@@ -1,3 +1,4 @@
+import {setTimeout as delay} from 'node:timers/promises'
 import {abortable} from '../core/camera-session.js'
 import {contextDependenciesSchema,emptyContextDependencies,mergeContextDependencies,type ContextDependencies} from './context-dependencies.js'
 import {factoryForMemoryComposition, personalMemoryFactory} from '../memory/factory.js'
@@ -49,6 +50,7 @@ import {scopeApprovalController} from './approval-scope.js'
 import {deliveryToEvent,executorApprovalMessage,projectStateMessage} from '../desktop/desktop-wire.js'
 
 const SOURCE_TODO_TURNS=4
+const AUTHORIZATION_SETTLE_ATTEMPTS=10
 /** Prepared topic text must retain evidence authorization for the actual model recipient. */
 
 export async function maySendPreparedMemory(memory: PersonalMemoryResource|undefined, consumer: string|undefined, refs: readonly string[]): Promise<boolean> {
@@ -98,7 +100,10 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(execution||contextDependencies.state==='tracked'&&!contextDependencies.items.length)return
    authorizationFailure=undefined
    const authorizationSignal=AbortSignal.any([lifetime,AbortSignal.timeout(5000)])
-   for(let attempt=0;attempt<2;attempt++){
+   // Admitting a turn ingests its own message, which moves the revision for a moment. Forced checks gate
+   // startup and turns, so they wait for it to settle inside the authorization deadline instead of failing.
+   for(let attempt=0;attempt<(force?AUTHORIZATION_SETTLE_ATTEMPTS:2);attempt++){
+    if(attempt>=2)await delay(Math.min(50*2**(attempt-2),400),undefined,{signal:authorizationSignal})
     const before=await abortable(options.host.contextAuthorizationRevision(authorizationSignal),authorizationSignal)
     if(!force&&authorizationCacheable&&before!==undefined&&before===authorizationRevision)return
     if(!await abortable(options.host.contextDependenciesAuthorized(contextDependencies,configuredMemoryConsumer(options.settings,mode)??null),authorizationSignal)){authorizationFailure='unauthorized';throw Error('context_authorization_changed')}
@@ -273,7 +278,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    ...(workbenchVoice?{suppressConversationMemoryCapture:true,providerToolView:tools=>({...tools,schemas:[]}),scopedTool:event=>Promise.resolve(scheduledToolResult(event,{state:'refused',code:'workbench_voice_readonly',message:'Return to text mode to confirm execution.'},'workbench_voice_readonly',false))}:{}),
    ...(memoryConsumerFingerprint?{memoryConsumerFingerprint}:{}),
    ...(options.nextPlaybackGeneration?{nextPlaybackGeneration:options.nextPlaybackGeneration}:{}),
-   ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&options.host.presentationMode!=='background'&&(options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
+   ...(options.onAudioFrame?{onAudioFrame:frame=>{if(!lifetime.aborted&&voiceEnabled&&(options.host.presentationMode!=='background'||options.host.remoteVoiceConversationId()===conversation.id)&&(options.host.voiceConversationId()===conversation.id||options.host.presentationMode===null||options.host.presentationMode==='orb'))options.onAudioFrame?.(frame)}}:{}),...(options.onAudioClear?{onAudioClear:options.onAudioClear}:{}),...(options.onAudioAlert?{onAudioAlert:options.onAudioAlert}:{}),...(options.onAudioTerminal?{onAudioTerminal:options.onAudioTerminal}:{}),sharedPersonal:{host:options.host,memory:options.memory()},
    ...(projectConfirmation?{projectConfirmation}:{}),...(codingTarget?{codingTarget}:{}),
    ...(options.codexResource?{codexResource:options.codexResource,codingAgentControllerFactory:options.codexResource.agentControllerFactory}:{}),
    ...(approval?{executorApproval:approval}:{}),
@@ -370,7 +375,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
    if(mode==='background')projectConfirmation?.setBackground(true)
    else if(!seen)projectConfirmation?.setBackground(false,{awaitPresentation:true})
    else if(seen?.proposal_id&&seen.conversation_id===conversation.id&&projectConfirmation?.view.pending_confirmation_id===seen.proposal_id)projectConfirmation.setBackground(false)
-   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'||!textOnly&&mode==='workbench'&&options.host.voiceConversationId()!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
+   if(!seen){audioGeneration++;const paused=!execution&&(!textOnly&&!voiceEnabled||mode==='background'&&options.host.remoteVoiceConversationId()!==conversation.id||!textOnly&&mode==='workbench'&&options.host.voiceConversationId()!==conversation.id);if(paused||presentationPaused)await graph.service.playbackDisconnected({resumeDelivery:!paused});presentationPaused=paused}
   })
   const syncIdentityContext=createIdentityContextSync({identity:()=>options.host.identity(),epoch:()=>graph.service.session.sessionEpoch,
    inject:(content,signal)=>provider.injectHostItem({kind:'dialogue_context',host_item_id:randomUUID(),event_id:randomUUID(),call_id:null,content},{confirmationTimeout:null,asUserActivation:false,signal})})
@@ -497,7 +502,7 @@ export function conversationRuntimeFactory(options:AssemblyOptions & Pick<Realti
     try{
      await authorizeContext()
      const generation=audioGeneration,epoch=graph.service.session.sessionEpoch
-     const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'?'background':options.host.voiceConversationId()!==conversation.id?'other_voice_owner':undefined
+     const reason=()=>closed||lifetime.aborted?'closed':!voiceEnabled?'voice_off':generation!==audioGeneration?'generation':epoch!==graph.service.session.sessionEpoch?'epoch':options.host.presentationMode==='background'&&options.host.remoteVoiceConversationId()!==conversation.id?'background':options.host.voiceConversationId()!==conversation.id?'other_voice_owner':undefined
      const current=()=>reason()===undefined
 
      if(!current()){dropped(reason()??'unknown');return}

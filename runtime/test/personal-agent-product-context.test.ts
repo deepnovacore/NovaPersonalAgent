@@ -22,6 +22,9 @@ import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {UnifiedRetrieval} from '../src/memory/retrieval.js'
 import {provider,eventually,turn} from './helpers/mem0-fixture.js'
+// Quiet hours (default 22:00-08:00) follow the machine's zone unless a test sets one. These fixtures use fixed clocks
+// (or the real clock) and expect delivery, so pin the zone instead of depending on where and when the suite runs.
+process.env.TZ = 'UTC'
 
 const report='Synthetic orchid prior report'
 const taskText='Synthetic orchid generated task answer'
@@ -463,6 +466,26 @@ test('revoked retained Plan association does not block an independent Chat model
   for(const input of [...requests,...histories,...injected.map(item=>item.content)])for(const excluded of [secret,title,body])assert.ok(!input.includes(excluded),'unused Plan content and revoked history never reach the model/provider')
   assert.ok(host.conversationSnapshot().messages.some(message=>message.text===secret),'source report remains locally visible')
   assert.equal((await host.workbench.plan(plan.id,plan.version)).content,body)
+ }finally{await host.close();await f.close()}
+})
+
+for(const persistent of [false,true])test(`text turn waits for its own ingestion churn to settle (persistent: ${persistent})`,{timeout:30000},async t=>{
+ const f=await fixture('none'),host=f.host,requests:string[]=[]
+ try{
+  const row=await host.life.mutate({op:'create',kind:'todo',title:'Churn source'},'source')
+  await host.close()
+  const store=new PersonalStore(f.path),state=await store.read()
+  state.conversations.items[0]!.messages=[{id:'source-answer',conversation_id:'chat:main',role:'assistant',text:'Earlier answer',context_dependencies:{state:'tracked',items:[{kind:'app_record',section:'todos',id:row.id,version:row.version}]},created_at:new Date().toISOString()}]
+  await store.write(state);await host.open()
+  host.setConversationRuntime(conversationRuntimeFactory({host,memory:()=>undefined,gateway,settings:settings('b'),createTextProvider:captureProvider(async function*(input){await Promise.resolve();requests.push(JSON.stringify(input));yield {kind:'response_started',response_id:'settled'};yield {kind:'text_delta',text:'Settled reply'};yield {kind:'response_completed',response_id:'settled'}})}),()=>{/* frames are not under test */})
+  // Admitting the message moves the ledger revision for a few reads, exactly as live ingestion does.
+  let reads=0
+  const original=host.contextAuthorizationRevision.bind(host)
+  t.mock.method(host,'contextAuthorizationRevision',async(signal?:AbortSignal)=>{reads++;return persistent||reads<=8?`churn-${reads}`:original(signal)})
+  await host.submitConversationText('chat:main','hi','settle');await host.waitConversation('chat:main')
+  const user=host.conversationSnapshot().messages.find(message=>message.request_id==='settle')!
+  if(persistent){assert.equal(user.generation_status,'failed','unbounded churn still cannot prove authority');assert.equal(requests.length,0)}
+  else{assert.equal(user.generation_status,'completed');assert.equal(requests.length,1);assert.equal(host.conversationSnapshot().messages.at(-1)!.text,'Settled reply')}
  }finally{await host.close();await f.close()}
 })
 

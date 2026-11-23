@@ -34,13 +34,13 @@ The scripts isolate build output by worktree path and run id. Call the output pa
    ```
 
    The config holds the Host private keys and content key; never commit it or put it on the relay. `--data` must be a fresh path; existing data is neither migrated nor overwritten. The config and data directories must be private to your user: missing ones are created `0700`, an existing one needs `chmod 700` first, otherwise `init` fails with `space_directory_must_be_private`. If the network drops during first creation, keep the written config and retry the same identity with `resume --config /private/new-space/config.json --bootstrap-file /private/relay-bootstrap`; do not delete the config to rebuild the identity.
-3. Start the desktop with `NOVA_SPACE_HOST_CONFIG=/private/new-space/config.json`. Settings > Connections > Space creates one-time QR codes, shows the phone's full fingerprint, confirms pairing and revokes devices.
+3. Start the desktop with `NOVA_SPACE_HOST_CONFIG=/private/new-space/config.json`. Settings → Devices creates one-time QR codes, shows the phone's full fingerprint, confirms pairing and revokes devices.
 4. On the phone choose "Client" and scan the QR. Compare the fingerprint on the phone and the desktop, then confirm on the desktop. The Client waits for key delivery and then pulls display data. While the Host is offline, state changes show as waiting and chat fails immediately; nothing is sent silently when the Host returns.
 5. Other Spaces created on the phone can be standalone or a Client of another Host; credentials, caches, intents and tool-run records stay isolated per Space. To use another Host Space on the desktop, start it with a separate config.
 
 ## Create a Space from desktop settings
 
-Under Settings > Space & phones, keep “Tailscale automatic setup” selected and choose Create Space. No relay address or bootstrap credential needs to be typed.
+Under Settings → Devices, keep “Tailscale automatic setup” selected and choose Create Space. No relay address or bootstrap credential needs to be typed.
 
 1. Connect the computer and phone to the same Tailscale network. MagicDNS and HTTPS certificates must be enabled by its administrator. Missing prerequisites produce actionable errors.
 2. The desktop runs a relay under `space/relay/` in its app data folder, listening only on `127.0.0.1`, with HTTPS provided by Tailscale Serve. Initial setup chooses a free port from 8443, 9443 and 10443 and pins the origin. Existing services are preserved; Funnel is never enabled. If that port becomes occupied later, data is preserved and the relay stays offline until the port is freed; its address does not silently change.
@@ -48,6 +48,14 @@ Under Settings > Space & phones, keep “Tailscale automatic setup” selected a
 4. Creation restarts the backend and opens a one-time QR code. Choose Client on the phone, scan, compare the full fingerprint and confirm on the computer. Expired codes can be regenerated. Initial HTTPS certificate issuance can time out; retrying keeps the same Space identity.
 5. Config and data use the fixed private `space/` folder (mode `0700`). A new Space starts with fresh data and does not migrate existing data. Losing the Host loses the Space. A changed Tailscale node name requires restoring the original address; the desktop never recreates its identity automatically.
 6. For an existing relay, select “Advanced: existing relay” and enter its HTTPS origin and a bootstrap credential of at least 32 characters (loopback HTTP is allowed for local development). Creation and recovery use the same flow. An existing `NOVA_SPACE_HOST_CONFIG` environment variable takes precedence.
+
+## Realtime voice (optional)
+
+A paired Client can start a realtime voice call that runs on the Host's voice pipeline. Audio goes only through the Space relay, end-to-end encrypted between phone and Host.
+
+- The Client shows a call button only when the relay serves media. The desktop-managed Tailscale relay enables media by default. A self-hosted relay needs `"media": {"enabled": true}` in its deployment JSON; see [Space voice media](../../relay/README.md). Calls use roughly 300 MB per hour on each relay leg.
+- By default only the Space owner can call (Space voice policy `owner`, set in the Space Host config).
+- If the button is missing, the Host is offline or the relay has media disabled; dictation still works.
 
 ## Headless Host (Linux/macOS)
 

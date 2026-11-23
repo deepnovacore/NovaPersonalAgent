@@ -29,8 +29,19 @@ out of this configuration authority.
 - Configuration errors must not echo secret values; any counterexample is a bug.
 - Codex workspace paths, Camera file inputs, and the loopback-only MyContext provider base are
   validated before use; reports about bypasses of those validations are in scope.
-- Home Assistant and AutoGLM are retired: legacy settings for them fail closed before any client
+- Home Assistant and AutoGLM are removed: legacy settings for them (including `AUTOGLM_*` and `EXECUTORS=autoglm`) fail closed before any client
   is constructed, and a configuration that still reaches one of those endpoints is a bug.
+- Optional experience mode. Two features contact `api.deepnovacore.com`; nothing else in the clients does.
+  Experience Spaces (sample personas, desktop Settings → Devices and the NovaCore Space list) only talk to
+  it after you redeem an experience code. Redeeming sends the code and a random per-installation secret
+  (kept in OS-encrypted storage, never in the renderer); later calls request short-lived tokens, refresh a
+  sample persona's profile (persona id and source version), and send the text of that experience
+  conversation to a hosted model. On the desktop, a text model you configured yourself is used first, and
+  the hosted service only when none is set. Experience Spaces hold sample data, not yours, and cannot be
+  paired with a phone. Separately, the clients fetch a small public catalogue of conversation-starter
+  topics for the interface language (`/nova/common/v1/ideas/{zh,en}.json`): a credential-less GET
+  that sends no account or personal data beyond ordinary network metadata such as your IP address, with
+  a 64 KiB size cap, no redirects and strict validation. Reports about either path sending more than this are in scope.
 - Live provider integrations (Qwen realtime, OpenAI, Gemini, Volcengine, Tavily, Codex) run with
   the credentials you configure locally; secure those credentials as you would for any other tool.
 - The reference self-hosted voice services in `serving/` bind to loopback and do not authenticate
