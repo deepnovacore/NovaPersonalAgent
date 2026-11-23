@@ -407,6 +407,33 @@ test('resolved desktop configuration removes an invalid inherited Codex binary',
   assert.equal('CODEX_PREFIX_ARGS' in spec.env, false)
 })
 
+test('an unfinished manual Codex path forwards no discovered Codex binary', () => {
+  const spec = nodeLaunchSpec({
+    nodeEntry: '/repo/runtime/dist/src/desktop-entry.js',
+    nodeResourcesPath: '/repo/clients/desktop/build',
+    workspace: '/workspace',
+    token: TOKEN,
+    readyEndpoint: '127.0.0.1:49152',
+    parentEnv: {CODEX_BIN: '/private/inherited-codex', Codex_Bin: '/private/mixed-case-codex', Codex_Prefix_Args: '["/private/mixed.js"]'},
+    settings: {codingBackend: 'opencode'},
+    resolvedConfig: {
+      workspace: '/workspace',
+      codexBinaryMode: 'manual',
+      codexConfigurationError: 'manual_path_required',
+      // Discovery still found the PATH binary; the unfinished manual choice must win.
+      codexBinaryPath: '/usr/local/bin/codex',
+      codexBinaryPrefixArgs: ['/usr/local/lib/codex.js'],
+      managedRoot: '/managed',
+      stateRoot: '/state',
+    },
+  })
+  assert.equal('CODEX_BIN' in spec.env, false)
+  assert.equal('CODEX_PREFIX_ARGS' in spec.env, false)
+  assert.equal(spec.env.CODING_BACKEND, 'opencode')
+  assert.deepEqual(Object.keys(spec.env).filter(name => ['CODEX_BIN', 'CODEX_PREFIX_ARGS'].includes(name.toUpperCase())), [])
+  assert.equal(spec.env.CODEX_MANAGED_ROOT, '/managed')
+})
+
 test('runtime entry resolves inside the workspace for dev and the asar for packages', () => {
   const developmentPackage = resolve('/repo/clients/desktop')
   assert.equal(nodeRuntimeEntry({

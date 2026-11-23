@@ -80,8 +80,10 @@ export function installDesktopControl(options: {
           result = {applied}
         } else result = method === 'capabilities.status' ? options.status() : await options.handle?.(method, value.params)
         if (!disposed) port?.postMessage({type: 'nova.control.reply', id, ...(result === undefined ? {error: 'not_ready'} : {result})})
-      } catch {
-        if (!disposed) port?.postMessage({type: 'nova.control.reply', id, error: 'unavailable'})
+      } catch (error) {
+        // A selected coding backend that this host cannot launch is reported by name; everything else stays opaque.
+        const code = error instanceof Error && error.message === 'coding_backend_unavailable' ? error.message : 'unavailable'
+        if (!disposed) port?.postMessage({type: 'nova.control.reply', id, error: code})
       } finally { pending -= 1 }
     })()
   }

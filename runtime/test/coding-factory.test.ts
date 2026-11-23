@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import {createHash} from 'node:crypto'
-import {chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync} from 'node:fs'
+import {chmodSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {test, type TestContext} from 'node:test'
@@ -9,8 +9,8 @@ import {VirtualClock} from '../src/core/clock.js'
 import {parseCapabilityRegistry} from '../src/config/capability-registry.js'
 import {parseCodingProfiles, runtimeCodingProfiles} from '../src/config/coding-profiles.js'
 import {createAcpBackendRouting, createAcpProjectTransport, PreparedAcpTransport, type AcpProjectBinding} from '../src/executors/acp/transport.js'
-import {createCodexAssemblyResource} from '../src/executors/codex/factory.js'
-import {resolveCodexHostConfig} from '../src/executors/codex/host-config.js'
+import {createCodexAssemblyResource, unavailableCodexBackendTransportFactory} from '../src/executors/codex/factory.js'
+import {CodexHostConfigurationError, resolveCodexHostConfig, resolveCodingHostConfig} from '../src/executors/codex/host-config.js'
 import {CodexTransportError, type CodexAppServerTransport} from '../src/executors/codex/app-server-transport.js'
 import {hostWorkspaceForTest} from '../src/executors/codex/process-owner.js'
 import type {ProjectCodexAdapter} from '../src/executors/codex/adapter-project.js'
@@ -217,6 +217,93 @@ test('one coding executor routes Codex sessions to app-server and others to ACP 
     const reader = await ProjectStore.open(await storeOptions(stateRoot, managedRoot))
     try { assert.deepEqual((await reader.snapshot()).sessions.map(row => row.backend_id).sort(), ['codex', 'opencode']) }
     finally { await reader.close() }
+  } finally { await resource.close() }
+})
+
+test('an ACP default backend runs the coding executor without any Codex binary', async t => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nova-coding-acp-only-')))
+  t.after(() => { rmSync(root, {recursive: true, force: true}) })
+  const workspace = join(root, 'workspace')
+  const managedRoot = join(root, 'managed')
+  const stateRoot = join(root, 'state')
+  for (const path of [workspace, managedRoot, stateRoot]) { mkdirSync(path, {mode: 0o700}); chmodSync(path, 0o700) }
+  // No CODEX_BIN and an empty binary catalog: the machine has no Codex CLI.
+  const catalog = {canonicalBinaries: [], canonicalWorkspaces: [workspace], defaultBinary: null, homeDirectory: root}
+  const environment = {EXECUTOR: 'codex', CODEX_WORKSPACE: workspace, CODEX_MANAGED_ROOT: managedRoot,
+    CODEX_PROJECT_STATE_ROOT: stateRoot, CODEX_PREWARM: 'false'}
+  assert.throws(() => resolveCodingHostConfig(loadSettings({...environment, CODING_BACKEND: 'codex'}), catalog),
+    error => error instanceof CodexHostConfigurationError && error.code === 'codex_host_unavailable')
+  const config = resolveCodingHostConfig(loadSettings({...environment, CODING_BACKEND: 'opencode'}), catalog)
+  assert.ok(config !== null)
+  assert.equal(config.codexAvailable, false)
+  assert.equal(Object.hasOwn(config, 'binary'), false)
+  const backends = (initialBackend: 'codex' | 'opencode', bindings: AcpProjectBinding[]) => ({
+    initialBackend,
+    defaultProfile: (backend: string) => `${backend}:source-v1:${'c'.repeat(64)}`,
+    displayName: () => 'ACP',
+    create: (binding: AcpProjectBinding) => { bindings.push(binding); return new ProjectTransport(`acp-${bindings.length}`) },
+  })
+  const projectHost = {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot])}
+  await assert.rejects(createCodexAssemblyResource({config, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'acp-only',
+    projectHost, transportFactory: unavailableCodexBackendTransportFactory, backends: backends('codex', [])}),
+  error => error instanceof CodexHostConfigurationError && error.code === 'codex_host_unavailable')
+  const acpBindings: AcpProjectBinding[] = []
+  const diagnostics: string[] = []
+  const resource = await createCodexAssemblyResource({config, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'acp-only',
+    projectHost, transportFactory: unavailableCodexBackendTransportFactory, backends: backends('opencode', acpBindings),
+    onDiagnostic: code => { diagnostics.push(code) }})
+  try {
+    assert.ok(diagnostics.includes('coding_codex_absent'))
+    await resource.start()
+    const adapter = resource.adapter as ProjectCodexAdapter
+    const dispatch = async (workOrder: string) => {
+      const request = {...runRequest(workOrder, {project: 'workspace'}), session: 'new' as const}
+      return await adapter.dispatch('run', request, context('run', request, new VirtualClock(), {delegateId: `delegate-${workOrder}`}))
+    }
+    const first = await dispatch('first')
+    assert.equal(first.outcome, 'ok', JSON.stringify(first.content))
+    assert.equal(acpBindings.at(-1)?.backendId, 'opencode')
+    assert.throws(() => resource.updateDefaultBackend?.('codex'), /coding_backend_unavailable/u)
+    const stillAcp = await dispatch('still-acp')
+    assert.equal(stillAcp.outcome, 'ok', JSON.stringify(stillAcp.content))
+    assert.equal(acpBindings.at(-1)?.backendId, 'opencode', 'a refused switch keeps the previous default')
+    resource.updateDefaultBackend?.('pi')
+    const switched = await dispatch('switched')
+    assert.equal(switched.outcome, 'ok', JSON.stringify(switched.content))
+    assert.equal(acpBindings.at(-1)?.backendId, 'pi')
+    assert.equal(acpBindings.length, 3)
+  } finally { await resource.close() }
+})
+
+test('a broken optional Codex home drops Codex but keeps an ACP default running', async t => {
+  if (process.platform === 'win32') { t.skip('POSIX symlink fixture'); return }
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'nova-coding-codex-home-')))
+  t.after(() => { rmSync(root, {recursive: true, force: true}) })
+  const binary = join(root, 'codex-host')
+  const workspace = join(root, 'workspace')
+  const managedRoot = join(root, 'managed')
+  const stateRoot = join(root, 'state')
+  writeFileSync(binary, '#!/fixture\n', {mode: 0o700})
+  for (const path of [workspace, managedRoot, stateRoot]) { mkdirSync(path, {mode: 0o700}); chmodSync(path, 0o700) }
+  symlinkSync(join(root, 'missing-codex-home'), join(root, '.codex'))
+  const catalog = {canonicalBinaries: [binary], canonicalWorkspaces: [workspace], defaultBinary: binary, homeDirectory: root}
+  const environment = {EXECUTOR: 'codex', CODEX_WORKSPACE: workspace, CODEX_MANAGED_ROOT: managedRoot,
+    CODEX_PROJECT_STATE_ROOT: stateRoot, CODEX_PREWARM: 'false'}
+  // Codex as the default keeps its strict resolution.
+  assert.throws(() => resolveCodingHostConfig(loadSettings({...environment, CODING_BACKEND: 'codex'}), catalog))
+  const config = resolveCodingHostConfig(loadSettings({...environment, CODING_BACKEND: 'opencode'}), catalog)
+  assert.ok(config !== null)
+  assert.equal(config.codexAvailable, false)
+  const diagnostics: string[] = []
+  const resource = await createCodexAssemblyResource({config, composition: 'realtime', clock: new VirtualClock(), idFactory: () => 'broken-home',
+    projectHost: {nativeLocks: new DescriptorLockAuthority(), rootFiles: new DescriptorRelativeRootFileAuthority([stateRoot, managedRoot])},
+    transportFactory: {available: true, create: () => assert.fail('Codex must not launch')},
+    backends: {initialBackend: 'opencode', defaultProfile: backend => `${backend}:source-v1:${'d'.repeat(64)}`, displayName: () => 'OpenCode',
+      create: binding => new ProjectTransport(`acp-${binding.backendId}`)},
+    onDiagnostic: code => { diagnostics.push(code) }})
+  try {
+    assert.ok(diagnostics.includes('coding_codex_absent'))
+    assert.throws(() => resource.updateDefaultBackend?.('codex'), /coding_backend_unavailable/u)
   } finally { await resource.close() }
 })
 

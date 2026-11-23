@@ -7,7 +7,7 @@ import test from 'node:test'
 import {applySettingsTransaction} from '../src/main/settings-apply.mjs'
 import {createLifecycleCoordinator} from '../src/main/desktop-startup.mjs'
 import {backendSettings, publicSettings, normalizeSettings, createSettingsWriter} from '../src/main/settings-store.mjs'
-import {codingBackendStatus, codingProfileRegistry} from '../src/main/coding-settings.mjs'
+import {codingBackendStatus, codingBlockedByCodex, codingProfileRegistry} from '../src/main/coding-settings.mjs'
 import {backendLaunchSpec} from '../src/main/backend.mjs'
 import {planSecretChange, rotationPayload} from '../src/main/credential-hot-apply.mjs'
 
@@ -18,7 +18,7 @@ test('actual main applies a default-only change live without restarting, and rol
     let saved, runtimeBackend = 'codex', requestCount = 0, failComplete = false, savedCodingEnabled = runtimeEnabled
     const calls = []
     const context = vm.createContext({
-      configuredSpaceModelsPath: () => null, currentSettings: normalizeSettings({}), settingsRestartPending: false, settingsRecoveryAvailable: false,
+      configuredSpaceModelsPath: () => null, codingBlockedByCodex, desktopConfig: null, codexStatus: {status: 'ready'}, currentSettings: normalizeSettings({}), settingsRestartPending: false, settingsRecoveryAvailable: false,
       runtimeCapabilities: {modules: {coding: {enabled: runtimeEnabled}}},
       backendSettings, publicSettings, applySettingsTransaction, lifecycleCoordinator: createLifecycleCoordinator(),
       backendControl: {request: async (method, params) => {

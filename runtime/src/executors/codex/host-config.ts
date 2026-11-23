@@ -54,13 +54,10 @@ export interface CodexCredentialProfile {
   readonly [codexCredentialProfileBrand]: true
 }
 
-export interface ResolvedCodexHostConfig {
+/** Backend-neutral project roots every coding backend (Codex app-server or ACP) runs inside. */
+interface CodingHostConfigBase {
   readonly [resolvedCodexHostConfigBrand]: true
-  readonly localCodexHome?: string
-  readonly binary: HostBinary
-  readonly binaryPrefixArgs: readonly string[]
   readonly workspace: HostWorkspace
-  readonly credential: CodexCredentialProfile
   readonly prewarm: boolean
   readonly workingInterval: number
   readonly eagerProgress: boolean
@@ -69,31 +66,99 @@ export interface ResolvedCodexHostConfig {
   readonly managedRoot: HostManagedProjectRoot
 }
 
+/** Coding host with a usable Codex launch tuple. */
+export interface ResolvedCodexHostConfig extends CodingHostConfigBase {
+  readonly codexAvailable: true
+  readonly localCodexHome?: string
+  readonly binary: HostBinary
+  readonly binaryPrefixArgs: readonly string[]
+  readonly credential: CodexCredentialProfile
+}
+
+/** Coding host for an ACP default backend on a machine without a usable Codex CLI. */
+export interface ResolvedAcpCodingHostConfig extends CodingHostConfigBase {
+  readonly codexAvailable: false
+}
+
+export type ResolvedCodingHostConfig = ResolvedCodexHostConfig | ResolvedAcpCodingHostConfig
+
+/** Codex selected as the default backend: the Codex binary is mandatory. */
 export function resolveCodexHostConfig(
   settings: Settings,
   catalog: CodexHostCatalog,
 ): ResolvedCodexHostConfig | null {
   if (!settings.executors.includes('codex')) return null
-  const configuredWorkspace = stripLikePython(settings.codex_workspace ?? '')
-  if (configuredWorkspace === '') throw new CodexHostConfigurationError('codex_workspace_missing')
-  const safeCatalog = validateCatalog(catalog)
-  const workspacePath = expandUserPath(configuredWorkspace, safeCatalog.homeDirectory)
+  const {safeCatalog, workspacePath} = resolveCatalogWorkspace(settings, catalog)
   if (
     safeCatalog.canonicalBinaries.length === 0
     || safeCatalog.canonicalWorkspaces.length === 0
   ) throw new CodexHostConfigurationError('codex_host_unavailable')
-  let workspace: HostWorkspace
+  const workspace = resolveWorkspace(workspacePath, safeCatalog)
+  const launch = resolveCodexLaunch(settings, safeCatalog)
+  const roots = resolveProjectRoots(settings, safeCatalog)
+  return Object.freeze({
+    ...codingBase(settings, workspace, roots),
+    codexAvailable: true as const,
+    localCodexHome: ensureLocalCodexHome(safeCatalog),
+    ...launch,
+  })
+}
+
+/**
+ * Coding host for the selected default backend. Codex stays mandatory when it is the default;
+ * an ACP default only needs the workspace and project roots, and Codex becomes an optional
+ * extra backend that is present only when its binary resolves.
+ */
+export function resolveCodingHostConfig(
+  settings: Settings,
+  catalog: CodexHostCatalog,
+): ResolvedCodingHostConfig | null {
+  if (settings.coding_backend === 'codex') return resolveCodexHostConfig(settings, catalog)
+  if (!settings.executors.includes('codex')) return null
+  const {safeCatalog, workspacePath} = resolveCatalogWorkspace(settings, catalog)
+  if (safeCatalog.canonicalWorkspaces.length === 0) throw new CodexHostConfigurationError('codex_workspace_invalid')
+  const workspace = resolveWorkspace(workspacePath, safeCatalog)
+  const roots = resolveProjectRoots(settings, safeCatalog)
+  const base = codingBase(settings, workspace, roots)
+  // Codex is optional here: any failure resolving its launch tuple or home drops Codex, never the ACP default.
+  let codex: {readonly localCodexHome: string} & ReturnType<typeof resolveCodexLaunch>
   try {
-    workspace = hostWorkspaceFromConfig(workspacePath, safeCatalog.canonicalWorkspaces)
+    codex = {...resolveCodexLaunch(settings, safeCatalog), localCodexHome: ensureLocalCodexHome(safeCatalog)}
+  } catch {
+    return Object.freeze({...base, codexAvailable: false as const})
+  }
+  return Object.freeze({...base, codexAvailable: true as const, ...codex})
+}
+
+function resolveCatalogWorkspace(
+  settings: Settings,
+  catalog: CodexHostCatalog,
+): {readonly safeCatalog: CodexHostCatalog; readonly workspacePath: string} {
+  const configuredWorkspace = stripLikePython(settings.codex_workspace ?? '')
+  if (configuredWorkspace === '') throw new CodexHostConfigurationError('codex_workspace_missing')
+  const safeCatalog = validateCatalog(catalog)
+  return {safeCatalog, workspacePath: expandUserPath(configuredWorkspace, safeCatalog.homeDirectory)}
+}
+
+function resolveWorkspace(workspacePath: string, catalog: CodexHostCatalog): HostWorkspace {
+  try {
+    return hostWorkspaceFromConfig(workspacePath, catalog.canonicalWorkspaces)
   } catch {
     throw new CodexHostConfigurationError('codex_workspace_invalid')
   }
+}
 
+function resolveCodexLaunch(settings: Settings, catalog: CodexHostCatalog): {
+  readonly binary: HostBinary
+  readonly binaryPrefixArgs: readonly string[]
+  readonly credential: CodexCredentialProfile
+} {
+  if (catalog.canonicalBinaries.length === 0) throw new CodexHostConfigurationError('codex_host_unavailable')
   const selector = stripLikePython(settings.codex_bin)
-  if (selector === 'codex' && safeCatalog.defaultBinary === null) {
+  if (selector === 'codex' && catalog.defaultBinary === null) {
     throw new CodexHostConfigurationError('codex_host_unavailable')
   }
-  const selectedBinary = selector === 'codex' ? safeCatalog.defaultBinary : selector
+  const selectedBinary = selector === 'codex' ? catalog.defaultBinary : selector
   if (
     selectedBinary === null
     || !isAbsolute(selectedBinary)
@@ -101,19 +166,25 @@ export function resolveCodexHostConfig(
   ) throw new CodexHostConfigurationError('codex_binary_invalid')
   let binary: HostBinary
   try {
-    binary = hostBinaryFromConfig(selectedBinary, safeCatalog.canonicalBinaries)
+    binary = hostBinaryFromConfig(selectedBinary, catalog.canonicalBinaries)
   } catch {
     throw new CodexHostConfigurationError('codex_binary_invalid')
   }
   const binaryPrefixArgs = resolveBinaryPrefixArgs(settings.codex_prefix_args)
-
   const credential = Object.freeze({[codexCredentialProfileBrand]: true as const})
   credentialValues.set(credential, settings.codex_api_key)
+  return {binary, binaryPrefixArgs, credential}
+}
+
+function resolveProjectRoots(settings: Settings, catalog: CodexHostCatalog): {
+  readonly stateRoot: HostProjectRoot
+  readonly managedRoot: HostManagedProjectRoot
+} {
   let stateRoot: HostProjectRoot
   try {
     stateRoot = hostProjectRootFromConfig(ensurePrivateDirectory(expandUserPath(
       settings.codex_project_state_root,
-      safeCatalog.homeDirectory,
+      catalog.homeDirectory,
     )))
   } catch {
     throw new CodexHostConfigurationError('codex_project_state_invalid')
@@ -122,31 +193,39 @@ export function resolveCodexHostConfig(
   try {
     managedRoot = hostManagedProjectRootFromConfig(ensurePrivateDirectory(expandUserPath(
       settings.codex_managed_root,
-      safeCatalog.homeDirectory,
+      catalog.homeDirectory,
     )))
   } catch {
     throw new CodexHostConfigurationError('codex_managed_root_invalid')
   }
-  const localCodexHome = join(safeCatalog.homeDirectory, '.codex')
+  return {stateRoot, managedRoot}
+}
+
+function ensureLocalCodexHome(catalog: CodexHostCatalog): string {
+  const localCodexHome = join(catalog.homeDirectory, '.codex')
   try { lstatSync(localCodexHome) } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
     // The selected user home already exists; preserve its ACL inheritance on Windows.
     mkdirSync(localCodexHome, {mode: 0o700})
   }
-  return Object.freeze({
+  return realpathSync(localCodexHome)
+}
+
+function codingBase(
+  settings: Settings,
+  workspace: HostWorkspace,
+  roots: {readonly stateRoot: HostProjectRoot; readonly managedRoot: HostManagedProjectRoot},
+): CodingHostConfigBase {
+  return {
     [resolvedCodexHostConfigBrand]: true as const,
-    localCodexHome: realpathSync(localCodexHome),
-    binary,
-    binaryPrefixArgs,
     workspace,
-    credential,
     prewarm: settings.codex_prewarm,
     workingInterval: settings.codex_working_interval,
     eagerProgress: settings.proactivity_preset === 'eager',
     codexApprovalMode: settings.codex_approval_mode,
-    stateRoot,
-    managedRoot,
-  })
+    stateRoot: roots.stateRoot,
+    managedRoot: roots.managedRoot,
+  }
 }
 
 function resolveBinaryPrefixArgs(configured: readonly string[]): readonly string[] {

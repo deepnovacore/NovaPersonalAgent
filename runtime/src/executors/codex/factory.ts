@@ -19,6 +19,7 @@ import {
 import type {
   CodexCredentialProfile,
   ResolvedCodexHostConfig,
+  ResolvedCodingHostConfig,
 } from './host-config.js'
 import {codexCredentialApiKey} from './host-config.js'
 import type {CredentialSnapshotter} from './credential-snapshot.js'
@@ -232,7 +233,8 @@ export interface CreateCodexAssemblyResourceOptions {
   readonly backends?: CodingBackendRouting
   readonly sharedApprovalController?: HostApprovalController
   readonly managedMcp?: ManagedCodexMcp
-  readonly config: ResolvedCodexHostConfig
+  /** Codex launch fields are required only when Codex is the default backend. */
+  readonly config: ResolvedCodingHostConfig
   readonly composition: 'realtime'
   readonly transportFactory: CodexBackendTransportFactory
   readonly clock: Clock
@@ -255,10 +257,16 @@ export async function createCodexAssemblyResource(
 ): Promise<CodexAssemblyResource> {
   let available = false
   try { available = options.transportFactory.available === true } catch { /* safe failure below */ }
-  if (!available) {
+  const codex = available && options.config.codexAvailable ? options.config : null
+  // Codex is mandatory only as the default backend; an ACP default runs with Codex absent.
+  const initialBackend = options.backends?.initialBackend ?? 'codex'
+  if (codex === null && (options.backends === undefined || !isAcpBackend(initialBackend))) {
     throw new CodexHostConfigurationError('codex_host_unavailable')
   }
-  return await createProjectResource(options)
+  if (codex === null) {
+    try { options.onDiagnostic?.('coding_codex_absent') } catch { /* diagnostics are advisory */ }
+  }
+  return await createProjectResource(options, codex)
 }
 
 function isCodexTransport(value: unknown): value is CodexAppServerTransport {
@@ -277,6 +285,7 @@ function isCodexTransport(value: unknown): value is CodexAppServerTransport {
 
 async function createProjectResource(
   options: CreateCodexAssemblyResourceOptions,
+  codex: ResolvedCodexHostConfig | null,
 ): Promise<CodexAssemblyResource> {
   const host = options.projectHost
   const stateRoot = options.config.stateRoot
@@ -337,8 +346,8 @@ async function createProjectResource(
     unsubscribeApproval?.()
     throw new CodexHostConfigurationError('codex_project_host_unsupported')
   }
-  const warmHome = options.config.prewarm && options.config.localCodexHome
-    ? hostPersistentHomeFromConfig(options.config.localCodexHome, [options.config.localCodexHome]) : null
+  const warmHome = codex !== null && codex.prewarm && codex.localCodexHome
+    ? hostPersistentHomeFromConfig(codex.localCodexHome, [codex.localCodexHome]) : null
   let warmReady = false
   const routing = options.backends
   let defaultBackend: CodingBackendId = routing?.initialBackend ?? 'codex'
@@ -348,25 +357,29 @@ async function createProjectResource(
   let store: ProjectStore | null = null
   let startupTransport: CodexAppServerTransport | null = null
   try {
-    startupTransport = options.transportFactory.create(Object.freeze({
-      ...(options.managedMcp === undefined ? {} : {managedMcp: options.managedMcp}),
-      mode: warmHome === null ? 'live' : 'project',
-      preserveHome: warmHome !== null,
-      binary: options.config.binary,
-      binaryPrefixArgs: options.config.binaryPrefixArgs,
-      workspace: options.config.workspace,
-      codexHome: warmHome,
-      credential: options.config.credential,
-      resumeThreadId: null,
-      workingInterval: options.config.workingInterval,
-      eagerProgress: options.config.eagerProgress,
-      launchProfile: warmHome !== null ? launchProfile : resolveCodexLaunchProfile({
-        approvalMode: options.config.codexApprovalMode, project: false, foregroundBroker: false,
-      }),
-      approvalController: warmHome === null ? null : scopedApproval({work_id: randomUUID(), project: '', title: 'Codex startup'}),
-    }))
-    if (!isCodexTransport(startupTransport)) {
-      throw new CodexHostConfigurationError('codex_host_unavailable')
+    // The startup transport certifies Codex; with Codex absent there is nothing to certify up front
+    // because ACP backends run their own preflight per task.
+    if (codex !== null) {
+      startupTransport = options.transportFactory.create(Object.freeze({
+        ...(options.managedMcp === undefined ? {} : {managedMcp: options.managedMcp}),
+        mode: warmHome === null ? 'live' : 'project',
+        preserveHome: warmHome !== null,
+        binary: codex.binary,
+        binaryPrefixArgs: codex.binaryPrefixArgs,
+        workspace: codex.workspace,
+        codexHome: warmHome,
+        credential: codex.credential,
+        resumeThreadId: null,
+        workingInterval: codex.workingInterval,
+        eagerProgress: codex.eagerProgress,
+        launchProfile: warmHome !== null ? launchProfile : resolveCodexLaunchProfile({
+          approvalMode: codex.codexApprovalMode, project: false, foregroundBroker: false,
+        }),
+        approvalController: warmHome === null ? null : scopedApproval({work_id: randomUUID(), project: '', title: 'Codex startup'}),
+      }))
+      if (!isCodexTransport(startupTransport)) {
+        throw new CodexHostConfigurationError('codex_host_unavailable')
+      }
     }
     store = await ProjectStore.open({
       stateRoot,
@@ -387,7 +400,7 @@ async function createProjectResource(
       defaultWorkspaceId: defaultWorkspace.workspace_id,
       ...(options.managedMcp?{managedMcp:options.managedMcp}:{}),
       store,
-      ...(options.config.localCodexHome === undefined ? {} : {localCodexHome: options.config.localCodexHome}),
+      ...(codex?.localCodexHome === undefined ? {} : {localCodexHome: codex.localCodexHome}),
       confirmation,
       ...(approvalController === null ? {} : {codexApproval: approvalController}),
       defaultBackend: defaultBinding,
@@ -406,6 +419,8 @@ async function createProjectResource(
               throw error
             }
           }
+          // A Codex session on a host without Codex stays recorded and retryable, like an unroutable ACP one.
+          if (codex === null) throw new CodexTransportError('resume_unavailable')
           const codexHome = binding.codexHome
           if (codexHome === null) throw new CodexHostConfigurationError('codex_host_unavailable')
           const approval = scopedApproval(binding.work)
@@ -422,14 +437,14 @@ async function createProjectResource(
               ...(options.managedMcp === undefined ? {} : {managedMcp: options.managedMcp}),
               preserveHome: binding.preserveHome ?? false,
               mode: 'project',
-              binary: options.config.binary,
-              binaryPrefixArgs: options.config.binaryPrefixArgs,
+              binary: codex.binary,
+              binaryPrefixArgs: codex.binaryPrefixArgs,
               workspace: binding.workspace,
               codexHome,
-              credential: options.config.credential,
+              credential: codex.credential,
               resumeThreadId: binding.resumeThreadId,
-              workingInterval: options.config.workingInterval,
-              eagerProgress: options.config.eagerProgress,
+              workingInterval: codex.workingInterval,
+              eagerProgress: codex.eagerProgress,
               launchProfile,
               approvalController: approval,
             }))
@@ -458,6 +473,8 @@ async function createProjectResource(
       ready => { warmReady = ready },
       backend => {
         if (!CODING_BACKEND_IDS.includes(backend) || (backend !== 'codex' && routing === undefined)) throw new Error('invalid_coding_backend')
+        // New sessions cannot default to a backend this host cannot launch; the current default stays.
+        if (backend === 'codex' && codex === null) throw new Error('coding_backend_unavailable')
         defaultBackend = backend
       },
     )
@@ -479,7 +496,7 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
   readonly agentControllerFactory = codingAgentControllerFactory
   get agentDescriptor() { return codexAgentDescriptor(this.adapter.manifest.name) }
   readonly mode = 'project'
-  readonly #startupTransport: CodexAppServerTransport
+  readonly #startupTransport: CodexAppServerTransport | null
   readonly #unsubscribeApproval: (() => void) | null
   #startOperation: Promise<void> | null = null
   #closeOperation: Promise<void> | null = null
@@ -487,7 +504,7 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
 
   constructor(
     readonly adapter: ProjectCodexAdapter,
-    startupTransport: CodexAppServerTransport,
+    startupTransport: CodexAppServerTransport | null,
     readonly approvalPolicy: CodexApprovalPolicy,
     readonly approvalController: HostApprovalController | null,
     unsubscribeApproval: (() => void) | null,
@@ -516,6 +533,7 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
   }
 
   async #startFresh(): Promise<void> {
+    if (this.#startupTransport === null) return
     if (this.prewarmConnection && this.#startupTransport.prewarmConnection) {
       // Certification remains mandatory; warming a certified connection is only an optimization.
       try { await this.#startupTransport.preflight({expiresAtMs: Date.now() + 20_000}) }
@@ -564,7 +582,7 @@ class ProjectCodexAssemblyResource implements CodexAssemblyResource {
     this.onPrewarmReady(false)
     this.invalidateApprovals('shutdown')
     try {
-      await this.#startupTransport.close('shutdown')
+      await this.#startupTransport?.close('shutdown')
       await this.adapter.close()
     } finally {
       // Approvals scoped to Codex work end with it even when shutdown fails; a borrowed controller stays open.

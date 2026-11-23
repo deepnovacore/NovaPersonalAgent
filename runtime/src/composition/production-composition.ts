@@ -151,14 +151,15 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
   const codexResource = !capabilities.modules.coding.enabled || !settings.executors.includes('codex')
     ? null
     : await (async () => {
-      const {createCodexAssemblyResource, createProductionCodexHost, resolveCodexHostConfig, prepareManagedCodexMcp,
+      const {createCodexAssemblyResource, createProductionCodexHost, resolveCodingHostConfig, prepareManagedCodexMcp,
         createAcpBackendRouting, loadWindowsGuardianFactoryFromResources} = await import('../executors/codex/host.js')
       const sourceResourcesPath = environment.CODEX_RESOURCES_PATH
       const codexHost = createProductionCodexHost(settings, {
         ...(sourceResourcesPath === undefined ? {} : {resourcesPath: sourceResourcesPath}),
         onDiagnostic: code => onDiagnostic(`[runtime-diagnostic] ${code}`),
       })
-      const codexConfig = resolveCodexHostConfig(settings, codexHost.catalog)
+      // Readiness follows the selected default backend: Codex is required only when it is the default.
+      const codexConfig = resolveCodingHostConfig(settings, codexHost.catalog)
       if (codexConfig === null) return null
       const resourcesPath = sourceResourcesPath ?? (process as NodeJS.Process & {resourcesPath?: string}).resourcesPath
       const acpProcessFactory = process.platform === 'win32' && resourcesPath !== undefined

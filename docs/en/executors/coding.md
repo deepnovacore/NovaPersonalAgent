@@ -1,6 +1,6 @@
 # Coding
 
-Coding delegates project work to a coding agent. Codex is the default; OpenCode, CodeBuddy, Pi and DeepSeek Harness are available for new sessions over ACP. Install the agent you choose and sign in on the host computer first.
+Coding delegates project work to a coding agent. Codex is the default; OpenCode, CodeBuddy, Pi and DeepSeek Harness are available for new sessions over ACP. Install the agent you choose and sign in on the host computer first. Only the agent you select is required: the Codex CLI is needed only when Codex is the selected agent.
 
 ## From request to result
 
@@ -31,6 +31,19 @@ Pick the default agent for new sessions under Settings → Capabilities → Codi
 
 Install the agent, then sign in with its own tools. Nova finds `opencode`, `codebuddy`, `pi-acp` or `dsh` on `PATH`, or uses the absolute path you set in Settings or in `OPENCODE_ACP_BIN`, `CODEBUDDY_ACP_BIN`, `PI_ACP_BIN` or `DEEPSEEK_ACP_BIN`. Login and protocol support are checked when a task starts, not at launch, so a missing agent does not stop voice or other agents.
 
+### Dependencies
+
+Coding readiness follows the selected agent. With Codex selected, Nova needs a working Codex CLI and its sandbox check; without them the Coding module starts off. With an ACP agent selected, the Codex CLI is not needed at all: the Coding module starts with that agent, and Codex is only offered as an extra agent when it is also installed. Switching the default to Codex on a computer without a usable Codex CLI is refused, and the previous default stays in place. Every agent shares the same workspace and project folders that Nova manages, so no agent-specific setup is needed for them. `npa doctor` reports Codex as missing without failing when you use another agent.
+
+Nova is tested against specific agent releases, and some need a small compatibility patch that keeps failed or interrupted turns from being replayed as answers. The scripts check the exact version and refuse other releases, and a reinstall or upgrade of the agent removes the patch, so run them again afterwards:
+
+| Agent | Tested release | Script (in `runtime/scripts/`) |
+| --- | --- | --- |
+| OpenCode | 1.19.0 | `install-opencode-recovery.mjs` (installs a recovery plugin into the OpenCode config) |
+| Pi | `pi-acp` 0.0.34, `@earendil-works/pi-coding-agent` and `pi-ai` 1.1.0 | `patch-pi-acp.mjs`, `patch-acp-recovery.mjs` |
+| DeepSeek Harness | `@deepseek-ai/dsh-agent-loop` 0.2.0-rc.2 | `patch-acp-recovery.mjs` |
+| CodeBuddy (Windows) | `@tencent-ai/codebuddy-code` 2.164.0 | `patch-codebuddy-recovery.mjs` |
+
 What each agent supports today:
 
 | | Codex | OpenCode | CodeBuddy | Pi | DeepSeek Harness |
@@ -43,7 +56,7 @@ What each agent supports today:
 | Ask-mode sandbox (workspace-only files, no network) | Yes | No | No | No | No |
 | MCP tools you grant | Yes | Yes | Yes | No (a granted tool refuses the task) | Yes |
 
-Ask mode means something narrower for ACP agents than for Codex. For Codex, Nova itself confines the agent to the workspace without network access and also asks you before each command or file change that needs approval. For an ACP agent, Nova can only answer the permission requests the agent chooses to send. Nova does not sandbox the agent's files or network, and the agent's own permission settings decide which actions it asks about. A rule in the agent's own config that allows an action without asking applies as usual; DeepSeek Harness is launched without a permission option, so it follows its own defaults. When you need Codex's confinement, use Codex, or run the ACP agent in a workspace and account you are willing to let it change.
+Ask mode means something narrower for ACP agents than for Codex. For Codex, Nova itself confines the agent to the workspace without network access and also asks you before each command or file change that needs approval. For an ACP agent, Nova can only answer the permission requests the agent chooses to send. Nova does not sandbox the agent's files or network, and the agent's own permission settings decide which actions it asks about. A rule in the agent's own config that allows an action without asking applies as usual. Nova passes the permission mode on where the agent accepts one: OpenCode gets `OPENCODE_PERMISSION`, CodeBuddy gets `--permission-mode default` or `--dangerously-skip-permissions`, and DeepSeek Harness gets `DSH_PERMISSION_MODE` set to `read-only` in Ask mode and `danger-full-access` in full-access mode. When you need Codex's confinement, use Codex, or run the ACP agent in a workspace and account you are willing to let it change.
 
 For an ACP agent, adding requirements mid-task is reported as unsupported. Nova never fakes it by cancelling and starting a new task. If an agent cannot find a session it is asked to resume, the session stays in your list so you can retry after fixing the agent's login or configuration.
 

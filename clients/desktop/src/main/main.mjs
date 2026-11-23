@@ -18,7 +18,7 @@ import {createSystemNotifier} from './system-notifier.mjs'
 import {createFeishuSetupOwner} from './feishu-setup.mjs'
 import {setLanguage, currentLanguage, preferredLanguage, t} from '../renderer/locale.mjs'
 import {createBackendControl, classifyBackendFailure, configWarnings, startupErrors, createBackendDiagnosticCollector, createBackendSupervisor} from './backend-supervisor.mjs'
-import {codingBackendStatus} from './coding-settings.mjs'
+import {codingBackendStatus, codingBlockedByCodex} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode, createConfigurationAttempt, runConfigurationStage, configurationTimeout} from './desktop-startup.mjs'
 import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
@@ -872,14 +872,19 @@ async function applyDesktopSettings(payload, restart = false) {
   let beforeSecrets, secretPlan = {changed: [], rotations: [], needsRestart: false}, liveCredentialsFailed = false
   const withoutSecrets = settings => { const {secrets: _secrets, ...rest} = backendSettings(settings); return JSON.stringify(rest) }
   const liveReady = () => backendControl !== null && backendStatus.state === 'connected'
-  const changesRequireRestart = () => restart || recoveryPending || capabilitiesChanged
+  // The coding default is delivered live, except when it decides whether Coding runs at all:
+  // the launch environment turns the module on or off, so only a restart can apply that.
+  const codexReadiness = () => ({codexConfigurationError: desktopConfig?.codexConfigurationError, codexStatus})
+  const codingAvailabilityChanged = () => codingBlockedByCodex(previousSettings.codingBackend, codexReadiness())
+    !== codingBlockedByCodex(currentSettings.codingBackend, codexReadiness())
+  const changesRequireRestart = () => restart || recoveryPending || capabilitiesChanged || codingAvailabilityChanged()
     || withoutSecrets(previousSettings) !== withoutSecrets(currentSettings)
     || secretPlan.needsRestart || (secretPlan.rotations.length > 0 && !liveReady())
   let applied = await applySettingsTransaction({
     deferRestart: !restart,
     needsBackendRestart: () => pendingRestart || changesRequireRestart(),
     applyLive: async () => {
-      if (previousSettings.codingBackend !== currentSettings.codingBackend) await applyLiveCodingBackend(currentSettings.codingBackend)
+      if (previousSettings.codingBackend !== currentSettings.codingBackend && !codingAvailabilityChanged()) await applyLiveCodingBackend(currentSettings.codingBackend)
       // A failed hand-over keeps the saved key and asks for a restart instead of discarding the save.
       if (liveReady()) await applyLiveCredentials(secretPlan).catch(() => { liveCredentialsFailed = true })
     },
@@ -1390,10 +1395,11 @@ async function launchBackend(smokeChannel, onExit) {
   try { launchDocument = readCapabilityDocument(currentSettings, process.env) }
   catch { throw classifyBackendFailure('configuration_required') }
   const codingEnabled = !acceptance && launchDocument?.modules?.coding?.enabled !== false
-  // Coding is optional: without a usable Codex CLI, including an unfinished manual path,
-  // the runtime starts with the coding module off.
-  const codingUnavailable = codingEnabled
-    && (Boolean(desktopConfig?.codexConfigurationError) || codexStatus.status !== 'ready')
+  // Coding readiness follows the selected backend. With Codex selected but no usable Codex CLI,
+  // including an unfinished manual path, the runtime starts with the coding module off. ACP
+  // backends never need the Codex CLI; their binary and login are checked by the task preflight.
+  const codingUnavailable = codingEnabled && codingBlockedByCodex(currentSettings?.codingBackend,
+    {codexConfigurationError: desktopConfig?.codexConfigurationError, codexStatus})
   const token = randomBytes(16).toString('hex')
   const workspace = desktopConfig?.workspace || process.cwd()
   let spawnedBackend = null
