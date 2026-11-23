@@ -945,6 +945,58 @@ void main() {
     );
 
     test(
+      'a frame in the same burst as ready is kept until frames is listened to',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((request) async {
+          final ws = await WebSocketTransformer.upgrade(request);
+          ws.add(jsonEncode({'type': 'ready', 'role': 'host'}));
+          ws.add(Uint8List.fromList([9, 8, 7]));
+        });
+        final media = RelaySpaceCallMedia(
+          uri: () => Uri.parse('ws://127.0.0.1:${server.port}/v1/media'),
+          token: () => 't',
+          expiresAt: () => DateTime.now().millisecondsSinceEpoch + 900000,
+          renew: () async {},
+        );
+        final socket = await media.connect('session-aaaaaaaaaaaaaaaaaaaaaa');
+        await Future<void>.delayed(const Duration(milliseconds: 50));
+        final inbound = <Uint8List>[];
+        socket.frames.listen(inbound.add);
+        await until(() => inbound.isNotEmpty, 'buffered frame');
+        expect(inbound.single, [9, 8, 7]);
+        await socket.close();
+        await server.close(force: true);
+      },
+    );
+
+    test(
+      'overflowing the pre-listener frame buffer closes with media_overflow',
+      () async {
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        server.listen((request) async {
+          final ws = await WebSocketTransformer.upgrade(request);
+          ws.add(jsonEncode({'type': 'ready', 'role': 'host'}));
+          for (var i = 0; i < 40; i++) {
+            ws.add(Uint8List.fromList([1, 2, 0, 0, i]));
+          }
+        });
+        final media = RelaySpaceCallMedia(
+          uri: () => Uri.parse('ws://127.0.0.1:${server.port}/v1/media'),
+          token: () => 't',
+          expiresAt: () => DateTime.now().millisecondsSinceEpoch + 900000,
+          renew: () async {},
+        );
+        final socket = await media.connect('session-aaaaaaaaaaaaaaaaaaaaaa');
+        expect(
+          await socket.closed.timeout(const Duration(seconds: 3)),
+          'media_overflow',
+        );
+        await server.close(force: true);
+      },
+    );
+
+    test(
       'a relay that rejects instead of sending ready fails the connect',
       () async {
         final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);

@@ -7,7 +7,7 @@ import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {AudioOwnerArbiter} from '../src/space-host/audio-owner.js'
 import {authorizeVoice,SpaceVoiceController,VOICE_MAX_AUDIO_FRAME_BYTES,type SpaceVoiceHostPort,type VoiceAccept,type VoiceMediaSocket,type VoicePolicy} from '../src/space-host/voice.js'
-import {decodeAudio,decodeControl,deriveCallKeys,encodeAudio,encodeControl,FRAME_AUDIO,FRAME_CONTROL,FrameReceiver,FrameSender,generateEphemeral,startHash,type Ephemeral} from '../src/space-host/voice-crypto.js'
+import {decodeAudio,decodeControl,deriveCallKeys,encodeAudio,encodeControl,FRAME_AUDIO,FRAME_CONTROL,FRAME_KEEPALIVE,FrameReceiver,FrameSender,generateEphemeral,startHash,type Ephemeral} from '../src/space-host/voice-crypto.js'
 import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import {SpaceHost,type SpaceHostTransport} from '../src/space-host/service.js'
@@ -303,6 +303,234 @@ test('the Host sends its ready only after startVoice succeeds; Client audio befo
   c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_AUDIO, encodeAudio({gen: 0, nativeSeq: 0, sampleOffset: 0, pcm: new Uint8Array(1280)})))
   await until(() => c.host.audio.length === 1, 'uplink')
   await c.call.end('stopped')
+})
+
+test('a duplicate ready while the provider is starting starts it exactly once with one keepalive loop', async () => {
+  const c = await connected({idleMs: 5000, keepaliveMs: 30})
+  let release!: () => void, starts = 0
+  const start = c.host.port.startVoice.bind(c.host.port)
+  c.host.port.startVoice = async id => { starts++; await new Promise<void>(resolve => { release = resolve }); await start(id) }
+  ready(c); ready(c)
+  await until(() => release !== undefined, 'startVoice pending')
+  await tick(20)
+  release()
+  await until(() => c.call.state === 'active', 'active')
+  await tick(20)
+  assert.equal(starts, 1)
+  const readies = () => decodeAll(c.sim, c.ctl.media.state.toPhone).filter(r => r.control?.type === 'ready').length
+  assert.equal(readies(), 1)
+  // One keepalive loop: about one keepalive per period, not two.
+  const before = c.ctl.media.state.toPhone.length
+  await tick(160)
+  const keepalives = c.ctl.media.state.toPhone.length - before
+  assert.ok(keepalives >= 2 && keepalives <= 7, `keepalives ${keepalives}`)
+  await c.call.end('stopped')
+})
+
+test('inbound playback receipts are processed in arrival order even when one is async', async () => {
+  const c = await connected({idleMs: 5000})
+  ready(c); await until(() => c.call.state === 'active', 'active')
+  c.call.audioFrame({utterance_id: 'u1', generation_epoch: 1, sequence: 0, pcm: new Uint8Array(1920)})
+  const receipts = c.host.port.receipts()!
+  let releaseStopped!: () => void
+  c.host.port.receipts = () => ({...receipts, playbackStopped: async (u, e, ms) => { await new Promise<void>(resolve => { releaseStopped = resolve }); return receipts.playbackStopped(u, e, ms) }})
+  const send = (body: Record<string, unknown>) => c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_CONTROL, encodeControl(body)))
+  send({type: 'playback.stopped', utterance_id: 'u1', generation_epoch: 1, played_ms: 10})
+  send({type: 'playback.cleared', utterance_id: 'u1', generation_epoch: 1, played_ms: 10})
+  await until(() => releaseStopped !== undefined, 'stopped pending')
+  await tick(20)
+  assert.deepEqual(c.host.receipts, [])
+  releaseStopped()
+  await until(() => c.host.receipts.length === 2, 'receipts')
+  assert.deepEqual(c.host.receipts, ['stopped:u1:1:10', 'cleared:u1:1:10'])
+  await c.call.end('stopped')
+})
+
+test('a transient capability error does not disable voice; an authoritative media:null does', async () => {
+  const host = fakeHost(), media = fakeMedia(), errors: unknown[] = []
+  let fail = true
+  const capabilities = media.media.capabilities
+  media.media.capabilities = async () => { if (fail) throw Error('relay_unreachable'); return capabilities() }
+  const ctl = controller(host, media, {onError: e => { errors.push(e) }})
+  await ctl.c.refreshCapability()
+  assert.equal(ctl.c.available('phone'), false)
+  assert.equal(errors.length, 1)
+  fail = false
+  const {call} = await ctl.c.begin('phone', startIntent(generateEphemeral()))
+  assert.equal(ctl.c.available('phone'), true)
+  await call.end('stopped')
+  // Once known, a later transient error keeps the last authoritative answer.
+  fail = true; await ctl.c.refreshCapability()
+  assert.equal(ctl.c.available('phone'), true)
+  // A relay that later enables media is picked up by the next start.
+  const late = fakeMedia(null), lateCtl = controller(fakeHost(), late)
+  await lateCtl.c.refreshCapability(); assert.equal(lateCtl.c.available('phone'), false)
+  late.media.capabilities = async () => ({media: {codecs: ['pcm16'], maxKbpsPerDirection: 512, maxFrameBytes: 4096}})
+  const second = await lateCtl.c.begin('phone', startIntent(generateEphemeral()))
+  await second.call.end('stopped')
+  // media:null (which also covers a 404 capabilities route) is authoritative.
+  const off = controller(fakeHost(), fakeMedia(null))
+  await off.c.refreshCapability()
+  assert.equal(off.c.available('phone'), false)
+  await assert.rejects(() => off.c.begin('phone', startIntent(generateEphemeral())), /relay_media_unavailable/)
+})
+
+test('a slow playback receipt never gates mic audio, keepalives or an in-band end; the receipt backlog is bounded', async () => {
+  const c = await connected({idleMs: 300, keepaliveMs: 50})
+  ready(c); await until(() => c.call.state === 'active', 'active')
+  c.call.audioFrame({utterance_id: 'u1', generation_epoch: 1, sequence: 0, pcm: new Uint8Array(1920)})
+  const receipts = c.host.port.receipts()!
+  c.host.port.receipts = () => ({...receipts, playbackStopped: () => new Promise<boolean>(() => undefined)})
+  const sendControl = (body: Record<string, unknown>) => c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_CONTROL, encodeControl(body)))
+  const sendAudio = () => c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_AUDIO, encodeAudio({gen: 0, nativeSeq: 0, sampleOffset: 0, pcm: new Uint8Array(1280)})))
+  sendControl({type: 'playback.stopped', utterance_id: 'u1', generation_epoch: 1, played_ms: 10})
+  sendAudio()
+  await until(() => c.host.audio.length === 1, 'mic audio past a stuck receipt')
+  // Keepalives keep a healthy phone alive past idleMs even while the receipt is stuck.
+  for (let i = 0; i < 8; i++) { c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_KEEPALIVE, new Uint8Array(0))); await tick(60) }
+  assert.equal(c.call.state, 'active')
+  sendControl({type: 'end'})
+  await until(() => c.call.state === 'ended', 'in-band end past a stuck receipt')
+  assert.equal(c.call.endReason.value, 'stopped')
+  // A second call: too many receipts queued behind a stuck one ends the call.
+  const d = await connected({idleMs: 5000})
+  ready(d); await until(() => d.call.state === 'active', 'active 2')
+  d.call.audioFrame({utterance_id: 'u1', generation_epoch: 1, sequence: 0, pcm: new Uint8Array(1920)})
+  const r2 = d.host.port.receipts()!
+  d.host.port.receipts = () => ({...r2, playbackStopped: () => new Promise<boolean>(() => undefined)})
+  for (let i = 0; i < 64 && d.call.state === 'active'; i++) d.ctl.media.state.hostFrame!(d.sim.sender.seal(FRAME_CONTROL, encodeControl({type: 'playback.stopped', utterance_id: 'u1', generation_epoch: 1, played_ms: i})))
+  await until(() => d.call.state === 'ended', 'receipt backlog overflow')
+  assert.equal(d.call.endReason.value, 'protocol_error')
+})
+
+test('a startVoice that never resolves cannot hold the lease: end completes, and the late provider is stopped', async () => {
+  const c = await connected({idleMs: 5000, providerStallMs: 100})
+  let resolveLate!: () => void
+  c.host.port.startVoice = async id => { c.host.events.push(`start:${id}`); await new Promise<void>(resolve => { resolveLate = resolve }); c.host.setVoiceId(id) }
+  ready(c)
+  await until(() => resolveLate !== undefined, 'startVoice pending')
+  const started = Date.now()
+  await c.call.end('stopped')
+  assert.ok(Date.now() - started < 1000, 'end is bounded')
+  assert.equal(c.call.state, 'ended')
+  assert.equal(c.host.arbiter.current, null)
+  assert.equal(c.ctl.media.state.closed, true)
+  resolveLate()
+  await until(() => c.host.events.includes('stop:chat:main'), 'late provider stopped')
+  assert.equal(c.host.port.voiceConversationId(), null)
+})
+
+test('a late start from an ended call is stopped even while another call holds a joining lease', async () => {
+  const c = await connected({idleMs: 5000, providerStallMs: 100})
+  let resolveLate!: () => void
+  c.host.port.startVoice = async id => { c.host.events.push(`start:${id}`); await new Promise<void>(resolve => { resolveLate = resolve }); c.host.setVoiceId(id) }
+  ready(c)
+  await until(() => resolveLate !== undefined, 'A startVoice pending')
+  await c.call.end('stopped')
+  // B joins (holds the lease) but has not started voice when A's start finally resolves.
+  const b = await c.ctl.c.begin('phone', startIntent(generateEphemeral(), {op: 'op-2'}))
+  await b.call.prepare()
+  assert.notEqual(c.host.arbiter.current, null)
+  resolveLate()
+  await until(() => c.host.events.includes('stop:chat:main'), 'A late provider stopped')
+  assert.equal(c.host.port.voiceConversationId(), null)
+  await b.call.end('join_timeout')
+  // Voice is clear for the next call.
+  const next = await c.ctl.c.begin('phone', startIntent(generateEphemeral(), {op: 'op-3'}))
+  await next.call.end('stopped')
+})
+
+test('a late start from a call of a replaced controller never stops a newer controller\'s active voice', async () => {
+  const c = await connected({idleMs: 5000, providerStallMs: 100})
+  let resolveLate!: () => void, starts = 0
+  c.host.port.startVoice = async id => {
+    c.host.events.push(`start:${id}`)
+    if (starts++ === 0) await new Promise<void>(resolve => { resolveLate = resolve })
+    c.host.setVoiceId(id)
+  }
+  ready(c)
+  await until(() => resolveLate !== undefined, 'A startVoice pending')
+  // Pairing re-creates the Space service: the old controller closes, a new one takes over the same Host.
+  await c.ctl.c.closeAll('space_restarted')
+  const next = controller(c.host), eph = generateEphemeral(), raw = startIntent(eph, {op: 'op-b'})
+  await next.c.refreshCapability()
+  const b = await next.c.begin('phone', raw)
+  const sim = phone(raw, eph, b.accept)
+  await b.call.prepare()
+  await until(() => next.media.state.hostFrame !== undefined, 'B join')
+  ready({ctl: next, sim})
+  await until(() => b.call.state === 'active', 'B active')
+  resolveLate()
+  await tick(30)
+  assert.equal(c.host.events.filter(e => e === 'stop:chat:main').length, 0)
+  assert.equal(c.host.port.voiceConversationId(), 'chat:main')
+  assert.equal(b.call.state, 'active')
+  await b.call.end('stopped')
+})
+
+test('a valid in-band end while the Host is still starting the provider ends the call as stopped', async () => {
+  const c = await connected({idleMs: 5000})
+  c.host.port.startVoice = () => new Promise<void>(() => undefined)
+  ready(c)
+  await until(() => c.host.remote() !== null, 'activation started')
+  c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_CONTROL, encodeControl({type: 'end'})))
+  await until(() => c.call.endReason.value !== undefined, 'ended')
+  assert.equal(c.call.endReason.value, 'stopped')
+})
+
+test('only playback receipts count toward the pending-receipt cap; other control frames never take a slot', async () => {
+  const c = await connected({idleMs: 5000})
+  ready(c); await until(() => c.call.state === 'active', 'active')
+  c.call.audioFrame({utterance_id: 'u1', generation_epoch: 1, sequence: 0, pcm: new Uint8Array(1920)})
+  const receipts = c.host.port.receipts()!
+  c.host.port.receipts = () => ({...receipts, playbackStopped: () => new Promise<boolean>(() => undefined)})
+  const send = (body: Record<string, unknown>) => c.ctl.media.state.hostFrame!(c.sim.sender.seal(FRAME_CONTROL, encodeControl(body)))
+  send({type: 'playback.stopped', utterance_id: 'u1', generation_epoch: 1, played_ms: 1})
+  for (let i = 0; i < 40; i++) send(i % 2 ? {type: 'ready', start_hash: c.sim.hash.toString('base64url')} : {type: 'something.else'})
+  await tick(20)
+  assert.equal(c.call.state, 'active')
+  await c.call.end('stopped')
+})
+
+test('capability probes are single-flight and the change notification follows the value actually replaced', async () => {
+  let probes = 0, changes = 0
+  const releases: (() => void)[] = []
+  const media = fakeMedia(), capabilities = media.media.capabilities
+  media.media.capabilities = async () => { probes++; await new Promise<void>(resolve => { releases.push(resolve) }); return capabilities() }
+  const ctl = controller(fakeHost(), media, {onAvailabilityChanged: () => { changes++ }})
+  const a = ctl.c.refreshCapability(), b = ctl.c.refreshCapability()
+  await until(() => releases.length > 0, 'probe pending')
+  await tick(5)
+  for (const release of releases) release()
+  await Promise.all([a, b])
+  assert.equal(probes, 1)
+  assert.equal(ctl.c.available('phone'), true)
+  assert.equal(changes, 1)
+  // A later authoritative media:null that replaces "available" notifies.
+  media.media.capabilities = async () => ({media: null})
+  await ctl.c.refreshCapability()
+  assert.equal(ctl.c.available('phone'), false)
+  assert.equal(changes, 2)
+})
+
+test('a failed startup probe recovers on the bounded background cadence and advertises voice without a begin', async () => {
+  let now = 1_000_000, fail = true, probes = 0, changes = 0
+  const media = fakeMedia(), capabilities = media.media.capabilities
+  media.media.capabilities = async () => { probes++; if (fail) throw Error('relay_unreachable'); return capabilities() }
+  const ctl = controller(fakeHost(), media, {now: () => now, onAvailabilityChanged: () => { changes++ }, onError: () => undefined})
+  await ctl.c.refreshCapability()
+  assert.equal(ctl.c.available('phone'), false); assert.equal(probes, 1)
+  fail = false
+  await ctl.c.refreshIfUnavailable()
+  assert.equal(probes, 1, 'throttled')
+  now += 30_000
+  await ctl.c.refreshIfUnavailable()
+  assert.equal(probes, 2)
+  assert.equal(ctl.c.available('phone'), true)
+  assert.equal(changes, 1)
+  now += 60_000
+  await ctl.c.refreshIfUnavailable()
+  assert.equal(probes, 2, 'no probing once media is known available')
 })
 
 test('a failed startVoice sends no ready and ends the call', async () => {
