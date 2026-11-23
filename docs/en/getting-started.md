@@ -1,12 +1,12 @@
 # Getting Started
 
-Nova runs on your computer, talks with you by voice, and uses Codex to carry out coding tasks.
+Nova runs on your computer, talks with you by voice, and hands coding tasks to a coding agent (Codex by default).
 
 ## 1. Prepare your computer
 
-To run from source, install Node.js 22.13 or later, npm, Git, and Codex. Sign in to Codex before starting Nova.
+To run from source, install Node.js 22.13 or later, npm, Git, and the coding agent you will use (Codex by default). Sign in to it before starting Nova.
 
-To use OpenCode, CodeBuddy, Pi or DeepSeek Harness for coding instead, install it as well and pick it in Settings; see [Coding](executors/coding.md#choosing-an-agent).
+Only the agent you select is required: Codex is needed only for the Codex backend. To use OpenCode, CodeBuddy, Pi or DeepSeek Harness instead, install it and pick it in Settings; see [Coding](executors/coding.md#choosing-an-agent).
 
 Native components also need a platform toolchain:
 
@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 npa
 ```
 
-The command is `npa`; `novapersonal` remains an alias. To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first. An upgraded install keeps using `~/.nova-audio-agent`; moving it to `~/.nova-personal-agent` with `npa migrate-data` is optional (see [Local data location](configuration.md#local-data-location)).
+The command is `npa`; `novapersonal` remains an alias. To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.0`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first. An upgraded install keeps using `~/.nova-audio-agent`; moving it to `~/.nova-personal-agent` with `npa migrate-data [--dry-run]` (with Nova closed) is optional (see [Local data location](configuration.md#local-data-location)).
 
 For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
 
@@ -44,7 +44,7 @@ Add the voice credential to `.env`:
 DASHSCOPE_API_KEY=your-dashscope-key
 ```
 
-The same key covers memory, the camera and web search, which uses Bailian search until you add `TAVILY_API_KEY`. A feature whose key is missing stays off, and Settings shows the key it needs. Without a key, the desktop opens a setup window on first launch. Start the desktop:
+The same key covers memory and web search, which uses Bailian search until you add `TAVILY_API_KEY`. A feature whose key is missing stays off, and Settings shows the key it needs. Without a key, the desktop opens a setup window on first launch. Start the desktop:
 
 ```bash
 npm run start:client
@@ -56,11 +56,11 @@ Desktop source launch commands currently provide no hot reload or file watching.
 
 ## 3. Give Nova a task
 
-Try: “Create a webpage to showcase my work.” Nova asks for any missing information, requests confirmation when creating or switching projects, and sends the task to Codex.
+Try: “Create a webpage to showcase my work.” Nova asks for any missing information, requests confirmation when creating or switching projects, and sends the task to the selected coding agent.
 
 You can add requirements, ask about progress, or request a stop. The task banner shows work status; bubbles provide brief updates. Operations that need permission have a separate approval prompt.
 
-A project is a directory containing your files. A session is an ongoing Codex conversation within that project. You can start a new session without discarding project files, or continue an existing session.
+A project is a directory containing your files. A session is an ongoing conversation with the coding agent within that project. You can start a new session without discarding project files, or continue an existing session.
 
 ## 4. Change settings
 
@@ -101,7 +101,18 @@ Desktop launches into one of three views, controlled by the `startupView` settin
 
 - **Personal memory** is on by default and stored locally in the unified memory ledger; inspect, correct or forget entries from the Workbench's Profile page. mem0 remains available as an explicit alternative. See [personal memory](personal-memory.md).
 - **Document knowledge** is enabled in capability settings. Review the data-processing notice before importing files; embedding sends text to your configured model service.
-- **iPhone connection**: on macOS, choose “连接 iPhone…” from the orb menu, enable the phone service, and follow the network and QR-code instructions. See [remote service and pairing](iphone.md).
+- **Phones (NovaCore)**: see [Pair a phone](#pair-a-phone) below, or the [mobile guide](iphone.md) for what a paired phone can do.
+
+## Pair a phone
+
+Nova runs on your computer (the Host); the NovaCore app on iOS or Android connects to it as a Client. Pairing takes one QR code.
+
+1. On the desktop, open **Settings → Devices**. Under **Connection**, keep **Tailscale automatic setup** (both devices must sign in to the same Tailscale network, with MagicDNS and HTTPS certificates enabled) or choose **Advanced: existing relay**, then choose **Create Space**. To use data already on this computer, set **Space data** to **Connect existing data on this computer**; the default is **Start a new Space**.
+2. Under **Connect your phone**, choose **Create one-time pairing code**.
+3. In NovaCore, create a Space, choose **Connect to a computer**, and scan the code.
+4. On the desktop, enter the full fingerprint shown on the phone under **Phone waiting to connect** and choose **Confirm pairing**.
+
+The first confirmed phone becomes the Space owner. See [Connect a phone](iphone.md) for what a Client can and cannot do, and [Space / Host / Client](space-host-client.md) for the full setup.
 
 ## Troubleshooting
 
@@ -109,11 +120,12 @@ Desktop launches into one of three views, controlled by the `startupView` settin
 |---|---|
 | macOS says the app is "damaged" | The app is unsigned and a browser download carries a quarantine flag. Move it to Applications, run `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent.app"`, then open it again |
 | Voice cannot connect | Credentials, service access and connectivity for the selected mode |
-| Codex cannot run | Codex sign-in and access to the project directory |
+| The coding agent cannot run | Sign-in of the agent selected in Settings (Codex only if it is the selected backend) and access to the project directory |
+| Unsure which keys are missing | Run `npa doctor`; it checks the keys your selected voice providers need, and `--online` tests them |
 | Saved settings have no effect | Look for the pending-restart notice and restart the backend |
 | Search is unavailable | Search credentials; Bailian or other MCP search also needs the selected service enabled |
 | A recent fact is missing | Learning takes time; check its state in the memory panel |
-| iPhone has no text-chat option | The host must use cascaded mode and support editable input |
+| The phone does not pair | Both devices on the same Tailscale network with MagicDNS and HTTPS enabled, or a reachable relay; the QR code is single-use and expires, so create a new one |
 
 ## Advanced configuration
 

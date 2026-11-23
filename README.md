@@ -60,7 +60,7 @@ Your context informs the conversation; the front brain coordinates work with the
 - **Proactive.** Nova chooses what matters and when to speak, and drafts instead of sending.
 - **Memory.** A source-backed Timeline and Profile grow as you talk; every memory can be traced, edited or forgotten.
 - **Voice-first.** Full-duplex voice: a front brain that talks and a back brain that works.
-- **Local-first.** Your Space lives on a Host you control; devices sync through an end-to-end encrypted relay or Tailscale. Voice can stay local too: one Docker command runs ASR, LLM and TTS on your Mac ([guide](docs/en/deployment/mac-local-voice.md)).
+- **Local-first.** Your Space lives on a Host you control; devices sync through an end-to-end encrypted relay, either self-hosted or set up automatically over your Tailscale network. Voice can stay local too: one Docker command runs ASR, LLM and TTS on your Mac ([guide](docs/en/deployment/mac-local-voice.md)).
 
 [How Nova works](docs/en/architecture.md) · [Task controls](docs/en/tasks.md) · [Executors](docs/en/executors/overview.md) · [Source permissions](docs/en/sources-and-connectors.md)
 
@@ -100,8 +100,9 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 
 | Platform | Download |
 | --- | --- |
-| macOS · Apple Silicon (arm64) | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
+| macOS · Apple Silicon (arm64) | [DMG (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
 | Windows · x64 | [EXE (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) |
+| Linux · x64 (Ubuntu 22.04+) | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [deb](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb) (unsigned) |
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
 | Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
@@ -117,11 +118,11 @@ npa config
 npa doctor
 ```
 
-For coding tasks, install and sign in to the coding agent you choose (Codex by default).
+For coding tasks, install and sign in to the coding agent you choose (Codex by default). Only the selected agent is required; Codex is needed only for the Codex backend.
 
-**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. Pin a version with `nova-personal-agent@1.0.0`. State files are versioned, so an older build may refuse a newer file: back up, then run `npa reset-state` before downgrading.
+**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. New installs keep data in `~/.nova-personal-agent`; an existing `~/.nova-audio-agent` stays in use, and moving it with `npa migrate-data [--dry-run]` is optional ([details](docs/en/configuration.md#local-data-location)). Pin a version with `nova-personal-agent@1.0.0`. State files are versioned, so an older build may refuse a newer file: back up, then run `npa reset-state` before downgrading.
 
-**Set up your Space.** A Host (your desktop or a headless server) keeps the runtime, keys and memory. Clients (another desktop, iOS, Android) reach it through an end-to-end encrypted relay or Tailscale; the relay only forwards ciphertext. A standalone Space runs locally with no relay. See the [Space setup guide](docs/en/space-host-client.md) and the [relay guide](relay/README.md).
+**Set up your Space.** A Host (your desktop or a headless server) keeps the runtime, keys and memory. Clients (another desktop, iOS, Android) reach it through an end-to-end encrypted relay: self-hosted, or created automatically by the desktop and exposed over Tailscale Serve (both devices must be on the same Tailscale network). The relay only forwards ciphertext. A standalone Space runs locally with no relay. See the [Space setup guide](docs/en/space-host-client.md) and the [relay guide](relay/README.md).
 
 > Clients need their Host online to chat and never take over background work. Losing the Host loses the Space, and switching modes creates a new Space without migrating data. Upgrading from v0.4? Read the [upgrade notes](docs/releases/v1.0.0.md).
 
@@ -135,7 +136,7 @@ cd nova-personal-agent
 npm ci && cp .env.example .env
 ```
 
-Get an API key from [DashScope](https://platform.qianwenai.com) and set `DASHSCOPE_API_KEY`. That one key runs voice, memory, the camera and web search. Search goes through Bailian until you add a [Tavily](https://docs.tavily.com) `TAVILY_API_KEY`.
+Get an API key from [DashScope](https://platform.qianwenai.com) and set `DASHSCOPE_API_KEY`. That one key runs voice, memory and web search. Search goes through Bailian until you add a [Tavily](https://docs.tavily.com) `TAVILY_API_KEY`.
 
 ```bash
 npm run start:client
@@ -147,7 +148,7 @@ node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
 
-The client includes microphone, camera, sound, settings and external MCP controls.
+The client includes microphone, sound, settings and external MCP controls.
 
 ### 3.3 Support matrix
 

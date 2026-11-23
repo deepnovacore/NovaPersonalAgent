@@ -17,7 +17,7 @@
 **能打电话、边干活边聊天的端侧开源个人助理。越聊越懂你，你的伙伴，你的助手。**
 
 
-**实时交互**（前后脑架构），边干活边聊天；**端侧闭环**，手机原生执行任务，手机原生快慢脑；支持多设备 Tailscale 直连，无需云电脑。多连接器，生成时间线、画像、待办。越聊越懂你，**主动但克制。**
+**实时交互**（前后脑架构），边干活边聊天；**端侧闭环**，手机原生执行任务，手机原生快慢脑；多设备通过你自己的 Space 同步（自托管 relay，或基于 Tailscale 自动配置），无需云电脑。多连接器，生成时间线与画像。越聊越懂你，**主动但克制。**
 
 **[官网](https://deepnovacore.github.io/NovaPersonalAgent/) · [文档](docs/zh-CN/README.md) · [宣传片](https://youtu.be/YHziCK_cKbQ)**
 
@@ -60,7 +60,7 @@ https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 - **主动。** Nova 判断什么值得说、何时开口，只起草，不替你发。
 - **记忆。** 结构化的个人长期记忆，记得你的偏好，每天写日记，每条记忆都可追溯、编辑或遗忘。
 - **语音优先。** 全双工语音：前脑负责说，后脑负责做。
-- **本地优先。** 手机原生可跑（事件抽取、任务执行、快慢脑），设备通过端到端加密中转（如 Tailscale）同步。语音管线也能留在本机：一条 Docker 命令在 Mac 上跑起 ASR、LLM 和 TTS（[部署说明](docs/zh-CN/deployment/mac-local-voice.md)）。
+- **本地优先。** 手机原生可跑（事件抽取、任务执行、快慢脑），Space 保存在你掌控的 Host 上，设备通过端到端加密的 relay 同步（自托管，或经 Tailscale 自动配置）。语音管线也能留在本机：一条 Docker 命令在 Mac 上跑起 ASR、LLM 和 TTS（[部署说明](docs/zh-CN/deployment/mac-local-voice.md)）。
 
 [工作原理](docs/zh-CN/architecture.md) · [任务控制](docs/zh-CN/tasks.md) · [执行器](docs/zh-CN/executors/overview.md) · [资料授权](docs/zh-CN/sources-and-connectors.md)
 
@@ -100,8 +100,9 @@ https://github.com/user-attachments/assets/f03208a6-7042-41fc-b12b-4869351703b0
 
 | 平台 | 下载 |
 | --- | --- |
-| macOS · Apple Silicon（arm64） | [DMG](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
+| macOS · Apple Silicon（arm64） | [DMG（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-macos-arm64.dmg) |
 | Windows · x64 | [EXE（未签名）](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-windows-x64.exe) |
+| Linux · x64（Ubuntu 22.04+） | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.AppImage) · [deb](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-linux-x64.deb)（未签名） |
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
 | Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.0/nova-personal-agent-1.0.0-android-arm64.apk) |
 
@@ -118,9 +119,11 @@ npa config
 npa doctor
 ```
 
-编码任务需要先安装并登录你选用的编码 Agent（默认 Codex）。
+编码任务需要先安装并登录你选用的编码 Agent（默认 Codex）。只需安装所选的那一个；只有选用 Codex 后端时才需要 Codex。
 
-**配置你的 Space。** Host（你的桌面电脑或无头服务器）保存 runtime、密钥和记忆；Client（另一台电脑、iOS、Android）通过端到端加密的 relay 或 Tailscale 连接 Host，relay 只转发密文。独立 Space 在本机运行，无需 relay。详见 [Space 设置指南](docs/zh-CN/space-host-client.md)与 [relay 部署说明](relay/README.md)。
+**升级与数据目录。** 新安装的数据在 `~/.nova-personal-agent`；已有的 `~/.nova-audio-agent` 会继续沿用，是否用 `npa migrate-data [--dry-run]` 迁移（需先退出 Nova）由你决定，[详情](docs/zh-CN/configuration.md#本地数据位置)。
+
+**配置你的 Space。** Host（你的桌面电脑或无头服务器）保存 runtime、密钥和记忆；Client（另一台电脑、iOS、Android）通过端到端加密的 relay 连接 Host：可自托管，也可由桌面端自动创建并经 Tailscale Serve 暴露（两台设备需登录同一 Tailscale 网络）。relay 只转发密文。独立 Space 在本机运行，无需 relay。详见 [Space 设置指南](docs/zh-CN/space-host-client.md)与 [relay 部署说明](relay/README.md)。
 
 > Client 聊天需要 Host 在线，也不会接管后台任务。Host 丢失即 Space 丢失；切换模式会新建 Space，旧数据不迁移。从 v0.4 升级请先看[升级说明](docs/releases/v1.0.0.md)。
 
@@ -135,7 +138,7 @@ npm ci && cp .env.example .env
 # 在 .env 中填入 DASHSCOPE_API_KEY
 ```
 
-从 [DashScope](https://platform.qianwenai.com) 获取 API Key 并配置 `DASHSCOPE_API_KEY`。这一把密钥就能用语音、记忆、摄像头和联网搜索；搜索默认走百炼，配置 [Tavily](https://docs.tavily.com) 的 `TAVILY_API_KEY` 后改用 Tavily。
+从 [DashScope](https://platform.qianwenai.com) 获取 API Key 并配置 `DASHSCOPE_API_KEY`。这一把密钥就能用语音、记忆和联网搜索；搜索默认走百炼，配置 [Tavily](https://docs.tavily.com) 的 `TAVILY_API_KEY` 后改用 Tavily。
 
 启动桌面应用：
 ```bash
@@ -148,7 +151,7 @@ node runtime/dist/src/cli.js diagnose --json
 node runtime/dist/src/cli.js demo all
 ```
 
-客户端提供麦克风、摄像头、声音、设置和外部 MCP 控件。
+客户端提供麦克风、声音、设置和外部 MCP 控件。
 
 ### 3.3 支持矩阵
 
