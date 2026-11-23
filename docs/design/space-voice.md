@@ -1,7 +1,8 @@
 # Client Space realtime voice through the Host
 
-Status: approved design (revision 2). Relay media, frame crypto and the Host side are
-implemented; the Flutter call UI is not. See "Implementation status" at the end.
+Status: approved design (revision 2). Relay media, frame crypto, the Host side and the
+Flutter client are implemented; physical-device acceptance has not been run. See
+"Implementation status" at the end.
 
 ## Goal and scope
 
@@ -655,9 +656,75 @@ Deviations and details settled in code:
   provider admission; uplink toward the provider is bounded and a stalled provider ends
   the call (§4).
 
-Left for the Flutter phase (§10 phase 4): `SpaceCallController` and the call panel,
-adding `host_capabilities` to the `_replaceSnapshot` allowlist and expiring the
-capability, sending `voice.start` / `voice.stop`, the media socket client and renewal,
-the NOVA re-wrap, the loss fence, terminal finalization against `last_native_seq` /
-`end_offset`, playback receipts, the dictation fallback UX, and
-physical-device AEC acceptance runs.
+- **Flutter client** (`clients/flutter/lib/space/space_call_controller.dart`,
+  `space_call_media.dart`, `space_call_panel.dart`, wiring in `client_controller.dart`,
+  `client_state.dart`, `relay_transport.dart`, `space_root.dart`): `SpaceCallController`
+  on `OwnedAudioPort` in native relay mode with the `NOVA` re-wrap keeping Host playback
+  identities; `voice.start` with nonce and a deadline of at most 15 s, `voice.stop` on a
+  local end; the `/v1/media` client that waits for the relay `ready` text frame, then
+  sends the sealed `ready`, and renews the token in-band; handshake verification
+  (start-hash binding, unoffered selection, late or foreign accepts, all-zero DH); the
+  per-direction replay window; the loss fence and terminal finalization against
+  `last_native_seq` / `end_offset`; receipts; the higher-epoch stop; mute, focus loss,
+  suspension and teardown; `AudioOwner` contention with dictation; the call panel with
+  zh/en reasons and a Retry after every end. `host_capabilities` is in the
+  `_replaceSnapshot` allowlist and is bound to the Host device, epoch and relay of the
+  snapshot that carried it, so it expires when any of them changes.
+
+Flutter deviations and details settled in code:
+
+- `playback.started` is derived from the first native `playback.progress` of an
+  utterance; progress receipts are throttled (100 ms by default). Every receipt carries
+  `utterance_id`, `generation_epoch` and `played_ms`. A `playback.done` for a fenced
+  utterance is reported as `playback.stopped{reason:'loss'}`.
+- The downlink uses a reorder hold rather than the §5 adaptive jitter buffer: up to 8
+  out-of-order packets are held for at most 200 ms before the loss fence applies.
+  Native relay mode already buffers before playout. An adaptive buffer remains a tuning
+  item for the physical-device runs.
+- App suspension (`AppLifecycleState.paused`) always ends the call. The companion/PiP
+  background exemption is not wired to Space calls yet.
+- The capability binding is kept in memory only; a restarted client waits for a fresh
+  snapshot before it shows the call button.
+- The fallback never switches modes on its own: the typed composer stays usable, and
+  dictation starts only from a fresh tap, which `AudioOwner` refuses while a call holds
+  the device.
+- Host-authoritative barge-in: Space calls start native relay mode with the onset
+  threshold at 1.0, the channel maximum. The native RMS detector, which clears playback
+  locally on onset, then fires only on a 50 ms run of samples all at negative full
+  scale, so it is effectively off without a native change. The phone clears playback
+  only on a Host `playback.clear`. A clear for an identity the phone never mapped is
+  ignored.
+- The device is acquired (native relay started, capture on) at `start`, so dictation
+  contention is decided up front, but no mic audio leaves the phone until the Host's
+  `ready`, which now follows the Host's provider start.
+- Rotation evidence: `SpaceCrypto.epochEvents` fires synchronously whenever the local or
+  observed Host epoch changes. A call ends on it, and also re-checks the evidence
+  synchronously at mic admission and immediately before every socket write (the
+  sealed `ready` included). The 1 s epoch poll is gone.
+- Each attempt's teardown takes its own port, socket and keys synchronously, and a retry
+  waits for the previous teardown before it touches the native port. Retry is disabled
+  in the panel while a teardown runs.
+- Android transient focus loss: `RelayAudio.kt` now emits a `control` event
+  `{type:'audio.focus', state:'hold'|'resumed'}` on a held or regained focus (there was
+  no event before, only silenced capture). A Space call ends on `hold` with
+  `audio_interrupted` and tells the Host with `voice.stop`. iOS already stops on an
+  interruption. This is the one native change; its JVM test was not run locally (no
+  Gradle here), CI runs it.
+- Capability expiry follows `epochEvents` too, so a key delivery (which yields no
+  payload) hides a hint learned under the old epoch. A reopened client asks for a fresh
+  snapshot when it has received none under its current binding, even with a stored one.
+
+Tests: `test/space_call_controller_test.dart` (fake media socket and `AudioPort`),
+`test/space_call_panel_test.dart` (panel, old Host, stale capability, Host offline,
+microphone denied), the shared crypto vectors, and the live-tagged
+`test/space_voice_relay_live_test.dart`. The live test runs the Flutter controller and
+media client against a real relay with media enabled and the real Host
+`SpaceVoiceController` (fixture `test/support/space_voice_relay_fixture.mjs`; only the
+provider is fake). It needs `NOVA_RELAY_BUILD_ROOT` and `NOVA_RUNTIME_BUILD_ROOT` from
+`npm run build:space`. It does not go through the Host mailbox or pairing UI: intents
+and receipts are passed directly.
+
+**Not done:** physical-device acceptance. AEC and speakerphone barge-in, clear-to-silence
+and mouth-to-Host latency over cellular on real iOS and Android devices, and the §9
+multi-device end-to-end scenarios (two phones racing, revocation during playback) have
+not been run.

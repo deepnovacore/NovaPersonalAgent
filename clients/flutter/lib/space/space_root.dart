@@ -38,6 +38,8 @@ import 'host_panel.dart';
 import 'source_panel.dart';
 import 'space_dialog.dart';
 import 'chat_message.dart';
+import 'space_call_controller.dart';
+import 'space_call_panel.dart';
 import 'reconnect_page.dart';
 import 'binding_cleanup.dart';
 import 'personal_adapter.dart';
@@ -900,8 +902,13 @@ class SpaceClientScreen extends StatefulWidget {
     this.requestMicrophone,
     this.audioOwner,
     this.createDictation,
+    this.createCall,
   });
   final SpaceRecord space;
+
+  /// Replaceable so tests can drive a Space voice call without relay media.
+  final SpaceCallController Function(SpaceClientController controller)?
+  createCall;
   final VoidCallback onSwitchSpace;
 
   /// Replaceable so tests can drive dictation without native audio or ASR.
@@ -938,6 +945,13 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
   PhoneDictation? dictation;
   String _dictationBase = '';
 
+  /// Space voice call (docs/design/space-voice.md §5); null without audio.
+  SpaceCallController? voiceCall;
+  bool _callPanel = false;
+  late final AudioOwner _audioOwner = widget.audioOwner ?? AudioOwner();
+  AudioPort? _audio;
+  Future<bool> Function()? _requestMicrophone;
+
   /// The composer a dictation run writes into; null once it was sent or left.
   String? _dictationTarget;
   String get _composerTarget =>
@@ -972,12 +986,14 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     final requestMicrophone =
         widget.requestMicrophone ??
         (audio is ChannelAudio ? audio.requestMicrophone : null);
+    _audio = audio;
+    _requestMicrophone = requestMicrophone;
     final create = widget.createDictation;
     if (create != null) {
       dictation = create(_dictationText)..addListener(_changed);
     } else if (audio != null && requestMicrophone != null) {
       dictation = PhoneDictation(
-        audioOwner: widget.audioOwner ?? AudioOwner(),
+        audioOwner: _audioOwner,
         audio: audio,
         requestMicrophone: requestMicrophone,
         readConfiguration: _voiceSettings.readForDictation,
@@ -1001,9 +1017,23 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
     }
   }
 
+  /// The call button appears only while the Host advertises voice for this
+  /// device under the current Host, epoch and relay (§8).
+  bool _voiceAvailable(SpaceClientState state) =>
+      voiceCall != null && state.hostCapability('voice.v1');
+
+  void _startCall() {
+    final call = voiceCall;
+    // Dictation and a call never share the microphone (AudioOwner also refuses).
+    if (call == null || call.busy || dictation?.busy == true) return;
+    _leaveDictation();
+    setState(() => _callPanel = true);
+    unawaited(call.start('chat:main'));
+  }
+
   void _beginDictation() {
     final d = dictation;
-    if (d == null || d.busy || sending) return;
+    if (d == null || d.busy || sending || voiceCall?.busy == true) return;
     FocusManager.instance.primaryFocus?.unfocus();
     setState(() => _showDictationHint = false);
     _dictationBase = chat.text;
@@ -1019,6 +1049,24 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         return;
       }
       controller = value;
+      final audio = _audio, requestMicrophone = _requestMicrophone;
+      final call =
+          widget.createCall?.call(value) ??
+          (audio != null && requestMicrophone != null
+              ? SpaceCallController(
+                  signals: value.callSignals,
+                  media: value.callMedia,
+                  audio: audio,
+                  audioOwner: _audioOwner,
+                  requestMicrophone: requestMicrophone,
+                )
+              : null);
+      if (call != null) {
+        voiceCall = call..addListener(_changed);
+        value.onVoiceMessage = (payload) =>
+            unawaited(call.onHostMessage(payload));
+        value.onSuspended = call.appSuspended;
+      }
       personal = RemotePersonalAdapter(value.state, onSync: value.sync);
       value.state.addListener(_changed);
       setState(() {});
@@ -1198,6 +1246,8 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
 
   @override
   void dispose() {
+    voiceCall?.removeListener(_changed);
+    voiceCall?.dispose();
     dictation?.removeListener(_changed);
     dictation?.dispose();
     chat.dispose();
@@ -1777,6 +1827,17 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                   )
                 : const SizedBox.shrink(),
           ),
+        if (tab == 0 && voiceCall != null && _callPanel)
+          SpaceCallPanel(
+            call: voiceCall!,
+            language: language,
+            canRetry:
+                state.hostOnline &&
+                _voiceAvailable(state) &&
+                !voiceCall!.tearingDown,
+            onRetry: _startCall,
+            onDismiss: () => setState(() => _callPanel = false),
+          ),
         if (dictation != null &&
             (dictation!.busy || dictation!.notice.isNotEmpty))
           Padding(
@@ -1897,6 +1958,18 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
                         onSubmitted: (_) => send(),
                       ),
                     ),
+                    if (tab == 0 && _voiceAvailable(state))
+                      IconButton(
+                        key: const ValueKey('space.call.start'),
+                        tooltip: t('语音通话', 'Voice call'),
+                        onPressed:
+                            state.hostOnline &&
+                                voiceCall?.busy != true &&
+                                dictation?.busy != true
+                            ? _startCall
+                            : null,
+                        icon: const Icon(CupertinoIcons.phone, size: 22),
+                      ),
                     if (dictation != null)
                       Tooltip(
                         message: t('按住说话', 'Hold to speak'),

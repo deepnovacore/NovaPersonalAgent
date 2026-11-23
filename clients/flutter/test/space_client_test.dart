@@ -661,6 +661,68 @@ void main() {
       );
     });
 
+    Future<Map<String, dynamic>> capabilitySnapshot() => host.content(
+      'phone',
+      {
+        'v': 1,
+        'type': 'snapshot',
+        'snapshot': {
+          'schema_version': 1,
+          'revision': 1,
+          'profile': {'about': 'caps', 'version': 1},
+          'host_capabilities': ['voice.v1'],
+        },
+      },
+      epoch: 1,
+      key: key1,
+      id: 'caps',
+    );
+
+    test(
+      'a key delivery (no payload) re-evaluates the capability binding and hides a stale hint',
+      () async {
+        final h = await harness([await capabilitySnapshot()], relayEpoch: 1);
+        await h.controller.sync();
+        expect(h.state.hostCapability('voice.v1'), isTrue);
+        // The real delivery path: openEnvelope installs epoch 2 and returns null.
+        expect(await h.crypto.openEnvelope(await delivery(2, key2)), isNull);
+        expect(h.crypto.epoch, 2);
+        expect(h.state.hostCapability('voice.v1'), isFalse);
+      },
+    );
+
+    test(
+      'a reopened client requests a fresh snapshot before trusting a stored capability',
+      () async {
+        final disk = MemorySpacePersistence();
+        final first = await harness(
+          [await capabilitySnapshot()],
+          relayEpoch: 1,
+          stateDisk: disk,
+        );
+        await first.controller.sync();
+        expect(first.state.hostCapability('voice.v1'), isTrue);
+        expect(
+          first.state.pending.where((p) => p['kind'] == 'snapshot.request'),
+          isEmpty,
+        );
+        // Reopen over the same stored state: the snapshot is there, the binding is not.
+        final reopened = await harness(
+          [await capabilitySnapshot()],
+          relayEpoch: 1,
+          stateDisk: disk,
+        );
+        expect(reopened.state.snapshot['host_capabilities'], ['voice.v1']);
+        expect(reopened.state.hostCapability('voice.v1'), isFalse);
+        await reopened.controller.sync();
+        expect(
+          reopened.state.pending.where((p) => p['kind'] == 'snapshot.request'),
+          hasLength(1),
+        );
+        expect(reopened.transport.sent, hasLength(1));
+      },
+    );
+
     test('a failed install is retried by the next sync', () async {
       var failures = 1;
       final h = await harness(

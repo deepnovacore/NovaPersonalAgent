@@ -171,6 +171,23 @@ class SpaceRelayTransport {
     crypto.sessionEpoch = epoch;
   }
 
+  /// Bearer token of the current relay session, for the media socket.
+  String? get sessionToken => _token;
+  int get sessionExpiresAt => _expiresAt;
+
+  /// Forces a fresh login even while the current token is still valid; the
+  /// media socket renews in-band before its token expires.
+  Future<void> renewSession() async {
+    _token = null;
+    _expiresAt = 0;
+    await login();
+  }
+
+  /// The relay's media WebSocket endpoint (docs/design/space-voice.md §1).
+  Uri get mediaUri => base
+      .resolve('/v1/media')
+      .replace(scheme: base.scheme == 'https' ? 'wss' : 'ws');
+
   Future<void> connectLive() async {
     await login();
     if (_socket != null) return;

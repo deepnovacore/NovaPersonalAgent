@@ -7,6 +7,8 @@ import 'client_state.dart';
 import 'mobile_tools.dart';
 import 'push_client.dart';
 import 'relay_transport.dart';
+import 'space_call_controller.dart';
+import 'space_call_media.dart';
 import 'space_crypto.dart';
 import 'space_storage.dart';
 
@@ -22,7 +24,15 @@ class SpaceClientController with WidgetsBindingObserver {
       tools ?? NativeSpaceMobileTools(),
       isForeground: () => foreground,
     );
+    _bindCapabilities();
+    // Any epoch change (a key delivery returns no payload) re-evaluates the
+    // capability binding, which hides a hint learned under the old epoch.
+    _epochEvents = transport.crypto.epochEvents.listen((_) {
+      _bindCapabilities();
+      state.changed();
+    });
   }
+  StreamSubscription<int>? _epochEvents;
   final bool bindingCleanup;
   final SpaceClientState state;
   final SpaceRelayTransport transport;
@@ -31,6 +41,35 @@ class SpaceClientController with WidgetsBindingObserver {
   Timer? _timer;
   StreamSubscription<Map<String, dynamic>>? _subscription;
   bool foreground = true, _disposed = false;
+
+  /// Space voice messages (voice.accept / voice.ended and receipts) for the
+  /// active call controller, if any. They still reach [state] as before.
+  void Function(Map<String, dynamic> payload)? onVoiceMessage;
+
+  /// Called when the app is suspended; a v1 voice call ends (§5).
+  void Function()? onSuspended;
+
+  /// Host device, epoch and relay the capability hint is bound to (§8).
+  String get capabilityBinding =>
+      '${transport.crypto.space.hostDevice}|${transport.crypto.epoch}|${transport.crypto.space.relay}';
+  void _bindCapabilities() => state.capabilityBinding = capabilityBinding;
+  void _voice(Map<String, dynamic>? payload) {
+    final type = payload?['type'];
+    if (type == 'voice.accept' || type == 'voice.ended' || type == 'receipt') {
+      onVoiceMessage?.call(payload!);
+    }
+  }
+
+  /// The call's view of this connection: binding, rotation evidence, sealing.
+  late final SpaceCallSignals callSignals = _ClientCallSignals(this);
+
+  /// Relay media for Space voice, using this connection's relay session.
+  late final SpaceCallMedia callMedia = RelaySpaceCallMedia(
+    uri: () => transport.mediaUri,
+    token: () => transport.sessionToken,
+    expiresAt: () => transport.sessionExpiresAt,
+    renew: transport.renewSession,
+  );
   Future<void>? _pumping;
   String get fingerprint => deviceFingerprint(transport.crypto.identity);
   static Future<SpaceClientController> openForBindingCleanup(
@@ -111,6 +150,7 @@ class SpaceClientController with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     foreground = state == AppLifecycleState.resumed;
+    if (state == AppLifecycleState.paused) onSuspended?.call();
     if (foreground) unawaited(sync());
   }
 
@@ -125,6 +165,8 @@ class SpaceClientController with WidgetsBindingObserver {
       final payload = await transport.crypto.openEnvelope(envelope);
       if (payload != null && !_disposed) {
         state.markOk();
+        _bindCapabilities();
+        _voice(payload);
         if (payload['type'] == 'push.key') {
           await push?.acceptKey(payload);
         } else if (payload['type'] == 'mobile.action') {
@@ -261,6 +303,8 @@ class SpaceClientController with WidgetsBindingObserver {
             await _action(payload!);
           }
           if (payload != null) {
+            _bindCapabilities();
+            _voice(payload);
             await state.apply(payload, sequence: item['seq'] as int);
           } else {
             await state.transaction(() async {
@@ -282,7 +326,10 @@ class SpaceClientController with WidgetsBindingObserver {
       }
       if (_disposed) return;
       if (transport.crypto.canSeal) {
-        if (state.snapshot.isEmpty &&
+        _bindCapabilities();
+        // A reopened client holds no snapshot received under its current
+        // binding, so it cannot trust a stored host_capabilities: ask again.
+        if ((state.snapshot.isEmpty || !state.snapshotBound) &&
             !state.pending.any((p) => p['kind'] == 'snapshot.request')) {
           await state.enqueue('snapshot.request', {});
         }
@@ -574,6 +621,7 @@ class SpaceClientController with WidgetsBindingObserver {
   Future<void> dispose() async {
     _disposed = true;
     _timer?.cancel();
+    await _epochEvents?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     await _subscription?.cancel();
     // Let an in-flight live envelope finish before the transport closes.
@@ -582,5 +630,52 @@ class SpaceClientController with WidgetsBindingObserver {
     await transport.dispose();
     await _pumping;
     state.dispose();
+  }
+}
+
+class _ClientCallSignals implements SpaceCallSignals {
+  _ClientCallSignals(this.controller);
+  final SpaceClientController controller;
+  SpaceRelayTransport get _transport => controller.transport;
+  @override
+  SpaceCallContext context() {
+    final crypto = _transport.crypto;
+    final key = crypto.keys[crypto.epoch];
+    if (key == null || !crypto.canSeal) {
+      throw StateError('waiting_for_host_key');
+    }
+    return SpaceCallContext(
+      space: crypto.space.remoteSpace!,
+      epoch: crypto.epoch,
+      clientDevice: crypto.space.device!,
+      hostDevice: crypto.space.hostDevice!,
+      contentKey: key,
+    );
+  }
+
+  @override
+  int observedHostEpoch() => _transport.crypto.observedHostEpoch;
+  @override
+  Stream<int> get epochEvidence => _transport.crypto.epochEvents;
+  @override
+  Future<bool> hostOnline() async {
+    await _transport.login();
+    return _transport.hostOnline();
+  }
+
+  @override
+  Future<void> sendIntent(
+    Map<String, dynamic> payload, {
+    required int expiresAt,
+  }) async {
+    await _transport.login();
+    await _transport.send(
+      await _transport.crypto.seal(
+        payload,
+        id: payload['op_id'] as String,
+        channel: 'stream',
+        expiresAt: expiresAt,
+      ),
+    );
   }
 }
