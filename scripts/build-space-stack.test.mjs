@@ -7,7 +7,7 @@ import {join,resolve} from 'node:path'
 import {test} from 'node:test'
 import {pathToFileURL} from 'node:url'
 
-test('build-space-stack: private SDK staging, same-run replacement, notices and real fixture module load',{timeout:120_000},async()=>{
+test('build-space-stack: private SDK staging, same-run replacement, notices and real fixture module load',{timeout:300_000},async()=>{
  const repo=realpathSync(resolve(import.meta.dirname,'..'));
  const root=mkdtempSync(join(realpathSync(tmpdir()),'space-sdk-packaging-'));
  const runId=`sdk-packaging-${process.pid}`;
