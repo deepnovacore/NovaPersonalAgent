@@ -29,7 +29,7 @@ out of this configuration authority.
 - Configuration errors must not echo secret values; any counterexample is a bug.
 - Codex workspace paths, Camera file inputs, and the loopback-only MyContext provider base are
   validated before use; reports about bypasses of those validations are in scope.
-- Home Assistant and AutoGLM are retired: legacy settings for them fail closed before any client
+- Home Assistant and AutoGLM are removed: legacy settings for them (including `AUTOGLM_*` and `EXECUTORS=autoglm`) fail closed before any client
   is constructed, and a configuration that still reaches one of those endpoints is a bug.
 - Live provider integrations (Qwen realtime, OpenAI, Gemini, Volcengine, Tavily, Codex) run with
   the credentials you configure locally; secure those credentials as you would for any other tool.

@@ -93,7 +93,6 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
   String _providerLabel(String name) =>
       const {
         'ARK_API_KEY': '火山方舟',
-        'AUTOGLM_API_KEY': 'AutoGLM',
         'CODEX_API_KEY': 'Codex',
         'COMPATIBLE_ASR_API_KEY': '兼容语音识别服务',
         'COMPATIBLE_TTS_API_KEY': '兼容语音合成服务',

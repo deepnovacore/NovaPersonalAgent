@@ -4,7 +4,6 @@ electronVersion: 43.2.0
 artifactName: "Nova-Personal-Agent-${version}-${arch}.${ext}"
 asar: true
 asarUnpack:
-  - '**/node_modules/@nova-personal-agent/runtime/scripts/autoglm-bridge.py'
   - '**/node_modules/sherpa-onnx/**'
 npmRebuild: true
 beforeBuild: scripts/before-build.cjs
@@ -45,7 +44,6 @@ files:
   - '!node_modules/@livekit/av-win32-x64/**/*'
   - '!node_modules/@nova-personal-agent/runtime/**/*'
   - node_modules/@nova-personal-agent/runtime/package.json
-  - node_modules/@nova-personal-agent/runtime/scripts/autoglm-bridge.py
   - node_modules/@nova-personal-agent/runtime/dist/src/**/*.js
   - node_modules/@nova-personal-agent/runtime/dist/src/memory/voicemem-sdk/LICENSE
   - node_modules/@nova-personal-agent/runtime/dist/src/memory/voicemem-sdk/NOTICE.md

@@ -872,7 +872,7 @@ test('borrowed Codex approvals preserve another executor on close and failed con
   const shared = new HostApprovalController({clock, idFactory: () => 'phone-approval'})
   const phone = shared.forWork({work_id: 'phone', project: 'device', title: 'Settings'})
   const offered = phone.offer({kind: 'permissions', local_detail: {kind: 'permissions', scope: 'Tap'},
-    operation_summary: 'Confirm phone action', executorIdentity: {executor: 'autoglm', display_name: 'AutoGLM'}}, new AbortController().signal)
+    operation_summary: 'Confirm phone action', executorIdentity: {executor: 'mobile', display_name: '手机助手'}}, new AbortController().signal)
   const options = {
     config: {...config, prewarm: true}, composition: 'realtime' as const, clock, idFactory: () => 'codex-approval',
     sharedApprovalController: shared,
@@ -889,7 +889,7 @@ test('borrowed Codex approvals preserve another executor on close and failed con
   await assert.rejects(createCodexAssemblyResource({...options, transportFactory: {
     available: true, create: () => { throw new Error('startup failed') },
   }}))
-  assert.equal(shared.view.executorIdentity?.executor, 'autoglm')
+  assert.equal(shared.view.executorIdentity?.executor, 'mobile')
   assert.equal(shared.acceptDecision({approvalId: 'phone-approval', decision: 'accept'}), true)
   assert.equal(phone.consume((await offered)!), 'accept')
 })

@@ -10,7 +10,7 @@ import {overlaySpaceModelRoutes} from './model-settings.js';
 export const SPACE_SETTINGS_METHODS=['identity.configure','soul.set','discovery.configure','news.configure','models.configure'] as const;
 export const settingsPatchSchema=z.object({method:z.enum(SPACE_SETTINGS_METHODS),params:z.record(z.string(),z.unknown())}).strict();
 /** Model-provider API keys a phone may store. The list is explicit on purpose: a new secret variable is not phone-writable until it is reviewed and added here. App-connection, executor, search, token and file secrets stay Host-only. */
-export const SPACE_SECRET_NAMES:readonly string[]=Object.freeze(['ARK_API_KEY','AUTOGLM_API_KEY','CODEX_API_KEY','COMPATIBLE_ASR_API_KEY','COMPATIBLE_TTS_API_KEY','DASHSCOPE_API_KEY','DEEPSEEK_API_KEY','DOUBAO_BIGMODEL_API_KEY','EMBEDDING_API_KEY','GEMINI_API_KEY','OPENAI_API_KEY','OPENAI_COMPATIBLE_API_KEY','OPENROUTER_API_KEY','SELF_HOSTED_ASR_API_KEY','SELF_HOSTED_LLM_API_KEY','SELF_HOSTED_TTS_API_KEY','STEPFUN_API_KEY']);
+export const SPACE_SECRET_NAMES:readonly string[]=Object.freeze(['ARK_API_KEY','CODEX_API_KEY','COMPATIBLE_ASR_API_KEY','COMPATIBLE_TTS_API_KEY','DASHSCOPE_API_KEY','DEEPSEEK_API_KEY','DOUBAO_BIGMODEL_API_KEY','EMBEDDING_API_KEY','GEMINI_API_KEY','OPENAI_API_KEY','OPENAI_COMPATIBLE_API_KEY','OPENROUTER_API_KEY','SELF_HOSTED_ASR_API_KEY','SELF_HOSTED_LLM_API_KEY','SELF_HOSTED_TTS_API_KEY','STEPFUN_API_KEY']);
 const secretName=z.string().refine(name=>SPACE_SECRET_NAMES.includes(name),'secret_not_allowed');
 export const secretPutSchema=z.object({name:secretName,value:z.string().min(1).max(4096).refine(value=>!/[\0\r\n]/u.test(value),'invalid_secret')}).strict();
 export const secretClearSchema=z.object({name:secretName}).strict();

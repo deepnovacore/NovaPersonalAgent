@@ -1,6 +1,6 @@
 export type EnvironmentOwner =
   | 'openai' | 'gemini' | 'core' | 'qwen' | 'stepfun' | 'ark' | 'deepseek' | 'volcengine' | 'codex' | 'search' | 'camera'
-  | 'executors' | 'browser' | 'computer' | 'mobile' | 'autoglm' | 'telemetry' | 'host_private'
+  | 'executors' | 'browser' | 'computer' | 'mobile' | 'telemetry' | 'host_private'
 
 export interface EnvironmentVariableContract {
   readonly name: string
@@ -207,16 +207,6 @@ const rows: readonly Row[] = [
   ['MOBILE_DEVICE_TYPE', 'mobile', false, true, 'ios-simulator', 'Phone platform: android, ios or ios-simulator; native execution supports Android ADB and iOS Simulator.', '手机平台：android、ios 或 ios-simulator；原生执行支持 Android ADB 和 iOS 模拟器。'],
   ['MOBILE_DEVICE_ID', 'mobile', false, true, null, 'Exact iOS device or Simulator UDID, or Android ADB serial.', '明确的 iOS 设备或模拟器 UDID，或 Android ADB 序列号。'],
   ['MOBILE_WDA_URL', 'mobile', false, true, 'http://127.0.0.1:8100', 'WebDriverAgent endpoint for the configured iOS device.', '配置的 iOS 设备 WebDriverAgent 地址。'],
-  ['AUTOGLM_PYTHON', 'autoglm', false, true, null, 'Absolute AutoGLM Python executable.', 'AutoGLM Python 可执行文件绝对路径。'],
-  ['AUTOGLM_SOURCE_PATH', 'autoglm', false, true, null, 'Pinned Open-AutoGLM checkout.', '固定版本 Open-AutoGLM 目录。'],
-  ['AUTOGLM_DEVICE_ID', 'autoglm', false, true, null, 'Exact iOS UDID or Android ADB serial.', '明确的 iOS UDID 或 Android ADB 序列号。'],
-  ['AUTOGLM_DEVICE_TYPE', 'autoglm', false, true, 'ios', 'Phone platform: ios, ios-simulator or android.', '手机平台：ios、ios-simulator 或 android。'],
-  ['AUTOGLM_WDA_URL', 'autoglm', false, true, 'http://127.0.0.1:8100', 'WebDriverAgent endpoint for the configured iOS device.', '配置的 iOS 设备 WebDriverAgent 地址。'],
-  ['AUTOGLM_BASE_URL', 'autoglm', false, true, null, 'Phone model endpoint receiving screenshots.', '接收手机截图的模型服务地址。'],
-  ['AUTOGLM_MODEL', 'autoglm', false, true, null, 'Phone model identifier.', '手机操作模型名称。'],
-  ['AUTOGLM_API_KEY', 'autoglm', true, true, null, 'Phone model credential.', '手机操作模型凭据。'],
-  ['AUTOGLM_MAX_STEPS', 'autoglm', false, true, '30', 'Supervised phone task step limit (1-100).', '受监督手机任务步骤上限（1-100）。'],
-  ['AUTOGLM_TIMEOUT_SECONDS', 'autoglm', false, true, '600', 'Phone task deadline (1-1800 seconds).', '手机任务截止时间（1-1800 秒）。'],
   ['CODING_BACKEND', 'core', false, true, 'codex', 'Backend for new coding sessions: codex, opencode, codebuddy, pi or deepseek. Existing sessions keep theirs.', '新编程会话使用的执行器：codex、opencode、codebuddy、pi 或 deepseek；已有会话保持原执行器。'],
   ['CODING_PROFILES', 'host_private', false, false, null, 'Desktop-supplied registry of immutable ACP configuration-source profiles.', '桌面端提供的不可变 ACP 配置来源档案。'],
   ['OPENCODE_ACP_BIN', 'core', false, true, 'opencode on PATH', 'Absolute path to the OpenCode executable used for ACP.', '用于 ACP 的 OpenCode 可执行文件绝对路径。'],

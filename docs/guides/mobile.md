@@ -1,6 +1,6 @@
 # Supervised mobile use
 
-`mobile.run` is Nova's phone capability. The current engine uses the native TypeScript Midscene SDK (1.12.9), with `autoglm-phone` as the model. It adds no Python service. The legacy `autoglm` executor remains available independently.
+`mobile.run` is Nova's phone capability. The current engine uses the native TypeScript Midscene SDK (1.12.9), with `autoglm-phone` as the model. It adds no Python service.
 
 Nova owns task admission, approvals, cancellation, device ownership and result trust. Midscene owns screenshot-based planning. Guarded Tap, Type, single Swipe and Home actions reach WDA or an explicitly selected Android device through fixed ADB commands. Android also supports Back and launching an installed app by exact package name. This small transport avoids the SDK iOS client's automatic fallback actions and incomplete timeout coverage. Model-generated shell commands, arbitrary intents or WDA requests, and automatic device selection are unavailable.
 
@@ -26,7 +26,7 @@ Provision a WDA session before dispatch. The runner borrows it without starting 
 
 ## Android preparation
 
-Select `MOBILE_DEVICE_TYPE=android` and the serial shown as `device` by `adb devices -l`. Install and enable ADB Keyboard as described in [AutoGLM setup](autoglm.md#optional-android-setup). Input appends UTF-8 text to the focused field and restores the previous input method, including after cancellation. Keep USB debugging enabled; some OEM phones also require their separate USB debugging security permission for input injection. WDA is unused on Android.
+Select `MOBILE_DEVICE_TYPE=android` and the serial shown as `device` by `adb devices -l`. Install and enable ADB Keyboard from the Android ADB Keyboard project. Input appends UTF-8 text to the focused field and restores the previous input method, including after cancellation. Keep USB debugging enabled; some OEM phones also require their separate USB debugging security permission for input injection. WDA is unused on Android.
 
 Launch accepts only an exact installed package name; no application-name mapping or shell command is inferred. Every action passes through Nova's existing approval and device/window guard. Midscene plans from full device screenshots; coordinates use that same screen. Pixel changes alone do not invalidate an action. A changed foreground window or screen dimensions stops the run with `screen_changed`. An uncertain ADB write or keyboard restoration retains the device quarantine lock.
 
@@ -49,7 +49,7 @@ The SDK exposes action/plan lifecycle events; this integration does not claim to
 
 Model URL, name and family are independent of the `mobile` capability. This first implementation admits AutoGLM families only; enabling another family requires verifying its action mapping, cancellation and completion semantics. A different agent replaces `runMobileIos` behind `MobileExecutor`; the host controller, shared approvals and device lock remain intact. There is no general plugin protocol or Python bridge to maintain.
 
-Both phone engines use the existing `autoglm-devices` lock directory during migration. A crash or uncertain write leaves a quarantine directory; remove it only after confirming the old owner and device writes have stopped. `cleanup_unknown` overrides a cancellation result when the write's completion cannot be established.
+The phone executor keeps the historical `autoglm-devices` lock directory name so existing device locks stay honoured. A crash or uncertain write leaves a quarantine directory; remove it only after confirming the old owner and device writes have stopped. `cleanup_unknown` overrides a cancellation result when the write's completion cannot be established.
 
 ## Acceptance
 

@@ -365,7 +365,24 @@ export const RENAMED_ENVIRONMENT: Readonly<Record<string, string>> = {SURROGATE_
  * to one provider. Refuse the retired names instead of quietly sending one provider's request to
  * another provider's URL or key.
  */
+const REMOVED_AUTOGLM_VARIABLES: readonly string[] = [
+  'AUTOGLM_PYTHON', 'AUTOGLM_SOURCE_PATH', 'AUTOGLM_DEVICE_ID', 'AUTOGLM_DEVICE_TYPE', 'AUTOGLM_WDA_URL',
+  'AUTOGLM_BASE_URL', 'AUTOGLM_MODEL', 'AUTOGLM_API_KEY', 'AUTOGLM_MAX_STEPS', 'AUTOGLM_TIMEOUT_SECONDS',
+]
+
+/** The AutoGLM executor is removed: its variables and its executor name fail closed before any executor is built. */
+function rejectRemovedAutoGlm(environment: NodeJS.ProcessEnv): void {
+  const removed = REMOVED_AUTOGLM_VARIABLES.filter(name => stripLikePython(environment[name] ?? '') !== '')
+  const selected = [environment.EXECUTORS, environment.EXECUTOR]
+    .some(raw => (raw ?? '').split(',').some(name => stripLikePython(name).toLowerCase() === 'autoglm'))
+  if (removed.length === 0 && !selected) return
+  throw new ConfigurationError(
+    `${[...removed, ...(selected ? ['EXECUTORS=autoglm'] : [])].join(', ')} 已移除；AutoGLM 执行器已下线，请改用 mobile 执行器（EXECUTORS=mobile）`,
+  )
+}
+
 function rejectRemovedModelOverrides(environment: NodeJS.ProcessEnv): void {
+  rejectRemovedAutoGlm(environment)
   const removed = ['MODEL_BASE_URL', 'MODEL_API_KEY']
     .filter(name => stripLikePython(environment[name] ?? '') !== '')
   if (removed.length === 0) return
