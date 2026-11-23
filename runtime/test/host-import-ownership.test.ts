@@ -88,7 +88,7 @@ test('actual desktop entry passes prepared external and knowledge MCP into the c
   export function buildDesktopRealtimeComposition() { throw new Error('unexpected composition'); }`
   const host = `export {prepareManagedCodexMcp} from ${JSON.stringify(managedModule)};
     export function createProductionCodexHost() { return {catalog: {}, transportFactory: {}, projectHost: null}; }
-    export function resolveCodexHostConfig() { return {}; }
+    export function resolveCodingHostConfig() { return {}; }
     export function createAcpBackendRouting() { return {}; }
     export function loadWindowsGuardianFactoryFromResources() { return null; }
     export function createCodexAssemblyResource({managedMcp}) {

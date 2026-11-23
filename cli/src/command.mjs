@@ -13,6 +13,13 @@ export const HELP_TEXT = `Usage: npa [start|config|doctor|reset-state|--version|
 novapersonal and novaaudio remain aliases of npa.`
 
 const VOICE_KEY_SOURCES = Object.freeze({settings: 'saved in settings', environment: 'set in environment', missing: 'missing'})
+// Names the selected providers so a missing key reads against the provider that needs it.
+function voiceProviders(voice) {
+  const providers = voice.providers
+  if (!providers) return ''
+  if (providers.integrated) return ` (${providers.integrated})`
+  return ` (ASR ${providers.asr}, LLM ${providers.llm}, TTS ${providers.tts})`
+}
 const VOICE_KEY_PROBES = Object.freeze({ok: 'valid', rejected: 'rejected by provider', network: 'could not reach provider', deferred: 'checked on first connection'})
 
 export async function main(argv, {
@@ -44,17 +51,16 @@ export async function main(argv, {
       stdout.write(`Desktop cache: ${report.desktopReady ? 'ready' : 'missing'}\n`)
       stdout.write(`Settings: ${report.settingsPresent ? 'present' : 'missing'}\n`)
       stdout.write(`Configured keys: ${report.configuredSecretKeys.length === 0 ? 'none' : report.configuredSecretKeys.join(', ')}\n`)
-      stdout.write(`Codex: ${report.codexPresent ? 'found' : 'missing'}\n`)
+      stdout.write(`Codex: ${report.codexPresent ? 'found' : 'missing (needed only for the Codex coding backend)'}\n`)
     }
     const missingVoiceKeys = report.voice?.keys.filter(key => key.source === null) ?? []
     const rejectedVoiceKeys = report.voice?.keys.filter(key => key.probe === 'rejected') ?? []
     if (report.voice) {
-      stdout.write(`Voice pipeline: ${report.voice.pipeline}\n`)
+      stdout.write(`Voice pipeline: ${report.voice.pipeline}${voiceProviders(report.voice)}\n`)
+      if (report.voice.keys.length === 0) stdout.write('  No cloud API key required by the selected providers.\n')
       for (const key of report.voice.keys) stdout.write(`  ${key.name}: ${VOICE_KEY_SOURCES[key.source ?? 'missing']}${key.probe ? ` (${VOICE_KEY_PROBES[key.probe] ?? key.probe})` : ''}\n`)
       if (online && report.voice.keys.some(key => key.source === 'settings')) stdout.write('  Saved keys are encrypted; test them in the desktop setup window.\n')
-      if (missingVoiceKeys.length > 0) stdout.write(report.voice.pipeline === 'integrated'
-        ? 'First run: start `npa` and paste a DashScope API Key into the setup window that opens.\n'
-        : 'First run: start `npa` and fill in the missing keys in the setup window that opens.\n')
+      if (missingVoiceKeys.length > 0) stdout.write(`First run: start \`npa\` and enter ${missingVoiceKeys.map(key => key.name).join(', ')} in the setup window that opens.\n`)
     }
     if (report.capabilities !== undefined) {
       const status = report.capabilities

@@ -33,6 +33,21 @@ test('coding default host update accepts only exact backend frames and waits for
     for (const reply of parentPort.sent.slice(1)) assert.equal((reply as {error: string}).error, 'unavailable')
   } finally { control.dispose(); stop.abort() }
 })
+test('coding default host update names an unlaunchable backend and keeps other failures opaque', async () => {
+  const parentPort = new Parent(), stop = new AbortController()
+  const control = installDesktopControl({parentPort, signal: stop.signal, status: () => undefined,
+    updateCodingBackend: backend => { throw new Error(backend === 'codex' ? 'coding_backend_unavailable' : 'secret detail') }})
+  try {
+    for (const backend of ['codex', 'pi']) {
+      parentPort.emit('message', {data: {type: 'nova.control.request', id: backend, method: 'coding.default.set', params: {backend}}})
+      await new Promise(resolve => setImmediate(resolve))
+    }
+    assert.deepEqual(parentPort.sent, [
+      {type: 'nova.control.reply', id: 'codex', error: 'coding_backend_unavailable'},
+      {type: 'nova.control.reply', id: 'pi', error: 'unavailable'},
+    ])
+  } finally { control.dispose(); stop.abort() }
+})
 test('real final compilation failure preserves exact N/B over private startup status without a resource', async () => {
   const parentPort = new Parent(), stop = new AbortController()
   let status: DesktopCapabilityState | undefined

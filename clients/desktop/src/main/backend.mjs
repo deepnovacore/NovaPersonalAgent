@@ -256,10 +256,18 @@ export function backendLaunchSpec({
     delete env.CODEX_PREFIX_ARGS
     delete env.CODEX_MANAGED_ROOT
     delete env.CODEX_PROJECT_STATE_ROOT
-    if (typeof resolvedConfig.codexBinaryPath === 'string' && resolvedConfig.codexBinaryPath) {
+    // An unfinished manual Codex path means Codex is unavailable: never fall back to a discovered binary.
+    const codexUsable = !resolvedConfig.codexConfigurationError
+    // Windows environment names are case-insensitive, so an inherited `Codex_Bin` would still reach the runtime.
+    if (!codexUsable) {
+      for (const name of Object.keys(env)) {
+        if (['CODEX_BIN', 'CODEX_PREFIX_ARGS'].includes(name.toUpperCase())) delete env[name]
+      }
+    }
+    if (codexUsable && typeof resolvedConfig.codexBinaryPath === 'string' && resolvedConfig.codexBinaryPath) {
       env.CODEX_BIN = resolvedConfig.codexBinaryPath
     }
-    if (Array.isArray(resolvedConfig.codexBinaryPrefixArgs)
+    if (codexUsable && Array.isArray(resolvedConfig.codexBinaryPrefixArgs)
       && resolvedConfig.codexBinaryPrefixArgs.length > 0) {
       env.CODEX_PREFIX_ARGS = JSON.stringify(
         resolvedConfig.codexBinaryPrefixArgs,

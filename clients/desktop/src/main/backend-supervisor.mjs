@@ -220,7 +220,7 @@ export function createBackendControl(child, {onStatus = () => {}, onUsage = () =
   // Short, fixed reasons let the settings page tell a slow backend from a missing or restarting one.
   const unavailable = () => new Error('backend control unavailable')
   const failure = reason => new Error(`backend control ${reason}`)
-  const REPLY_FAILURES = {busy: 'busy', not_ready: 'not ready'}
+  const REPLY_FAILURES = {busy: 'busy', not_ready: 'not ready', coding_backend_unavailable: 'coding backend unavailable'}
   const receive = message => {
     if (closed || !message || typeof message !== 'object') return
     if (message.type === 'nova.space.models.changed') {
