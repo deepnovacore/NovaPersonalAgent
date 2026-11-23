@@ -1496,25 +1496,10 @@ test('usage scope switches independently and stays selected through live updates
   assert.equal(panel.node('#usage-history').attributes['aria-pressed'], 'true')
 })
 
-test('the main-agent conversation vision switch is gone while camera monitoring stays', () => {
+test('the main-agent conversation vision switch and the Loop Camera controls are not offered in v1.0', () => {
   assert.doesNotMatch(html, /conversation-vision-enabled|主 Agent 视觉能力/)
-  assert.match(html, /id="camera-executor-toggle"/)
-  assert.match(html, /id="watch-model"/)
+  assert.doesNotMatch(html, /camera-executor-toggle|monitor-camera|watch-model|camera-refresh/)
   assert.doesNotMatch(script, /conversationVisionEnabled/)
-})
-
-test('monitor model presets require the matching saved API key and preserve unavailable selections', async () => {
-  const base = {visionModels: {qwen: ['qwen3-vl-plus', 'qwen3-vl-flash'], ark: ['doubao-seed-2-0-pro-260215']}}
-  const panel = await mountSettingsPanel(publicView(base))
-  const select = panel.node('#watch-model')
-  assert.equal(select.disabled, true)
-  panel.push(publicView({...base, secretsPresent: {dashscopeApiKey: true}}))
-  assert.equal(select.disabled, false)
-  assert.deepEqual(select.children.filter(row => row.value).map(row => row.value), ['qwen3-vl-plus', 'qwen3-vl-flash'])
-  panel.push(publicView({...base, watchModel: 'qwen3-vl-plus', secretsPresent: {arkApiKey: true}}))
-  assert.equal(select.value, 'qwen3-vl-plus')
-  assert.equal(select.children.find(row => row.value === 'qwen3-vl-plus').disabled, true)
-  assert.ok(select.children.some(row => row.value === 'doubao-seed-2-0-pro-260215' && !row.disabled))
 })
 
 test('empty usage has quiet card values, one hint, and no empty details disclosure', async () => {

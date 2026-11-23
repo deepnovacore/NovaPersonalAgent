@@ -278,7 +278,7 @@ for (const [index, button] of categoryButtons.entries()) {
 }
 
 const capabilityEditor = createCapabilitiesEditor({root: document.querySelector('#capabilities-editor'),
-  cameraRoot: document.querySelector('#camera-executor-toggle'), codingRoot: document.querySelector('#coding-executor-toggle'),
+  codingRoot: document.querySelector('#coding-executor-toggle'),
   problemsLabel: document.querySelector('#capabilities-problems'),
   stage: patch => controller.stage(patch), probe: payload => api.probeCapabilities(payload)})
 const memoryPrerecall = document.getElementById('memory-prerecall-enabled')
@@ -489,49 +489,6 @@ function updateButtons() {
   settingsRestore.disabled = controllerState.busy || workspaceBusy || currentView?.managedWorkspaces?.lifecycleBusy === true
 }
 
-const monitorCamera = document.getElementById('monitor-camera')
-let cameraDevices = []
-function renderVision(view) {
-  const enabled = view.capabilitiesDocument?.modules?.camera?.enabled !== false
-  const watchSelect = document.getElementById('watch-model')
-  const presets = Object.entries(view.visionModels ?? {}).flatMap(([provider, models]) =>
-    view.secretsPresent?.[({qwen: 'dashscopeApiKey', ark: 'arkApiKey'})[provider]]
-      ? models.map(model => ({value: model, label: `${provider === 'qwen' ? 'Qwen' : t("豆包")} · ${model}`})) : [])
-  watchSelect.replaceChildren()
-  for (const row of [{value: '', label: presets.length ? t("选择监控模型") : t("请先配置视觉模型 API Key")}, ...presets]) {
-    const option = document.createElement('option'); option.value = row.value; option.textContent = row.label
-    option.disabled = row.value === ''; watchSelect.append(option)
-  }
-  if (view.watchModel && !presets.some(row => row.value === view.watchModel)) {
-    const option = document.createElement('option'); option.value = view.watchModel
-    option.textContent = t("{0}（当前不可选）", view.watchModel); option.disabled = true; watchSelect.append(option)
-  }
-  watchSelect.value = view.watchModel ?? ''
-  watchSelect.disabled = !enabled || presets.length === 0
-  monitorCamera.disabled = !enabled
-  document.getElementById('camera-refresh').disabled = !enabled
-  const selected = view.monitorCameraDeviceId ?? ''
-  monitorCamera.replaceChildren()
-  const rows = [{deviceId: '', label: t("系统默认摄像头")}, ...cameraDevices]
-  if (selected && !rows.some(row => row.deviceId === selected)) rows.push({deviceId: selected, label: t("已选摄像头（未检测到）")})
-  for (const row of rows) {
-    const option = document.createElement('option'); option.value = row.deviceId; option.textContent = row.label; monitorCamera.append(option)
-  }
-  monitorCamera.value = selected
-}
-monitorCamera.addEventListener('change', () => controller.stage({monitorCameraDeviceId: monitorCamera.value}))
-document.getElementById('watch-model').addEventListener('change', event => {
-  if (!event.target.disabled && event.target.value) controller.stage({watchModel: event.target.value})
-})
-onButton(document.getElementById('camera-refresh'), async () => {
-  const status = document.getElementById('camera-devices-status')
-  try {
-    cameraDevices = await window.novaPersonalAgentDesktop.camera.listDevices()
-    status.textContent = cameraDevices.length ? '' : t("未检测到摄像头；授权并连接设备后重试")
-    renderVision(currentView)
-  } catch { status.textContent = t("无法获取摄像头列表") }
-})
-
 let usageScope = 'session'
 let usageGroup = 'features'
 document.getElementById('usage-group').addEventListener('change',event=>{usageGroup=event.target.value;renderUsage()})
@@ -683,7 +640,6 @@ function render(view, drafts, state) {
   if(JSON.stringify(skillList)!==JSON.stringify(skillsState.skills)){skillsState.skills=skillList;if(activeCategory==='skills')renderSettingsSkills()}
   skinPanel.render(view, state)
   renderUsage()
-  renderVision(view)
   renderModelRoutes(view)
   capabilityEditor.render(view)
   knowledgePanel.render(view)

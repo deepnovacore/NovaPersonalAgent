@@ -25,7 +25,7 @@
 
 - **Dual-Brain Runtime:** The **Front Brain** stays responsive in realtime voice/text while the **Back Brain** orchestrates durable background tasks, evidence checks, and take-over/hand-back controls.
 - **Authoritative Local Host:** Model keys, permissions, source connectors, and personal memory stay on your Host (`0700` private storage); retrieved memories never grant execution authority.
-- **Specialist Executors:** Delegate coding (`Codex` + `ACP` agents), desktop GUI (`Computer Use`), phone automation (`mobile.run`), and independent `Loop Camera` monitoring under unified host approval gates.
+- **Specialist Executors:** Delegate coding (`Codex` + `ACP` agents), desktop GUI (`Computer Use`), phone automation (`mobile.run`), and independent `Loop Camera` monitoring (runtime only; deferred in the v1.0 desktop app) under unified host approval gates.
 - **E2EE Space Connectivity:** Pair iOS and Android (**NovaCore**) to your desktop or headless Host via Tailscale Serve or a self-hosted zero-knowledge `relay`.
 
 ---
