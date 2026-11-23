@@ -22,6 +22,9 @@ import {SubstrateMemoryResource} from '../src/memory-substrate/resource.js'
 import {MemoryLedgerClient} from '../src/memory-ledger/store-client.js'
 import {UnifiedRetrieval} from '../src/memory/retrieval.js'
 import {provider,eventually,turn} from './helpers/mem0-fixture.js'
+// Quiet hours (default 22:00-08:00) follow the machine's zone unless a test sets one. These fixtures use fixed clocks
+// (or the real clock) and expect delivery, so pin the zone instead of depending on where and when the suite runs.
+process.env.TZ = 'UTC'
 
 const report='Synthetic orchid prior report'
 const taskText='Synthetic orchid generated task answer'

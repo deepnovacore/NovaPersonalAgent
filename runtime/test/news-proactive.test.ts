@@ -8,6 +8,9 @@ import {PersonalAgentHost} from '../src/personal-agent/host.js'
 import {SuggestionPool} from '../src/core/suggestions.js'
 import type {Score} from '../src/news/ranking.js'
 import {feedNotification} from '../src/notifications/feed.js'
+// Quiet hours (default 22:00-08:00) follow the machine's zone unless a test sets one. These fixtures use fixed clocks
+// (or the real clock) and expect delivery, so pin the zone instead of depending on where and when the suite runs.
+process.env.TZ = 'UTC'
 
 const NOW=new Date('2026-09-20T11:00:00Z')
 const source={id:'bbc',name:'BBC',url:'https://feeds.bbci.co.uk/news/rss.xml'}

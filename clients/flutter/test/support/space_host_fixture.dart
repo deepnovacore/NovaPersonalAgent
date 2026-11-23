@@ -5,7 +5,7 @@ import 'package:nova_mobile/space/space_crypto.dart';
 import 'package:nova_mobile/space/space_storage.dart';
 import 'package:pointycastle/export.dart' as pc;
 import 'package:pointycastle/key_derivators/concat_kdf.dart' as pc;
-import 'space_client_test.dart' show MemorySpacePersistence;
+import '../space_client_test.dart' show MemorySpacePersistence;
 
 /// Test-only Host that signs envelopes and wraps content keys exactly like the
 /// TypeScript Host (EdDSA `nova-envelope+jws`, ECDH-ES+A256KW, A256GCM).

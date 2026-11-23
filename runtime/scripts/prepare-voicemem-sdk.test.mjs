@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict'
 import {test} from 'node:test'
 import {createRequire} from 'node:module'
-import {cpSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync} from 'node:fs'
+import {cpSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync} from 'node:fs'
 import {tmpdir} from 'node:os'
 import {dirname, join, resolve} from 'node:path'
 import {prepareVoiceMemSdk} from './prepare-voicemem-sdk.mjs'
 
 test('prepare-voicemem-sdk: pristine exact preimage, fresh copy, provenance and fail-closed integrity', () => {
-  const root = mkdtempSync(join(tmpdir(), 'sdk-package-'))
+  const root = mkdtempSync(join(realpathSync(tmpdir()), 'sdk-package-')) // the tool rejects symlink ancestors; macOS tmpdir() is under the /var symlink
   const original = resolve(dirname(createRequire(import.meta.url).resolve('voicemem')), '../..')
   const source = join(root, 'pristine'), output = join(root, 'generated')
   try {

@@ -27,7 +27,8 @@ const privateText='Synthetic orchid report'
 const now=new Date('2026-11-02T12:00:00Z')
 const reason={kind:'suggestion_selected' as const,priority:40,routing_class:'ambient' as const,origin:null,selected_suggestion:null}
 
-for(const backend of ['mem0','ledger'] as const)test(`host product memory: ${backend} discovery, persisted feed, selector and voice destinations`,{timeout:30000},async t=>{
+// Real SQLite ledger, embedding/extraction fixture server and flush loops: ~10-30s alone on a loaded machine, so budget about 3x.
+for(const backend of ['mem0','ledger'] as const)test(`host product memory: ${backend} discovery, persisted feed, selector and voice destinations`,{timeout:90_000},async t=>{
  const directory=await mkdtemp(join(await realpath(tmpdir()),'nova-product-memory-')),path=join(directory,'host.json')
  const endpoint=await provider(false,privateText),ledger=backend==='ledger'
  const memory:PersonalMemoryResource=ledger?new SubstrateMemoryResource({client:new MemoryLedgerClient(join(directory,'ledger.sqlite')),userId:'test',model:'extract',inputConsent:true,conversationProviders:['support-a','voice-a'],consolidation:{enabled:false},gateway:{async *stream(){await Promise.resolve();throw Error('unexpected extraction')},complete:()=>Promise.reject(Error('unexpected extraction'))}}):createMem0PersonalMemory({path:join(directory,'memory.sqlite'),userId:'test',conversationProviders:['support-a','voice-a'],embedding:{baseUrl:endpoint.baseUrl,apiKey:'test',model:'embedding',dimensions:2},extractionModel:'extract'})
