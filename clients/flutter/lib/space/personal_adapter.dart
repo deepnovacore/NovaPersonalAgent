@@ -1,6 +1,7 @@
 import 'dart:async';
 import '../personal/personal_store.dart';
 import 'client_state.dart';
+import 'space_language.dart';
 import 'space_storage.dart';
 
 /// Shared personal pages, backed only by the encrypted Host outbox and cache.
@@ -65,7 +66,7 @@ class RemotePersonalAdapter {
       } else if (method == 'life.mutate') {
         final version = params.remove('expected_version') as int?;
         if (params['op'] != 'create' && version == null) {
-          throw StateError('请刷新内容后重试');
+          throw StateError(spaceText('请刷新内容后重试', 'Refresh and try again'));
         }
         final dependencies = [
           for (final item in state.pending)
@@ -86,7 +87,7 @@ class RemotePersonalAdapter {
         );
         unawaited(onSync().catchError((Object _) {}));
       } else {
-        throw StateError('请在电脑上完成这项操作');
+        throw StateError(spaceText('请在电脑上完成这项操作', 'Do this on your computer'));
       }
       if (!_disposed) {
         store.receive({
@@ -101,7 +102,10 @@ class RemotePersonalAdapter {
           'type': 'personal.result',
           'request_id': frame['request_id'],
           'ok': false,
-          'error': '未能保存，请刷新后重试。',
+          'error': spaceText(
+            '未能保存，请刷新后重试。',
+            'Could not save. Refresh and try again.',
+          ),
         });
       }
     }

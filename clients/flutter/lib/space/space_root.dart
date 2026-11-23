@@ -1,4 +1,6 @@
 import 'push_invitation_dialog.dart';
+import 'space_language.dart';
+export 'space_language.dart' show spacePlatformLanguage;
 import '../experience/persona.dart';
 import '../generic/shared_ideas.dart';
 import '../ui/shared_idea_suggestions.dart';
@@ -48,12 +50,6 @@ import '../ui/timeline_page.dart';
 import '../ui/timeline_briefs.dart';
 import '../ui/conversation_home.dart';
 import 'connection_status.dart';
-
-/// The platform language, reduced to the two the Space UI ships.
-String spacePlatformLanguage() =>
-    WidgetsBinding.instance.platformDispatcher.locale.languageCode == 'zh'
-    ? 'zh'
-    : 'en';
 
 /// The App language preference, falling back to the platform language.
 Future<String> spaceSavedLanguage() async {
@@ -2211,7 +2207,12 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
       : ListView(
           padding: const EdgeInsets.symmetric(vertical: 16),
           children: [
-            SpaceHostPanel(state: c.state, onSync: c.sync, section: section),
+            SpaceHostPanel(
+              state: c.state,
+              onSync: c.sync,
+              section: section,
+              language: language,
+            ),
             _pending(c.state),
           ],
         );

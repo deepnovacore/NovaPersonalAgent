@@ -1,3 +1,4 @@
+import 'dart:ui' show Locale;
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:nova_mobile/agent_core/model_client.dart';
@@ -68,7 +69,7 @@ void main() {
       expect(view.modelDiscovery, false);
       expect(view.allowKeyEntry, false);
       expect(await backend.hasCredential('deepseek', ''), true);
-      expect(view.notice, contains('重启'));
+      expect(view.notice, contains('restarts'));
       expect(nativeCalls, 0);
     },
   );
@@ -160,7 +161,15 @@ void main() {
               lane: lane,
             );
         expect((await backend.load()).canFollow, true);
+        expect(
+          (await backend.load()).followLabel,
+          'Use the computer’s default model',
+        );
+        TestWidgetsFlutterBinding.instance.platformDispatcher.localeTestValue =
+            const Locale('zh', 'CN');
         expect((await backend.load()).followLabel, '使用电脑默认模型');
+        TestWidgetsFlutterBinding.instance.platformDispatcher
+            .clearLocaleTestValue();
         await backend.follow();
         final blocked = RemoteModelSettingsBackend(
           state,

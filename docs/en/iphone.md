@@ -22,7 +22,7 @@ The first confirmed phone on a fresh Host becomes the Space **owner**. Only the 
 |---|---|---|
 | Text chat | Yes, answered by the Host; needs the Host online | Yes, on the phone |
 | Dictation into the composer (hold to speak, then edit and send) | Yes; the draft is transcribed with the speech recognition set up on the phone and is never sent automatically | Yes |
-| Realtime voice | Not yet available; use dictation | Yes |
+| Realtime voice | Yes when the Host's relay serves media: the chat shows a call button. Owner only by default, relayed end-to-end encrypted through the Host's relay; dictation is the fallback | Yes |
 | Tasks | View Host tasks and execution activity; continue them on the computer | Run on the phone |
 | Approvals of executor actions | Yes, owner only: Allow or Deny on the phone | Not applicable (no Host) |
 | Timeline, Profile, News, To-dos, Ideas, Goals | Yes, shown from the Host's data and cached for offline viewing | Yes, from local data |
@@ -51,7 +51,7 @@ NovaCore returns one JPEG, scaled to at most 640 px and under 64 KiB, with the p
 ## Limits
 
 - Client chat requires the Host to be online; messages are not queued silently when the Host is offline.
-- Realtime voice in a Client Space is not yet available. Use dictation.
+- Client Space realtime voice needs the Host online and a relay that serves media, and only the owner can call by default. Without the call button, use dictation. See [Space / Host / Client setup and deployment](space-host-client.md#realtime-voice-optional).
 - There is no continuous phone camera, screen sharing or background wake word.
 - Host loss means Client Space loss (there is no cloud backup or automatic failover).
 - Legacy native iOS client sources remain in `clients/ios/Nova`; active cross-platform development targets `clients/flutter`.
