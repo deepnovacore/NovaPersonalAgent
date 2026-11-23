@@ -7,6 +7,7 @@ import {resolve, join} from 'node:path'
 const [previous, candidate] = process.argv.slice(2).map(path => resolve(path))
 assert.ok(previous && candidate && previous !== candidate)
 const manifest = JSON.parse(await readFile(join(previous, 'package.json'), 'utf8'))
+// Compatibility: nova-audio-agent is the retired npm name that still receives the deprecation patch.
 assert.ok(['nova-personal-agent', 'nova-audio-agent', 'nova-personal-agent-server'].includes(manifest.name))
 assert.equal(manifest.version, '0.4.0')
 const desktop = manifest.name !== 'nova-personal-agent-server'

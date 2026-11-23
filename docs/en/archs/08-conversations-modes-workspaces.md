@@ -87,7 +87,7 @@ Workbench executor, and returns the existing task when the same plan version was
 ## Nova-managed workspaces
 
 Nova keeps its own workspaces instead of asking for a directory every time. The managed root is
-`~/.nova-audio-agent/workspaces`, with `workspaces/default` as the host-approved default. Two host
+`~/.nova-personal-agent/workspaces`, with `workspaces/default` as the host-approved default. Two host
 commands expose it:
 
 - `workspaces.list` returns Nova-managed workspaces plus the approved default, newest first, each as

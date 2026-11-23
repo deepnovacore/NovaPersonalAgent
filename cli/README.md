@@ -44,6 +44,7 @@ npa
 | `npa doctor` | Check platform support, installation and the voice keys your pipeline needs |
 | `npa doctor --online` | Also test provider keys set in the environment |
 | `npa reset-state` | Move an unreadable state file aside (quit Nova first) |
+| `npa migrate-data [--dry-run]` | Optionally move local data from `~/.nova-audio-agent` to `~/.nova-personal-agent` (quit Nova first; `--dry-run` changes nothing) |
 | `npa --version` · `npa --help` | Show the release version or help |
 
 `novapersonal` and `novaaudio` remain aliases of `npa`.

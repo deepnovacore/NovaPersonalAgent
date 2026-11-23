@@ -182,6 +182,7 @@ const codexWorkspace = document.querySelector('#codexWorkspace')
 const codexManagedRoot = document.querySelector('#codexManagedRoot')
 const effectiveWorkspace = document.querySelector('#effective-workspace')
 const effectiveManagedRoot = document.querySelector('#effective-managed-root')
+const dataRootNotice = document.querySelector('#data-root-notice')
 const integratedSection = document.querySelector('#integrated-pipeline')
 const cascadedSection = document.querySelector('#cascaded-pipeline')
 const integratedProvider = document.querySelector('#integratedProvider')
@@ -679,6 +680,7 @@ function render(view, drafts, state) {
   codexManagedRoot.value = view.codexManagedRoot ?? ''
   effectiveWorkspace.textContent = view.effectivePaths?.workspace ?? ''
   effectiveManagedRoot.textContent = view.effectivePaths?.managedRoot ?? ''
+  if (dataRootNotice) dataRootNotice.textContent = view.dataRootNotice ? (view.dataRootNotice.kind === 'link' ? t('数据已迁移，但兼容链接 {0} 缺失或指向别处。请先退出 Nova，再运行 {1} 修复。', view.dataRootNotice.path, view.dataRootNotice.command) : t('本地数据仍在 {0}。如需迁移到新目录，请先退出 Nova，再运行 {1}（可选）。', view.dataRootNotice.path, view.dataRootNotice.command)) : ''
   renderCodexStatus(view)
   integratedSection.hidden = view.pipelineMode !== 'integrated'
   cascadedSection.hidden = view.pipelineMode !== 'cascaded'

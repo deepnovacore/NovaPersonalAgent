@@ -1,6 +1,6 @@
 # Local Markdown reading copies
 
-The desktop runtime maintains `profile.md`, `timeline.md`, `todos.md`, `goals.md`, and `ideas.md` beside its configured Personal Agent state. With the default local data directory these files live in `~/.nova-audio-agent/`.
+The desktop runtime maintains `profile.md`, `timeline.md`, `todos.md`, `goals.md`, and `ideas.md` beside its configured Personal Agent state. With the default local data directory these files live in `~/.nova-personal-agent/`.
 
 These are private, automatically refreshed reading copies. The database and existing application stores remain authoritative. Editing Markdown never updates the app; a subsequent sync can overwrite edits. No model call is needed to create the copies.
 

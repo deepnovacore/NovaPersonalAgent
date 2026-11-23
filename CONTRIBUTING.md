@@ -78,7 +78,7 @@ its name and default in the issue before writing the adapter.
 ### Tools and MCP servers
 
 Nova has no separate plugin system; tools arrive as manifests. The lightest contribution needs no
-runtime code: an external MCP server configured in `~/.nova-audio-agent/capabilities.json`
+runtime code: an external MCP server configured in `~/.nova-personal-agent/capabilities.json`
 (parsed by `config/capability-registry.ts`, run by `executors/mcp.ts`). The names `nova_camera`
 and `nova_knowledge` are reserved. Search transports implement `SearchTransport` in
 `executors/search.ts`; the opt-in Knowledge MCP lives in `knowledge/`.

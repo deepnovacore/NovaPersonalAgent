@@ -1,4 +1,5 @@
 import {readFile} from 'node:fs/promises'
+import {existsSync} from 'node:fs'
 import {pathToFileURL} from 'node:url'
 import {homedir} from 'node:os'
 
@@ -54,7 +55,9 @@ export function summarize(records) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const paths = process.argv.slice(2)
-  if (!paths.length) paths.push(`${homedir()}/.nova-audio-agent/realtime-telemetry.jsonl`)
+  // Compatibility: before the one-time data-root migration the telemetry still lives under ~/.nova-audio-agent.
+  const telemetry = `${homedir()}/.nova-personal-agent/realtime-telemetry.jsonl`
+  if (!paths.length) paths.push(existsSync(telemetry) ? telemetry : `${homedir()}/.nova-audio-agent/realtime-telemetry.jsonl`)
   const records = []; let invalid_lines = 0, legacy_records = 0
   for (const path of paths) for (const line of (await readFile(path, 'utf8')).split('\n')) {
     if (!line.trim()) continue
