@@ -551,20 +551,18 @@ Android devices over cellular.
 Phases 0–4 give a usable relay-only PCM call in about 5–7 weeks. Phases 5–7 are
 optional follow-ups.
 
-## Decisions needed from the user
+## Decisions (approved 2026-11-22)
 
-1. **Default voice policy:** `owner` (proposed) or `members`? With no owner assigned,
-   `owner` blocks everyone. Is that acceptable?
-2. **Relay media off by default** (proposed). Should v1 also ship a monthly per-Space byte
-   quota, or leave it unset?
-3. **Opus requirement:** v1 is PCM (~300 MB per hour per relay leg). Is Opus required
-   before media is enabled on any shared or multi-user relay?
-4. **Desktop takeover:** when the local desktop user starts voice during a phone call,
-   always take over (proposed), or refuse?
-5. **Background playback:** acceptable to play a Space call while the Host window is in
-   background presentation, scoped to the call's conversation (proposed)? Or require the
-   window to be visible?
-6. **Headless server:** is Phase 5 (voice on the headless server) wanted, or is
-   desktop-Host-only acceptable?
-7. **Direct path (Phase 7):** may the Host ever open a listening socket, or is relay-only
-   the long-term answer?
+1. **Default voice policy is `owner`.** A Space with no assigned owner cannot start voice
+   (`owner_unassigned`).
+2. **Relay media is off by default.** v1 ships no monthly per-Space byte quota; operators
+   rely on the per-call caps and bandwidth limits in §6. A quota is later work.
+3. **Opus is not a gate** for enabling media. The relay README warns operators of shared
+   relays about PCM bandwidth (about 300 MB per hour per relay leg).
+4. **Desktop takes over.** When the local desktop user starts voice during a phone call,
+   the phone call ends with `taken_over`.
+5. **Background playback is allowed** while the Host window is backgrounded, limited to the
+   call's conversation.
+6. **Headless server voice is deferred** to Phase 5; it is not in v1.
+7. **Direct path and Host listening socket are deferred** to Phase 7. v1 and the near term
+   are relay-only; the decision is revisited at Phase 7.
