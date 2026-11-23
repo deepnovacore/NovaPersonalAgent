@@ -173,9 +173,9 @@ test('pipeline defaults are product-shaped and cascaded defaults use DeepSeek Fl
     progressBubbles: 'milestones',
     embeddingProvider: 'dashscope',
     embeddingModel: 'text-embedding-v4',
-    knowledgePath: '~/.nova-audio-agent/knowledge.sqlite',
+    knowledgePath: '~/.nova-personal-agent/knowledge.sqlite',
     memoryConnection: 'local',
-    memoryPath: '~/.nova-audio-agent/memory.sqlite',
+    memoryPath: '~/.nova-personal-agent/memory.sqlite',
     memoryUserId: 'local',
   })
 })
@@ -526,8 +526,8 @@ test('selected Codex settings preserve the established host environment defaults
     binary: 'codex',
     apiKey: null,
     prewarm: true,
-    managedRoot: '~/.nova-audio-agent/workspaces',
-    stateRoot: '~/.nova-audio-agent',
+    managedRoot: '~/.nova-personal-agent/workspaces',
+    stateRoot: '~/.nova-personal-agent',
   })
   assert.equal(Object.hasOwn(defaults, 'codex_projects_enabled'), false)
 

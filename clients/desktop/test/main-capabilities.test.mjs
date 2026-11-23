@@ -94,7 +94,7 @@ test('actual settings view never decrypts while projecting startup and panel sta
     readCapabilityDocument: () => ({version: 1}), decryptSecretsForSpawn: () => {decrypts++; return {}},
     readCapabilityEditor: () => ({document: {version: 1}, revision: 'test-revision', problems: []}), capabilityEnvironment: () => ({}), capabilityPath, statSync, capabilityDocumentRevision: () => 'fixed',
     runtimeCapabilities: null, publicSettings: () => ({}), codexStatus: {}, backendStatus: {}, settingsApplyStatus: 'idle', settingsRecoveryAvailable: false, managedWorkspacesView: () => ({}),
-    startup: {}, keyringAvailable: true, microphoneStatus: 'unknown', desktopConfig: null, secretsPresent: () => ({}), secretCodec: {available: () => true}, hasPlaintextSecret: () => false})
+    startup: {}, keyringAvailable: true, microphoneStatus: 'unknown', desktopConfig: null, dataRootNotice: null, secretsPresent: () => ({}), secretCodec: {available: () => true}, hasPlaintextSecret: () => false})
   vm.runInContext(view, context)
   context.settingsView(); context.settingsView()
   assert.equal(decrypts, 0)

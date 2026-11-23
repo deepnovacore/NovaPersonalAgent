@@ -8,16 +8,16 @@ const { productPaths, resolveDesktopConfig } = platformConfig
 
 test('product paths use the hidden Nova root on Windows and POSIX', () => {
   assert.deepEqual(productPaths({ home: 'C:\\Users\\nova', pathApi: win32 }), {
-    root: 'C:\\Users\\nova\\.nova-audio-agent',
-    stateRoot: 'C:\\Users\\nova\\.nova-audio-agent',
-    managedRoot: 'C:\\Users\\nova\\.nova-audio-agent\\workspaces',
-    defaultWorkspace: 'C:\\Users\\nova\\.nova-audio-agent\\workspaces\\default',
+    root: 'C:\\Users\\nova\\.nova-personal-agent',
+    stateRoot: 'C:\\Users\\nova\\.nova-personal-agent',
+    managedRoot: 'C:\\Users\\nova\\.nova-personal-agent\\workspaces',
+    defaultWorkspace: 'C:\\Users\\nova\\.nova-personal-agent\\workspaces\\default',
   })
   assert.deepEqual(productPaths({ home: '/home/nova', pathApi: posix }), {
-    root: '/home/nova/.nova-audio-agent',
-    stateRoot: '/home/nova/.nova-audio-agent',
-    managedRoot: '/home/nova/.nova-audio-agent/workspaces',
-    defaultWorkspace: '/home/nova/.nova-audio-agent/workspaces/default',
+    root: '/home/nova/.nova-personal-agent',
+    stateRoot: '/home/nova/.nova-personal-agent',
+    managedRoot: '/home/nova/.nova-personal-agent/workspaces',
+    defaultWorkspace: '/home/nova/.nova-personal-agent/workspaces/default',
   })
 })
 
@@ -47,7 +47,7 @@ test('desktop configuration lets the explicit process binary override saved disc
   })
 
   assert.deepEqual(resolved, {
-    root: 'C:\\Users\\nova\\.nova-audio-agent',
+    root: 'C:\\Users\\nova\\.nova-personal-agent',
     stateRoot: 'C:\\Env\\State',
     managedRoot: 'C:\\Env\\Managed',
     workspace: 'C:\\Work\\Nova',
@@ -57,7 +57,7 @@ test('desktop configuration lets the explicit process binary override saved disc
     startListeningOnLaunch: true,
   })
   assert.deepEqual(canonicalized, [
-    'C:\\Users\\nova\\.nova-audio-agent',
+    'C:\\Users\\nova\\.nova-personal-agent',
     'C:\\Env\\State',
     'C:\\Env\\Managed',
     'C:\\Work\\Nova',
@@ -79,9 +79,9 @@ test('empty desktop settings admit environment and hidden-root defaults', () => 
   assert.equal(resolved.codexBinaryPath, '')
   assert.equal(resolved.codexConfigurationError, null)
   assert.equal(Object.hasOwn(resolved, 'codexProjectsEnabled'), false)
-  assert.equal(resolved.stateRoot, '/home/nova/.nova-audio-agent')
-  assert.equal(resolved.managedRoot, '/home/nova/.nova-audio-agent/workspaces')
-  assert.equal(resolved.workspace, '/home/nova/.nova-audio-agent/workspaces/default')
+  assert.equal(resolved.stateRoot, '/home/nova/.nova-personal-agent')
+  assert.equal(resolved.managedRoot, '/home/nova/.nova-personal-agent/workspaces')
+  assert.equal(resolved.workspace, '/home/nova/.nova-personal-agent/workspaces/default')
   assert.equal(resolved.startListeningOnLaunch, false)
 })
 
@@ -134,9 +134,9 @@ test('startup creates every application-owned default directory before spawn', a
 
   assert.equal(result, config)
   assert.deepEqual(created, [
-    { path: '/home/nova/.nova-audio-agent', options: { recursive: true, mode: 0o700 } },
-    { path: '/home/nova/.nova-audio-agent/workspaces', options: { recursive: true, mode: 0o700 } },
-    { path: '/home/nova/.nova-audio-agent/workspaces/default', options: { recursive: true, mode: 0o700 } },
+    { path: '/home/nova/.nova-personal-agent', options: { recursive: true, mode: 0o700 } },
+    { path: '/home/nova/.nova-personal-agent/workspaces', options: { recursive: true, mode: 0o700 } },
+    { path: '/home/nova/.nova-personal-agent/workspaces/default', options: { recursive: true, mode: 0o700 } },
   ])
 })
 
@@ -145,4 +145,15 @@ test('desktop startup model preflight accepts both modes without voice credentia
   const config=resolveDesktopConfig({settings:{pipelineMode},environment:{},home:'/home/nova',platform:'darwin',pathApi:posix})
   assert.equal(config.codexConfigurationError,null)
  }
+})
+
+test('the legacy data root stays the default until its one-time migration has run', () => {
+  // Compatibility: main.mjs passes the active root name from resolveDataRoot().
+  assert.equal(productPaths({ home: '/home/nova', pathApi: posix, dataRootName: '.nova-audio-agent' }).managedRoot, '/home/nova/.nova-audio-agent/workspaces')
+  const resolved = resolveDesktopConfig({
+    settings: {}, environment: {CODEX_MANAGED_ROOT: '/explicit/managed'}, home: '/home/nova', dataRootName: '.nova-audio-agent',
+    platform: 'linux', pathApi: posix, canonicalize: value => value,
+  })
+  assert.equal(resolved.root, '/home/nova/.nova-audio-agent')
+  assert.equal(resolved.managedRoot, '/explicit/managed')
 })

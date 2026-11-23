@@ -22,7 +22,8 @@ import {codingBackendStatus, codingBlockedByCodex} from './coding-settings.mjs'
 import {ensureBuiltInSkills, listSkills} from './skills-dir.mjs'
 import {createLifecycleCoordinator, canonicalInstalledExecutable, canonicalInstalledInvocation, inspectCodexVersion, prepareDesktopStartup, reportStartupFailure, startupFailureCode, createConfigurationAttempt, runConfigurationStage, configurationTimeout} from './desktop-startup.mjs'
 import {FeishuConnector, MODEL_CATALOG, VISION_MODELS} from '@nova-personal-agent/runtime/desktop'
-import {configureDesktopIdentity, DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
+import {configureDesktopIdentity, DESKTOP_APP_ID, DESKTOP_PRODUCT_NAME} from './desktop-identity.mjs'
+import {checkDataRootStartup, legacyDataRootNotice} from './local-data.mjs'
 import {createFrontendUsage} from './frontend-usage.mjs'
 import {createKnowledgeActions} from './knowledge-actions.mjs'
 import {createSpaceCreateHandler} from './space-create.mjs'
@@ -162,7 +163,7 @@ import {bindWindowShortcuts} from './window-shortcuts.mjs'
 import { validReleaseCameraResult } from '../renderer/release-camera-contract.mjs'
 import { isValidCategory } from '../renderer/settings-categories.mjs'
 
-configureDesktopIdentity(app)
+configureDesktopIdentity(app, {log: message => console.error(`[desktop-identity] ${message}`)})
 const acceptance = installAcceptanceGate()
 let acceptanceFailure=false
 if(acceptance)assertOriginalProfilePaths({userData:app.getPath('userData'),blackboardPath:process.env.BLACKBOARD_PATH},{userData:acceptance.originalUserData,blackboardPath:acceptance.originalBlackboardPath})
@@ -170,7 +171,8 @@ registerAppScheme(protocol)
 
 // Windows groups taskbar/notification identity by AppUserModelID; a no-op
 // everywhere else, so it is set unconditionally rather than gated by platform.
-app.setAppUserModelId('ai.deepnovacore.nova-audio-agent.orb')
+// It matches electron-builder's appId so the installer's Start-menu shortcut carries the same identity.
+app.setAppUserModelId(DESKTOP_APP_ID)
 
 // Wayland has no global window positioning, so the orb is pinned to X11
 // (XWayland handles Wayland sessions transparently). These switches must be
@@ -524,6 +526,7 @@ function settingsView() {
       managedRoot: desktopConfig.managedRoot,
       workspace: desktopConfig.workspace,
     }) : null,
+    dataRootNotice,
     secretsPresent: effectivePresence,
     secretSources,
     keyringAvailable: hasPlaintextSecret(currentSettings) ? false : keyringAvailable,
@@ -1574,7 +1577,28 @@ async function loadStartupSettings() {
   }
 }
 
+let dataRootNotice = null
+
+/**
+ * Startup never moves data: it only resolves the data root. A pending move journal (an interrupted
+ * `npa migrate-data`) stops the app here, before settings are read or any backend starts.
+ */
+function prepareLocalData() {
+  const gate = checkDataRootStartup({home: homedir()})
+  if (!gate.ok) {
+    dialog.showErrorBox('Nova Personal Agent cannot start',
+      `Moving your local data from\n${gate.legacyRoot}\nto\n${gate.root}\nis running or did not finish. Nothing has been deleted. `
+      + `Keep Nova closed and let \`npa migrate-data\` finish, or run it again in a terminal to finish or roll it back.`
+      + `\n\n${gate.lock ? `Migration lock: ${gate.lock}` : `Migration journal: ${gate.journal}`}`)
+    app.exit(1)
+    return false
+  }
+  dataRootNotice = legacyDataRootNotice({home: homedir()})
+  return true
+}
+
 async function startSelectedCamera(camera, smokeChannel) {
+  if (!prepareLocalData()) return
   settingsReady = await loadStartupSettings()
   setLanguage(currentSettings.language)
   initializeDesktopBootstrap(camera.source)

@@ -716,17 +716,29 @@ test('desktop bootstrap payload identifies the host platform for the renderer', 
 
 test('sets the Windows AppUserModelID unconditionally before startup', async () => {
   const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  const builder = await readFile(new URL('../electron-builder.yml', import.meta.url), 'utf8')
+  const {DESKTOP_APP_ID} = await import('../src/main/desktop-identity.mjs')
 
-  assert.match(
-    source,
-    /app\.setAppUserModelId\('ai\.deepnovacore\.nova-audio-agent\.orb'\)/,
-  )
-  const call = source.indexOf("app.setAppUserModelId('ai.deepnovacore.nova-audio-agent.orb')")
+  // The taskbar/notification identity must equal the installer's appId, or shortcuts and toasts split apart.
+  assert.equal(DESKTOP_APP_ID, 'ai.deepnovacore.nova-personal-agent')
+  assert.equal(builder.match(/^appId: (.+)$/mu)?.[1], DESKTOP_APP_ID)
+  const call = source.indexOf('app.setAppUserModelId(DESKTOP_APP_ID)')
   const whenReady = source.indexOf('app.whenReady()')
   assert.ok(call >= 0 && whenReady > call)
   // Unconditional: never gated behind a platform check.
   const line = source.slice(source.lastIndexOf('\n', call) + 1, source.indexOf('\n', call))
   assert.doesNotMatch(line, /if\s*\(/)
+})
+
+test('startup never moves data, and a pending migration journal stops it before settings load or any backend starts', async () => {
+  const source = await readFile(new URL('../src/main/main.mjs', import.meta.url), 'utf8')
+  assert.doesNotMatch(source, /migrateDataRoot|acquireMigrationLock|finishDesktopProfileMigration/u)
+  const prepare = source.slice(source.indexOf('function prepareLocalData()'), source.indexOf('async function startSelectedCamera('))
+  assert.match(prepare, /if \(!gate\.ok\) \{[^]*dialog\.showErrorBox\([^]*app\.exit\(1\)[^]*return false/u)
+  assert.match(prepare, /gate\.lock \? `Migration lock: \$\{gate\.lock\}`/u)
+  const start = source.slice(source.indexOf('async function startSelectedCamera('))
+  assert.ok(start.indexOf('if (!prepareLocalData()) return') < start.indexOf('loadStartupSettings()'))
+  assert.ok(start.indexOf('if (!prepareLocalData()) return') < start.indexOf('createWindow('))
 })
 
 test('renderer threads the bootstrap platform into the orb state axes', async () => {

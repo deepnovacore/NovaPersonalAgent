@@ -1,4 +1,5 @@
 import {homedir} from 'node:os'
+import {environmentHome, legacyDataRootActive, mapLegacyDataPath, rebaseDataRootDefault} from './data-root.js'
 import {resolve} from 'node:path'
 import {parseCapabilityRegistry, type CapabilityRegistry} from './capability-registry.js'
 import {CODING_BACKEND_IDS} from './coding-backends.js'
@@ -219,8 +220,8 @@ export const settingsSchema = z.object({
   codex_prefix_args: z.array(z.string().min(1).max(32_768)).max(1).default([]),
   codex_api_key: z.string().nullable().default(null),
   codex_prewarm: z.boolean().default(true),
-  codex_managed_root: z.string().default('~/.nova-audio-agent/workspaces'),
-  codex_project_state_root: z.string().default('~/.nova-audio-agent'),
+  codex_managed_root: z.string().default('~/.nova-personal-agent/workspaces'),
+  codex_project_state_root: z.string().default('~/.nova-personal-agent'),
   coding_progress_narration: z.enum(['smart', 'continuous']).default('smart'),
   proactivity_preset: proactivityPresetSchema.default('balanced'),
   codex_working_interval: z.number().finite().min(5).max(600).default(30),
@@ -236,12 +237,12 @@ export const settingsSchema = z.object({
   search_provider: searchProviderSchema.default('tavily'),
   search_mcp_url: z.string().default(''),
   search_mcp_tool: z.string().default('web_search'),
-  knowledge_path: z.string().default('~/.nova-audio-agent/knowledge.sqlite'),
+  knowledge_path: z.string().default('~/.nova-personal-agent/knowledge.sqlite'),
   embedding_provider: embeddingProviderSchema.default('dashscope'),
   embedding_model: z.string().default('text-embedding-v4'),
   embedding_base_url: z.url().default(DASHSCOPE_COMPATIBLE_BASE_URL),
   embedding_api_key: z.string().nullable().default(null),
-  blackboard_path: z.string().min(1).default('~/.nova-audio-agent/blackboard.sqlite'),
+  blackboard_path: z.string().min(1).default('~/.nova-personal-agent/blackboard.sqlite'),
   blackboard_owner_id: z.string().min(1).max(512).default('local'),
   memory_prerecall_enabled: z.boolean().default(false),
   memory_consolidation_enabled: z.boolean().default(true),
@@ -253,10 +254,10 @@ export const settingsSchema = z.object({
   memory_extractors: z.array(z.enum(['ledger','voicemem'])).min(1).nullable().default(null),
   memory_url: z.string().default(''),
   memory_token: z.string().nullable().default(null),
-  memory_path: z.string().min(1).default('~/.nova-audio-agent/memory.sqlite'),
+  memory_path: z.string().min(1).default('~/.nova-personal-agent/memory.sqlite'),
   memory_user_id: z.string().min(1).default('local'),
   // Existing v0.3 ledger location; the retired workspace graph is not enabled.
-  workspace_graph_path: z.string().min(1).default('~/.nova-audio-agent/workspace-graph.sqlite'),
+  workspace_graph_path: z.string().min(1).default('~/.nova-personal-agent/workspace-graph.sqlite'),
 }).strict()
 
 export type Settings = z.infer<typeof settingsSchema>
@@ -658,7 +659,30 @@ export function loadSettings(environment: NodeJS.ProcessEnv = process.env, textC
     throw new ConfigurationError(`invalid configuration: ${fields.join(', ')}`, 'invalid_configuration', fields.some(field=>memoryConfigurationVariables.includes(field)) ? {code:'memory_configuration_invalid',variables:fields.filter(field=>memoryConfigurationVariables.includes(field)) as MemoryConfigurationVariable[]} : undefined)
   }
   resolveMemoryConnection(result.data)
+  rebaseDataRootDefaults(result.data, environment)
   return result.data
+}
+
+/** Defaulted data paths follow the legacy root until its one-time migration has run; explicit values never move. */
+const DATA_ROOT_DEFAULTS = [
+  ['codex_managed_root', 'CODEX_MANAGED_ROOT'],
+  ['codex_project_state_root', 'CODEX_PROJECT_STATE_ROOT'],
+  ['knowledge_path', 'KNOWLEDGE_PATH'],
+  ['blackboard_path', 'BLACKBOARD_PATH'],
+  ['memory_path', 'MEMORY_PATH'],
+  ['workspace_graph_path', 'MEMORY_LEDGER_PATH'],
+] as const
+
+function rebaseDataRootDefaults(settings: Settings, environment: NodeJS.ProcessEnv): void {
+  const home = environmentHome(environment)
+  if (!legacyDataRootActive(home)) {
+    // Migrated: explicit paths named under the legacy root open the moved data, never a second copy.
+    for (const [key] of DATA_ROOT_DEFAULTS) settings[key] = mapLegacyDataPath(settings[key], home)
+    return
+  }
+  for (const [key, variable] of DATA_ROOT_DEFAULTS) {
+    if (optionalString(environment[variable]) === undefined) settings[key] = rebaseDataRootDefault(settings[key], true)
+  }
 }
 
 export function resolveProactivity(settings: Settings): ProactivityParams {

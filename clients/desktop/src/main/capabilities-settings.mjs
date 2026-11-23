@@ -3,6 +3,7 @@ import {readFileSync, statSync} from 'node:fs'
 import {mkdir, rename, unlink, writeFile} from 'node:fs/promises'
 import {dirname, join, resolve} from 'node:path'
 import {homedir} from 'node:os'
+import {defaultDataPath, mapLegacyDataPath} from './data-root.mjs'
 import {createHmac, randomBytes, randomUUID} from 'node:crypto'
 import {parseCapabilityRegistry, capabilityStatus, probeMcpServer, SensitiveContentPolicy, MCP_NON_AUTH_HEADERS} from '@nova-personal-agent/runtime/desktop'
 export {capabilityEnvironment} from './backend.mjs'
@@ -54,7 +55,7 @@ export function validatePreparedSettings(patch, next) {
   compare(patch ?? {}, next)
 }
 export function capabilityPath(settings, environment = {}, home = homedir()) {
-  const raw = settings?.capabilitiesConfigPath?.trim() || environment.CAPABILITIES_CONFIG?.trim() || '~/.nova-audio-agent/capabilities.json'
+  const raw = mapLegacyDataPath(settings?.capabilitiesConfigPath?.trim() || environment.CAPABILITIES_CONFIG?.trim() || defaultDataPath('capabilities.json', home), home)
   return raw.startsWith('~/') ? join(home, raw.slice(2)) : resolve(raw)
 }
 export function readCapabilityDocument(settings, environment = {}) {

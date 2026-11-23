@@ -1,4 +1,6 @@
-appId: ai.deepnovacore.nova-audio-agent.orb
+# Must match DESKTOP_APP_ID in src/main/desktop-identity.mjs (also the Windows AppUserModelId).
+# Changing it resets macOS camera/microphone (TCC) grants; see docs/releases for the 1.0 identity change.
+appId: ai.deepnovacore.nova-personal-agent
 productName: Nova Personal Agent
 electronVersion: 43.2.0
 artifactName: "Nova-Personal-Agent-${version}-${arch}.${ext}"
@@ -115,6 +117,10 @@ win:
 nsis:
   oneClick: false
   perMachine: false
+  # Compatibility: the GUID electron-builder derived from the retired appId (ai.deepnovacore.nova-audio-agent.orb,
+  # UUID v5 in electron-builder's namespace). Pinning it keeps the uninstall key and install directory, so the
+  # 1.0 installer upgrades an existing installation in place instead of installing beside it.
+  guid: 0cda9643-065f-51ce-a568-5bb6995f3f55
 
 linux:
   desktop:
@@ -135,6 +141,7 @@ linux:
 deb:
   packageName: nova-personal-agent-desktop
   fpm:
+    # Compatibility: upgrades over the retired nova-audio-agent-desktop package replace it in place.
     - --replaces=nova-audio-agent-desktop
     - --conflicts=nova-audio-agent-desktop
   recommends:

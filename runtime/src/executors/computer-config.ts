@@ -1,5 +1,6 @@
 import {homedir} from 'node:os'
 import {join} from 'node:path'
+import {resolveDataRoot} from '../config/data-root.js'
 import {validGuiConfig,type GuiModelConfig} from './gui-runner.js'
 import {validComputerDisplayId} from './computer-device.js'
 
@@ -11,7 +12,7 @@ export function loadComputerDeviceConfig(env: NodeJS.ProcessEnv): ComputerDevice
   const displayId=env.COMPUTER_DISPLAY_ID?.trim()??''
   const config = {...(env.CODEX_RESOURCES_PATH ? {resourcesPath: env.CODEX_RESOURCES_PATH} : {}), displayId: displayId.length?displayId:'primary', maxSteps: Number(env.EXECUTOR_MAX_STEPS ?? 30),
     budgetMs: Number(env.EXECUTOR_TIMEOUT_SECONDS ?? 600) * 1000, settleMs: Number(env.EXECUTOR_SETTLE_MS ?? 4000), clickHoldMs: Number(env.COMPUTER_CLICK_HOLD_MS ?? 100),
-    lockRoot: join(homedir(), '.nova-audio-agent', 'gui-devices')}
+    lockRoot: join(resolveDataRoot(homedir()).root, 'gui-devices')}
   const windowPid = env.COMPUTER_MAC_WINDOW_PID === '' ? undefined : env.COMPUTER_MAC_WINDOW_PID, windowId = env.COMPUTER_MAC_WINDOW_ID === '' ? undefined : env.COMPUTER_MAC_WINDOW_ID
   let macWindow: ComputerDeviceConfig['macWindow']
   if (windowPid !== undefined || windowId !== undefined) {

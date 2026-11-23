@@ -7,8 +7,8 @@ import {
   repairProjectDirectory,
 } from '../src/main/project-directories.mjs'
 
-function fixture() {
-  const root = 'C:\\Users\\nova\\.nova-audio-agent'
+function fixture(name = '.nova-personal-agent') {
+  const root = `C:\\Users\\nova\\${name}`
   const fds = new Map([
     ['C:\\Users\\nova', 1],
     [root, 2],
@@ -73,13 +73,13 @@ test('Windows creates and verifies every default directory descriptor-relatively
     mkdir: async () => { throw new Error('path mkdir must not create defaults') },
   })
   assert.deepEqual(value.creates, [
-    ['bootstrap', 1, '.nova-audio-agent'],
+    ['bootstrap', 1, '.nova-personal-agent'],
     ['child', 2, 'state'],
     ['child', 2, 'workspaces'],
     ['child', 4, 'default'],
   ])
   assert.deepEqual(value.protects, [
-    [1, '.nova-audio-agent', 2],
+    [1, '.nova-personal-agent', 2],
     [2, 'state', 3],
     [4, 'default', 5],
   ])
@@ -103,12 +103,12 @@ test('Windows reuses the protected product root when it is also the state root',
     mkdir: async () => { throw new Error('path mkdir must not create defaults') },
   })
   assert.deepEqual(value.creates, [
-    ['bootstrap', 1, '.nova-audio-agent'],
+    ['bootstrap', 1, '.nova-personal-agent'],
     ['child', 2, 'workspaces'],
     ['child', 4, 'default'],
   ])
   assert.deepEqual(value.protects, [
-    [1, '.nova-audio-agent', 2],
+    [1, '.nova-personal-agent', 2],
     [4, 'default', 5],
   ])
   assert.deepEqual(value.managedPrepares, [[2, 'workspaces', 4]])
@@ -161,4 +161,14 @@ test('Windows directory bootstrap identifies the failed stage without disclosing
     }),
     error => error?.message === 'project_directory_open_failed_root',
   )
+})
+
+test('Windows keeps protecting the legacy root until it is migrated, and refuses any other root', async () => {
+  const value = fixture('.nova-audio-agent')
+  const config = {root: value.root, stateRoot: value.root, managedRoot: `${value.root}\\workspaces`, workspace: `${value.root}\\workspaces\\default`}
+  const options = {home: 'C:\\Users\\nova', platform: 'win32', nativeHost: value.nativeHost, pathApi: path.win32,
+    mkdir: async () => { throw new Error('path mkdir must not create defaults') }}
+  await ensurePrivateProjectDirectories({config, ...options})
+  assert.deepEqual(value.creates[0], ['bootstrap', 1, '.nova-audio-agent'])
+  await assert.rejects(ensurePrivateProjectDirectories({config: {...config, root: 'C:\\Users\\nova\\.other'}, ...options}), /project_directory_authority_unavailable/)
 })
