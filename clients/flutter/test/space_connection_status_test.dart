@@ -34,7 +34,7 @@ class PresenceTransport extends SpaceRelayTransport {
   Future<void> login() async {
     logins++;
     if (failure != null) throw failure!;
-    await crypto.setEpoch(2);
+    crypto.sessionEpoch = 2;
   }
 
   @override

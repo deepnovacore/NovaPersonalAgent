@@ -1870,6 +1870,9 @@ class _SpaceClientScreenState extends State<SpaceClientScreen> {
         error.contains('missing_content_key')) {
       return '等待 Host 发送空间密钥。';
     }
+    if (error.contains('needs_repair')) {
+      return '此设备需要重新配对。请在电脑上打开配对码并重新扫描。';
+    }
     if (error.contains('revoked')) return '此设备已被撤销。请创建新 Space 后重新配对。';
     return '网络不稳定，正在重试。';
   }

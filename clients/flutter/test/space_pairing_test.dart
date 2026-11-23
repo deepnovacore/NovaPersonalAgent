@@ -167,4 +167,145 @@ void main() {
       }
     },
   );
+
+  for (final poisoned in [false, true]) {
+    test(
+      poisoned
+          ? 'a legacy binding with an unproven epoch re-pairs as a fresh device'
+          : 'an inactive answer pairs a fresh device and never loses the old binding',
+      () async {
+        FlutterSecureStorage.setMockInitialValues({});
+        HttpOverrides.global = null;
+        final host = await SpaceIdentity.generate();
+        final space = signingFingerprint(host.signingPublic);
+        final old = await SpaceIdentity.generate();
+        final requests = <Map<String, dynamic>>[];
+        final logins = <String>[];
+        // The relay keeps revoked rows (their ids and keys are taken), and it
+        // can also answer "inactive" falsely: the client cannot tell which.
+        const oldDevice = 'old-device';
+        final server = await HttpServer.bind(InternetAddress.loopbackIPv4, 0);
+        final subscription = server.listen((request) async {
+          final body = jsonMap(await utf8.decoder.bind(request).join());
+          request.response.headers.contentType = ContentType.json;
+          if (request.uri.path == '/v1/auth/challenge') {
+            logins.add(body['device'] as String);
+            request.response.statusCode = 401;
+            request.response.write(jsonEncode({'error': 'device_inactive'}));
+          } else {
+            requests.add(body);
+            final taken =
+                body['device'] == oldDevice ||
+                jsonEncode(body['signingPublicKey']) ==
+                    jsonEncode(old.signingPublic);
+            request.response.statusCode = taken ? 409 : 200;
+            request.response.write(
+              jsonEncode(
+                taken ? {'error': 'device_exists'} : {'id': 'pending'},
+              ),
+            );
+          }
+          await request.response.close();
+        });
+        final relay = 'http://127.0.0.1:${server.port}';
+        final previous = SpaceRecord(
+          id: 'old-binding',
+          name: 'Computer',
+          mode: SpaceMode.client,
+          remoteSpace: space,
+          hostDevice: 'host',
+          hostSigningKey: host.signingPublic,
+          relay: relay,
+          device: oldDevice,
+        );
+        final catalog = SpaceCatalog(persistence: MemorySpacePersistence());
+        await catalog.open();
+        await catalog.add(previous);
+        Future<Map<String, String?>> oldSecrets() async => {
+          for (final name in ['identity', 'keys', 'pair-request'])
+            name: await SpaceSecurePersistence(
+              'nova.space.$name.old-binding',
+            ).read(),
+        };
+        await SpaceSecurePersistence(
+          'nova.space.identity.old-binding',
+        ).write(jsonEncode(old.toJson()));
+        await SpaceSecurePersistence('nova.space.keys.old-binding').write(
+          jsonEncode(
+            poisoned
+                // Written by older builds from a relay-supplied epoch.
+                ? {'epoch': 1 << 40, 'keys': {}}
+                : {
+                    'epoch': 1,
+                    'keys': {'1': b64url(List.filled(32, 9))},
+                  },
+          ),
+        );
+        // The original pairing request survives admission and revocation.
+        await SpaceSecurePersistence(
+          'nova.space.pair-request.old-binding',
+        ).write(jsonEncode({'invitationId': 'first', 'device': oldDevice}));
+        final before = await oldSecrets();
+        final invitation = SpaceInvitation.parse(
+          jsonEncode({
+            'id': 'second',
+            'space': space,
+            'host': 'host',
+            'hostSigningPublicKey': host.signingPublic,
+            'relay': relay,
+            'secret': 'one-time-secret',
+            'expiresAt': DateTime.now().millisecondsSinceEpoch + 60000,
+            'business_versions': [1],
+          }),
+          allowLoopback: true,
+        );
+        try {
+          final paired = await invitation.pair(
+            'Computer',
+            catalog,
+            allowLoopback: true,
+          );
+          expect(
+            logins,
+            poisoned ? isEmpty : [oldDevice],
+            reason: 'a legacy binding is never used to log in',
+          );
+          expect(paired.id, isNot('old-binding'));
+          expect(paired.device, isNot(oldDevice));
+          expect(catalog.selectedId, paired.id);
+          final fresh = SpaceIdentity.fromJson(
+            jsonMap(
+              (await SpaceSecurePersistence(
+                'nova.space.identity.${paired.id}',
+              ).read())!,
+            ),
+          );
+          expect(fresh.signingPublic, isNot(old.signingPublic));
+          expect(fresh.encryptionPublic, isNot(old.encryptionPublic));
+          final sent = requests.single;
+          expect(sent['invitationId'], 'second');
+          expect(sent['device'], paired.device);
+          expect(sent['signingPublicKey'], fresh.signingPublic);
+          expect(sent['encryptionPublicKey'], fresh.encryptionPublic);
+          final proof = await SpaceCrypto.verifyJws(
+            sent['proof'] as String,
+            fresh.signingPublic,
+            type: 'nova-control+jws',
+          );
+          expect(proof['device'], paired.device);
+          // The old binding is never retired or erased automatically; only
+          // the Host-confirmed cleanup flow removes it.
+          expect(catalog.spaces.map((v) => v.id), ['old-binding', paired.id]);
+          expect(catalog.retired, isEmpty);
+          expect(await oldSecrets(), before);
+          expect(catalog.bindings(paired), hasLength(2));
+        } finally {
+          catalog.dispose();
+          SpaceStorage.active = null;
+          await subscription.cancel();
+          await server.close(force: true);
+        }
+      },
+    );
+  }
 }

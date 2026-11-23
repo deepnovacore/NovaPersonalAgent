@@ -641,4 +641,5 @@ bool isFatalConnectionError(String error) =>
     error.contains('inactive') ||
     error.contains('waiting_for_host_key') ||
     error.contains('missing_content_key') ||
-    error.contains('revoked');
+    error.contains('revoked') ||
+    error.contains('needs_repair');

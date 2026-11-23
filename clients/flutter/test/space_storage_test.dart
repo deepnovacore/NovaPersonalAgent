@@ -7,6 +7,68 @@ import 'package:nova_mobile/space/space_storage.dart';
 import 'space_client_test.dart' show MemorySpacePersistence;
 
 void main() {
+  test('a legacy catalog keeps its selected binding per Host', () async {
+    SpaceRecord binding(String id, String host) => SpaceRecord(
+      id: id,
+      name: id,
+      mode: SpaceMode.client,
+      remoteSpace: host,
+      hostDevice: 'host',
+      hostSigningKey: const {'kty': 'OKP', 'crv': 'Ed25519', 'x': 'host'},
+      relay: 'https://relay.example',
+      device: '$id-device',
+    );
+    // Written before `recent` existed: no selection history.
+    final disk = MemorySpacePersistence()
+      ..value = jsonEncode({
+        'v': 1,
+        'selected': 'current',
+        'spaces': [
+          binding('old', 'a').toJson(),
+          binding('current', 'a').toJson(),
+          binding('other', 'b').toJson(),
+        ],
+      });
+    final catalog = SpaceCatalog(persistence: disk);
+    await catalog.open();
+    await catalog.select('other');
+    expect(catalog.visibleSpaces.map((v) => v.id), ['current', 'other']);
+    catalog.dispose();
+    SpaceStorage.active = null;
+  });
+  test(
+    'the chooser keeps showing a re-paired binding, also after restart',
+    () async {
+      SpaceRecord binding(String id) => SpaceRecord(
+        id: id,
+        name: id,
+        mode: SpaceMode.client,
+        remoteSpace: 'space',
+        hostDevice: 'host',
+        hostSigningKey: const {'kty': 'OKP', 'crv': 'Ed25519', 'x': 'host'},
+        relay: 'https://relay.example',
+        device: '$id-device',
+      );
+      final disk = MemorySpacePersistence();
+      var catalog = SpaceCatalog(persistence: disk);
+      await catalog.open();
+      await catalog.add(binding('old'));
+      await catalog.addBinding(binding('fresh'));
+      await catalog.select(null);
+      expect(catalog.visibleSpaces.map((v) => v.id), ['fresh']);
+      catalog.dispose();
+      catalog = SpaceCatalog(persistence: disk);
+      await catalog.open();
+      expect(catalog.selectedId, isNull);
+      expect(catalog.visibleSpaces.map((v) => v.id), ['fresh']);
+      // Tapping the chooser entry selects the fresh binding.
+      await catalog.select(catalog.visibleSpaces.single.id);
+      expect(catalog.selectedId, 'fresh');
+      expect(catalog.bindings(binding('fresh')), hasLength(2));
+      catalog.dispose();
+      SpaceStorage.active = null;
+    },
+  );
   test('failed removal leaves the selected Space and disk untouched', () async {
     final disk = _FailingPersistence();
     const space = SpaceRecord(

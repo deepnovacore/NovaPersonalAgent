@@ -50,6 +50,7 @@ class SpaceRelayTransport {
     String path, {
     Map<String, dynamic>? body,
     bool authenticated = true,
+    bool Function()? beforeWrite,
   }) async {
     if (_disposed) throw const RelayFailure('closed');
     if (authenticated) await login();
@@ -58,6 +59,12 @@ class SpaceRelayTransport {
         .timeout(const Duration(seconds: 15));
     req.followRedirects = false;
     if (authenticated) req.headers.set('authorization', 'Bearer $_token');
+    // Last check after the awaits above, before any byte is written.
+    if (beforeWrite != null && !beforeWrite()) {
+      req.abort(const RelayFailure(sendAborted));
+      unawaited(req.done.then((_) {}, onError: (Object _) {}));
+      throw const RelayFailure(sendAborted);
+    }
     if (body != null) {
       req.headers.contentType = ContentType.json;
       req.write(jsonEncode(body));
@@ -100,8 +107,11 @@ class SpaceRelayTransport {
   }
 
   Future<void> login() async {
+    // A legacy binding with an unproven epoch must be re-paired, not used.
+    if (crypto.needsRepair) throw const RelayFailure('needs_repair');
     if (_token != null &&
-        _expiresAt > DateTime.now().millisecondsSinceEpoch + 30000) {
+        _expiresAt > DateTime.now().millisecondsSinceEpoch + 30000 &&
+        (crypto.sessionEpoch ?? 0) >= crypto.epoch) {
       return;
     }
     final challenge = Map<String, dynamic>.from(
@@ -120,8 +130,14 @@ class SpaceRelayTransport {
         challenge['device'] != crypto.space.device) {
       throw const RelayFailure('challenge_binding');
     }
-    final epoch = challenge['epoch'] as int;
-    await crypto.setEpoch(epoch);
+    // The relay's epoch is untrusted: it is only echoed in the signed proof
+    // (the relay checks it against the Space) and never persisted or used to
+    // drop keys. Content keys advance only via Host-signed key delivery.
+    final epoch = challenge['epoch'];
+    if (epoch is! int || epoch < 1) {
+      throw const RelayFailure('challenge_binding');
+    }
+    if (epoch < crypto.epoch) throw StateError('stale_epoch');
     final proof = await crypto.signControl({
       'v': 1,
       'purpose': 'relay-login',
@@ -152,6 +168,7 @@ class SpaceRelayTransport {
     }
     _token = session['token'] as String;
     _expiresAt = session['expiresAt'] as int;
+    crypto.sessionEpoch = epoch;
   }
 
   Future<void> connectLive() async {
@@ -210,11 +227,18 @@ class SpaceRelayTransport {
     await request('POST', '/v1/mailbox/ack', body: {'cursor': cursor});
   }
 
+  /// Sent nothing: the envelope's epoch is no longer sealable.
+  static const sendAborted = 'send_aborted_epoch_changed';
+
+  /// Sends a sealed envelope. Rotation evidence can be verified while login
+  /// or the request is pending, so sealability is re-checked right before
+  /// the body is written; a stale envelope is never sent.
   Future<void> send(Map<String, dynamic> envelope) async {
     await request(
       'POST',
       envelope['chan'] == 'stream' ? '/v1/stream' : '/v1/mailbox',
       body: envelope,
+      beforeWrite: () => envelope['epoch'] == crypto.epoch && crypto.canSeal,
     );
   }
 
@@ -285,44 +309,84 @@ class SpaceInvitation {
     final previous =
         existing.where((space) => space.id == catalog.selectedId).firstOrNull ??
         existing.lastOrNull;
-    final record = previous != null
-        ? SpaceRecord(
-            id: previous.id,
-            name: name,
-            mode: previous.mode,
-            remoteSpace: previous.remoteSpace,
-            hostDevice: previous.hostDevice,
-            hostSigningKey: previous.hostSigningKey,
-            relay: relay,
-            device: previous.device,
-          )
-        : SpaceRecord(
-            id: newSpaceId(),
-            name: name,
-            mode: SpaceMode.client,
-            remoteSpace: value['space'] as String,
-            hostDevice: value['host'] as String,
-            hostSigningKey: Map<String, dynamic>.from(
-              value['hostSigningPublicKey'] as Map,
-            ),
-            relay: relay,
-            device: newSpaceId(),
-          );
-    final identityStore = SpaceSecurePersistence(
-      'nova.space.identity.${record.id}',
-    );
-    final SpaceIdentity identity;
-    if (previous == null) {
-      identity = await SpaceIdentity.generate();
-      await identityStore.write(jsonEncode(identity.toJson()));
-    } else {
-      final raw = await identityStore.read();
-      if (raw == null) throw StateError('missing_client_identity');
-      identity = SpaceIdentity.fromJson(jsonMap(raw));
+    if (previous != null) {
+      final reused = await _reusePrevious(
+        previous,
+        name,
+        catalog,
+        allowLoopback: allowLoopback,
+      );
+      if (reused.admitted) return reused.record;
+      if (reused.retryScan) {
+        return _requestPairing(
+          reused.record,
+          reused.identity,
+          catalog,
+          allowLoopback: allowLoopback,
+          replaces: null,
+        );
+      }
     }
-    // Persist identity and Space before admission. A lost HTTP response can be
-    // recovered by logging in with the same device after Host confirmation.
+    // A new binding, or a fresh device replacing one the relay no longer
+    // admits (for example after revocation). The relay keeps revoked device
+    // ids and signing keys forever, so they are never presented again.
+    final record = SpaceRecord(
+      id: newSpaceId(),
+      name: name,
+      mode: SpaceMode.client,
+      remoteSpace: value['space'] as String,
+      hostDevice: value['host'] as String,
+      hostSigningKey: Map<String, dynamic>.from(
+        value['hostSigningPublicKey'] as Map,
+      ),
+      relay: relay,
+      device: newSpaceId(),
+    );
+    final identity = await SpaceIdentity.generate();
+    await SpaceSecurePersistence(
+      'nova.space.identity.${record.id}',
+    ).write(jsonEncode(identity.toJson()));
+    return _requestPairing(
+      record,
+      identity,
+      catalog,
+      allowLoopback: allowLoopback,
+      replaces: previous,
+    );
+  }
 
+  /// Try the saved device for this Host. It is reused only when it is still
+  /// admitted, or when this is a retry of the same invitation whose pairing
+  /// request was saved (a lost response must replay identical keys).
+  Future<
+    ({
+      SpaceRecord record,
+      SpaceIdentity identity,
+      bool admitted,
+      bool retryScan,
+    })
+  >
+  _reusePrevious(
+    SpaceRecord previous,
+    String name,
+    SpaceCatalog catalog, {
+    required bool allowLoopback,
+  }) async {
+    final record = SpaceRecord(
+      id: previous.id,
+      name: name,
+      mode: previous.mode,
+      remoteSpace: previous.remoteSpace,
+      hostDevice: previous.hostDevice,
+      hostSigningKey: previous.hostSigningKey,
+      relay: relay,
+      device: previous.device,
+    );
+    final raw = await SpaceSecurePersistence(
+      'nova.space.identity.${record.id}',
+    ).read();
+    if (raw == null) throw StateError('missing_client_identity');
+    final identity = SpaceIdentity.fromJson(jsonMap(raw));
     final crypto = SpaceCrypto(
       record,
       identity,
@@ -330,22 +394,67 @@ class SpaceInvitation {
     );
     final transport = SpaceRelayTransport(crypto, allowLoopback: allowLoopback);
     try {
-      if (previous != null) {
-        await crypto.load();
-        try {
-          await transport.login();
-          await catalog.updateBinding(record);
-          return record;
-        } on RelayFailure catch (error) {
-          if (![
-            'unknown_device',
-            'inactive_device',
-            'device_inactive',
-          ].contains(error.code)) {
-            rethrow;
-          }
-        }
+      await crypto.load();
+      if (crypto.needsRepair) {
+        // A legacy binding with an unproven epoch is never reused; pair a
+        // fresh device, which receives a fresh Host key delivery.
+        return (
+          record: record,
+          identity: identity,
+          admitted: false,
+          retryScan: false,
+        );
       }
+      await transport.login();
+      await catalog.updateBinding(record);
+      return (
+        record: record,
+        identity: identity,
+        admitted: true,
+        retryScan: false,
+      );
+    } on RelayFailure catch (error) {
+      if (![
+        'unknown_device',
+        'inactive_device',
+        'device_inactive',
+      ].contains(error.code)) {
+        rethrow;
+      }
+    } finally {
+      await transport.dispose();
+    }
+    final saved = await SpaceSecurePersistence(
+      'nova.space.pair-request.${record.id}',
+    ).read();
+    final retryScan =
+        saved != null &&
+        jsonMap(saved)['invitationId'] == value['id'] &&
+        jsonMap(saved)['device'] == record.device;
+    return (
+      record: record,
+      identity: identity,
+      admitted: false,
+      retryScan: retryScan,
+    );
+  }
+
+  Future<SpaceRecord> _requestPairing(
+    SpaceRecord record,
+    SpaceIdentity identity,
+    SpaceCatalog catalog, {
+    required bool allowLoopback,
+    required SpaceRecord? replaces,
+  }) async {
+    // Persist identity and Space before admission. A lost HTTP response can be
+    // recovered by logging in with the same device after Host confirmation.
+    final crypto = SpaceCrypto(
+      record,
+      identity,
+      SpaceSecurePersistence('nova.space.keys.${record.id}'),
+    );
+    final transport = SpaceRelayTransport(crypto, allowLoopback: allowLoopback);
+    try {
       final proofPayload = {
         'v': 1,
         'purpose': 'pair-request',
@@ -368,10 +477,16 @@ class SpaceInvitation {
       await SpaceSecurePersistence(
         'nova.space.pair-request.${record.id}',
       ).write(jsonEncode(request));
-      if (previous == null) {
-        await catalog.add(record);
-      } else {
+      if (replaces != null) {
+        // The old binding and its secrets stay untouched: the relay's
+        // inactive answer is unauthenticated and a superseded request may
+        // still be confirmed. The owner removes it with the Host-confirmed
+        // "Clean up old connections" flow.
+        await catalog.addBinding(record);
+      } else if (catalog.spaces.any((v) => v.id == record.id)) {
         await catalog.updateBinding(record);
+      } else {
+        await catalog.add(record);
       }
       await transport.request(
         'POST',

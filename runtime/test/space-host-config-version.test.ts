@@ -58,3 +58,23 @@ test('legacy existing config upgrades atomically under Host ownership before rel
   assert.equal(legacyReader.safeParse(upgraded).success,false);
  }finally{await host.close();await rm(dir,{recursive:true,force:true})}
 });
+
+test('a revocation receipt that skips epochs is refused and the revocation stays pending',async()=>{
+ const dir=await mkdtemp(join(await realpath(tmpdir()),'space-revoke-epoch-')),configPath=join(dir,'config.json');
+ const host=new PersonalAgentHost({path:join(dir,'personal.json'),userScope:'owner',memory:()=>undefined,pool:new SuggestionPool(),evidence:()=>null});
+ const member=(device:string)=>({selected_version:1 as const,device,signingPublicKey:{x:device+'-sign'},encryptionPublicKey:{x:device+'-encrypt'}});
+ const config:HostSpaceConfig={v:1,mode:'host',space:'fixture-space',personal_path:host.path,relay_url:'https://fixture.invalid',epoch:4,identity:{device:'host',signingPublicKey:{x:'host-sign'},signingPrivateKey:{d:'host-private'},encryptionPublicKey:{x:'host-encrypt'},encryptionPrivateKey:{d:'host-private-encrypt'}},content_key:'x'.repeat(43),members:[member('owner-phone'),member('lost-phone')],owner_device:'owner-phone',pending_revoke:{device:'lost-phone',op_id:'revoke-op',new_content_key:'y'.repeat(43)}};
+ const receipts:number[]=[6,1,4];let calls=0;
+ const sdk={crypto:{},RelayClient:class {revokeDevice(){return Promise.resolve({epoch:receipts[calls++],remainingDevices:[]})}}} as unknown as SpaceHostModules;
+ const controller=new SpaceHostController(configPath,structuredClone(config),host,sdk);host.setSpaceHost(controller);
+ try{
+  await writeFile(configPath,JSON.stringify(config),{mode:0o600});
+  await host.open({deferBackground:true});
+  assert.equal(calls,1,'open retries the pending revocation once');
+  for(let i=1;i<receipts.length;i++)await assert.rejects(controller.revoke('lost-phone'),/invalid_rotation_epoch/);
+  const saved=readHostSpaceConfig(configPath);
+  assert.equal(saved.epoch,4);assert.equal(saved.content_key,config.content_key);
+  assert.deepEqual(saved.pending_revoke,config.pending_revoke);
+  assert.deepEqual(saved.members.map(row=>row.device),['owner-phone','lost-phone']);
+ }finally{await host.close();await rm(dir,{recursive:true,force:true})}
+});
