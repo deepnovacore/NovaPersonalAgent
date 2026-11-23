@@ -1,6 +1,7 @@
 # Client Space realtime voice through the Host
 
-Status: design proposal (P9b step 1), revision 2 after review. Nothing here is implemented.
+Status: approved design (revision 2). Relay media, frame crypto and the Host side are
+implemented; the Flutter call UI is not. See "Implementation status" at the end.
 
 ## Goal and scope
 
@@ -123,6 +124,10 @@ none) and QUIC/WebTransport (immature on Dart and Node).
      device claims `client`. Any other socket is rejected.
    - A half-joined socket (peer absent) counts against a small per-Space and global cap
      and is closed at the join deadline.
+   - While the peer is absent the relay keeps at most `controlQueueFrames` sealed
+     **control** frames for it and delivers them at its join, so a fast endpoint's first
+     `ready` is never lost. Audio from a half-joined leg is dropped. More early control
+     frames than that close the session.
 4. **No replacement in v1.**
    - A second socket for an already-claimed role is rejected.
    - If either claimed socket closes, the relay closes the peer and tombstones the
@@ -133,9 +138,14 @@ none) and QUIC/WebTransport (immature on Dart and Node).
    sends a text frame `{"type":"renew","token":"…"}` carrying a fresh token from its
    normal login. The relay accepts it only if it maps to the identical
    `(space, epoch, device)` principal, then swaps the stored credential. At expiry
-   without renewal the socket closes and the call ends.
+   without renewal the socket closes and the call ends. Renewal frames are the only
+   text frames an endpoint may send, and they are rate-charged.
+   - After a successful role claim the relay sends one text frame
+     `{"type":"ready","role":"host"|"client"}`, so an endpoint knows the upgrade was
+     accepted before it starts its sealed `ready` handshake.
 6. **Invalidation.** Device revocation (`/v1/devices/revoke`) and the 1 s maintenance
-   sweep run `assertActive` on every media socket. Stale-epoch or revoked principals
+   sweep run `assertActive` and `assertMember` on every media socket, and re-check the
+   socket's current bearer token. Stale-epoch or revoked principals
    close the session at once.
 
 ## 2. E2EE framing
@@ -250,6 +260,15 @@ packet is missing (gap in `native_seq` for a live `gen`):
 There is no concealment or splicing in v1. Uplink loss needs no repair: the Host feeds
 audio in seq order and endpointing tolerates gaps.
 
+**Terminal and reordering.** Control frames may overtake queued audio in the relay
+(§6), so `playback.terminal` carries the utterance's end position:
+`{utterance_id, generation_epoch, last_native_seq, end_offset}`, where `last_native_seq`
+is the last audio packet's `native_seq` (`null` if the utterance had no audio) and
+`end_offset` is its `sample_offset` plus its sample count. The phone finalizes the
+utterance (`playback.done`) only once it holds the contiguous prefix through
+`last_native_seq` ending at `end_offset`. A packet still missing when the jitter buffer
+gives up is a gap, and the loss policy above applies, reporting the confirmed prefix.
+
 **Receipts (phone → Host, control frames)** carry `utterance_id`, `generation_epoch` and
 `played_ms` from the native render ledger, never enqueue time:
 - `playback.started`
@@ -310,21 +329,38 @@ and relay teardown, never on the goodbye arriving.
      newer call.
    - A device's second start replaces only its own call. The local desktop user always
      takes over (`taken_over`).
-3. Register the relay reservation and send `voice.accept`.
-4. Wait for both sockets and an authenticated `ready` from the phone (15 s). **Only then**
-   call `conversations.voice {id, enabled:true, voice_mode:"chat"}` and begin provider
-   work.
-5. Mark the call active. Playback is permitted in `background` presentation **only for
-   frames whose conversation is the call's conversation**, through the owner bridge. All
-   other background suppression stays.
+3. Register the relay reservation **and join the Host leg**, then journal and send
+   `voice.accept`. The accept is never visible before the session is joinable, so a fast
+   phone cannot meet `media_session_unknown`. Any failure between the lease claim and
+   the durable receipt (relay error, join timeout, journal or outbox write failure) ends
+   the call and releases the lease.
+4. Wait for the phone's socket and an authenticated `ready` (15 s from the start). Then
+   **re-check the full authorization** (membership, policy and owner, chat-only, mode):
+   it may have changed during the join. Only then call
+   `conversations.voice {id, enabled:true, voice_mode:"chat"}` and begin provider work.
+   The Host's own sealed `ready` is sent **only after that start succeeds**: it is the
+   phone's signal to show "In call" and send mic audio. A failed start sends no `ready`
+   and ends the call.
+   That same command re-checks chat-only atomically with the start, so a conversation
+   switched to plan in between is refused (`conversation_read_only`), never forced into
+   chat voice.
+   - Teardown during this start awaits the in-flight start and, if it succeeds after the
+     fence, stops the provider again, so an ended call never leaves `voice_id` set.
+   - Uplink toward the provider is fed in order through a bounded queue (≤ 500 ms and
+     ≤ 16 packets, oldest dropped). A single provider write pending longer than 2 s ends
+     the call (`provider_stalled`), and teardown waits at most that long for it before
+     stopping the provider.
+5. Mark the call active. Playback and microphone input are permitted in `background`
+   presentation **only for the call's conversation**, through the owner bridge and the
+   conversation runtime's audio gate. All other background suppression stays.
 
 **Teardown (timeout, revoke, close, policy change, takeover, stop).** **Fence first, then
 clean up:**
 1. Bump the lease so in-flight work is stale.
 2. Stop accepting uplink and stop emitting downlink.
 3. Clear the current generation.
-4. Then stop the provider (`conversations.voice enabled:false`, only if this lease still
-   holds it), release the owner, close the relay session and zero the keys.
+4. Then stop the provider (`conversations.voice enabled:false`, only if this call started it
+   and its lease still holds audio or no owner does), release the owner, close the relay session and zero the keys.
 
 A policy change re-evaluates every active call. Idle detection: no authenticated frame
 from the peer for 20 s ends the call.
@@ -396,18 +432,24 @@ opt in.
 | `media.maxFramesPerSecond` | 40 per direction | covers 32 paced audio packets + control + keepalive |
 | `media.maxFrameBytes` | 4096 | enforced by `ws` `maxPayload` **during assembly**, not after |
 | `media.queueFrames` / `media.queueBytes` | 16 / 64 KiB per direction | bounded app-level queue, not `bufferedAmount` |
-| `media.controlQueueFrames` | 8 | control frames jump audio inside the queue only, charge the same budgets, and cannot bypass caps |
+| `media.controlQueueFrames` | 8 | control frames jump audio inside the queue only and charge the same budgets. They count toward `queueFrames`/`queueBytes`: a control frame evicts the oldest queued audio, and if control alone would exceed a cap the session closes |
 | `media.blockedPeerMs` | 2000 | a peer whose queue stays full this long is disconnected and the call ends |
 | `media.maxSessionsPerSpace` / global | 1 / 64 | |
-| `media.maxPendingReservations` | 2 per Space, 128 global | |
-| `media.maxHalfJoined` | 2 per Space, 128 global | 15 s join deadline |
+| `media.maxPendingPerSpace` / `maxPendingGlobal` | 2 / 128 | |
+| `media.maxHalfJoinedPerSpace` / `maxHalfJoinedGlobal` | 2 / 128 | `media.joinDeadlineMs` 15000 |
+| `media.maxTombstones` | 4096 | closed session ids kept unusable until their lifetime cap passes |
+| `media.overLimitCloseMs` | 3000 | see Accounting |
 | `media.maxSessionMinutes` | 60 | server-side cap regardless of the requested TTL |
-| `media.idleTimeoutSeconds` | 20 | endpoints send sealed keepalives every 5 s |
-| `media.monthlyBytesPerSpace` | unset | optional quota |
+| `media.idleTimeoutMs` | 20000 | endpoints send sealed keepalives every 5 s |
+
+There is no per-Space monthly byte quota in v1 (approved decision 2); it is later work.
+Unknown options and non-positive values are rejected when the relay starts.
 
 - **Accounting.** Every inbound frame is charged against the byte and frame buckets
   *before* it is forwarded or dropped, so dropping is not free for an abuser. Sustained
-  over-limit traffic (more than 3 s) closes the socket. Frames do not consume
+  over-limit traffic closes the session: once a frame is dropped for exceeding a bucket,
+  drops that keep recurring within 1 s of each other for longer than `overLimitCloseMs`
+  (3 s) close it. Frames do not consume
   `requestsPerMinute`; reservations, upgrades and renewals do.
 - Media sockets count toward `maxConnections`, `maxConnectionsPerIp` and the trusted-proxy
   per-source budget.
@@ -424,7 +466,8 @@ opt in.
   It never sees audio, transcripts, conversation ids or keys. Logs contain neither the
   session header nor tokens; only a hashed session id and counters are recorded.
 - `GET /v1/capabilities` (static) advertises `{media:{v:1, codecs:["pcm16"],
-  maxKbpsPerDirection}}`. It is a hint only (§1).
+  maxKbpsPerDirection, maxFrameBytes}}`. It is a hint only (§1). With media disabled the
+  route returns 404, like every media route, and clients read that as `{media:null}`.
 
 ## 7. Failure handling and fallback
 
@@ -456,7 +499,10 @@ opt in.
 - Add `host_capabilities` to `DisplaySnapshot` (additive; old phones ignore it). It
   contains `voice.v1` **only when** this Host can serve *this* recipient: the policy
   admits the device, the Host is a desktop Host with the owner arbiter, and the relay
-  advertises media with PCM within the caps. Snapshots are already per recipient
+  advertises media with PCM within the caps and a `maxFrameBytes` that carries the
+  largest sealed 40 ms audio frame (12 + 10 + 1920 + 16 = 1958 bytes). A relay with a
+  smaller frame limit gets no capability, and `voice.start` is refused with
+  `relay_media_unavailable`. Snapshots are already per recipient
   (`snapshot(to)`).
 - The new phone **must add `host_capabilities` to the `_replaceSnapshot` allowlist**,
   otherwise it is stripped. Cached availability expires on any change of Host device,
@@ -566,3 +612,52 @@ optional follow-ups.
 6. **Headless server voice is deferred** to Phase 5; it is not in v1.
 7. **Direct path and Host listening socket are deferred** to Phase 7. v1 and the near term
    are relay-only; the decision is revisited at Phase 7.
+
+## Implementation status
+
+The work order "phases 0–2" maps to §10 phases 1–3 (relay, frame crypto, Host); the
+phase 0 spike was not run. Implemented:
+
+- **Relay** (`relay/src/media.ts`, `server.ts`, `client.ts`, `cli.ts`): §1 join and
+  registration and all §6 limits, behind `media.enabled` (default `false`). With media
+  disabled every media route returns 404, no media session can exist, and all other
+  routes behave as before. A `clock` server option
+  injects time for tests.
+- **Frame crypto** (`runtime/src/space-host/voice-crypto.ts`, Dart counterpart
+  `clients/flutter/lib/space/space_voice_crypto.dart`): §2 handshake, keys, frames,
+  replay window and payload layouts. Shared vectors live in
+  `tests/fixtures/space-voice/v1/vectors.json` and are checked by both languages.
+- **Host** (`runtime/src/space-host/voice.ts`, `audio-owner.ts`, SpaceHost wiring): the
+  `voice.start` / `voice.stop` intents, the §4 authorization order, the shared lease-based
+  owner arbiter (desktop, LAN phone, Space), `SpaceVoiceBridge` re-chunking, pacing,
+  receipts, fence-first teardown, scoped background playback and the per-caller
+  `host_capabilities` snapshot field.
+
+Deviations and details settled in code:
+
+- Downlink packets are **at most** 40 ms: a Host frame is cut into 1920-byte packets and
+  its remainder becomes one shorter packet, with `native_seq` contiguous per generation.
+- The Space voice policy is the optional `voice_policy` field (`off` / `owner` /
+  `members`, default `owner`) in the Space Host config. There is no settings UI yet.
+- Only the desktop composition enables Space voice (`spaceVoice: true`). The headless
+  server never advertises it (approved decision 6).
+- The relay `ready` text frame, the 404 capabilities route and the drop-based
+  over-limit rule are described in §1 and §6 above.
+- Final review: the Host's sealed `ready` follows a successful provider start (§4 step
+  4). A clear for a generation whose `playback.start` never left the Host is recorded by
+  the Host as `playback.cleared` with `played_ms` 0, and nothing is sent: the Client
+  never knew that generation. pcm16 is advertised only when the relay frame limit fits
+  the largest sealed audio frame (§8).
+- After review: the Host joins its leg before publishing the accept, and the relay keeps
+  a bounded number of early control frames for an absent peer (§1, §4). Terminal carries
+  `last_native_seq` and `end_offset` because control may overtake audio (§3). Control
+  frames count toward the shared queue caps (§6). Authorization is re-checked at
+  provider admission; uplink toward the provider is bounded and a stalled provider ends
+  the call (§4).
+
+Left for the Flutter phase (§10 phase 4): `SpaceCallController` and the call panel,
+adding `host_capabilities` to the `_replaceSnapshot` allowlist and expiring the
+capability, sending `voice.start` / `voice.stop`, the media socket client and renewal,
+the NOVA re-wrap, the loss fence, terminal finalization against `last_native_seq` /
+`end_offset`, playback receipts, the dictation fallback UX, and
+physical-device AEC acceptance runs.

@@ -71,6 +71,10 @@ import type {UnifiedRetrieval,UnifiedRetrievalResult} from '../memory/retrieval.
 import {validateMemoryOverview, type MemoryOverview} from './memory-overview.js';
 import {personalFeedIdForAffordance,type ContextView} from '../core/context-view.js';
 import { createHash, randomUUID } from 'node:crypto';
+import {AudioOwnerArbiter} from '../space-host/audio-owner.js';
+import type {SpaceVoiceHostPort,VoiceReceipts} from '../space-host/voice.js';
+import type {PlaybackFrame} from '../realtime/playback.js';
+export interface SpaceVoiceSink {onAudioFrame(frame:PlaybackFrame):void;onAudioClear(utteranceId:string,generationEpoch:number):void;onAudioAlert(utteranceId:string|null,generationEpoch:number|null):void;onAudioTerminal(utteranceId:string,generationEpoch:number):void}
 import { z } from 'zod';
 import type { PersonalMemoryResource } from '../memory/personal-memory.js';
 import type { MemoryEntry } from '../memory/entry.js';
@@ -1015,7 +1019,33 @@ export class PersonalAgentHost {
     })}
     rememberWorkOwner(id:string,conversationId:string,approvalId?:string):Promise<void>{return this.#serial(async()=>{const next=structuredClone(this.#state);if(!next.conversations.items.some(item=>item.id===conversationId))return;next.conversations.work_owners[id]=conversationId;if(approvalId)next.conversations.approval_owners[approvalId]=conversationId;for(const owners of [next.conversations.work_owners,next.conversations.approval_owners])for(const key of Object.keys(owners).slice(0,-1024))delete owners[key];await this.#commit(next)})}
     voiceService(){const id=this.#state.conversations.voice_id??(this.#presentationMode==='orb'?this.#orbVoiceBinding.conversation_id:null);return id&&this.#conversationPool?.hasVoice(id)?this.#conversationPool.service(id):undefined}
-    async sendConversationAudio(id:string,pcm:Uint8Array):Promise<void>{if(this.#presentationMode==='background')throw Error('presentation_hidden');if(this.#state.conversations.voice_id!==id)throw Error('voice_not_owned');await this.#conversationPool?.sendAudio(id,pcm)}
+    /** Host-wide audio owner shared by desktop, the legacy LAN phone and Space voice calls. */
+    readonly audioOwner=new AudioOwnerArbiter();
+    #remoteVoice:string|null=null;#spaceVoiceEnabled=false;#spaceVoiceAdmission:string|undefined;#spaceVoiceSink:SpaceVoiceSink|undefined;
+    /** Conversation whose voice call may play while the window is backgrounded (Space voice, approved decision 5). */
+    remoteVoiceConversationId():string|null{return this.#remoteVoice}
+    /** The desktop composition enables Space voice; the headless server does not (deferred to Phase 5). */
+    enableSpaceVoice():void{this.#spaceVoiceEnabled=true}
+    setSpaceVoiceSink(sink:SpaceVoiceSink|undefined):void{this.#spaceVoiceSink=sink}
+    /** Audio sink while a Space call owns audio. */
+    spaceVoiceSink():SpaceVoiceSink|undefined{return this.audioOwner.spaceDevice===undefined?undefined:this.#spaceVoiceSink}
+    spaceVoicePort():SpaceVoiceHostPort|undefined{
+        if(!this.#spaceVoiceEnabled)return undefined;
+        const command=async(id:string,enabled:boolean)=>{const result=await this.command({type:'personal.command',request_id:randomUUID(),method:'conversations.voice',params:{id,enabled,...(enabled?{voice_mode:'chat'}:{})}},{client_id:'space:voice'}) as {ok?:boolean;error?:string};if(!result.ok)throw Error(typeof result.error==='string'&&/^[a-z_]{1,64}$/u.test(result.error)?result.error:'voice_unavailable')};
+        return {
+            arbiter:this.audioOwner,
+            requireChat:id=>{const row=this.conversationSnapshot(0).items.find(item=>item.id===id);if(!row)throw Error('conversation_not_found');if(!['chat','topic'].includes(row.kind)||(row.mode??'chat')!=='chat')throw Error('conversation_read_only')},
+            voiceConversationId:()=>this.#state.conversations.voice_id??null,
+            // Admission re-checks chat-only inside the same command that starts voice, so a conversation
+            // switched to plan (or another kind) during the join is refused rather than forced into chat voice.
+            startVoice:async id=>{this.#spaceVoiceAdmission=id;try{await command(id,true)}finally{this.#spaceVoiceAdmission=undefined}},
+            stopVoice:id=>command(id,false),
+            sendAudio:(id,pcm)=>this.sendConversationAudio(id,pcm),
+            receipts:():VoiceReceipts|undefined=>this.voiceService(),
+            setRemoteVoice:id=>{this.#remoteVoice=id},
+        };
+    }
+    async sendConversationAudio(id:string,pcm:Uint8Array):Promise<void>{if(this.#presentationMode==='background'&&this.#remoteVoice!==id)throw Error('presentation_hidden');if(this.#state.conversations.voice_id!==id)throw Error('voice_not_owned');await this.#conversationPool?.sendAudio(id,pcm)}
     async #conversationCommand(method:string,p:Record<string,unknown>):Promise<unknown>{
         if(typeof p.id==='string'&&this.#state.conversations.items.some(item=>item.id===p.id&&item.kind==='schedule'))throw Error('hidden_conversation');
         if(method==='conversations.targets'){return {targets:await this.#codingTargets?.list()??[],executors:this.#workbenchExecutors,local_build_supported:['darwin','win32'].includes(process.platform)}}
@@ -1037,6 +1067,7 @@ export class PersonalAgentHost {
             // Starting voice clears the conversation runtime; on the active Build that would abort
             // its in-flight run. Voice on other conversations stays available during a Build.
             if(q.enabled&&item.kind==='build'&&this.activeLocalBuild()?.id===item.id)throw Error('conversation_busy');
+            if(q.enabled&&this.#spaceVoiceAdmission===q.id&&(!['chat','topic'].includes(item.kind)||(item.mode??'chat')!=='chat'))throw Error('conversation_read_only');
             const c=this.#state.conversations;
             const voiceMode=q.voice_mode??(this.#presentationMode==='orb'&&this.#orbVoiceBinding.conversation_id===q.id?this.#orbVoiceBinding.voice_mode:item.kind==='build'?'build':item.mode??'chat');
             if(q.enabled){

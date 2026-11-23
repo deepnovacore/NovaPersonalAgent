@@ -1579,17 +1579,22 @@ export interface BuildDesktopRealtimeCompositionOptions {
     cameraTransport: CameraCaptureTransport,
   ) => RealtimeAssembly
   readonly telemetry?: RealtimeTelemetry
+  /** Space voice calls (desktop Host only; the headless server defers them to Phase 5). */
+  readonly spaceVoice?: boolean
   readonly projectView?: ProjectConfirmationView
   readonly approvalView?: ExecutorApprovalView
   readonly createServer?: DesktopRealtimeOptions['createServer']
   readonly transportFailure?: DesktopRealtimeOptions['transportFailure']
 }
 
+/** Playback sink: the renderer bridge, or the Space voice bridge while a Space call owns audio. */
+export type DesktopAudioSink = Pick<DesktopSocketBridge, 'onAudioFrame' | 'onAudioClear' | 'onAudioAlert' | 'onAudioTerminal'>
+
 export interface DesktopRealtimeComposition {
   readonly realtime: RealtimeAssembly
   readonly desktop: DesktopRealtime
   createPhone(options: {token: string; createServer: NonNullable<DesktopRealtimeOptions['createServer']>}): DesktopRealtime
-  audioBridge(): DesktopSocketBridge | undefined
+  audioBridge(): DesktopAudioSink | undefined
   publishPersonal(frame: unknown): void
   prepareLegacyPhoneVoice(): Promise<string>
 }
@@ -1604,19 +1609,37 @@ export function buildDesktopRealtimeComposition(
   let audioOwner: 'desktop' | 'phone' | null = null
   let audioClosing = 0
   const voiceOperations = new Map<string,Promise<unknown>>()
-  const audioBridge = () => audioClosing ? undefined : audioOwner === 'phone' ? phone?.bridge : holder.desktop?.bridge
+  const audioBridge = (): DesktopAudioSink | undefined => {
+    const space = holder.realtime?.personalAgent.spaceVoiceSink()
+    if (space) return space
+    return audioClosing ? undefined : audioOwner === 'phone' ? phone?.bridge : holder.desktop?.bridge
+  }
+  // Local owners also hold the Host-wide arbiter lease, so a Space call can never start under them.
+  let localLease: number | undefined
+  const syncArbiter = () => {
+    const arbiter = holder.realtime?.personalAgent.audioOwner
+    if (!arbiter) return
+    if (audioOwner === null) { if (localLease !== undefined) arbiter.release(localLease); localLease = undefined; return }
+    if (localLease === undefined || !arbiter.owns(localLease)) {
+      try { localLease = arbiter.claim(audioOwner === 'phone' ? 'lan_phone' : 'desktop') } catch { localLease = undefined }
+    }
+  }
   const publishPersonal = (frame: unknown) => { holder.desktop?.bridge.onPersonalFrame(frame); phone?.bridge.onPersonalFrame(frame) }
   const presentation = new Map<string, 'background' | 'workbench' | 'orb'>()
   const effectivePresentation = () => [...presentation.values()].includes('workbench') ? 'workbench' : [...presentation.values()].includes('orb') ? 'orb' : 'background'
   const claimAudio = (side: 'desktop' | 'phone') => {
     if (audioClosing || (audioOwner !== null && audioOwner !== side)) throw Error('voice_not_owned')
+    if (holder.realtime?.personalAgent.audioOwner.spaceDevice !== undefined) throw Error('voice_not_owned')
     audioOwner = side
+    syncArbiter()
   }
   const command = async (side: 'desktop' | 'phone', value: unknown, context?: PersonalCommandContext): Promise<unknown> => {
     const input = value as {type: 'personal.command'; method: string; request_id: string; params?: Record<string, unknown>}
     const params = input.params ?? {}
     const priorOwner = audioOwner
     if (input.method === 'conversations.voice') {
+      // The local desktop always takes over a Space call (approved decision 4); the legacy LAN phone does not.
+      if (params.enabled === true && side === 'desktop') await requireRealtime().personalAgent.audioOwner.takeOver('taken_over')
       if (params.enabled === true) { try { claimAudio(side) } catch { return {type:'personal.result',request_id:input.request_id,ok:false,error:'voice_not_owned'} } }
       else if (audioOwner !== side) return {type:'personal.result',request_id:input.request_id,ok:false,error:'voice_not_owned'}
     }
@@ -1639,7 +1662,7 @@ export function buildDesktopRealtimeComposition(
         try {
           await requireRealtime().service.discardInputAudio?.()
           await requireRealtime().service.playbackDisconnected({resumeDelivery:true})
-          if (audioOwner === side) audioOwner = null
+          if (audioOwner === side) { audioOwner = null; syncArbiter() }
         } catch {
           // Failed draining must retain ownership: retry or disconnect before
           // routing another device's audio through potentially stale playback.
@@ -1649,10 +1672,11 @@ export function buildDesktopRealtimeComposition(
       if (input.method === 'conversations.voice') {
         if (!(result as {ok?:boolean}).ok) audioOwner = priorOwner
         else if (params.enabled === false) audioOwner = null
+        syncArbiter()
       }
       return result
     } catch (error) {
-      if (input.method === 'conversations.voice') audioOwner = priorOwner
+      if (input.method === 'conversations.voice') { audioOwner = priorOwner; syncArbiter() }
       throw error
     } finally {
       if(operation && voiceOperations.get(side)===operation)voiceOperations.delete(side)
@@ -1730,9 +1754,10 @@ export function buildDesktopRealtimeComposition(
     onProjectView: view => requireDesktop().bridge.onProjectView(view),
   }, cameraTransport)
   holder.realtime = realtime
+  if (options.spaceVoice === true) realtime.personalAgent.enableSpaceVoice()
   const endpointOptions = (side: 'desktop' | 'phone'): DesktopRealtimeOptions => ({
     token: options.token,
-    ownsAudio: () => !audioClosing && (audioOwner === side || (side === 'desktop' && audioOwner === null)),
+    ownsAudio: () => !audioClosing && holder.realtime?.personalAgent.audioOwner.spaceDevice === undefined && (audioOwner === side || (side === 'desktop' && audioOwner === null)),
     ...(options.transportFailure === undefined ? {} : {transportFailure: options.transportFailure}),
     service: realtime.service,
     conversationService:id=>realtime.personalAgent.conversationService(id),
@@ -1752,8 +1777,8 @@ export function buildDesktopRealtimeComposition(
           const id=realtime.personalAgent.voiceConversationId()
           if(id){const result=await realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'conversations.voice',params:{id,enabled:false}}) as {ok?:boolean};if(!result.ok)throw Error('voice_release_failed')}
           released=true
-        })().catch(()=>{/* Keep owner if draining failed; that endpoint can reconnect and retry stop. */}).finally(()=>{if(released&&audioOwner===side)audioOwner=null;audioClosing--})
-      }else if(audioOwner===side)audioOwner=null
+        })().catch(()=>{/* Keep owner if draining failed; that endpoint can reconnect and retry stop. */}).finally(()=>{if(released&&audioOwner===side){audioOwner=null;syncArbiter()}audioClosing--})
+      }else if(audioOwner===side){audioOwner=null;syncArbiter()}
       if(hadPresentation&&presentation.size===0&&realtime.personalAgent.presentationMode!==null)void realtime.personalAgent.disconnectPresentation().catch(()=>{ /* best-effort cleanup */ })
       else if(presentation.size>0)void realtime.personalAgent.command({type:'personal.command',request_id:randomUUID(),method:'presentation.set',params:{mode:'background'}},{client_id:side==='phone'?'remote:master':'desktop:local',can_takeover:false,presentation_mode:effectivePresentation()})
     },
