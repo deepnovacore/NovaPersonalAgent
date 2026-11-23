@@ -1,12 +1,12 @@
 # 上手指南
 
-Nova 运行在电脑上，通过语音与你交流，并调用 Codex 完成编码任务。
+Nova 运行在电脑上，通过语音与你交流，并把编码任务交给编码 Agent（默认 Codex）完成。
 
 ## 1. 准备环境
 
-源码运行需要 Node.js 22.13 或更新版本、npm、Git，以及已安装并登录的 Codex。
+源码运行需要 Node.js 22.13 或更新版本、npm、Git，以及你要用的编码 Agent（默认 Codex），并在启动 Nova 前登录它。
 
-如果想改用 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness 处理编码任务，另外安装它并在设置中选择即可，见 [Coding](executors/coding.md#选择执行器)。
+只需安装你所选的那一个编码 Agent：只有选用 Codex 后端时才需要 Codex。如果想改用 OpenCode、CodeBuddy、Pi 或 DeepSeek Harness，安装它并在设置中选择即可，见 [Coding](executors/coding.md#选择执行器)。
 
 原生组件还需要对应平台的构建工具：
 
@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 npa
 ```
 
-命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。升级后的安装继续使用 `~/.nova-audio-agent`；用 `npa migrate-data` 迁移到 `~/.nova-personal-agent` 是可选操作（见[本地数据位置](configuration.md#本地数据位置)）。
+命令为 `npa`，`novapersonal` 仍可作为别名使用。升级时先退出 Nova，再运行同一条命令。如需固定版本，使用 `nova-personal-agent@1.0.0`。升级会保留本地设置与数据；改回旧版本不会回滚数据变化，请先备份 Nova 数据。升级后的安装继续使用 `~/.nova-audio-agent`；在 Nova 关闭时用 `npa migrate-data [--dry-run]` 迁移到 `~/.nova-personal-agent` 是可选操作（见[本地数据位置](configuration.md#本地数据位置)）。
 
 Ubuntu 22.04+ x64 无头服务使用 `npm install --global nova-personal-agent-server@latest`。
 
@@ -44,7 +44,7 @@ cp .env.example .env
 DASHSCOPE_API_KEY=你的百炼密钥
 ```
 
-这把密钥同时用于记忆、摄像头和联网搜索；搜索默认走百炼，填了 `TAVILY_API_KEY` 后改用 Tavily。缺密钥的功能保持关闭，设置里会注明需要哪个密钥。没有配置密钥时，桌面首次启动会弹出设置窗口。随后启动桌面：
+这把密钥同时用于记忆和联网搜索；搜索默认走百炼，填了 `TAVILY_API_KEY` 后改用 Tavily。缺密钥的功能保持关闭，设置里会注明需要哪个密钥。没有配置密钥时，桌面首次启动会弹出设置窗口。随后启动桌面：
 
 ```bash
 npm run start:client
@@ -56,7 +56,7 @@ npm run start:client
 
 ## 3. 交办第一个任务
 
-直接说：“帮我创建一个展示个人作品的网页。”Nova 会询问必要的信息，并在需要新建或切换项目时请求确认，然后交给 Codex 执行。
+直接说：“帮我创建一个展示个人作品的网页。”Nova 会询问必要的信息，并在需要新建或切换项目时请求确认，然后交给所选的编码 Agent 执行。
 
 任务开始后，可以补充要求、询问进度或要求停止。任务横幅显示工作状态，进度气泡用于提醒；需要授权的操作会单独请求确认。
 
@@ -103,7 +103,18 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 
 - **个人记忆**默认开启，使用本地统一账本保存；可在 Workbench 的「Profile」页查看、纠正或忘记条目，也可显式选择 mem0。详见[个人记忆](personal-memory.md)。
 - **文档知识库**需在能力设置中启用。导入文件前会说明数据处理方式；生成向量会把文本发送给配置的模型服务。
-- **连接 iPhone**：macOS 桌面右键悬浮球，选择「连接 iPhone…」，启用手机连接后按页面提示设置网络并扫码。详见[手机连接与远程服务](iphone.md)。
+- **连接手机（NovaCore）**：见下方[配对手机](#配对手机)，手机能做什么见[手机使用指南](iphone.md)。
+
+## 配对手机
+
+Nova 运行在电脑（Host）上，iOS 或 Android 上的 NovaCore 作为 Client 连接它。配对只需扫一次二维码。
+
+1. 在桌面端打开 **设置 → 设备**。在 **连接方式** 中保持 **Tailscale 自动配置**（两台设备需登录同一 Tailscale 网络，并开启 MagicDNS 与 HTTPS 证书），或选择 **高级：使用已有 Relay**，然后点击 **创建空间**。若要使用这台电脑上已有的数据，把 **空间数据** 设为 **连接本机现有数据**；默认是 **新建空白空间**。
+2. 在 **连接手机** 中点击 **生成一次性配对码**。
+3. 在 NovaCore 中新建 Space，选择 **连接 Host**，扫描二维码。
+4. 在桌面端的 **待连接的手机** 下输入手机上显示的完整指纹，点击 **确认绑定**。
+
+第一台确认的手机会成为 Space 所有者。Client 能做什么、不能做什么见[手机使用指南](iphone.md)，完整设置见 [Space / Host / Client](space-host-client.md)。
 
 ## 常见问题
 
@@ -111,11 +122,12 @@ Ark 可显式选择为级联 LLM，使用 `ARK_API_KEY`。条件式设置面板�
 |---|---|
 | macOS 提示应用「已损坏」 | 应用未签名，浏览器下载的文件带有隔离标记。拖到「应用程序」后运行 `xattr -dr com.apple.quarantine "/Applications/Nova Personal Agent.app"`，再重新打开 |
 | 语音连接失败 | 检查所选模式的密钥、服务权限和网络连接 |
-| Codex 无法执行 | 确认 Codex 已登录，项目目录可访问 |
+| 编码 Agent 无法执行 | 确认设置中所选的编码 Agent 已登录（只有选用 Codex 后端时才需要 Codex），项目目录可访问 |
+| 不确定缺哪些密钥 | 运行 `npa doctor`，它会检查你所选语音服务需要的密钥；加 `--online` 在线验证 |
 | 保存后没有变化 | 查看是否提示「待重启」，点击重启后台 |
 | 搜索不可用 | 检查搜索服务密钥；使用百炼或其他 MCP 搜索时确认相应服务已开通 |
 | 找不到刚说过的记忆 | 记忆整理需要时间，在记忆面板查看学习状态 |
-| 手机没有文字聊天入口 | 主机需使用级联模式并支持可编辑输入 |
+| 手机无法配对 | 两台设备需登录同一 Tailscale 网络并开启 MagicDNS 与 HTTPS，或能访问你的 relay；二维码只能使用一次且会过期，请重新生成 |
 
 ## 高级配置
 
