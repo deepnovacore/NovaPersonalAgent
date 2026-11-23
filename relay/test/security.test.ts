@@ -59,6 +59,20 @@ test('login challenges are single-use, expiring, possession bound and sessions d
   f.setNow(1_000_000);assert.throws(()=>f.store.authenticate(`Bearer ${result.token}`),/unauthorized/);
  }finally{f.close();}
 });
+test('one device repeating login challenges keeps only its newest two and cannot exhaust the space pool',async()=>{
+ const f=await fixture();try{
+  const pairing=new PairingStore(f.store);const {value,proof}=await f.request();const pending=pairing.requestPairing({...value,proof});f.store.confirmPairing(f.p,pending.id,'confirm-'+pending.id);
+  const sign=(c:{id:string;nonce:string;space:string;device:string;epoch:number;expiresAt:number},key:typeof f.host.signingPrivateKey)=>signControl({v:1,purpose:'relay-login',challengeId:c.id,nonce:c.nonce,space:c.space,device:c.device,epoch:c.epoch,expiresAt:c.expiresAt},key);
+  const issued=Array.from({length:100},()=>f.store.beginLogin(f.space,f.host.device));
+  const db=new DatabaseSync(join(f.dir,'security.sqlite'));try{assert.equal(Number(db.prepare('SELECT count(*) AS n FROM security_challenges').get()!.n),2);}finally{db.close();}
+  // Another device of the same space still gets a challenge and logs in.
+  const other=f.store.beginLogin(f.space,f.client.device);assert.ok(f.store.completeLogin({challengeId:other.id,proof:await sign(other,f.client.signingPrivateKey)}).token);
+  // A superseded challenge fails cleanly; the newest one still logs in.
+  assert.throws(()=>f.store.completeLogin({challengeId:issued[0]!.id,proof:'unused'}),/invalid_challenge/);
+  const superseded=issued[97]!;assert.throws(()=>f.store.completeLogin({challengeId:superseded.id,proof:'unused'}),/invalid_challenge/);
+  const newest=issued[99]!;assert.deepEqual(f.store.completeLogin({challengeId:newest.id,proof:await sign(newest,f.host.signingPrivateKey)}).principal,f.p);
+ }finally{f.close();}
+});
 test('pairing invitation is one-use and pending devices need explicit immutable Host approval',async()=>{
  const f=await fixture();try{
   const pairing=new PairingStore(f.store);const {i,value,proof}=await f.request();const pending=pairing.requestPairing({...value,proof});

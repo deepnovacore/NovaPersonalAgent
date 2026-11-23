@@ -20,6 +20,7 @@ export interface RelaySubscription {
   /** Resolve only after ciphertext is verified, decrypted and durably applied/deduplicated. */
   onMailbox(envelope: RelayEnvelope,seq: number): Promise<void>;
   onStream?(envelope: RelayEnvelope): void;
+  /** Must return the last cursor saveCursor durably stored; the client ACKs it as processed. */
   loadCursor?(): Promise<number | undefined>;
   saveCursor?(cursor: number): Promise<void>;
   onError?(error: unknown): void;
@@ -119,8 +120,12 @@ export class RelayClient {
       for (;;) {
         const page = await this.read(after === undefined ? {} : {after});
         for (const message of page.messages) await subscription.onMailbox(message.envelope,message.seq);
-        await subscription.saveCursor?.(page.nextCursor);
-        await this.acknowledge(page.nextCursor);
+        // `after` is always durable: loadCursor must return the last successfully saved cursor, and inside this loop it
+        // only advances after a save resolved. An idle poll returns an empty page at that cursor and needs neither a
+        // rewrite nor an ACK. A moved cursor (messages, or skipped expired rows) is saved first, so a failed save throws
+        // before any ACK. An ACK lost after a successful save is repaired from the ACK cursor the relay reports per page.
+        if (page.nextCursor !== after) await subscription.saveCursor?.(page.nextCursor);
+        if (page.nextCursor > page.ackCursor) await this.acknowledge(page.nextCursor);
         after=page.nextCursor;
         if (!page.hasMore) return;
       }
