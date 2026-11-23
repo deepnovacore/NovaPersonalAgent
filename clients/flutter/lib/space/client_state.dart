@@ -14,6 +14,24 @@ class SpaceClientState extends ChangeNotifier {
   SpaceClientState(this.persistence);
   final SpacePersistence persistence;
   Map<String, dynamic> snapshot = {};
+
+  /// Host device, epoch and relay URL the current connection is bound to. A
+  /// `host_capabilities` value is only trusted while it was received under the
+  /// same binding (docs/design/space-voice.md §8): any change hides it until
+  /// the next snapshot.
+  String? capabilityBinding;
+  String? _snapshotBinding;
+
+  /// Whether the Host advertised [capability] for this device under the
+  /// current binding. It only shows or hides UI; the Host re-checks per call.
+  /// Whether a snapshot has been received in this process; a reopened client
+  /// has none until it asks, whatever snapshot it restored from disk.
+  bool get snapshotBound => _snapshotBinding != null;
+
+  bool hostCapability(String capability) =>
+      capabilityBinding != null &&
+      _snapshotBinding == capabilityBinding &&
+      (snapshot['host_capabilities'] as List? ?? const []).contains(capability);
   final List<Map<String, dynamic>> pending = [];
   final Map<String, Map<String, dynamic>> previews = {};
   final List<Map<String, dynamic>> messages = [];
@@ -504,6 +522,7 @@ class SpaceClientState extends ChangeNotifier {
       return;
     }
     final processing = value['source_processing'];
+    _snapshotBinding = capabilityBinding;
     snapshot = {
       for (final key in [
         'schema_version',
@@ -527,6 +546,7 @@ class SpaceClientState extends ChangeNotifier {
         'host_credentials',
         'host_feishu',
         'pending_approvals',
+        'host_capabilities',
       ])
         if (value.containsKey(key)) key: value[key],
       if (processing is Map)

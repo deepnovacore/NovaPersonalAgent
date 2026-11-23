@@ -191,7 +191,7 @@ export async function buildProductionComposition({token, stop, ownership, onDiag
     token,
     stop,
     ...(createServer === undefined ? {} : {createServer: options => createServer(options, media)}),
-    ...(remote ? {transportFailure: 'disconnect' as const} : {}),
+    ...(remote ? {transportFailure: 'disconnect' as const} : {spaceVoice: true}),
     telemetry,
     progressBubbles: settings.progress_bubbles,
     ...(codexResource?.projectView === null || codexResource === null

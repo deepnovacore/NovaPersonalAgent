@@ -68,6 +68,8 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
    focusHeld=false;holdAt=SystemClock.elapsedRealtime()
    attack=0.0;silence=0.0;speaking=false;emit("level",mapOf("level" to 0.0))
    player?.pause();audioHandler.postDelayed(callWatch,500)
+   // Tell Dart: a Space call must not hold and resume silently.
+   focusControl(FocusDecision.HOLD)?.let{control(it)}
    android.util.Log.i("NovaAudio","Focus: transient_loss")
   }
   FocusDecision.RESUME->if(!focusHeld){
@@ -75,6 +77,7 @@ class RelayAudio(private val context:Context, private val emit:(String,Map<Strin
    // The pause is not presentation time; keep the 65 s verification honest.
    terminalAt=terminalAt?.plus(SystemClock.elapsedRealtime()-holdAt)
    if(ledger.current!=null)player?.play()
+   focusControl(FocusDecision.RESUME)?.let{control(it)}
    android.util.Log.i("NovaAudio","Focus: regained")
   }
  }}
@@ -247,6 +250,13 @@ internal const val FOCUS_HOLD_LIMIT_MS=120_000L
 internal enum class FocusDecision { END, HOLD, RESUME }
 
 internal fun callMode(mode:Int)=mode==AudioManager.MODE_RINGTONE||mode==AudioManager.MODE_IN_CALL||mode==AudioManager.MODE_CALL_SCREENING
+
+/** Control event for a held or regained focus; END already emits `stopped`. */
+internal fun focusControl(decision:FocusDecision):Map<String,Any>?=when(decision){
+ FocusDecision.HOLD->mapOf("type" to "audio.focus","state" to "hold")
+ FocusDecision.RESUME->mapOf("type" to "audio.focus","state" to "resumed")
+ FocusDecision.END->null
+}
 
 internal fun focusDecision(change:Int,mode:Int)=when{
  change>0->FocusDecision.RESUME

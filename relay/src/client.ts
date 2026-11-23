@@ -16,6 +16,16 @@ export interface RelayClientOptions {
   reconnectMinMs?: number;
   reconnectMaxMs?: number;
 }
+/** One media leg (docs/design/space-voice.md §1). Frames are opaque AEAD frames sealed by the endpoint. */
+export interface RelayMediaSocket {
+  send(frame: Uint8Array): Promise<void>;
+  onFrame(listener: (frame: Uint8Array) => void): void;
+  onClose(listener: (reason: string) => void): void;
+  close(): void;
+  /** True while an in-band renewal is scheduled; false once the socket closed. */
+  readonly renewalPending?: boolean;
+}
+export interface RelayMediaCapability {v:number;codecs:string[];maxKbpsPerDirection:number;maxFrameBytes:number}
 export interface RelaySubscription {
   /** Resolve only after ciphertext is verified, decrypted and durably applied/deduplicated. */
   onMailbox(envelope: RelayEnvelope,seq: number): Promise<void>;
@@ -95,6 +105,57 @@ export class RelayClient {
     return (await this.request<{online:boolean}>('GET',`/v1/presence?device=${encodeURIComponent(device)}`)).online;
   }
   async stream(envelope: RelayEnvelope): Promise<void> {await this.request('POST','/v1/stream',envelope);}
+  /** Media capability hint; null when the relay has no media route (older or media disabled). It never weakens crypto. */
+  async capabilities(): Promise<{media:RelayMediaCapability|null}> {
+    try {
+      const value = await this.request<{media?:RelayMediaCapability}>('GET','/v1/capabilities');
+      return {media:value.media && value.media.v===1 && Array.isArray(value.media.codecs) ? value.media : null};
+    } catch (error) {if (error instanceof RelayClientError && error.status===404) return {media:null};throw error;}
+  }
+  /** Host only: reserve a media session for one Client device. */
+  reserveMedia(session: string,client: string,ttlMs?: number): Promise<{session:string;expiresAt:number}> {
+    return this.request('POST','/v1/media/sessions',{session,client,...(ttlMs===undefined?{}:{ttlMs})});
+  }
+  /** Join a reserved media session. The bearer token is renewed in-band before it expires. */
+  async connectMedia(session: string): Promise<RelayMediaSocket> {
+    const token = await this.authorized();
+    const url=new URL('/v1/media',this.base);url.protocol=url.protocol==='https:'?'wss:':'ws:';
+    const ws=new WebSocket(url,{headers:{authorization:`Bearer ${token}`,'x-nova-media-session':session},maxPayload:8192,
+      handshakeTimeout:this.options.requestTimeoutMs ?? 10000,followRedirects:false,perMessageDeflate:false});
+    await new Promise<void>((resolve,reject) => {
+      ws.once('message',data => {try {const v=JSON.parse(data.toString()) as {type?:string};if(v.type==='ready')resolve();else reject(new RelayClientError('media_rejected',0));} catch {reject(new RelayClientError('media_rejected',0));}});
+      ws.once('close',(code,reason) => reject(new RelayClientError(reason.toString()||'media_rejected',code)));
+      ws.once('error',reject);
+    });
+    const frames: ((frame: Uint8Array) => void)[] = [], closes: ((reason: string) => void)[] = [];
+    let renewal: ReturnType<typeof setTimeout> | undefined, closed=false;
+    const schedule = (): void => {
+      if (closed) return;
+      const expiresAt=this.session?.expiresAt ?? Date.now();
+      renewal=setTimeout(() => {renewal=undefined;void (async () => {
+        try {
+          await this.login();
+          // The socket may have closed while the login was in flight: no renew, no new timer.
+          if (closed || ws.readyState!==WebSocket.OPEN) return;
+          ws.send(JSON.stringify({type:'renew',token:this.session!.token}));schedule();
+        } catch {if (!closed) ws.close(1000,'renewal_failed');}
+      })();},Math.max(1000,expiresAt-Date.now()-60_000));
+      renewal.unref?.();
+    };
+    const stop = (): void => {closed=true;if (renewal) clearTimeout(renewal);renewal=undefined;};
+    schedule();
+    ws.on('message',(data,isBinary) => {if (!isBinary) return;const bytes=Array.isArray(data)?Buffer.concat(data):Buffer.from(data as ArrayBuffer);for (const f of frames) f(new Uint8Array(bytes));});
+    ws.on('close',(_code,reason) => {stop();for (const c of closes) c(reason.toString()||'closed');});
+    ws.on('error',() => ws.terminate());
+    return {
+      send: frame => new Promise<void>((resolve,reject) => {if (ws.readyState!==WebSocket.OPEN) {reject(new RelayClientError('media_closed',0));return;}ws.send(frame,{binary:true},e => e?reject(e):resolve());}),
+      onFrame: listener => {frames.push(listener);},
+      onClose: listener => {closes.push(listener);},
+      /** Pending renewal timer, for tests. */
+      get renewalPending() {return renewal!==undefined;},
+      close: () => {stop();ws.close(1000,'closed');},
+    };
+  }
   createInvitation(options: {ttlMs?:number;business_versions?:number[]}={}): Promise<Invitation> {return this.request('POST','/v1/pairing/invitations',options);}
   pendingPairings(): Promise<PairingRequest[]> {return this.request('GET','/v1/pairing/requests');}
   confirmPairing(requestId: string,opId:string): Promise<DeviceRecord> {return this.request('POST','/v1/pairing/confirm',{requestId,opId});}

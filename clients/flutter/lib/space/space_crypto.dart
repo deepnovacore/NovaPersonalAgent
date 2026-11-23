@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:math';
 import 'dart:typed_data';
@@ -163,6 +164,12 @@ class SpaceCrypto {
   /// needs a Host-authenticated freshness check.
   int observedHostEpoch = 1;
 
+  /// Fires synchronously (with [observedHostEpoch]) whenever the local epoch
+  /// or the observed Host epoch changes, including key deliveries whose
+  /// [openEnvelope] returns null. Space voice and capability expiry use it.
+  Stream<int> get epochEvents => _epochEvents.stream;
+  final _epochEvents = StreamController<int>.broadcast(sync: true);
+
   /// Whether intents can be sealed for the current relay session.
   bool get canSeal =>
       !needsRepair &&
@@ -249,10 +256,12 @@ class SpaceCrypto {
     } catch (error) {
       throw SpaceKeyStorageError(error);
     }
+    final changed = epoch != nextEpoch || seen > observedHostEpoch;
     epoch = nextEpoch;
     keys = kept;
     observedHostEpoch = max(observedHostEpoch, seen);
     _durableObserved = seen;
+    if (changed) _epochEvents.add(observedHostEpoch);
   }
 
   /// Retention: the [retainedEpochs] newest keys.
@@ -276,7 +285,10 @@ class SpaceCrypto {
   /// lowered even if the write fails), then durably under the lock.
   Future<void> _observe(int seen) {
     if (needsRepair) return Future.value();
-    observedHostEpoch = max(observedHostEpoch, seen);
+    if (seen > observedHostEpoch) {
+      observedHostEpoch = seen;
+      _epochEvents.add(seen);
+    }
     return _flushObserved();
   }
 

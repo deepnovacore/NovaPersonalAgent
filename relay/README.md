@@ -114,6 +114,24 @@ The standalone `MailboxStore` keeps its 16 KiB default; `RelayServer` explicitly
 
 Dedup hashes survive pruning and restart but use finite capacity. History exhaustion fails closed with `history_capacity_exceeded`; deploying a namespace lifecycle or cleaning history requires coordinated replay and snapshot decisions. SQLite pages/indexes/journals consume additional disk space. An optional service `onMailbox` hook receives metadata/ciphertext after a new durable insert for gateway wake integration; wake failures never roll back accepted mail or cause duplicate insertion. External crypto review, sustained throughput and real mobile lock-screen delivery are separate release evidence.
 
+## Space voice media (optional, disabled by default)
+
+Space voice (`docs/design/space-voice.md`) can forward realtime call audio between a Host and one paired Client. It is **off unless the deployment sets `"media": {"enabled": true}`**. With media disabled, `/v1/media`, `/v1/media/sessions` and `/v1/capabilities` return 404 and every other route works the same as before.
+
+| Route | Purpose |
+|---|---|
+| `GET /v1/capabilities` | `{media:{v:1,codecs:["pcm16"],maxKbpsPerDirection,maxFrameBytes}}`. This is a hint: endpoints use it only to hide or refuse a call |
+| `POST /v1/media/sessions` | Host only: `{session, client, ttlMs?}` reserves a session for one distinct, active Client device. Keyed by Space, epoch and session; lifetime capped server-side; ids are never reusable |
+| `GET /v1/media` (upgrade) | Bearer header plus `X-Nova-Media-Session`. No query string, so the id stays out of access logs. The Host claims the `host` role and the reserved device claims `client`; any other or replacement socket is rejected |
+
+Frames are binary, opaque end-to-end AEAD frames (12-byte clear header, ciphertext, 16-byte tag). The relay checks only the header shape and size, never decrypts or verifies them, and forwards each to the peer. The only text frame a device may send is `{"type":"renew","token":"…"}`, which swaps in a fresh login token for the identical principal; without renewal the socket closes when the 15-minute token expires. Revocation and the 1 s maintenance sweep close the sessions of stale or revoked devices. If either side closes, the whole session ends.
+
+Media options (`media` object in the deployment JSON, defaults shown) are `maxKbpsPerDirection` 512, `maxFramesPerSecond` 40, `maxFrameBytes` 4096 (enforced while the WebSocket message is assembled), `queueFrames` 16, `queueBytes` 65536, `controlQueueFrames` 8, `blockedPeerMs` 2000, `overLimitCloseMs` 3000, `maxSessionsPerSpace` 1, `maxSessionsGlobal` 64, `maxPendingPerSpace` 2, `maxPendingGlobal` 128, `maxHalfJoinedPerSpace` 2, `maxHalfJoinedGlobal` 128, `maxTombstones` 4096, `joinDeadlineMs` 15000, `maxSessionMinutes` 60 and `idleTimeoutMs` 20000. Unknown options and non-positive values are rejected at startup. Every frame is charged against the byte and frame buckets before it is forwarded or dropped; traffic over the budget for longer than `overLimitCloseMs` closes the session. Audio and control share the queue caps: queued audio is shed oldest-first (a control frame may evict audio), and control alone over a cap, or a peer that stays blocked, closes the session. Until the peer joins, at most `controlQueueFrames` control frames wait for it; early audio is dropped. Media frames do not consume `requestsPerMinute`, but upgrades, reservations and renewals do, and media sockets count toward the connection limits.
+
+**Bandwidth warning for shared relays.** v1 calls carry uncompressed PCM16: about 270 kbps up and 400 kbps down per call, roughly **300 MB per hour on each relay leg** (in and out). There is no per-Space monthly quota in v1; size `maxSessionsGlobal`, `maxKbpsPerDirection` and your network budget accordingly. Reverse proxies must allow WebSocket upgrades on `/v1/media` and keep idle timeouts at 60 s or more.
+
+The relay learns the Space id, both device ids, IP addresses, call timing and duration, and byte and packet counts. It never sees audio, transcripts, conversation ids or keys. Do not log the `X-Nova-Media-Session` header or bearer tokens.
+
 ## Verification
 
 From repository root:
