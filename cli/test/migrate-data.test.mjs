@@ -281,6 +281,23 @@ test('a legacy root that is a link the user created is never migrated', t => {
   assert.deepEqual(resolveDataRoot(directory), {root: join(directory, '.nova-audio-agent'), legacy: true})
 })
 
+test('dry run previews the rewrite of a Space config that still lives in the legacy root', t => {
+  const {directory, legacy, root} = fixture(t)
+  const profile = join(directory, 'Library', 'Application Support', 'Nova Audio Agent Ambient Orb')
+  const legacyConfig = join(legacy, 'space', 'config.json'), movedConfig = join(root, 'space', 'config.json')
+  const settingsPath = join(profile, 'ambient-orb-settings.json')
+  write(legacyConfig, JSON.stringify({v: 2, mode: 'host', data_mode: 'existing', space: 's', personal_path: join(legacy, 'blackboard.sqlite.personal.json'), members: []}))
+  fs.chmodSync(legacyConfig, 0o600)
+  write(settingsPath, JSON.stringify({version: 5, spaceHostConfigPath: legacyConfig}))
+  fs.chmodSync(settingsPath, 0o600)
+  const dry = run(directory, {dryRun: true})
+  assert.match(dry.output, /update  .*space.config\.json: personal_path/u)
+  assert.equal(fs.existsSync(movedConfig), false)
+  assert.equal(JSON.parse(fs.readFileSync(legacyConfig, 'utf8')).personal_path, join(legacy, 'blackboard.sqlite.personal.json'))
+  assert.equal(run(directory).code, 0)
+  assert.equal(JSON.parse(fs.readFileSync(movedConfig, 'utf8')).personal_path, join(root, 'blackboard.sqlite.personal.json'))
+})
+
 test('settings and an existing-data Space config follow the move and match the runtime comparison', t => {
   const {directory, legacy, root} = fixture(t)
   const profile = join(directory, 'Library', 'Application Support', 'Nova Audio Agent Ambient Orb')

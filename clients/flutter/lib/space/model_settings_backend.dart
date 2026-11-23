@@ -3,6 +3,7 @@ import '../agent_core/model_client.dart';
 import '../agent_core/model_presets.dart';
 import '../settings/model_settings_backend.dart';
 import 'client_state.dart';
+import 'space_language.dart';
 
 /// Only the encrypted Space outbox writes Host configuration. No local model
 /// settings, credentials or native engine are opened by this adapter.
@@ -74,17 +75,29 @@ class RemoteModelSettingsBackend extends ModelSettingsBackend {
       modelDiscovery: false,
       allowKeyEntry: false,
       canFollow: true,
-      followLabel: '使用电脑默认模型',
+      followLabel: spaceText('使用电脑默认模型', 'Use the computer’s default model'),
       following: following,
       readOnly: locked,
       notice: locked
-          ? '此模型由电脑的启动配置管理，请在电脑上修改。'
+          ? spaceText(
+              '此模型由电脑的启动配置管理，请在电脑上修改。',
+              'This model is managed by the computer’s startup configuration; change it on the computer.',
+            )
           : models['version'] != models['applied_version']
-          ? '已保存的模型选择将在重启电脑上的助手后生效。'
+          ? spaceText(
+              '已保存的模型选择将在重启电脑上的助手后生效。',
+              'The saved model choice takes effect after the assistant on the computer restarts.',
+            )
           : following
-          ? '当前使用电脑的默认模型。保存后将改用所选模型。'
+          ? spaceText(
+              '当前使用电脑的默认模型。保存后将改用所选模型。',
+              'Currently using the computer’s default model. Saving switches to the selected model.',
+            )
           : null,
-      securityText: '模型选择将加密发送到电脑。请在设置中的 API 密钥管理服务密钥。',
+      securityText: spaceText(
+        '模型选择将加密发送到电脑。请在设置中的 API 密钥管理服务密钥。',
+        'The model choice is sent to the computer encrypted. Manage service keys under API keys in Settings.',
+      ),
     );
   }
 

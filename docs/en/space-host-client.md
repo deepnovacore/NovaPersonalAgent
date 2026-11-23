@@ -49,6 +49,14 @@ Under Settings → Devices, keep “Tailscale automatic setup” selected and ch
 5. Config and data use the fixed private `space/` folder (mode `0700`). A new Space starts with fresh data and does not migrate existing data. Losing the Host loses the Space. A changed Tailscale node name requires restoring the original address; the desktop never recreates its identity automatically.
 6. For an existing relay, select “Advanced: existing relay” and enter its HTTPS origin and a bootstrap credential of at least 32 characters (loopback HTTP is allowed for local development). Creation and recovery use the same flow. An existing `NOVA_SPACE_HOST_CONFIG` environment variable takes precedence.
 
+## Realtime voice (optional)
+
+A paired Client can start a realtime voice call that runs on the Host's voice pipeline. Audio goes only through the Space relay, end-to-end encrypted between phone and Host.
+
+- The Client shows a call button only when the relay serves media. The desktop-managed Tailscale relay enables media by default. A self-hosted relay needs `"media": {"enabled": true}` in its deployment JSON; see [Space voice media](../../relay/README.md). Calls use roughly 300 MB per hour on each relay leg.
+- By default only the Space owner can call (Space voice policy `owner`, set in the Space Host config).
+- If the button is missing, the Host is offline or the relay has media disabled; dictation still works.
+
 ## Headless Host (Linux/macOS)
 
 A machine without a desktop UI can be the Host: one service process runs the Space Host and pairing happens in the terminal.

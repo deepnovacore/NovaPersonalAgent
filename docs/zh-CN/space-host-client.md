@@ -49,6 +49,14 @@ npm run test:space -- --output-root /your/build-disk --run-id your-task
 5. 配置和数据固定保存在桌面应用数据目录的 `space/`（目录权限 `0700`），不能自选路径。新空间是全新数据，不迁移本机现有数据；Host 损坏后此 Space 无法恢复。Tailscale 节点域名改变时需恢复原地址，不会自动重建身份。
 6. 已经有 relay 时，选择“高级：使用已有 Relay”，填写 HTTPS origin 和至少 32 字符的 bootstrap 凭据（本机开发可用 loopback HTTP），仍走相同的创建和恢复流程。启动环境中已有 `NOVA_SPACE_HOST_CONFIG` 时以环境变量为准。
 
+## 实时语音（可选）
+
+已配对的 Client 可以发起实时语音通话，由 Host 的语音流水线处理。音频只经 Space relay 转发，手机与 Host 之间端到端加密。
+
+- 只有 relay 提供媒体转发时，Client 才显示通话按钮。桌面端托管的 Tailscale relay 默认开启媒体转发；自建 relay 需要在部署 JSON 中设置 `"media": {"enabled": true}`，详见 [Space voice media](../../relay/README.md)。通话在 relay 每个方向约占 300 MB/小时。
+- 默认只有 Space 所有者可以发起通话（Space 语音策略 `owner`，在 Space Host 配置中设置）。
+- 看不到按钮时，可能是 Host 离线或 relay 未开启媒体转发；听写仍可使用。
+
 ## 无桌面 Host（Linux / macOS）
 
 没有桌面界面的机器可以直接作为 Host：同一个服务进程运行 Space Host，配对在终端完成。

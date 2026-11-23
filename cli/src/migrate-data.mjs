@@ -20,6 +20,8 @@ const SETTINGS_FILE = 'ambient-orb-settings.json'
 // Desktop, runtime host and server executables of any build, and processes working inside either data root.
 const NOVA_PROCESS = /Nova Personal Agent|Nova Audio Agent|nova-personal-agent|nova-audio-agent|nova-runtime|novapersonal|novaaudio/iu
 
+// Windows `tasklist` exposes no command line, so the process scan can only match image names there; the writer-lock
+// scan (dataRootLocksHeld) is the guard that actually keeps a running Nova from being migrated under.
 function inside(parent, child) {
   const path = relative(parent, child)
   return path === '' || (path !== '..' && !path.startsWith(`..${sep}`) && !isAbsolute(path))
@@ -101,20 +103,24 @@ function readJson(fs, path) {
 export function planPathRewrites({home, platform = process.platform, environment = process.env, fs = nodeFs} = {}) {
   const paths = {home, ...dataRootPaths(home)}
   const rewrites = []
-  const spaceConfigs = new Set()
-  if (environment.NOVA_SPACE_HOST_CONFIG) spaceConfigs.add(environment.NOVA_SPACE_HOST_CONFIG)
+  // Rewrite target -> file to read while planning. A dry run plans before the data moves, so a rebased file that
+  // is not there yet is read from its legacy location; the rewrite still targets the rebased path that the real
+  // migration writes after the move.
+  const spaceConfigs = new Map()
+  if (environment.NOVA_SPACE_HOST_CONFIG) spaceConfigs.set(environment.NOVA_SPACE_HOST_CONFIG, environment.NOVA_SPACE_HOST_CONFIG)
   for (const profile of desktopProfileDirectories({platform, home, environment})) {
-    spaceConfigs.add(join(profile, 'space', 'config.json'))
+    const profileConfig = join(profile, 'space', 'config.json')
+    spaceConfigs.set(profileConfig, profileConfig)
     const file = join(profile, SETTINGS_FILE)
     const settings = readJson(fs, file)
     if (settings === null || typeof settings !== 'object') continue
-    if (typeof settings.spaceHostConfigPath === 'string' && settings.spaceHostConfigPath !== '') spaceConfigs.add(rebaseValue(settings.spaceHostConfigPath, paths))
+    if (typeof settings.spaceHostConfigPath === 'string' && settings.spaceHostConfigPath !== '') spaceConfigs.set(rebaseValue(settings.spaceHostConfigPath, paths), settings.spaceHostConfigPath)
     const fields = Object.entries(settings).filter(([, value]) => rebaseValue(value, paths) !== value)
       .map(([key, value]) => ({key, from: value, to: rebaseValue(value, paths)}))
     if (fields.length > 0) rewrites.push({kind: 'settings', file, fields})
   }
-  for (const file of spaceConfigs) {
-    const config = readJson(fs, file)
+  for (const [file, original] of spaceConfigs) {
+    const config = readJson(fs, file) ?? (original === file ? null : readJson(fs, original))
     const next = rebaseValue(config?.personal_path, paths)
     if (config !== null && next !== config.personal_path) rewrites.push({kind: 'space', file, fields: [{key: 'personal_path', from: config.personal_path, to: next}]})
   }

@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/services.dart';
 import 'client_state.dart';
+import 'space_language.dart';
 import 'relay_transport.dart';
 import 'space_crypto.dart';
 import 'space_storage.dart';
@@ -73,7 +74,10 @@ class SpacePushClient {
   StreamSubscription<dynamic>? _events;
   bool _disposed = false;
   Timer? _leaseTimer;
-  String status = '尚未启用锁屏通知';
+  String status = spaceText(
+    '尚未启用锁屏通知',
+    'Lock-screen notifications are not enabled yet',
+  );
   Future<void> _load() async {
     final raw = await persistence.read();
     registration = raw == null ? {} : jsonMap(raw);
@@ -105,7 +109,12 @@ class SpacePushClient {
           saved['credential'] as String,
         );
         if (recovered['installationId'] is! String) {
-          throw StateError('通知网关返回无效安装信息');
+          throw StateError(
+            spaceText(
+              '通知网关返回无效安装信息',
+              'The notification gateway returned invalid installation info',
+            ),
+          );
         }
         saved['installationId'] = recovered['installationId'];
         saved.remove('invitation');
@@ -122,7 +131,14 @@ class SpacePushClient {
   Future<bool> needsInvitation({bool verifyExisting = false}) => _PushLocks.run(
     _installationLock,
     () async {
-      if (gatewayUrl.isEmpty) throw StateError('此构建尚未配置通知网关');
+      if (gatewayUrl.isEmpty) {
+        throw StateError(
+          spaceText(
+            '此构建尚未配置通知网关',
+            'This build has no notification gateway configured',
+          ),
+        );
+      }
       final saved = await _recoverInstallation(verifyExisting: verifyExisting);
       return saved['installationId'] == null || saved['credential'] == null;
     },
@@ -130,11 +146,20 @@ class SpacePushClient {
   Future<void> redeemInvitation(
     String invitation,
   ) => _PushLocks.run(_installationLock, () async {
-    if (gatewayUrl.isEmpty) throw StateError('此构建尚未配置通知网关');
+    if (gatewayUrl.isEmpty) {
+      throw StateError(
+        spaceText(
+          '此构建尚未配置通知网关',
+          'This build has no notification gateway configured',
+        ),
+      );
+    }
     relayUri(gatewayUrl);
     invitation = invitation.trim();
     if (invitation.isEmpty || invitation.length > 4096) {
-      throw StateError('请输入有效的一次性邀请');
+      throw StateError(
+        spaceText('请输入有效的一次性邀请', 'Enter a valid one-time invitation'),
+      );
     }
     var saved = await _recoverInstallation();
     // Another Space may have completed enrollment while this dialog was open.
@@ -155,7 +180,14 @@ class SpacePushClient {
       invitation,
       body: {'credential': saved['credential']},
     );
-    if (created['installationId'] is! String) throw StateError('通知网关返回无效安装信息');
+    if (created['installationId'] is! String) {
+      throw StateError(
+        spaceText(
+          '通知网关返回无效安装信息',
+          'The notification gateway returned invalid installation info',
+        ),
+      );
+    }
     await installationPersistence.write(
       jsonEncode({
         'installationId': created['installationId'],
@@ -201,8 +233,11 @@ class SpacePushClient {
           });
         }
         status = registration['notification_key'] != null
-            ? '锁屏通知已启用'
-            : '等待 Host 完成通知密钥配置';
+            ? spaceText('锁屏通知已启用', 'Lock-screen notifications are on')
+            : spaceText(
+                '等待 Host 完成通知密钥配置',
+                'Waiting for the host to finish notification key setup',
+              );
       }
     });
     if (_disposed) return;
@@ -214,7 +249,10 @@ class SpacePushClient {
           if (event['type'] == 'token') {
             unawaited(
               _register(event).catchError((Object _) {
-                status = '通知令牌更新失败，将在恢复连接后重试';
+                status = spaceText(
+                  '通知令牌更新失败，将在恢复连接后重试',
+                  'Notification token update failed; it will retry when the connection is back',
+                );
                 state?.changed();
               }),
             );
@@ -227,7 +265,10 @@ class SpacePushClient {
           }
         },
         onError: (Object _) {
-          status = '此平台推送服务暂不可用';
+          status = spaceText(
+            '此平台推送服务暂不可用',
+            'Push service is unavailable on this platform right now',
+          );
           state?.changed();
         },
       );
@@ -244,9 +285,15 @@ class SpacePushClient {
         }).catchError((Object _) {}),
       );
     } on MissingPluginException {
-      status = '此平台不支持锁屏通知';
+      status = spaceText(
+        '此平台不支持锁屏通知',
+        'Lock-screen notifications are not supported on this platform',
+      );
     } on PlatformException {
-      status = '推送服务暂不可用，请重试';
+      status = spaceText(
+        '推送服务暂不可用，请重试',
+        'Push service is unavailable; please try again',
+      );
     }
     if (_disposed) return;
     _leaseTimer?.cancel();
@@ -254,7 +301,10 @@ class SpacePushClient {
       unawaited(
         refreshRegistration().catchError((Object _) {
           if (registration['enabled'] == true) {
-            status = '通知注册等待重试，空间内容仍可同步';
+            status = spaceText(
+              '通知注册等待重试，空间内容仍可同步',
+              'Notification registration will retry; Space content still syncs',
+            );
             state?.changed();
           }
         }),
@@ -268,7 +318,14 @@ class SpacePushClient {
     return !_disposed && registration['enable_request'] == generation;
   });
   Future<void> enable({Future<String?> Function()? requestInvitation}) async {
-    if (gatewayUrl.isEmpty) throw StateError('此构建尚未配置通知网关');
+    if (gatewayUrl.isEmpty) {
+      throw StateError(
+        spaceText(
+          '此构建尚未配置通知网关',
+          'This build has no notification gateway configured',
+        ),
+      );
+    }
     relayUri(gatewayUrl);
     final generation = newSpaceId();
     await _locked(() async {
@@ -279,7 +336,14 @@ class SpacePushClient {
     try {
       if (await needsInvitation(verifyExisting: true)) {
         if (!await _enableCurrent(generation)) return;
-        if (requestInvitation == null) throw StateError('请先兑换通知网关的一次性邀请');
+        if (requestInvitation == null) {
+          throw StateError(
+            spaceText(
+              '请先兑换通知网关的一次性邀请',
+              'Redeem the notification gateway’s one-time invitation first',
+            ),
+          );
+        }
         final invitation = await requestInvitation();
         if (invitation == null ||
             invitation.isEmpty ||
@@ -293,7 +357,10 @@ class SpacePushClient {
           await channel.invokeMethod<bool>('requestPermission') ?? false;
       if (!await _enableCurrent(generation)) return;
       if (!allowed) {
-        status = '通知权限未授予';
+        status = spaceText(
+          '通知权限未授予',
+          'Notification permission was not granted',
+        );
         state?.changed();
         return;
       }
@@ -318,7 +385,10 @@ class SpacePushClient {
       final token = await channel.invokeMapMethod<String, dynamic>('getToken');
       if (!await _enableCurrent(generation)) return;
       if (token == null) {
-        status = '等待系统提供推送令牌';
+        status = spaceText(
+          '等待系统提供推送令牌',
+          'Waiting for the system to provide a push token',
+        );
         state?.changed();
         return;
       }
@@ -386,8 +456,11 @@ class SpacePushClient {
         !_leaseDue) {
       await _ensureHostRegistration();
       status = registration['notification_key'] != null
-          ? '锁屏通知已启用'
-          : '等待 Host 完成通知密钥配置';
+          ? spaceText('锁屏通知已启用', 'Lock-screen notifications are on')
+          : spaceText(
+              '等待 Host 完成通知密钥配置',
+              'Waiting for the host to finish notification key setup',
+            );
       state?.changed();
       return;
     }
@@ -415,8 +488,11 @@ class SpacePushClient {
         await _save();
         await _ensureHostRegistration();
         status = registration['notification_key'] != null
-            ? '锁屏通知已启用'
-            : '等待 Host 完成通知密钥配置';
+            ? spaceText('锁屏通知已启用', 'Lock-screen notifications are on')
+            : spaceText(
+                '等待 Host 完成通知密钥配置',
+                'Waiting for the host to finish notification key setup',
+              );
         state?.changed();
         return;
       } on RelayFailure catch (error) {
@@ -425,7 +501,10 @@ class SpacePushClient {
     }
     final installationCredential = await _installationCredential();
     if (installationCredential == null) {
-      status = '需要一次性邀请才能注册或续期锁屏通知';
+      status = spaceText(
+        '需要一次性邀请才能注册或续期锁屏通知',
+        'A one-time invitation is required to register or renew lock-screen notifications',
+      );
       state?.changed();
       return;
     }
@@ -459,7 +538,10 @@ class SpacePushClient {
             await installationPersistence.write(jsonEncode(current));
           }
         });
-        status = '通知准入已失效，请兑换新的一次性邀请';
+        status = spaceText(
+          '通知准入已失效，请兑换新的一次性邀请',
+          'Notification access expired; redeem a new one-time invitation',
+        );
         state?.changed();
       }
       rethrow;
@@ -467,7 +549,12 @@ class SpacePushClient {
     if (created['handle'] is! String ||
         created['credential'] is! String ||
         created['expiresAt'] is! num) {
-      throw StateError('通知网关返回无效注册信息');
+      throw StateError(
+        spaceText(
+          '通知网关返回无效注册信息',
+          'The notification gateway returned invalid registration info',
+        ),
+      );
     }
     final retired = _retired();
     _addRetired(retired, old);
@@ -490,7 +577,10 @@ class SpacePushClient {
       });
     }
     await _retire();
-    status = '等待 Host 完成通知密钥配置';
+    status = spaceText(
+      '等待 Host 完成通知密钥配置',
+      'Waiting for the host to finish notification key setup',
+    );
     state?.changed();
     unawaited(onWake());
     if (registration['token'] != token['token'] ||
@@ -498,7 +588,10 @@ class SpacePushClient {
       // Finish an uncertain registration first; then process a newer token.
       unawaited(
         _register(token).catchError((Object _) {
-          status = '通知令牌更新等待重试';
+          status = spaceText(
+            '通知令牌更新等待重试',
+            'Notification token update will retry',
+          );
           state?.changed();
         }),
       );
@@ -562,7 +655,10 @@ class SpacePushClient {
             }
           });
         }).catchError((Object _) {
-          status = '通知密钥等待系统存储恢复，将自动重试';
+          status = spaceText(
+            '通知密钥等待系统存储恢复，将自动重试',
+            'Waiting for system storage to recover the notification key; it will retry automatically',
+          );
           state?.changed();
         });
     _drainingKeys = work.whenComplete(() {
@@ -590,7 +686,7 @@ class SpacePushClient {
       'handle': registration['handle'],
       'notificationKey': key,
     });
-    status = '锁屏通知已启用';
+    status = spaceText('锁屏通知已启用', 'Lock-screen notifications are on');
     state?.changed();
   }
 
@@ -612,7 +708,12 @@ class SpacePushClient {
       }, operationId: 'unregister_${old['handle']}');
     }
     await _retire();
-    status = _retired().isEmpty ? '锁屏通知已关闭' : '已在本机关闭，等待网关注销';
+    status = _retired().isEmpty
+        ? spaceText('锁屏通知已关闭', 'Lock-screen notifications are off')
+        : spaceText(
+            '已在本机关闭，等待网关注销',
+            'Turned off on this device; waiting for the gateway to unregister',
+          );
     state?.changed();
     unawaited(onWake());
   });

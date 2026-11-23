@@ -445,7 +445,7 @@ void main() {
         (state.pending.single['input'] as Map).containsKey('token'),
         false,
       );
-      expect(push.status, contains('等待 Host'));
+      expect(push.status, contains('Waiting for the host'));
       await push.dispose();
       push = SpacePushClient(
         space,

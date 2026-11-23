@@ -35,8 +35,10 @@ class SpaceHostPanel extends StatefulWidget {
     required this.onSync,
     this.openUrl,
     this.section,
+    this.language = 'zh',
   });
   final String? section;
+  final String language;
   final SpaceClientState state;
   final Future<void> Function() onSync;
   final Future<void> Function(Uri uri)? openUrl;
@@ -45,6 +47,7 @@ class SpaceHostPanel extends StatefulWidget {
 }
 
 class _SpaceHostPanelState extends State<SpaceHostPanel> {
+  String t(String zh, String en) => widget.language == 'zh' ? zh : en;
   Map<String, dynamic> _map(Object? v) =>
       v is Map ? Map<String, dynamic>.from(v) : <String, dynamic>{};
   Future<void> _send(String kind, Map<String, dynamic> input) async {
@@ -78,11 +81,11 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
-            child: const Text('取消'),
+            child: Text(t('取消', 'Cancel')),
           ),
           TextButton(
             onPressed: () => Navigator.pop(context, controller.text.trim()),
-            child: const Text('保存'),
+            child: Text(t('保存', 'Save')),
           ),
         ],
       ),
@@ -91,29 +94,38 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
   }
 
   String _providerLabel(String name) =>
-      const {
-        'ARK_API_KEY': '火山方舟',
+      {
+        'ARK_API_KEY': t('火山方舟', 'Volcano Ark'),
         'CODEX_API_KEY': 'Codex',
-        'COMPATIBLE_ASR_API_KEY': '兼容语音识别服务',
-        'COMPATIBLE_TTS_API_KEY': '兼容语音合成服务',
-        'DASHSCOPE_API_KEY': '通义千问 / DashScope',
+        'COMPATIBLE_ASR_API_KEY': t(
+          '兼容语音识别服务',
+          'Compatible speech recognition',
+        ),
+        'COMPATIBLE_TTS_API_KEY': t('兼容语音合成服务', 'Compatible speech synthesis'),
+        'DASHSCOPE_API_KEY': t('通义千问 / DashScope', 'Qwen / DashScope'),
         'DEEPSEEK_API_KEY': 'DeepSeek',
-        'DOUBAO_BIGMODEL_API_KEY': '豆包语音',
-        'EMBEDDING_API_KEY': '向量模型服务',
+        'DOUBAO_BIGMODEL_API_KEY': t('豆包语音', 'Doubao Speech'),
+        'EMBEDDING_API_KEY': t('向量模型服务', 'Embedding model service'),
         'GEMINI_API_KEY': 'Gemini',
         'OPENAI_API_KEY': 'OpenAI',
-        'OPENAI_COMPATIBLE_API_KEY': 'OpenAI 兼容服务',
+        'OPENAI_COMPATIBLE_API_KEY': t(
+          'OpenAI 兼容服务',
+          'OpenAI-compatible service',
+        ),
         'OPENROUTER_API_KEY': 'OpenRouter',
-        'SELF_HOSTED_ASR_API_KEY': '自托管语音识别',
-        'SELF_HOSTED_LLM_API_KEY': '自托管模型',
-        'SELF_HOSTED_TTS_API_KEY': '自托管语音合成',
-        'STEPFUN_API_KEY': '阶跃星辰 / StepFun',
+        'SELF_HOSTED_ASR_API_KEY': t(
+          '自托管语音识别',
+          'Self-hosted speech recognition',
+        ),
+        'SELF_HOSTED_LLM_API_KEY': t('自托管模型', 'Self-hosted model'),
+        'SELF_HOSTED_TTS_API_KEY': t('自托管语音合成', 'Self-hosted speech synthesis'),
+        'STEPFUN_API_KEY': t('阶跃星辰 / StepFun', 'StepFun'),
       }[name] ??
-      '其他模型服务';
+      t('其他模型服务', 'Other model service');
 
   Future<void> _putSecret(String name) async {
     final secret = await _ask(
-      '${_providerLabel(name)} API 密钥',
+      t('${_providerLabel(name)} API 密钥', '${_providerLabel(name)} API key'),
       '',
       secret: true,
     );
@@ -165,15 +177,18 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
       children: [
         if (widget.section == null || widget.section == 'assistant')
           NovaSection(
-            header: 'Host 设置',
-            footer: '修改将发送到 Host 执行，仅限本 Space 的所有者设备。',
+            header: t('Host 设置', 'Host settings'),
+            footer: t(
+              '修改将发送到 Host 执行，仅限本 Space 的所有者设备。',
+              'Changes are sent to the host to apply, and only the Space owner’s device can make them.',
+            ),
             children: [
               _tile(
-                '助手名称',
+                t('助手名称', 'Assistant name'),
                 '${identity['assistant_name'] ?? ''}',
                 () async {
                   final v = await _ask(
-                    '助手名称',
+                    t('助手名称', 'Assistant name'),
                     '${identity['assistant_name'] ?? ''}',
                   );
                   if (v != null) {
@@ -183,11 +198,11 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 key: const ValueKey('host.assistant_name'),
               ),
               _tile(
-                '你的称呼',
+                t('你的称呼', 'What to call you'),
                 '${identity['user_name'] ?? ''}',
                 () async {
                   final v = await _ask(
-                    '你的称呼',
+                    t('你的称呼', 'What to call you'),
                     '${identity['user_name'] ?? ''}',
                   );
                   if (v != null) {
@@ -197,22 +212,27 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                 key: const ValueKey('host.user_name'),
               ),
               if (soul['available'] == true)
-                _tile('角色设定', '${soul['role'] ?? ''}', () async {
-                  final v = await _ask(
-                    '角色设定',
-                    '${soul['role'] ?? ''}',
-                    lines: 3,
-                  );
-                  if (v != null) {
-                    await _patch('soul.set', {
-                      'role': v,
-                      'expected_version': soul['version'],
-                    });
-                  }
-                }, key: const ValueKey('host.soul')),
+                _tile(
+                  t('角色设定', 'Role'),
+                  '${soul['role'] ?? ''}',
+                  () async {
+                    final v = await _ask(
+                      t('角色设定', 'Role'),
+                      '${soul['role'] ?? ''}',
+                      lines: 3,
+                    );
+                    if (v != null) {
+                      await _patch('soul.set', {
+                        'role': v,
+                        'expected_version': soul['version'],
+                      });
+                    }
+                  },
+                  key: const ValueKey('host.soul'),
+                ),
               NovaTile(
                 key: const ValueKey('host.discovery'),
-                title: '主动发现',
+                title: t('主动发现', 'Proactive discovery'),
                 trailing: Switch(
                   value: discovery['discovery_enabled'] == true,
                   onChanged: (v) =>
@@ -222,7 +242,7 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
               NewsInterests(
                 key: const ValueKey('host.news'),
                 news: news,
-                language: 'zh',
+                language: widget.language,
                 configure: (interests) => _patch('news.configure', {
                   'enabled': news['enabled'] ?? true,
                   'explore': news['explore'] ?? true,
@@ -234,10 +254,16 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
           ),
         if (widget.section == null || widget.section == 'credentials')
           NovaSection(
-            header: 'API 密钥',
+            header: t('API 密钥', 'API keys'),
             footer: credentialsDamaged
-                ? 'Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。'
-                : '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
+                ? t(
+                    'Host 上保存的密钥文件已损坏，本次启动已忽略；请重新输入需要的密钥。',
+                    'The key file saved on the host is damaged and was ignored at this start. Enter the keys you need again.',
+                  )
+                : t(
+                    '密钥只发送给 Host，不会回显；写入后需重启 Host 生效，Host 环境变量中已设置的密钥优先。',
+                    'Keys are sent only to the host and never shown again. Restart the host after saving; keys already set in the host’s environment take precedence.',
+                  ),
             children: [
               for (final c in credentials)
                 NovaTile(
@@ -245,15 +271,15 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
                   title: _providerLabel('${c['name']}'),
                   subtitle: Text(
                     c['configured'] == true
-                        ? '已配置 · ${c['source'] == 'environment' ? '来自 Host 环境' : '来自 Space'} · ${c['fingerprint']}'
-                        : '未配置',
+                        ? '${t('已配置', 'Configured')} · ${c['source'] == 'environment' ? t('来自 Host 环境', 'from the host environment') : t('来自 Space', 'from the Space')} · ${c['fingerprint']}'
+                        : t('未配置', 'Not configured'),
                   ),
                   trailing: Wrap(
                     children: [
                       if (c['source'] == 'space')
                         IconButton(
                           key: ValueKey('host.credential.clear.${c['name']}'),
-                          tooltip: '清除',
+                          tooltip: t('清除', 'Clear'),
                           icon: const Icon(CupertinoIcons.delete),
                           onPressed: () =>
                               _send('secret.clear', {'name': c['name']}),
@@ -266,66 +292,84 @@ class _SpaceHostPanelState extends State<SpaceHostPanel> {
           ),
         if (widget.section == null || widget.section == 'feishu')
           NovaSection(
-            header: 'Host 飞书',
-            footer: '授权在 Host 上完成，手机不保存也不转交飞书令牌。',
+            header: t('Host 飞书', 'Host Feishu'),
+            footer: t(
+              '授权在 Host 上完成，手机不保存也不转交飞书令牌。',
+              'Authorization happens on the host; this phone never stores or forwards Feishu tokens.',
+            ),
             children: [
               NovaTile(
                 key: const ValueKey('host.feishu.status'),
                 title: connected
-                    ? '已连接'
+                    ? t('已连接', 'Connected')
                     : unverified
-                    ? '暂时无法验证登录'
+                    ? t('暂时无法验证登录', 'Unable to verify sign-in for now')
                     : loginPending
-                    ? '等待在授权页确认'
-                    : '未连接',
+                    ? t(
+                        '等待在授权页确认',
+                        'Waiting for confirmation on the authorization page',
+                      )
+                    : t('未连接', 'Not connected'),
                 subtitle: Text(
                   unverified && feishu['error'] is String
                       ? feishu['error'] as String
                       : feishu['configured'] == true
-                      ? '应用已配置'
-                      : '尚未配置飞书应用',
+                      ? t('应用已配置', 'App configured')
+                      : t('尚未配置飞书应用', 'Feishu app not configured yet'),
                 ),
               ),
               if (feishu['configured'] != true)
                 NovaTile(
                   key: const ValueKey('host.feishu.app_start'),
-                  title: '配置飞书应用',
+                  title: t('配置飞书应用', 'Set up Feishu app'),
                   onTap: () =>
                       _send('connector.feishu', {'action': 'app.start'}),
                 ),
               if (setupUrl != null)
                 NovaTile(
                   key: const ValueKey('host.feishu.app_open'),
-                  title: '打开配置页面',
+                  title: t('打开配置页面', 'Open setup page'),
                   onTap: () => _open(setupUrl),
                 ),
               if (feishu['configured'] == true && !connected && !unverified)
                 NovaTile(
                   key: const ValueKey('host.feishu.login'),
-                  title: loginPending ? '重新开始登录' : '登录飞书',
+                  title: loginPending
+                      ? t('重新开始登录', 'Restart sign-in')
+                      : t('登录飞书', 'Sign in to Feishu'),
                   subtitle: loginPending
-                      ? const Text('授权页过期或确认失败时使用，之前的授权链接会失效')
+                      ? Text(
+                          t(
+                            '授权页过期或确认失败时使用，之前的授权链接会失效',
+                            'Use this if the authorization page expired or confirmation failed; the previous link stops working.',
+                          ),
+                        )
                       : null,
                   onTap: () => _send('connector.feishu', {'action': 'login'}),
                 ),
               if (loginUrl != null && !connected)
                 NovaTile(
                   key: const ValueKey('host.feishu.open'),
-                  title: '打开授权页面',
+                  title: t('打开授权页面', 'Open authorization page'),
                   onTap: () => _open(loginUrl),
                 ),
               if (loginUrl != null && !connected)
                 NovaTile(
                   key: const ValueKey('host.feishu.complete'),
-                  title: '完成',
-                  subtitle: const Text('在授权页确认后点此通知 Host'),
+                  title: t('完成', 'Done'),
+                  subtitle: Text(
+                    t(
+                      '在授权页确认后点此通知 Host',
+                      'Tap after confirming on the authorization page to notify the host',
+                    ),
+                  ),
                   onTap: () =>
                       _send('connector.feishu', {'action': 'complete'}),
                 ),
               if (connected || unverified)
                 NovaTile(
                   key: const ValueKey('host.feishu.logout'),
-                  title: '退出登录',
+                  title: t('退出登录', 'Sign out'),
                   onTap: () => _send('connector.feishu', {'action': 'logout'}),
                 ),
             ],

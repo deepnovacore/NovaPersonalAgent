@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:math' show max;
 import 'package:flutter/widgets.dart';
 import 'client_state.dart';
+import 'space_language.dart';
 import 'mobile_tools.dart';
 import 'push_client.dart';
 import 'relay_transport.dart';
@@ -112,7 +113,10 @@ class SpaceClientController with WidgetsBindingObserver {
     controller.start();
     unawaited(
       controller.push!.start().catchError((Object _) {
-        controller.push!.status = '锁屏通知暂不可用，空间内容仍可同步';
+        controller.push!.status = spaceText(
+          '锁屏通知暂不可用，空间内容仍可同步',
+          'Lock-screen notifications are unavailable; Space content still syncs',
+        );
         state.changed();
       }),
     );

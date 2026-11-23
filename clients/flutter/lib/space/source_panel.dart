@@ -38,7 +38,7 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialog) => AlertDialog(
-          title: Text('向 Host 发送采集输入'),
+          title: Text(t('向 Host 发送采集输入', 'Send collected input to the host')),
           content: SizedBox(
             width: 420,
             child: SingleChildScrollView(
@@ -74,14 +74,29 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
                   ),
                   CheckboxListTile(
                     value: upload,
-                    title: Text('允许将这份内容发送并保存在 Host'),
+                    title: Text(
+                      t(
+                        '允许将这份内容发送并保存在 Host',
+                        'Allow this content to be sent to and stored on the host',
+                      ),
+                    ),
                     onChanged: (value) =>
                         setDialog(() => upload = value ?? false),
                   ),
                   CheckboxListTile(
                     value: processing,
-                    title: Text('允许 Host 使用模型处理这份内容'),
-                    subtitle: Text('不勾选时仅上传，不用于模型推断个人资料。'),
+                    title: Text(
+                      t(
+                        '允许 Host 使用模型处理这份内容',
+                        'Allow the host to process this content with a model',
+                      ),
+                    ),
+                    subtitle: Text(
+                      t(
+                        '不勾选时仅上传，不用于模型推断个人资料。',
+                        'If unchecked, content is only uploaded and not used for model-based profile inference.',
+                      ),
+                    ),
                     onChanged: currentProvider == null
                         ? null
                         : (value) =>
@@ -94,11 +109,11 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
-              child: Text('取消'),
+              child: Text(t('取消', 'Cancel')),
             ),
             FilledButton(
               onPressed: upload ? () => Navigator.pop(context, true) : null,
-              child: Text('授权并发送'),
+              child: Text(t('授权并发送', 'Authorize and send')),
             ),
           ],
         ),
@@ -124,16 +139,22 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
     final save = await showSpaceDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: Text('向 Host 纠正个人资料'),
+        title: Text(t('向 Host 纠正个人资料', 'Correct your profile on the host')),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             DropdownButtonFormField<String>(
               initialValue: key,
               items: [
-                DropdownMenuItem(value: 'about', child: Text('个人情况')),
-                DropdownMenuItem(value: 'work', child: Text('工作')),
-                DropdownMenuItem(value: 'interests', child: Text('兴趣')),
+                DropdownMenuItem(
+                  value: 'about',
+                  child: Text(t('个人情况', 'About you')),
+                ),
+                DropdownMenuItem(value: 'work', child: Text(t('工作', 'Work'))),
+                DropdownMenuItem(
+                  value: 'interests',
+                  child: Text(t('兴趣', 'Interests')),
+                ),
               ],
               onChanged: (v) => key = v!,
             ),
@@ -151,11 +172,11 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('取消'),
+            child: Text(t('取消', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('发送纠正'),
+            child: Text(t('发送纠正', 'Send correction')),
           ),
         ],
       ),
@@ -194,11 +215,11 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
-            child: Text('取消'),
+            child: Text(t('取消', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.pop(context, true),
-            child: Text('确认'),
+            child: Text(t('确认', 'Confirm')),
           ),
         ],
       ),
@@ -261,17 +282,19 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
                           }
                         },
                         itemBuilder: (_) => [
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'edit',
-                            child: Text('修改并重新授权'),
+                            child: Text(t('修改并重新授权', 'Edit and re-authorize')),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'revoke',
-                            child: Text('撤销授权'),
+                            child: Text(t('撤销授权', 'Revoke authorization')),
                           ),
-                          const PopupMenuItem(
+                          PopupMenuItem(
                             value: 'delete',
-                            child: Text('删除来源及派生资料'),
+                            child: Text(
+                              t('删除来源及派生资料', 'Delete source and derived data'),
+                            ),
                           ),
                         ],
                       ),
@@ -310,7 +333,8 @@ class _SpaceSourcePanelState extends State<SpaceSourcePanel> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(title),
-          if (needsUpdate) Text('有新内容等待更新'),
+          if (needsUpdate)
+            Text(t('有新内容等待更新', 'New content is waiting to be updated')),
           if (!widget.state.hostOnline)
             Text(
               hasStatus
