@@ -21,7 +21,7 @@ Nova thinks ahead before you ask, keeps talking while it works, picks up on your
 
 **[Website](https://deepnovacore.github.io/NovaPersonalAgent/) · [Documentation](docs/en/README.md) · [Product film](https://youtu.be/3qyZupBgOEs)**
 
-[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Gallery](#22-gallery) · [macOS](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-macos-arm64.dmg) | [Android](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-android-arm64.apk) | [iOS](https://testflight.apple.com/join/eQrtvXYJ)
+[Quickstart](#3-quickstart) · [Highlights](#1-highlights) · [Gallery](#22-gallery) · [macOS](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-macos-arm64.dmg) | [Android](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-android-arm64.apk) | [iOS](https://testflight.apple.com/join/eQrtvXYJ)
 
 </div>
 
@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/3a4bfcee-dcb4-4b12-b03c-cdb0133bffa0
 
 ## News
 
-- **2026-11 · [v1.0.1](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.1)** — Client Space realtime voice through the Host, executor approvals and dictation on phones, English Client Space, the `nova-personal-agent` data identity with an optional `npa migrate-data`, and many reliability fixes. [Release notes](docs/releases/v1.0.1.md).
+- **2026-11 · [v1.0.2](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.2)** — Client Space realtime voice through the Host, executor approvals and dictation on phones, English Client Space, the `nova-personal-agent` data identity with an optional `npa migrate-data`, and many reliability fixes. [Release notes](docs/releases/v1.0.2.md).
 - **2026-11 · [v1.0.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.0)** — **Talks while it works, understands you over time, stays on your devices:** Space / Host / Client with end-to-end encrypted sync, a unified iOS and Android companion, a rebuilt Workbench, more executors (coding, computer use, supervised mobile use). [Release notes](docs/releases/v1.0.0.md).
 - **2026-10-13 · [v0.4.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.4.0)** — **Continuous context, ongoing work:** GUI-use across browser, computer and phone (experimental), Scheduled Agent Tasks, and a full Timeline for context, evidence and task results.
 - **2026-10-07 · [v0.3.0](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v0.3.0)** — **Your personal agent:** Todos, Ideas, Goals, Feeds and Profile, with source-backed memory and evidence-checked tasks.
@@ -97,17 +97,17 @@ Real recordings on persona accounts. Clips and the film are on the [website gall
 
 ### 3.1 Install and run
 
-**v1.0.1 downloads** — [Release notes and SHA-256 checksums](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.1) · [All releases](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
+**v1.0.2 downloads** — [Release notes and SHA-256 checksums](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.2) · [All releases](https://github.com/deepnovacore/NovaPersonalAgent/releases/latest)
 
 | Platform | Download |
 | --- | --- |
-| macOS · Apple Silicon (arm64) | [DMG (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-macos-arm64.dmg) |
-| Windows · x64 | [EXE (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-windows-x64.exe) |
-| Linux · x64 (Ubuntu 22.04+) | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-linux-x64.AppImage) · [deb](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-linux-x64.deb) (unsigned) |
+| macOS · Apple Silicon (arm64) | [DMG (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-macos-arm64.dmg) |
+| Windows · x64 | [EXE (unsigned)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-windows-x64.exe) |
+| Linux · x64 (Ubuntu 22.04+) | [AppImage](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-linux-x64.AppImage) · [deb](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-linux-x64.deb) (unsigned) |
 | iOS · NovaCore | [TestFlight](https://testflight.apple.com/join/eQrtvXYJ) |
-| Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-android-arm64.apk) |
+| Android · arm64 · NovaCore | [APK](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-android-arm64.apk) |
 
-**Or install the CLI with npm** (1.0.1; Node.js 22.13+). The command is `npa`; `novapersonal` still works:
+**Or install the CLI with npm** (1.0.2; Node.js 22.13+). The command is `npa`; `novapersonal` still works:
 
 ```bash
 npm install --global nova-personal-agent@latest
@@ -121,7 +121,7 @@ npa doctor
 
 For coding tasks, install and sign in to the coding agent you choose (Codex by default). Only the selected agent is required; Codex is needed only for the Codex backend.
 
-**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. New installs keep data in `~/.nova-personal-agent`; an existing `~/.nova-audio-agent` stays in use, and moving it with `npa migrate-data [--dry-run]` is optional ([details](docs/en/configuration.md#local-data-location)). Pin a version with `nova-personal-agent@1.0.1`. State files are versioned, so an older build may refuse a newer file: back up, then run `npa reset-state` before downgrading.
+**Upgrading.** Quit Nova and rerun the install command; settings and data carry over. New installs keep data in `~/.nova-personal-agent`; an existing `~/.nova-audio-agent` stays in use, and moving it with `npa migrate-data [--dry-run]` is optional ([details](docs/en/configuration.md#local-data-location)). Pin a version with `nova-personal-agent@1.0.2`. State files are versioned, so an older build may refuse a newer file: back up, then run `npa reset-state` before downgrading.
 
 **Set up your Space.** A Host (your desktop or a headless server) keeps the runtime, keys and memory. Clients (another desktop, iOS, Android) reach it through an end-to-end encrypted relay: self-hosted, or created automatically by the desktop and exposed over Tailscale Serve (both devices must be on the same Tailscale network). The relay only forwards ciphertext. A standalone Space runs locally with no relay. See the [Space setup guide](docs/en/space-host-client.md) and the [relay guide](relay/README.md).
 
