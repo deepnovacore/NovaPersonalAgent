@@ -280,7 +280,7 @@ On 2026-11-20 the project owner approved these files for the public website and 
 
 ## Desktop tray icons (2026-11-23)
 
-On 2026-11-23 the project owner reviewed and approved the desktop tray icons introduced in commit `bc7b2ee1` for the public repository and the v1.0.1 release. They replace the earlier crescent tray icon with the Eclipse ring on a dark square, derived from the approved Eclipse app icon. The approval covers these exact files; new sizes or edits need separate review.
+On 2026-11-23 the project owner reviewed and approved the desktop tray icons introduced in commit `bc7b2ee1` for the public repository and the v1.0.2 release. They replace the earlier crescent tray icon with the Eclipse ring on a dark square, derived from the approved Eclipse app icon. The approval covers these exact files; new sizes or edits need separate review.
 
 | File | SHA-256 |
 | --- | --- |

@@ -52,11 +52,11 @@ npa
 ## Phones and servers
 
 - **iOS · NovaCore** — [TestFlight](https://testflight.apple.com/join/eQrtvXYJ)
-- **Android · NovaCore** — [APK (arm64)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.1/nova-personal-agent-1.0.1-android-arm64.apk)
+- **Android · NovaCore** — [APK (arm64)](https://github.com/deepnovacore/NovaPersonalAgent/releases/download/v1.0.2/nova-personal-agent-1.0.2-android-arm64.apk)
 - **Headless Host** — [nova-personal-agent-server](https://www.npmjs.com/package/nova-personal-agent-server) for Ubuntu servers
 
 ## Upgrade
 
-Quit Nova and rerun the install command; settings and data carry over. Pin this release with `nova-personal-agent@1.0.1`, and back up before downgrading — an older build does not roll back data changes. Coming from `nova-audio-agent`? Run `npm uninstall --global nova-audio-agent` first so the command links do not collide; downloads stay under `~/.nova-audio-agent/cli/releases/`.
+Quit Nova and rerun the install command; settings and data carry over. Pin this release with `nova-personal-agent@1.0.2`, and back up before downgrading — an older build does not roll back data changes. Coming from `nova-audio-agent`? Run `npm uninstall --global nova-audio-agent` first so the command links do not collide; downloads stay under `~/.nova-audio-agent/cli/releases/`.
 
-[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.1) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [GPL-3.0-or-later](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)
+[Release notes](https://github.com/deepnovacore/NovaPersonalAgent/releases/tag/v1.0.2) · [Report an issue](https://github.com/deepnovacore/NovaPersonalAgent/issues) · [GPL-3.0-or-later](https://github.com/deepnovacore/NovaPersonalAgent/blob/main/LICENSE)

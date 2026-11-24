@@ -1,6 +1,6 @@
 {
   "name": "@nova-personal-agent/runtime",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "private": true,
   "type": "module",
   "engines": {
@@ -89,7 +89,7 @@
     "voicemem": "0.0.1",
     "ws": "8.21.3",
     "zod": "4.4.3",
-    "@nova-personal-agent/relay": "1.0.1",
+    "@nova-personal-agent/relay": "1.0.2",
     "jose": "6.2.10"
   },
   "devDependencies": {
