@@ -3,7 +3,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { assertNoPendingDataRootMigration, dataRootPaths } from './data-root.mjs'
 
-export const PRODUCT_VERSION = '1.0.1'
+export const PRODUCT_VERSION = '1.0.2'
 export const RELEASE_REPOSITORY = 'deepnovacore/NovaPersonalAgent'
 
 export function resolveTarget(platform = process.platform, arch = process.arch, version = PRODUCT_VERSION) {

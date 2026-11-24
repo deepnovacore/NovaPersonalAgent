@@ -4,13 +4,13 @@
 
 <a href="README.md"><ins>English</ins></a> | <a href="../zh-CN/README.md"><ins>简体中文</ins></a> · <a href="../../README.md">Repository Home</a>
 
-[![Version](https://img.shields.io/badge/Version-v1.0.1-0f172a.svg)](../releases/v1.0.1.md)
+[![Version](https://img.shields.io/badge/Version-v1.0.2-0f172a.svg)](../releases/v1.0.2.md)
 [![License](https://img.shields.io/badge/License-GPL--3.0--or--later-blue.svg)](../../LICENSE)
 [![Node.js](https://img.shields.io/badge/Node.js-22.13%2B-339933.svg)](../../package.json)
 
-**Documentation for Nova Personal Agent (`v1.0.1`)** — dual-brain realtime voice & text interaction, ledger-authoritative personal memory, specialist executors, and end-to-end encrypted Space connectivity across desktop and mobile (**NovaCore**).
+**Documentation for Nova Personal Agent (`v1.0.2`)** — dual-brain realtime voice & text interaction, ledger-authoritative personal memory, specialist executors, and end-to-end encrypted Space connectivity across desktop and mobile (**NovaCore**).
 
-[Getting Started](getting-started.md) · [Architecture](architecture.md) · [Support Matrix](support-matrix.md) · [Security & Privacy](security.md) · [v1.0.1 Release Notes](../releases/v1.0.1.md)
+[Getting Started](getting-started.md) · [Architecture](architecture.md) · [Support Matrix](support-matrix.md) · [Security & Privacy](security.md) · [v1.0.2 Release Notes](../releases/v1.0.2.md)
 
 </div>
 

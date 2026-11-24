@@ -25,7 +25,7 @@ npm install --global nova-personal-agent@latest
 npa
 ```
 
-The command is `npa`; `novapersonal` remains an alias. To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.1`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first. An upgraded install keeps using `~/.nova-audio-agent`; moving it to `~/.nova-personal-agent` with `npa migrate-data [--dry-run]` (with Nova closed) is optional (see [Local data location](configuration.md#local-data-location)).
+The command is `npa`; `novapersonal` remains an alias. To upgrade, quit Nova and run the same command. Pin a version with `nova-personal-agent@1.0.2`. Upgrades keep your local settings and data; moving back to an older version does not roll back data changes, so back up your Nova data first. An upgraded install keeps using `~/.nova-audio-agent`; moving it to `~/.nova-personal-agent` with `npa migrate-data [--dry-run]` (with Nova closed) is optional (see [Local data location](configuration.md#local-data-location)).
 
 For headless Ubuntu 22.04+ x64, use `npm install --global nova-personal-agent-server@latest`.
 
